@@ -1,0 +1,7 @@
+/target/
+/.run/
+/mobile-target-check/
+/apps/android-app/.gradle/
+/apps/android-app/.kotlin/
+/apps/android-app/app/build/
+/apps/android-app/local.properties
