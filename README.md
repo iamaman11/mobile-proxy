@@ -20,6 +20,7 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 - `scripts/start-local-stack.ps1` - local dev stack launcher
 - `scripts/test-local-stack.ps1` - local dev stack smoke test
 - `scripts/device/*.ps1` - device install, verify, and rollback automation
+- `scripts/device/rotate-ip.ps1` - managed rotate with auto-repair for post-airplane route loss
 - `scripts/ops/check-fleet.ps1` - fleet readiness and staleness report
 - `deploy/device-runtime` - reproducible phone runtime bundle templates
 - `deploy/manifests/devices/*.json` - per-device manifest declarations
@@ -97,13 +98,22 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 .\scripts\device\verify-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
 ```
 
-4. Roll back if needed:
+4. Perform managed IP rotation (auto-heals route/runtimes if airplane bounce stalls):
+
+```powershell
+.\scripts\device\rotate-ip.ps1 `
+  -ManifestPath .\deploy\manifests\devices\example-device.json `
+  -Strategy airplane_bounce `
+  -RequirePublicIpChange $true
+```
+
+5. Roll back if needed:
 
 ```powershell
 .\scripts\device\rollback-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
 ```
 
-5. Check fleet status:
+6. Check fleet status:
 
 ```powershell
 .\scripts\ops\check-fleet.ps1 -ControlPlaneUrl http://34.118.26.142:8080

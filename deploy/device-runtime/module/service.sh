@@ -22,6 +22,58 @@ log_boot() {
   echo "$(timestamp) $*" >> "$BOOT_LOG"
 }
 
+stop_runtime_procs() {
+  pkill -f "$RUNTIME_ROOT/current/bin/host-daemon" || true
+  pkill -f "$RUNTIME_ROOT/current/bin/sing-box" || true
+  pkill -f "$RUNTIME_ROOT/releases/.*/host-daemon" || true
+  pkill -f "$RUNTIME_ROOT/releases/.*/sing-box" || true
+}
+
+spawn_host_daemon() {
+  nohup "$BIN/host-daemon" --config "$CFG/host-daemon.json" >> "$HOST_LOG" 2>&1 &
+  log_boot "host_daemon_spawned pid=$!"
+}
+
+cellular_route_hint() {
+  line="$(ip -4 route get 1.1.1.1 2>/dev/null | head -n 1 || true)"
+  dev=""
+  via=""
+  set -- $line
+  while [ "$#" -gt 1 ]; do
+    case "$1" in
+      dev) dev="$2" ;;
+      via) via="$2" ;;
+    esac
+    shift
+  done
+  [ -n "$dev" ] || return 1
+  case "$dev" in
+    rmnet*|ccmni*|pdp*|wwan*)
+      echo "$dev|$via"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+ensure_cellular_default_route() {
+  hint="$(cellular_route_hint || true)"
+  [ -n "$hint" ] || return 0
+  dev="${hint%%|*}"
+  via="${hint#*|}"
+  if ip route show default 2>/dev/null | grep -Eq "default .* dev $dev( |$)"; then
+    return 0
+  fi
+  if [ -n "$via" ]; then
+    ip route replace default via "$via" dev "$dev" >/dev/null 2>&1 || return 1
+    log_boot "default_route_repaired dev=$dev via=$via"
+  else
+    ip route replace default dev "$dev" >/dev/null 2>&1 || return 1
+    log_boot "default_route_repaired dev=$dev"
+  fi
+  return 0
+}
+
 cellular_default_ready() {
   ip route show default 2>/dev/null | grep -Eq 'default .* rmnet[0-9]+'
 }
@@ -93,11 +145,8 @@ if needs_wireguard; then
   log_boot "wireguard_helper_started pid=$!"
 fi
 
-pkill -f "$RUNTIME_ROOT/current/bin/host-daemon" || true
-pkill -f "$RUNTIME_ROOT/current/bin/sing-box" || true
-pkill -f "$RUNTIME_ROOT/releases/.*/host-daemon" || true
-pkill -f "$RUNTIME_ROOT/releases/.*/sing-box" || true
+stop_runtime_procs
 sleep 1
 
-nohup "$BIN/host-daemon" --config "$CFG/host-daemon.json" >> "$HOST_LOG" 2>&1 &
-log_boot "host_daemon_spawned pid=$!"
+ensure_cellular_default_route || true
+spawn_host_daemon

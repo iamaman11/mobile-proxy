@@ -72,7 +72,13 @@ If local API access is not configured yet:
 & "C:\Users\Bose\AppData\Local\Android\Sdk\platform-tools\adb.exe" forward tcp:18088 tcp:8088
 ```
 
-Manual rotation:
+Managed rotation (recommended, includes auto-repair if airplane bounce stalls):
+
+```powershell
+.\scripts\device\rotate-ip.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json -Strategy airplane_bounce -RequirePublicIpChange $true
+```
+
+Raw API rotation (fallback):
 
 ```powershell
 $h=@{Authorization="Bearer $env:MOBILE_PROXY_ADMIN_TOKEN"};$b='{"strategy":"airplane_bounce","require_public_ip_change":true,"reason":"manual-rotate"}';$id=(Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:18088/v1/ip/rotate' -Headers $h -ContentType 'application/json' -Body $b).job_id;do{$s=Invoke-RestMethod -Uri "http://127.0.0.1:18088/v1/jobs/$id" -Headers $h;$x=Invoke-RestMethod -Uri 'http://127.0.0.1:18088/v1/health' -Headers $h;"{0} job={1} state={2} serving={3} old={4} new={5}" -f (Get-Date -Format HH:mm:ss),$s.status,$x.readiness_state,$x.serving,$s.old_public_ip,$s.new_public_ip;Start-Sleep 2}while($s.status -eq 'running');$s|ConvertTo-Json -Depth 5

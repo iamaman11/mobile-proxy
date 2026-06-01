@@ -42,6 +42,9 @@
       "type": "direct"
     }
   ],
+  "route": {
+    "default_domain_resolver": "dns-cf"
+  },
   "dns": {
     "strategy": "ipv4_only",
     "servers": [

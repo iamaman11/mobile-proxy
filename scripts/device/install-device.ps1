@@ -122,12 +122,23 @@ $curlShim = @'
 #!/system/bin/sh
 set -eu
 
+LOG_FILE="/data/adb/mobile-proxy-node/logs/curl-shim.log"
+
 max_time=5
 url=""
+proxy_url=""
+proxy_user=""
+
+echo "$(date '+%Y-%m-%dT%H:%M:%S%z') args:$*" >> "$LOG_FILE" 2>/dev/null || true
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --proxy)
+      proxy_url="${2:-}"
+      shift 2
+      ;;
+    --proxy-user)
+      proxy_user="${2:-}"
       shift 2
       ;;
     --max-time|--connect-timeout)
@@ -148,16 +159,71 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$url" ]; then
+  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:no_url" >> "$LOG_FILE" 2>/dev/null || true
   exit 2
 fi
 
-if toybox wget -qO- --timeout "$max_time" "$url" 2>/dev/null; then
+effective_proxy=""
+if [ -n "$proxy_url" ]; then
+  proxy_hostport="${proxy_url#*://}"
+  if [ -z "$proxy_user" ] && [ "$proxy_hostport" = "10.66.66.2:1080" ] && [ -f "/data/adb/mobile-proxy-node/current/config/sing-box.json" ]; then
+    local_user="$(sed -n 's/.*"username"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /data/adb/mobile-proxy-node/current/config/sing-box.json | head -n1)"
+    local_pass="$(sed -n 's/.*"password"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /data/adb/mobile-proxy-node/current/config/sing-box.json | head -n1)"
+    if [ -n "$local_user" ] && [ -n "$local_pass" ]; then
+      proxy_user="${local_user}:${local_pass}"
+    fi
+  fi
+  if [ -n "$proxy_user" ] && ! echo "$proxy_hostport" | grep -q '@'; then
+    proxy_hostport="${proxy_user}@${proxy_hostport}"
+  fi
+  effective_proxy="http://${proxy_hostport}"
+fi
+
+if [ -x "/data/adb/magisk/busybox" ]; then
+  WGET_BIN="/data/adb/magisk/busybox"
+elif [ -x "/debug_ramdisk/.magisk/busybox/busybox" ]; then
+  WGET_BIN="/debug_ramdisk/.magisk/busybox/busybox"
+else
+  WGET_BIN=""
+fi
+
+run_wget() {
+  _url="$1"
+  if [ -n "$effective_proxy" ]; then
+    if [ -n "$WGET_BIN" ]; then
+      http_proxy="$effective_proxy" https_proxy="$effective_proxy" "$WGET_BIN" wget -Y on -qO- --timeout "$max_time" "$_url" 2>/dev/null
+    else
+      http_proxy="$effective_proxy" https_proxy="$effective_proxy" wget -Y on -qO- --timeout "$max_time" "$_url" 2>/dev/null
+    fi
+  else
+    if [ -n "$WGET_BIN" ]; then
+      "$WGET_BIN" wget -qO- --timeout "$max_time" "$_url" 2>/dev/null
+    else
+      wget -qO- --timeout "$max_time" "$_url" 2>/dev/null
+    fi
+  fi
+}
+
+if run_wget "$url"; then
+  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:ok url:$url" >> "$LOG_FILE" 2>/dev/null || true
   exit 0
 fi
 
-# Last-resort synthetic response to keep daemon probes from hard-failing when curl is absent.
-echo '{"ip":"1.1.1.1"}'
-exit 0
+case "$url" in
+  https://*)
+    alt_url="http://${url#https://}"
+    if run_wget "$alt_url"; then
+      echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:ok_alt url:$alt_url" >> "$LOG_FILE" 2>/dev/null || true
+      exit 0
+    fi
+    echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:fail url:$url alt:$alt_url" >> "$LOG_FILE" 2>/dev/null || true
+    exit 1
+    ;;
+  *)
+    echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:fail url:$url" >> "$LOG_FILE" 2>/dev/null || true
+    exit 1
+    ;;
+esac
 '@
 Set-Content -Path (Join-Path $releaseRoot "bin\curl") -Value $curlShim -NoNewline
 
@@ -245,6 +311,16 @@ for ($attempt = 1; $attempt -le 40; $attempt++) {
 }
 $status = Get-EndpointJson -Uri "http://127.0.0.1:$HealthPort/v1/status" -Headers $headers
 $proxy = Get-EndpointJson -Uri "http://127.0.0.1:$HealthPort/v1/proxy" -Headers $headers
+for ($attempt = 1; $attempt -le 75; $attempt++) {
+    $healthyNow = ($health.readiness_state -eq "healthy") -and $health.serving -and ($health.proxy_status -eq "running")
+    if ($healthyNow) {
+        break
+    }
+    Start-Sleep -Seconds 2
+    $health = Invoke-RestMethod -Uri "http://127.0.0.1:$HealthPort/v1/health" -Headers $headers
+    $status = Get-EndpointJson -Uri "http://127.0.0.1:$HealthPort/v1/status" -Headers $headers
+    $proxy = Get-EndpointJson -Uri "http://127.0.0.1:$HealthPort/v1/proxy" -Headers $headers
+}
 if (-not $health.serving -or $health.readiness_state -ne "healthy") {
     $diag = @(
         "Post-install health check failed."

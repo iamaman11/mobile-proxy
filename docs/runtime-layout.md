@@ -19,6 +19,7 @@ Boot behavior:
 - `service.sh` activates a versioned release
 - `host-daemon` starts first
 - `tun0` becomes ready after the WireGuard helper converges
+- `service.sh` performs one-shot default-route repair at startup; managed rotation script performs post-rotate repair when cellular route stays stale
 - public serving is exposed only after VM gate confirms readiness
 
 ## VM
