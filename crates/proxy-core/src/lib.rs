@@ -5,6 +5,16 @@ pub const RELAY_IP: &str = "34.118.26.142";
 pub const MIXED_PORT: u16 = 1080;
 pub const SOCKS5_PORT: u16 = 1081;
 pub const HTTP_PORT: u16 = 3128;
+pub const PUBLIC_PROXY_USERNAME: &str = "relay4855cb91";
+pub const PUBLIC_PROXY_PASSWORD: &str = "4gKDPTqhCtFwSvy5FlsDJO91e7A4r3t9";
+pub const MIXED_PROXY_URL: &str =
+    "http://relay4855cb91:4gKDPTqhCtFwSvy5FlsDJO91e7A4r3t9@34.118.26.142:1080";
+pub const SOCKS5_URL: &str =
+    "socks5h://relay4855cb91:4gKDPTqhCtFwSvy5FlsDJO91e7A4r3t9@34.118.26.142:1081";
+pub const HTTP_PROXY_URL: &str =
+    "http://relay4855cb91:4gKDPTqhCtFwSvy5FlsDJO91e7A4r3t9@34.118.26.142:3128";
+pub const HTTP_TEST_URL: &str = "http://httpbin.org/ip";
+pub const HTTPS_TEST_URL: &str = "https://httpbin.org/ip";
 pub const LOCAL_API: &str = "http://127.0.0.1:18088";
 pub const DEVICE_ID: &str = "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06";
 pub const NODE_NAME: &str = "galaxy-a02-gcp-relay";
@@ -14,6 +24,8 @@ pub struct ProxyEndpoint {
     pub scheme: &'static str,
     pub host: &'static str,
     pub port: u16,
+    pub username: Option<&'static str>,
+    pub password: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,16 +129,22 @@ pub fn proxy_endpoints() -> [ProxyEndpoint; 3] {
             scheme: "mixed",
             host: RELAY_IP,
             port: MIXED_PORT,
+            username: Some(PUBLIC_PROXY_USERNAME),
+            password: Some(PUBLIC_PROXY_PASSWORD),
         },
         ProxyEndpoint {
             scheme: "socks5",
             host: RELAY_IP,
             port: SOCKS5_PORT,
+            username: Some(PUBLIC_PROXY_USERNAME),
+            password: Some(PUBLIC_PROXY_PASSWORD),
         },
         ProxyEndpoint {
             scheme: "http",
             host: RELAY_IP,
             port: HTTP_PORT,
+            username: Some(PUBLIC_PROXY_USERNAME),
+            password: Some(PUBLIC_PROXY_PASSWORD),
         },
     ]
 }

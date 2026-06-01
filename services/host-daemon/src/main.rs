@@ -153,7 +153,7 @@ async fn execute_rotation(
     let started = Instant::now();
     sleep(Duration::from_secs(
         if request.strategy == "airplane_bounce" {
-            5
+            4
         } else {
             2
         },

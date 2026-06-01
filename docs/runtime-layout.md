@@ -57,5 +57,6 @@ Current exposure model:
 
 - current operator profile: `mts_by`
 - `rotate_ip` works on `MTS BY`
+- `airplane_bounce` rotation holds airplane mode for 4 seconds before disabling it
 - current deployment is effectively IPv4-only
 - public relay is fail-closed
