@@ -37,6 +37,12 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 
 ## Device Runtime Deployment
 
+Phone prerequisites:
+
+- `adb shell su 0 sh -c "id"` returns `uid=0`
+- `adb shell pm list packages com.wireguard.android` returns installed package
+- tunnel `WiGandroid` exists in WireGuard app and can be started
+
 Install a versioned release:
 
 ```powershell

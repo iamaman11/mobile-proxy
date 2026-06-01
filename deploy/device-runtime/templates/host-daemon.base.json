@@ -32,7 +32,7 @@
   "network": {
     "cellular_only": true,
     "wifi_disable_command": "svc wifi disable",
-    "status_command": "ip addr show rmnet4; ip addr show tun0; ip route show"
+    "status_command": "ip addr show rmnet4; ip route show table rmnet4"
   },
   "rotation": {
     "drain_delay_secs": 2,
@@ -53,7 +53,59 @@
       "command": "stop ril-daemon && stop ril-daemon1 && sleep 8 && start ril-daemon && start ril-daemon1 && sleep 35"
     }
   },
+  "reliability": {
+    "max_restart_attempts": 5,
+    "restart_window_secs": 600,
+    "quarantine_secs": 900,
+    "max_flaps_per_window": 6,
+    "flap_window_secs": 900
+  },
+  "operator_detection": {
+    "command": "getprop gsm.operator.numeric | tr ',' '\\n' | grep -E '^[0-9]{5,6}$' | head -n1"
+  },
   "operator_profiles": {
-    "default_profile": "{{OPERATOR_PROFILE}}"
+    "default_profile": "{{OPERATOR_PROFILE}}",
+    "by_plmn": {
+      "25702": "mts_by",
+      "25704": "life_by"
+    },
+    "profiles": {
+      "default": {
+        "preferred_rotation_strategy": "data_reconnect",
+        "fallback_strategies": [
+          "airplane_bounce"
+        ],
+        "airplane_hold_secs": 10,
+        "drain_delay_secs": 2,
+        "rotate_cooldown_secs": 30,
+        "expect_ip_change": true,
+        "sticky_after_failures": 2
+      },
+      "mts_by": {
+        "preferred_rotation_strategy": "airplane_bounce",
+        "fallback_strategies": [
+          "data_reconnect",
+          "network_mode_bounce"
+        ],
+        "airplane_hold_secs": 5,
+        "drain_delay_secs": 2,
+        "rotate_cooldown_secs": 20,
+        "expect_ip_change": true,
+        "sticky_after_failures": 2
+      },
+      "life_by": {
+        "preferred_rotation_strategy": "airplane_bounce",
+        "fallback_strategies": [
+          "data_reconnect",
+          "network_mode_bounce",
+          "ril_bounce"
+        ],
+        "airplane_hold_secs": 10,
+        "drain_delay_secs": 2,
+        "rotate_cooldown_secs": 45,
+        "expect_ip_change": false,
+        "sticky_after_failures": 1
+      }
+    }
   }
 }

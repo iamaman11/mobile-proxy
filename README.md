@@ -68,6 +68,12 @@ Smoke-test it:
 
 ## Device Runtime Rollout
 
+Prerequisites on phone:
+
+- rooted device with `adb shell su 0 sh -c "id"` returning `uid=0`
+- WireGuard Android app installed (`com.wireguard.android`)
+- WireGuard tunnel named `WiGandroid` configured and valid
+
 1. Set required secrets in the shell:
 
 ```powershell

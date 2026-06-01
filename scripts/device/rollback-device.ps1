@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 function Invoke-Adb {
     param([string[]]$Arguments)
@@ -15,11 +16,28 @@ function Invoke-Adb {
     if ($DeviceSerial) {
         $base += @("-s", $DeviceSerial)
     }
-    $out = & "C:\Users\Bose\AppData\Local\Android\Sdk\platform-tools\adb.exe" @base @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw ($out -join [Environment]::NewLine)
+    $all = @($base + $Arguments)
+    $stdoutPath = Join-Path $env:TEMP ("adb-out-" + [guid]::NewGuid().ToString() + ".log")
+    $stderrPath = Join-Path $env:TEMP ("adb-err-" + [guid]::NewGuid().ToString() + ".log")
+    try {
+        $proc = Start-Process -FilePath "C:\Users\Bose\AppData\Local\Android\Sdk\platform-tools\adb.exe" `
+            -ArgumentList $all `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+        $stdout = if (Test-Path $stdoutPath) { Get-Content $stdoutPath -ErrorAction SilentlyContinue } else { @() }
+        $stderr = if (Test-Path $stderrPath) { Get-Content $stderrPath -ErrorAction SilentlyContinue } else { @() }
+        if ($proc.ExitCode -ne 0) {
+            $message = @($stdout + $stderr) -join [Environment]::NewLine
+            throw $message
+        }
+        return @($stdout + $stderr)
     }
-    return $out
+    finally {
+        Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-RequiredEnv {
@@ -34,14 +52,14 @@ function Get-RequiredEnv {
 $manifest = Get-Content (Resolve-Path $ManifestPath) | ConvertFrom-Json
 $adminToken = Get-RequiredEnv $manifest.tokens.adminTokenEnv
 
-$rootCheck = Invoke-Adb @("shell", "su", "-c", "id")
+$rootCheck = Invoke-Adb @("shell", "su", "0", "sh", "-c", "id")
 if (-not (($rootCheck -join "`n") -match "uid=0")) {
     throw "Root access is required on device for rollback."
 }
 
-$current = (Invoke-Adb @("shell", "su", "-c", "readlink $DeviceRoot/current")).Trim()
+$current = (Invoke-Adb @("shell", "su", "0", "sh", "-c", "readlink $DeviceRoot/current")).Trim()
 $currentRelease = [System.IO.Path]::GetFileName($current)
-$releases = (Invoke-Adb @("shell", "su", "-c", "ls -1t $DeviceRoot/releases")).Where({ $_.Trim() -ne "" })
+$releases = (Invoke-Adb @("shell", "su", "0", "sh", "-c", "ls -1t $DeviceRoot/releases")).Where({ $_.Trim() -ne "" })
 if (-not $releases -or $releases.Count -eq 0) {
     throw "No releases found under $DeviceRoot/releases."
 }
@@ -56,7 +74,7 @@ if (-not $targetRelease) {
 }
 
 $switchCmd = "set -eu; ln -sfn $DeviceRoot/releases/$targetRelease $DeviceRoot/current; sh $DeviceRoot/current/service.sh"
-Invoke-Adb @("shell", "su", "-c", $switchCmd) | Out-Null
+Invoke-Adb @("shell", "su", "0", "sh", "-c", $switchCmd) | Out-Null
 
 Invoke-Adb @("forward", "tcp:$HealthPort", "tcp:8088") | Out-Null
 $health = Invoke-RestMethod -Uri "http://127.0.0.1:$HealthPort/v1/health" -Headers @{ Authorization = "Bearer $adminToken" }
