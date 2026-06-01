@@ -1,0 +1,18 @@
+{
+  "deviceId": "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06",
+  "nodeName": "galaxy-a02-gcp-relay",
+  "operatorProfile": "mts_by",
+  "controlPlaneUrl": "http://34.118.26.142:8080",
+  "tokens": {
+    "adminTokenEnv": "MOBILE_PROXY_ADMIN_TOKEN",
+    "deviceTokenEnv": "MOBILE_PROXY_DEVICE_TOKEN",
+    "relayUserEnv": "MOBILE_PROXY_RELAY_USER",
+    "relayPasswordEnv": "MOBILE_PROXY_RELAY_PASSWORD"
+  },
+  "relay": {
+    "host": "34.118.26.142",
+    "socks5Port": 1081,
+    "mixedPort": 1080,
+    "httpPort": 3128
+  }
+}

@@ -1,13 +1,25 @@
 param(
     [string]$RelayHost = "34.118.26.142",
-    [string]$Username = "relay4855cb91",
-    [string]$Password = "4gKDPTqhCtFwSvy5FlsDJO91e7A4r3t9",
+    [string]$Username = "",
+    [string]$Password = "",
     [string]$HttpTestUrl = "http://httpbin.org/ip",
-    [string]$HttpsTestUrl = "https://httpbin.org/ip",
+    [string]$HttpsTestUrl = "https://example.com",
     [int]$TimeoutSeconds = 20
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $Username) {
+    $Username = $env:MOBILE_PROXY_RELAY_USER
+}
+
+if (-not $Password) {
+    $Password = $env:MOBILE_PROXY_RELAY_PASSWORD
+}
+
+if (-not $Username -or -not $Password) {
+    throw "Missing credentials. Set -Username/-Password or MOBILE_PROXY_RELAY_USER/MOBILE_PROXY_RELAY_PASSWORD."
+}
 
 function Invoke-ProxyProbe {
     param(

@@ -1,0 +1,59 @@
+{
+  "node_id": "{{NODE_ID}}",
+  "node_name": "{{NODE_NAME}}",
+  "listen": "127.0.0.1:8088",
+  "admin_token": "{{ADMIN_TOKEN}}",
+  "control_plane": {
+    "base_url": "{{CONTROL_PLANE_URL}}",
+    "device_token": "{{DEVICE_TOKEN}}",
+    "heartbeat_interval_secs": 2,
+    "poll_interval_secs": 5
+  },
+  "observer_urls": [
+    "{{CONTROL_PLANE_URL}}/api/v1/ip",
+    "https://api.ipify.org?format=json"
+  ],
+  "proxy": {
+    "binary": "/data/adb/mobile-proxy-node/current/bin/sing-box",
+    "args": [
+      "run",
+      "-c",
+      "/data/adb/mobile-proxy-node/current/config/sing-box.json"
+    ],
+    "working_dir": "/data/adb/mobile-proxy-node/current",
+    "env": {},
+    "listen_address": "10.66.66.2:1080"
+  },
+  "wireguard": {
+    "enabled": false,
+    "up_command": "true",
+    "down_command": "true"
+  },
+  "network": {
+    "cellular_only": true,
+    "wifi_disable_command": "svc wifi disable",
+    "status_command": "ip addr show rmnet4; ip addr show tun0; ip route show"
+  },
+  "rotation": {
+    "drain_delay_secs": 2,
+    "data_reconnect": {
+      "enabled": true,
+      "command": "svc data disable && sleep 20 && svc data enable"
+    },
+    "airplane_bounce": {
+      "enabled": true,
+      "command": "cmd connectivity airplane-mode enable && sleep {{AIRPLANE_HOLD_SECS}} && cmd connectivity airplane-mode disable"
+    },
+    "network_mode_bounce": {
+      "enabled": true,
+      "command": "settings put global preferred_network_mode1 3 && settings put global preferred_network_mode 3,9 && svc data disable && sleep 15 && svc data enable && sleep 20 && settings put global preferred_network_mode1 9 && settings put global preferred_network_mode 9,9 && svc data disable && sleep 15 && svc data enable"
+    },
+    "ril_bounce": {
+      "enabled": true,
+      "command": "stop ril-daemon && stop ril-daemon1 && sleep 8 && start ril-daemon && start ril-daemon1 && sleep 35"
+    }
+  },
+  "operator_profiles": {
+    "default_profile": "{{OPERATOR_PROFILE}}"
+  }
+}

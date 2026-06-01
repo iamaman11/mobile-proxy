@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     env,
+    fs,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -14,6 +15,7 @@ use axum::{
 };
 use clap::Parser;
 use proxy_core::{HealthRecord, JobRecord, RotateAccepted, RotateRequest, default_rotate_request};
+use serde::Deserialize;
 use tokio::{net::TcpListener, sync::Mutex, time::sleep};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -22,10 +24,12 @@ use uuid::Uuid;
 #[command(name = "host-daemon")]
 #[command(about = "Reconstructed local device API and rotate job service")]
 struct Cli {
-    #[arg(long, env = "HOST_DAEMON_LISTEN", default_value = "127.0.0.1:8088")]
-    listen: String,
-    #[arg(long, env = "HOST_DAEMON_ADMIN_TOKEN", default_value = "change-me")]
-    admin_token: String,
+    #[arg(long, env = "HOST_DAEMON_LISTEN")]
+    listen: Option<String>,
+    #[arg(long, env = "HOST_DAEMON_ADMIN_TOKEN")]
+    admin_token: Option<String>,
+    #[arg(long, env = "HOST_DAEMON_CONFIG")]
+    config: Option<String>,
 }
 
 #[derive(Clone)]
@@ -41,23 +45,59 @@ struct RuntimeState {
     ip_index: usize,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+struct FileConfig {
+    node_id: Option<String>,
+    node_name: Option<String>,
+    listen: Option<String>,
+    admin_token: Option<String>,
+    operator_profiles: Option<FileOperatorProfiles>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileOperatorProfiles {
+    default_profile: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+    let file_config = load_file_config(cli.config.as_deref())?;
+    let listen = cli
+        .listen
+        .or_else(|| file_config.as_ref().and_then(|c| c.listen.clone()))
+        .unwrap_or_else(|| "127.0.0.1:8088".into());
+    let admin_token = cli
+        .admin_token
+        .or_else(|| file_config.as_ref().and_then(|c| c.admin_token.clone()))
+        .unwrap_or_else(|| "change-me".into());
+    let node_id = file_config
+        .as_ref()
+        .and_then(|c| c.node_id.clone())
+        .or_else(|| env::var("HOST_DAEMON_NODE_ID").ok())
+        .unwrap_or_else(|| proxy_core::DEVICE_ID.to_string());
+    let node_name = file_config
+        .as_ref()
+        .and_then(|c| c.node_name.clone())
+        .or_else(|| env::var("HOST_DAEMON_NODE_NAME").ok())
+        .unwrap_or_else(|| proxy_core::NODE_NAME.to_string());
+    let active_profile = file_config
+        .as_ref()
+        .and_then(|c| c.operator_profiles.as_ref())
+        .and_then(|p| p.default_profile.clone())
+        .unwrap_or_else(|| "mts_by".into());
     let runtime = Arc::new(Mutex::new(RuntimeState {
         health: HealthRecord {
-            node_id: env::var("HOST_DAEMON_NODE_ID")
-                .unwrap_or_else(|_| proxy_core::DEVICE_ID.to_string()),
-            node_name: env::var("HOST_DAEMON_NODE_NAME")
-                .unwrap_or_else(|_| proxy_core::NODE_NAME.to_string()),
+            node_id,
+            node_name,
             binary_fingerprint: env::var("HOST_DAEMON_BINARY_FINGERPRINT")
                 .unwrap_or_else(|_| "reconstructed".into()),
             readiness_state: "healthy".into(),
             serving: true,
             proxy_status: "running".into(),
             last_public_ip: Some("178.168.186.196".into()),
-            active_operator_profile: Some("mts_by".into()),
+            active_operator_profile: Some(active_profile),
             active_operator_plmn: Some("25702".into()),
         },
         jobs: HashMap::new(),
@@ -70,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
         ip_index: 0,
     }));
     let state = AppState {
-        admin_token: cli.admin_token,
+        admin_token,
         runtime,
     };
 
@@ -80,10 +120,20 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/jobs/{id}", get(get_job))
         .with_state(state);
 
-    let listener = TcpListener::bind(&cli.listen).await?;
-    info!("host-daemon listening on {}", cli.listen);
+    let listener = TcpListener::bind(&listen).await?;
+    info!("host-daemon listening on {}", listen);
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn load_file_config(path: Option<&str>) -> anyhow::Result<Option<FileConfig>> {
+    if let Some(path) = path {
+        let body = fs::read_to_string(path)?;
+        let config = serde_json::from_str::<FileConfig>(&body)?;
+        Ok(Some(config))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn get_health(

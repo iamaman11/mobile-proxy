@@ -1,0 +1,45 @@
+{
+  "log": {
+    "level": "warn"
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "listen": "10.66.66.2",
+      "listen_port": 1080,
+      "users": [
+        {
+          "username": "{{RELAY_USER}}",
+          "password": "{{RELAY_PASSWORD}}"
+        }
+      ]
+    },
+    {
+      "type": "socks",
+      "listen": "10.66.66.2",
+      "listen_port": 1081,
+      "users": [
+        {
+          "username": "{{RELAY_USER}}",
+          "password": "{{RELAY_PASSWORD}}"
+        }
+      ]
+    },
+    {
+      "type": "http",
+      "listen": "10.66.66.2",
+      "listen_port": 3128,
+      "users": [
+        {
+          "username": "{{RELAY_USER}}",
+          "password": "{{RELAY_PASSWORD}}"
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct"
+    }
+  ]
+}

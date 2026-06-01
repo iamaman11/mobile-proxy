@@ -1,0 +1,6 @@
+id=mobile-proxy-node
+name=mobile-proxy-node
+version=0.1.0
+versionCode=1
+author=mobile-proxy
+description=Versioned runtime for host-daemon + sing-box managed by release switch.

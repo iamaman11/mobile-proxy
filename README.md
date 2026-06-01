@@ -19,6 +19,10 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 - `config/*.example.env` - local example environment files
 - `scripts/start-local-stack.ps1` - local dev stack launcher
 - `scripts/test-local-stack.ps1` - local dev stack smoke test
+- `scripts/device/*.ps1` - device install, verify, and rollback automation
+- `scripts/ops/check-fleet.ps1` - fleet readiness and staleness report
+- `deploy/device-runtime` - reproducible phone runtime bundle templates
+- `deploy/manifests/devices/*.json` - per-device manifest declarations
 - `docs/quick-reference.md` - current proxy parameters and rotate command
 - `docs/runtime-layout.md` - current observed production layout on VM and phone
 
@@ -33,7 +37,7 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 Rust workspace:
 
 ```powershell
-cd C:\Users\Bose\temp\mobile
+cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy
 cargo build
 cargo test
 ```
@@ -43,7 +47,7 @@ Android shell:
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot'
 $env:Path="$env:JAVA_HOME\bin;C:\Users\Bose\tools\gradle-8.10.2\bin;$env:Path"
-cd C:\Users\Bose\temp\mobile\apps\android-app
+cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy\apps\android-app
 gradle.bat assembleDebug
 ```
 
@@ -52,7 +56,7 @@ gradle.bat assembleDebug
 Start the reconstructed local stack:
 
 ```powershell
-cd C:\Users\Bose\temp\mobile
+cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy
 .\scripts\start-local-stack.ps1 -Token replace_me
 ```
 
@@ -62,8 +66,45 @@ Smoke-test it:
 .\scripts\test-local-stack.ps1 -Token replace_me
 ```
 
+## Device Runtime Rollout
+
+1. Set required secrets in the shell:
+
+```powershell
+$env:MOBILE_PROXY_ADMIN_TOKEN='replace_admin_token'
+$env:MOBILE_PROXY_DEVICE_TOKEN='replace_device_token'
+$env:MOBILE_PROXY_RELAY_USER='replace_relay_user'
+$env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
+```
+
+2. Install a release to a phone:
+
+```powershell
+.\scripts\device\install-device.ps1 `
+  -ManifestPath .\deploy\manifests\devices\example-device.json `
+  -ReleaseId 2026.06.01
+```
+
+3. Verify health and public proxy:
+
+```powershell
+.\scripts\device\verify-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
+```
+
+4. Roll back if needed:
+
+```powershell
+.\scripts\device\rollback-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
+```
+
+5. Check fleet status:
+
+```powershell
+.\scripts\ops\check-fleet.ps1 -ControlPlaneUrl http://34.118.26.142:8080
+```
+
 ## Notes
 
 - the control and operations path is Rust-first through `apps/operator-cli`
 - the Android project stays intentionally thin until a Rust-backed mobile UI is chosen
-- docs use placeholders for secrets; do not store live credentials in repo-tracked files
+- docs and manifests use placeholders for secrets; do not store live credentials in repo-tracked files

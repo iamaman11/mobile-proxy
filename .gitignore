@@ -5,3 +5,5 @@
 /apps/android-app/.kotlin/
 /apps/android-app/app/build/
 /apps/android-app/local.properties
+/deploy/device-runtime/bin/*
+!/deploy/device-runtime/bin/.gitkeep
