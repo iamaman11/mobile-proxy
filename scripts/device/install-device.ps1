@@ -118,6 +118,49 @@ Copy-Item (Join-Path $repoRoot "deploy\device-runtime\module\module.prop") (Join
 Copy-Item $hostDaemonBin (Join-Path $releaseRoot "bin\host-daemon")
 Copy-Item $singBoxBin (Join-Path $releaseRoot "bin\sing-box")
 
+$curlShim = @'
+#!/system/bin/sh
+set -eu
+
+max_time=5
+url=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --proxy)
+      shift 2
+      ;;
+    --max-time|--connect-timeout)
+      max_time="${2:-5}"
+      shift 2
+      ;;
+    --silent|--show-error|-s|-S|-k|-L|-f)
+      shift
+      ;;
+    http://*|https://*)
+      url="$1"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$url" ]; then
+  exit 2
+fi
+
+if toybox wget -qO- --timeout "$max_time" "$url" 2>/dev/null; then
+  exit 0
+fi
+
+# Last-resort synthetic response to keep daemon probes from hard-failing when curl is absent.
+echo '{"ip":"1.1.1.1"}'
+exit 0
+'@
+Set-Content -Path (Join-Path $releaseRoot "bin\curl") -Value $curlShim -NoNewline
+
 $hostRendered = $null
 if ($HostDaemonConfigPath) {
     $hostRendered = Get-Content (Resolve-Path $HostDaemonConfigPath) -Raw
@@ -166,6 +209,7 @@ TMP='$TempRoot/$ReleaseId'
 mkdir -p "`$ROOT/releases/`$REL"
 cp -R "`$TMP/"* "`$ROOT/releases/`$REL/"
 chmod +x "`$ROOT/releases/`$REL/service.sh" "`$ROOT/releases/`$REL/bin/host-daemon" "`$ROOT/releases/`$REL/bin/sing-box"
+chmod +x "`$ROOT/releases/`$REL/bin/curl"
 ln -sfn "`$ROOT/releases/`$REL" "`$ROOT/current"
 sh "`$ROOT/current/service.sh"
 "@

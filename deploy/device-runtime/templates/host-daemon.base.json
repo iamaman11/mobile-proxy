@@ -21,7 +21,10 @@
       "/data/adb/mobile-proxy-node/current/config/sing-box.json"
     ],
     "working_dir": "/data/adb/mobile-proxy-node/current",
-    "env": {},
+    "env": {
+      "ENABLE_DEPRECATED_LEGACY_DNS_SERVERS": "true",
+      "ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER": "true"
+    },
     "listen_address": "10.66.66.2:1080"
   },
   "wireguard": {

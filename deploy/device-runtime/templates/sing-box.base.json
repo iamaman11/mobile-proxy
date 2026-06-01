@@ -41,5 +41,23 @@
     {
       "type": "direct"
     }
-  ]
+  ],
+  "dns": {
+    "strategy": "ipv4_only",
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "dns-cf",
+        "server": "1.1.1.1",
+        "server_port": 53
+      },
+      {
+        "type": "udp",
+        "tag": "dns-google",
+        "server": "8.8.8.8",
+        "server_port": 53
+      }
+    ],
+    "final": "dns-cf"
+  }
 }

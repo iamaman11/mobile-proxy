@@ -9,6 +9,9 @@ LOG_DIR="$RUNTIME_ROOT/logs"
 HOST_LOG="$LOG_DIR/host-daemon.log"
 BOOT_LOG="$LOG_DIR/runtime-boot.log"
 
+# Ensure runtime helper binaries/shims (for example curl shim on Android) are discoverable.
+export PATH="$BIN:$PATH"
+
 mkdir -p "$LOG_DIR"
 
 timestamp() {
