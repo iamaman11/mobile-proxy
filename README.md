@@ -61,6 +61,8 @@ cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy
 .\scripts\start-local-stack.ps1 -Token replace_me
 ```
 
+`start-local-stack.ps1` now sets `HOST_DAEMON_CONTROL_PLANE_URL=http://127.0.0.1:8080`, so host-daemon self-registers and keeps control-plane heartbeats in sync during rotate jobs.
+
 Smoke-test it:
 
 ```powershell
@@ -74,6 +76,10 @@ Prerequisites on phone:
 - rooted device with `adb shell su 0 sh -c "id"` returning `uid=0`
 - WireGuard Android app installed (`com.wireguard.android`)
 - WireGuard tunnel named `WiGandroid` configured and valid
+- WireGuard set as always-on VPN:
+  - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
+  - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
+- Screen unlock available for first tunnel bootstrap after install/reboot (runtime can toggle tunnel via UI fallback when broadcast is blocked)
 
 1. Set required secrets in the shell:
 

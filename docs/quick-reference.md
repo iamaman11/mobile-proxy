@@ -42,6 +42,10 @@ Phone prerequisites:
 - `adb shell su 0 sh -c "id"` returns `uid=0`
 - `adb shell pm list packages com.wireguard.android` returns installed package
 - tunnel `WiGandroid` exists in WireGuard app and can be started
+- always-on VPN is pinned to WireGuard:
+  - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
+  - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
+- first bootstrap after reboot/install must allow screen unlock (runtime uses UI fallback to toggle WireGuard if Android blocks background broadcast)
 
 Install a versioned release:
 
@@ -83,3 +87,9 @@ Raw API rotation (fallback):
 ```powershell
 $h=@{Authorization="Bearer $env:MOBILE_PROXY_ADMIN_TOKEN"};$b='{"strategy":"airplane_bounce","require_public_ip_change":true,"reason":"manual-rotate"}';$id=(Invoke-RestMethod -Method POST -Uri 'http://127.0.0.1:18088/v1/ip/rotate' -Headers $h -ContentType 'application/json' -Body $b).job_id;do{$s=Invoke-RestMethod -Uri "http://127.0.0.1:18088/v1/jobs/$id" -Headers $h;$x=Invoke-RestMethod -Uri 'http://127.0.0.1:18088/v1/health' -Headers $h;"{0} job={1} state={2} serving={3} old={4} new={5}" -f (Get-Date -Format HH:mm:ss),$s.status,$x.readiness_state,$x.serving,$s.old_public_ip,$s.new_public_ip;Start-Sleep 2}while($s.status -eq 'running');$s|ConvertTo-Json -Depth 5
 ```
+
+Runtime introspection endpoints (same bearer token):
+
+- `GET http://127.0.0.1:18088/v1/health` - readiness, serving state, route/proxy probes
+- `GET http://127.0.0.1:18088/v1/status` - current runtime job and WireGuard mode
+- `GET http://127.0.0.1:18088/v1/proxy` - active proxy listener metadata

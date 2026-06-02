@@ -1,5 +1,5 @@
 param(
-    [string]$ProjectRoot = "C:\Users\Bose\temp\mobile",
+    [string]$ProjectRoot = "\\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy",
     [string]$Token = "replace_me"
 )
 
@@ -26,44 +26,21 @@ $previousToken = $env:HOST_DAEMON_ADMIN_TOKEN
 $previousNodeId = $env:HOST_DAEMON_NODE_ID
 $previousNodeName = $env:HOST_DAEMON_NODE_NAME
 $previousFingerprint = $env:HOST_DAEMON_BINARY_FINGERPRINT
+$previousControlPlaneUrl = $env:HOST_DAEMON_CONTROL_PLANE_URL
 $env:HOST_DAEMON_LISTEN = "127.0.0.1:8088"
 $env:HOST_DAEMON_ADMIN_TOKEN = $Token
 $env:HOST_DAEMON_NODE_ID = "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06"
 $env:HOST_DAEMON_NODE_NAME = "galaxy-a02-gcp-relay"
 $env:HOST_DAEMON_BINARY_FINGERPRINT = "local-dev"
+$env:HOST_DAEMON_CONTROL_PLANE_URL = "http://127.0.0.1:8080"
 Start-Process -FilePath (Join-Path $binDir "host-daemon.exe") -RedirectStandardOutput $hostDaemonOut -RedirectStandardError $hostDaemonErr -WindowStyle Hidden -WorkingDirectory $ProjectRoot | Out-Null
 if ($null -eq $previousListen) { Remove-Item Env:HOST_DAEMON_LISTEN -ErrorAction SilentlyContinue } else { $env:HOST_DAEMON_LISTEN = $previousListen }
 if ($null -eq $previousToken) { Remove-Item Env:HOST_DAEMON_ADMIN_TOKEN -ErrorAction SilentlyContinue } else { $env:HOST_DAEMON_ADMIN_TOKEN = $previousToken }
 if ($null -eq $previousNodeId) { Remove-Item Env:HOST_DAEMON_NODE_ID -ErrorAction SilentlyContinue } else { $env:HOST_DAEMON_NODE_ID = $previousNodeId }
 if ($null -eq $previousNodeName) { Remove-Item Env:HOST_DAEMON_NODE_NAME -ErrorAction SilentlyContinue } else { $env:HOST_DAEMON_NODE_NAME = $previousNodeName }
 if ($null -eq $previousFingerprint) { Remove-Item Env:HOST_DAEMON_BINARY_FINGERPRINT -ErrorAction SilentlyContinue } else { $env:HOST_DAEMON_BINARY_FINGERPRINT = $previousFingerprint }
+if ($null -eq $previousControlPlaneUrl) { Remove-Item Env:HOST_DAEMON_CONTROL_PLANE_URL -ErrorAction SilentlyContinue } else { $env:HOST_DAEMON_CONTROL_PLANE_URL = $previousControlPlaneUrl }
 Start-Sleep 1
-
-$registerBody = @{
-    node_id = "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06"
-    node_name = "galaxy-a02-gcp-relay"
-    proxy_status = "running"
-} | ConvertTo-Json -Compress
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/devices/register" -ContentType "application/json" -Body $registerBody | Out-Null
-
-$health = Invoke-RestMethod -Uri "http://127.0.0.1:8088/v1/health" -Headers @{ Authorization = "Bearer $Token" }
-$heartbeatBody = @{
-    node_id = $health.node_id
-    node_name = $health.node_name
-    readiness_state = $health.readiness_state
-    serving = $health.serving
-    proxy_status = $health.proxy_status
-    proxy_pid = $null
-    last_public_ip = $health.last_public_ip
-    current_job = $null
-    last_proxy_error = $null
-    version = "local-dev"
-    config_fingerprint = "local-dev"
-    binary_fingerprint = $health.binary_fingerprint
-    active_operator_profile = $health.active_operator_profile
-    active_operator_plmn = $health.active_operator_plmn
-} | ConvertTo-Json -Compress
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/devices/heartbeat" -ContentType "application/json" -Body $heartbeatBody | Out-Null
 
 $previousCpUrl = $env:CONTROL_PLANE_URL
 $previousRelayId = $env:RELAY_GATE_DEVICE_ID

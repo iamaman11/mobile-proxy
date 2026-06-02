@@ -99,7 +99,9 @@ async fn evaluate_ready(client: &reqwest::Client, cli: &Cli) -> bool {
 }
 
 fn is_device_ready(device: &DeviceRecord) -> bool {
-    device.serving && device.readiness_state == "healthy"
+    device.serving
+        && device.readiness_state == "healthy"
+        && device.degradation_reason_code.is_none()
 }
 
 #[cfg(test)]
@@ -126,7 +128,12 @@ mod tests {
             publicly_serving: false,
             public_probe_error: None,
             public_probe_at: None,
-            availability: "degraded".into(),
+            availability: "ready".into(),
+            degradation_reason_code: None,
+            serving_failure_reason: None,
+            desired_state: None,
+            recovery_intent: None,
+            last_event_at: None,
         }
     }
 

@@ -32,7 +32,7 @@
   "network": {
     "cellular_only": true,
     "wifi_disable_command": "svc wifi disable",
-    "status_command": "ip addr show rmnet4; ip route show table rmnet4"
+    "status_command": "ip addr show rmnet4; ip -4 route show table all | grep -E '^default .* dev rmnet4' || true"
   },
   "rotation": {
     "drain_delay_secs": 2,

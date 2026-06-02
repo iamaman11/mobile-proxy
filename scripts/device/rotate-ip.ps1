@@ -57,6 +57,29 @@ function Get-RequiredEnv {
 function Repair-CellularDefaultRoute {
     $line = (Invoke-Adb @("shell", "su", "0", "sh", "-c", "ip -4 route get 1.1.1.1 2>/dev/null | head -n1")) -join " "
     if (-not $line) {
+        $line = (Invoke-Adb @(
+            "shell",
+            "su",
+            "0",
+            "sh",
+            "-c",
+            "ip -4 route show table all 2>/dev/null | grep -E '^default .* dev (rmnet|ccmni|pdp|wwan)[0-9]*' | head -n1"
+        )) -join " "
+    }
+    if (-not $line) {
+        $devLine = (Invoke-Adb @(
+            "shell",
+            "su",
+            "0",
+            "sh",
+            "-c",
+            "ip -o link show 2>/dev/null | grep -E '(rmnet|ccmni|pdp|wwan)' | grep 'UP' | head -n1"
+        )) -join " "
+        if ($devLine -match "^\d+:\s*([^:]+):") {
+            $line = "default dev $($Matches[1])"
+        }
+    }
+    if (-not $line) {
         return
     }
     $dev = ""
