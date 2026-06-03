@@ -7,6 +7,7 @@ Current observed device:
 - model: `SM-A022G`
 - runtime owner: Magisk module `mobile-proxy-node`
 - active processes:
+  - `runtime-supervisor`
   - `host-daemon`
   - `sing-box`
 - current release path pattern:
@@ -16,10 +17,12 @@ Current observed device:
 
 Boot behavior:
 
-- `service.sh` activates a versioned release
-- `host-daemon` starts first
-- `tun0` becomes ready after the WireGuard helper converges
-- `service.sh` performs one-shot default-route repair at startup; managed rotation script performs post-rotate repair when cellular route stays stale
+- `service.sh` is bootstrap-only and starts `bin/runtime-supervisor`
+- `runtime-supervisor` starts and supervises `host-daemon` and `sing-box`
+- `runtime-supervisor` attempts WireGuard activation when `tun0` is missing
+- `runtime-supervisor` attempts route repair and falls back to data bounce when health reports missing cellular route
+- `host-daemon` reports health from real probes: cellular route, proxy TCP bind, public IP observer, and `tun0`
+- cellular route detection is Android policy-routing aware and accepts default routes in tables such as `rmnet*`, not only `main`
 - public serving is exposed only after VM gate confirms readiness
 
 ## VM
@@ -27,6 +30,9 @@ Boot behavior:
 Current observed layout:
 
 - host: `34.118.26.142`
+- GCP project: `project-56ecc519-f3ab-429a-b0a`
+- GCP instance: `mobile-relaycontrolpoint`
+- GCP zone: `europe-central2-a`
 - control plane binary:
   - `/opt/mobile-relaycontrolpoint/current/control-plane`
 - relay gate binary:
@@ -40,6 +46,14 @@ Active services:
 - `mobile-relay-gate.service`
 - `mobile-public-proxy.service`
 - `nginx.service`
+
+Current access status:
+
+- GCP API can identify and describe the instance
+- HTTP control-plane endpoint is reachable and returns `401` without a bearer token
+- direct SSH and `gcloud compute ssh` currently fail with `Permission denied (publickey)`
+- OS Login profile exists for `sarov8502905@gmail.com`, but SSH key propagation still does not grant shell access
+- do not rewrite startup metadata or reboot the VM unless explicitly performing VM recovery/provisioning work
 
 Current exposure model:
 

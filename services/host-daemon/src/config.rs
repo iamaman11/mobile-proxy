@@ -1,0 +1,209 @@
+use std::{env, fs};
+
+use anyhow::Result;
+use proxy_core::{HealthRecord, RuntimeReadiness};
+use serde::Deserialize;
+
+use crate::cli::Cli;
+use crate::control_plane::ControlPlaneSyncConfig;
+use crate::state::{RotationCommands, RuntimeState};
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FileConfig {
+    node_id: Option<String>,
+    node_name: Option<String>,
+    listen: Option<String>,
+    admin_token: Option<String>,
+    observer_urls: Option<Vec<String>>,
+    operator_profiles: Option<FileOperatorProfiles>,
+    proxy: Option<FileProxyConfig>,
+    wireguard: Option<FileWireguardConfig>,
+    control_plane: Option<FileControlPlaneConfig>,
+    rotation: Option<FileRotationConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileOperatorProfiles {
+    default_profile: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileProxyConfig {
+    listen_address: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileWireguardConfig {
+    enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileControlPlaneConfig {
+    base_url: Option<String>,
+    heartbeat_interval_secs: Option<u64>,
+    poll_interval_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileRotationConfig {
+    data_reconnect: Option<FileRotationStrategyConfig>,
+    airplane_bounce: Option<FileRotationStrategyConfig>,
+    network_mode_bounce: Option<FileRotationStrategyConfig>,
+    ril_bounce: Option<FileRotationStrategyConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileRotationStrategyConfig {
+    command: Option<String>,
+}
+
+pub struct LoadedConfig {
+    pub listen: String,
+    pub admin_token: String,
+    pub control_plane_sync: Option<ControlPlaneSyncConfig>,
+    pub runtime_state: RuntimeState,
+    pub probe: ProbeConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProbeConfig {
+    pub observer_urls: Vec<String>,
+    pub proxy_listen_address: String,
+}
+
+pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
+    let file_config = load_file_config(cli.config.as_deref())?;
+    let listen = cli
+        .listen
+        .clone()
+        .or_else(|| file_config.as_ref().and_then(|c| c.listen.clone()))
+        .unwrap_or_else(|| "127.0.0.1:8088".into());
+    let admin_token = cli
+        .admin_token
+        .clone()
+        .or_else(|| file_config.as_ref().and_then(|c| c.admin_token.clone()))
+        .unwrap_or_else(|| "change-me".into());
+    let node_id = file_config
+        .as_ref()
+        .and_then(|c| c.node_id.clone())
+        .or_else(|| env::var("HOST_DAEMON_NODE_ID").ok())
+        .unwrap_or_else(|| proxy_core::DEVICE_ID.to_string());
+    let node_name = file_config
+        .as_ref()
+        .and_then(|c| c.node_name.clone())
+        .or_else(|| env::var("HOST_DAEMON_NODE_NAME").ok())
+        .unwrap_or_else(|| proxy_core::NODE_NAME.to_string());
+    let active_profile = file_config
+        .as_ref()
+        .and_then(|c| c.operator_profiles.as_ref())
+        .and_then(|p| p.default_profile.clone())
+        .unwrap_or_else(|| "mts_by".into());
+    let wireguard_enabled = file_config
+        .as_ref()
+        .and_then(|c| c.wireguard.as_ref())
+        .and_then(|w| w.enabled)
+        .unwrap_or(false);
+    let proxy_listen_address = file_config
+        .as_ref()
+        .and_then(|c| c.proxy.as_ref())
+        .and_then(|p| p.listen_address.clone())
+        .unwrap_or_else(|| "10.66.66.2:1080".into());
+    let observer_urls = file_config
+        .as_ref()
+        .and_then(|c| c.observer_urls.clone())
+        .unwrap_or_else(|| vec!["https://api.ipify.org?format=json".into()]);
+    let rotation_commands = RotationCommands {
+        data_reconnect: rotation_command(file_config.as_ref(), |r| r.data_reconnect.as_ref()),
+        airplane_bounce: rotation_command(file_config.as_ref(), |r| r.airplane_bounce.as_ref()),
+        network_mode_bounce: rotation_command(file_config.as_ref(), |r| {
+            r.network_mode_bounce.as_ref()
+        }),
+        ril_bounce: rotation_command(file_config.as_ref(), |r| r.ril_bounce.as_ref()),
+    };
+    let control_plane_base_url = file_config
+        .as_ref()
+        .and_then(|c| c.control_plane.as_ref())
+        .and_then(|cp| cp.base_url.clone())
+        .or_else(|| env::var("HOST_DAEMON_CONTROL_PLANE_URL").ok());
+    let control_plane_sync = control_plane_base_url.map(|base_url| ControlPlaneSyncConfig {
+        base_url,
+        heartbeat_interval_secs: file_config
+            .as_ref()
+            .and_then(|c| c.control_plane.as_ref())
+            .and_then(|cp| cp.heartbeat_interval_secs)
+            .or_else(|| {
+                env::var("HOST_DAEMON_HEARTBEAT_INTERVAL_SECS")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+            })
+            .unwrap_or(2),
+        poll_interval_secs: file_config
+            .as_ref()
+            .and_then(|c| c.control_plane.as_ref())
+            .and_then(|cp| cp.poll_interval_secs)
+            .or_else(|| {
+                env::var("HOST_DAEMON_COMMAND_POLL_INTERVAL_SECS")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+            })
+            .unwrap_or(5),
+    });
+
+    let health = HealthRecord {
+        node_id,
+        node_name,
+        binary_fingerprint: env::var("HOST_DAEMON_BINARY_FINGERPRINT")
+            .unwrap_or_else(|_| "reconstructed".into()),
+        readiness_state: RuntimeReadiness::Booting.to_string(),
+        serving: false,
+        proxy_status: "starting".into(),
+        last_public_ip: None,
+        active_operator_profile: Some(active_profile),
+        active_operator_plmn: Some("25702".into()),
+        last_proxy_error: None,
+        serving_failure_reason: None,
+        degradation_reason_code: None,
+        cellular_route_ready: None,
+        proxy_bind_ready: None,
+        local_serving_ready: None,
+        tun0_present: None,
+        wg_handshake_recent: None,
+    };
+
+    Ok(LoadedConfig {
+        listen,
+        admin_token,
+        control_plane_sync,
+        runtime_state: RuntimeState::new(
+            health,
+            wireguard_enabled,
+            proxy_listen_address.clone(),
+            rotation_commands,
+            observer_urls.clone(),
+        ),
+        probe: ProbeConfig {
+            observer_urls,
+            proxy_listen_address,
+        },
+    })
+}
+
+fn rotation_command(
+    file_config: Option<&FileConfig>,
+    selector: impl Fn(&FileRotationConfig) -> Option<&FileRotationStrategyConfig>,
+) -> Option<String> {
+    file_config
+        .and_then(|c| c.rotation.as_ref())
+        .and_then(selector)
+        .and_then(|s| s.command.clone())
+}
+
+fn load_file_config(path: Option<&str>) -> Result<Option<FileConfig>> {
+    if let Some(path) = path {
+        let body = fs::read_to_string(path)?;
+        let config = serde_json::from_str::<FileConfig>(&body)?;
+        Ok(Some(config))
+    } else {
+        Ok(None)
+    }
+}

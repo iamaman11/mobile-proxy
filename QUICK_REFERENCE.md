@@ -49,19 +49,54 @@ Phone prerequisites:
 
 Install a versioned release:
 
+```bash
+cargo run -p operator-cli -- install-device-release \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --release-id 2026.06.01
+```
+
+Legacy PowerShell path:
+
 ```powershell
 .\scripts\device\install-device.ps1 `
   -ManifestPath .\deploy\manifests\devices\example-device.json `
   -ReleaseId 2026.06.01
 ```
 
+Package a versioned release locally through Rust:
+
+```bash
+export MOBILE_PROXY_ADMIN_TOKEN=replace_admin_token
+export MOBILE_PROXY_DEVICE_TOKEN=replace_device_token
+export MOBILE_PROXY_RELAY_USER=replace_relay_user
+export MOBILE_PROXY_RELAY_PASSWORD=replace_relay_password
+
+cargo run -p operator-cli -- package-device-release \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --release-id 2026.06.01
+```
+
 Verify device health and proxy readiness:
+
+```bash
+cargo run -p operator-cli -- verify-device \
+  --manifest-path deploy/manifests/devices/example-device.json
+```
+
+Legacy PowerShell path:
 
 ```powershell
 .\scripts\device\verify-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
 ```
 
 Roll back to previous or explicit release:
+
+```bash
+cargo run -p operator-cli -- rollback-device \
+  --manifest-path deploy/manifests/devices/example-device.json
+```
+
+Legacy PowerShell path:
 
 ```powershell
 .\scripts\device\rollback-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
@@ -93,3 +128,9 @@ Runtime introspection endpoints (same bearer token):
 - `GET http://127.0.0.1:18088/v1/health` - readiness, serving state, route/proxy probes
 - `GET http://127.0.0.1:18088/v1/status` - current runtime job and WireGuard mode
 - `GET http://127.0.0.1:18088/v1/proxy` - active proxy listener metadata
+
+Live timing result as of `2026-06-03`:
+
+- release `hard-rust-supervisor-20260603-1733` is installed on `SM_A022G`
+- programmatic airplane matrix selected `4s` as the minimum reliable hold for `MTS BY`
+- results: `1s=24/30`, `2s=28/30`, `3s=29/30`, `4s=30/30`, `5s=30/30`

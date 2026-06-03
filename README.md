@@ -10,22 +10,24 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 
 ## Layout
 
+- `crates/` - shared Rust crates and future domain/infra libraries
+- `apps/` - operator-facing and user-facing executable applications
+- `services/` - long-running backend and device services
+- `deploy/` - deployable runtime bundles, templates, and device manifests
+- `config/` - example environment files and local configuration inputs
+- `scripts/` - legacy automation and local helper scripts pending Rust CLI replacement
+- root `*.md` documents - architecture map, plan, runtime layout, and operator reference
+
+Current primary entrypoints:
+
 - `crates/proxy-core` - shared Rust models, runtime defaults, and proxy metadata
-- `apps/operator-cli` - Rust CLI for status, proxy data, and rotation
-- `services/host-daemon` - local device API baseline
+- `crates/runtime-domain` - pure runtime state machine baseline
+- `apps/operator-cli` - Rust CLI for status, rotation, airplane timing study, device packaging/install/verify/rollback, and future VM provisioning
+- `services/host-daemon` - phone-local API, rotation executor, health probe, and control-plane sync
 - `services/control-plane` - registry and readiness service baseline
 - `services/relay-gate` - VM-side readiness gate baseline
+- `services/runtime-supervisor` - phone-side owner for process lifecycle and runtime recovery
 - `apps/android-app` - minimal Android shell source
-- `config/*.example.env` - local example environment files
-- `scripts/start-local-stack.ps1` - local dev stack launcher
-- `scripts/test-local-stack.ps1` - local dev stack smoke test
-- `scripts/device/*.ps1` - device install, verify, and rollback automation
-- `scripts/device/rotate-ip.ps1` - managed rotate with auto-repair for post-airplane route loss
-- `scripts/ops/check-fleet.ps1` - fleet readiness and staleness report
-- `deploy/device-runtime` - reproducible phone runtime bundle templates
-- `deploy/manifests/devices/*.json` - per-device manifest declarations
-- `docs/quick-reference.md` - current proxy parameters and rotate command
-- `docs/runtime-layout.md` - current observed production layout on VM and phone
 
 ## Reality Check
 
@@ -92,13 +94,40 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 
 2. Install a release to a phone:
 
+Preferred Rust path:
+
+```bash
+cargo run -p operator-cli -- install-device-release \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --release-id 2026.06.01
+```
+
+Legacy PowerShell path:
+
 ```powershell
 .\scripts\device\install-device.ps1 `
   -ManifestPath .\deploy\manifests\devices\example-device.json `
   -ReleaseId 2026.06.01
 ```
 
+2a. Or package the device release locally through Rust before pushing it to a phone:
+
+```bash
+cargo run -p operator-cli -- package-device-release \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --release-id 2026.06.01
+```
+
 3. Verify health and public proxy:
+
+Preferred Rust path:
+
+```bash
+cargo run -p operator-cli -- verify-device \
+  --manifest-path deploy/manifests/devices/example-device.json
+```
+
+Legacy PowerShell path:
 
 ```powershell
 .\scripts\device\verify-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
@@ -115,6 +144,15 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 
 5. Roll back if needed:
 
+Preferred Rust path:
+
+```bash
+cargo run -p operator-cli -- rollback-device \
+  --manifest-path deploy/manifests/devices/example-device.json
+```
+
+Legacy PowerShell path:
+
 ```powershell
 .\scripts\device\rollback-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
 ```
@@ -128,5 +166,6 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 ## Notes
 
 - the control and operations path is Rust-first through `apps/operator-cli`
+- live phone testing on `2026-06-02` proved that `airplane_bounce` can change public IP while the old shell-owned runtime stayed in `waiting_cellular`; the repo now has Rust-owned recovery and policy-routing-aware health, but it still requires live phone validation
 - the Android project stays intentionally thin until a Rust-backed mobile UI is chosen
 - docs and manifests use placeholders for secrets; do not store live credentials in repo-tracked files
