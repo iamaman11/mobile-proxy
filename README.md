@@ -163,6 +163,32 @@ Legacy PowerShell path:
 .\scripts\ops\check-fleet.ps1 -ControlPlaneUrl http://34.118.26.142:8080
 ```
 
+## Reproducible Provisioning
+
+Prepare runtime binaries that are intentionally not tracked in git:
+
+```bash
+cargo run -p operator-cli -- prepare-runtime-binaries
+```
+
+Provision or re-provision a GCP relay VM from the repo:
+
+```bash
+cargo run -p operator-cli -- provision-vm \
+  --manifest-path deploy/manifests/vms/example-gcp-relay.json \
+  --release-id 2026.06.03 \
+  --ssh-user bose \
+  --ssh-key ~/.ssh/google_compute_engine
+```
+
+Delete a VM from a manifest:
+
+```bash
+cargo run -p operator-cli -- delete-vm \
+  --manifest-path deploy/manifests/vms/example-gcp-relay.json \
+  --delete-firewall-rules
+```
+
 ## Notes
 
 - the control and operations path is Rust-first through `apps/operator-cli`

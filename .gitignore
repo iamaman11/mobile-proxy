@@ -7,3 +7,5 @@
 /apps/android-app/local.properties
 /deploy/device-runtime/bin/*
 !/deploy/device-runtime/bin/.gitkeep
+/deploy/vm-runtime/bin/*
+!/deploy/vm-runtime/bin/.gitkeep

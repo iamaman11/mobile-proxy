@@ -1,0 +1,23 @@
+{
+  "project": "project-56ecc519-f3ab-429a-b0a",
+  "zone": "europe-central2-a",
+  "instanceName": "mobile-relaycontrolpoint",
+  "machineType": "e2-micro",
+  "imageFamily": "debian-12",
+  "imageProject": "debian-cloud",
+  "network": "default",
+  "tags": [
+    "mobile-relaycontrolpoint"
+  ],
+  "tokens": {
+    "controlTokenEnv": "MOBILE_PROXY_CONTROL_TOKEN",
+    "relayUserEnv": "MOBILE_PROXY_RELAY_USER",
+    "relayPasswordEnv": "MOBILE_PROXY_RELAY_PASSWORD"
+  },
+  "wireguard": {
+    "serverPrivateKeyEnv": "MOBILE_PROXY_WG_SERVER_PRIVATE_KEY",
+    "phonePublicKeyEnv": "MOBILE_PROXY_WG_PHONE_PUBLIC_KEY",
+    "phoneAllowedIp": "10.66.66.2/32",
+    "listenPort": 51820
+  }
+}

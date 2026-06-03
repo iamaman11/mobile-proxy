@@ -1,8 +1,10 @@
+mod artifacts;
 mod cli;
 mod commands;
 mod device;
 mod http;
 mod provision;
+mod vm;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -13,6 +15,7 @@ use crate::cli::{Cli, Command};
 use crate::commands::{run_airplane_study, run_proxy, run_rotate, run_status};
 use crate::device::{install_device_release, rollback_device, verify_device};
 use crate::provision::package_device_release;
+use crate::vm::{delete_vm, provision_vm};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,6 +39,9 @@ async fn main() -> Result<()> {
             let token = resolve_token(cli.token.as_deref())?;
             run_airplane_study(&client, &cli.api, &token, &args).await?
         }
+        Command::PrepareRuntimeBinaries(args) => artifacts::prepare_runtime_binaries(&args)?,
+        Command::ProvisionVm(args) => provision_vm(&args)?,
+        Command::DeleteVm(args) => delete_vm(&args)?,
         Command::PackageDeviceRelease(args) => package_device_release(&args)?,
         Command::InstallDeviceRelease(args) => install_device_release(&args).await?,
         Command::VerifyDevice(args) => verify_device(&args).await?,

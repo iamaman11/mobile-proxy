@@ -40,8 +40,9 @@ These are not theoretical concerns. They are visible in the current codebase.
    - IP: `34.118.26.142`
    Current blocker:
    - GCP describe access works
-   - SSH shell access fails with `Permission denied (publickey)` even after OS Login key add
-   - durable VM provisioning cannot be completed until shell/admin path is fixed or replaced with a controlled metadata/startup-script workflow
+   - SSH shell access previously failed with `Permission denied (publickey)` even after OS Login key add
+   - fixed on `2026-06-03` by snapshotting the boot disk and installing a local `bose` sudo SSH user through controlled recovery metadata
+   - `operator-cli provision-vm` can now re-provision the VM runtime from repo artifacts and env secrets
 
 4. Device operations still depend on PowerShell orchestration, including route repair and runtime restart.
    Evidence: [rotate-ip.ps1](/home/bose/projects/mobile-proxy/scripts/device/rotate-ip.ps1:54), [rotate-ip.ps1](/home/bose/projects/mobile-proxy/scripts/device/rotate-ip.ps1:145)
@@ -294,7 +295,11 @@ Exit criteria:
 
 Current status:
 - Rust `package-device-release`, `install-device-release`, `verify-device`, and `rollback-device` commands now exist in `operator-cli`
-- VM zero-to-one provisioning is still pending
+- Rust `prepare-runtime-binaries` now rebuilds Android Rust binaries and downloads official `sing-box` artifacts
+- Rust `provision-vm` now creates/configures a GCP relay VM from manifest/env and can re-provision the current VM
+- current VM was re-provisioned from the application as release `vm-hard-check-20260603`
+- fresh VM smoke passed on `2026-06-03`: `mobile-relaycontrolpoint-repro-test` was created from the application, provisioned, verified with active services/listening ports, then deleted with `operator-cli delete-vm`
+- remaining full migration proof: switch a phone manifest to a newly created VM endpoint, install phone release, verify public proxy end-to-end, then delete the old production VM
 
 ### Workstream 6. Rotation engine
 

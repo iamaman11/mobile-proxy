@@ -51,9 +51,10 @@ Current access status:
 
 - GCP API can identify and describe the instance
 - HTTP control-plane endpoint is reachable and returns `401` without a bearer token
-- direct SSH and `gcloud compute ssh` currently fail with `Permission denied (publickey)`
-- OS Login profile exists for `sarov8502905@gmail.com`, but SSH key propagation still does not grant shell access
-- do not rewrite startup metadata or reboot the VM unless explicitly performing VM recovery/provisioning work
+- SSH access was recovered on `2026-06-03` with local user `bose` and sudo
+- recovery snapshot: `mobile-relaycontrolpoint-pre-ssh-recovery-20260603`
+- `operator-cli provision-vm` successfully re-provisioned the VM release `vm-hard-check-20260603`
+- public proxy ports `1080`, `1081`, `3128` and control-plane port `8080` were verified listening after reprovision
 
 Current exposure model:
 

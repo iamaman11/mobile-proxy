@@ -11,6 +11,9 @@
 ## Public Relay
 
 - relay IP: `34.118.26.142`
+- GCP project: `project-56ecc519-f3ab-429a-b0a`
+- GCP zone: `europe-central2-a`
+- GCP instance: `mobile-relaycontrolpoint`
 - mixed: `34.118.26.142:1080`
 - SOCKS5: `34.118.26.142:1081`
 - HTTP/HTTPS CONNECT: `34.118.26.142:3128`
@@ -134,3 +137,50 @@ Live timing result as of `2026-06-03`:
 - release `hard-rust-supervisor-20260603-1733` is installed on `SM_A022G`
 - programmatic airplane matrix selected `4s` as the minimum reliable hold for `MTS BY`
 - results: `1s=24/30`, `2s=28/30`, `3s=29/30`, `4s=30/30`, `5s=30/30`
+
+## Reproducible Runtime Artifacts
+
+Prepare ignored runtime binaries from source and official releases:
+
+```bash
+cargo run -p operator-cli -- prepare-runtime-binaries
+```
+
+This produces:
+
+- `deploy/device-runtime/bin/runtime-supervisor`
+- `deploy/device-runtime/bin/host-daemon`
+- `deploy/device-runtime/bin/sing-box`
+- `deploy/vm-runtime/bin/sing-box`
+
+## VM Provisioning
+
+Required environment variables:
+
+```bash
+export MOBILE_PROXY_CONTROL_TOKEN=replace_control_token
+export MOBILE_PROXY_RELAY_USER=replace_relay_user
+export MOBILE_PROXY_RELAY_PASSWORD=replace_relay_password
+export MOBILE_PROXY_WG_SERVER_PRIVATE_KEY=replace_server_private_key
+export MOBILE_PROXY_WG_PHONE_PUBLIC_KEY=replace_phone_public_key
+```
+
+Provision or re-provision the GCP relay VM from this repo:
+
+```bash
+cargo run -p operator-cli -- provision-vm \
+  --manifest-path deploy/manifests/vms/example-gcp-relay.json \
+  --release-id 2026.06.03 \
+  --ssh-user bose \
+  --ssh-key ~/.ssh/google_compute_engine
+```
+
+Delete a VM from its manifest:
+
+```bash
+cargo run -p operator-cli -- delete-vm \
+  --manifest-path deploy/manifests/vms/example-gcp-relay.json \
+  --delete-firewall-rules
+```
+
+Fresh VM smoke passed on `2026-06-03` with temporary instance `mobile-relaycontrolpoint-repro-test`; it was provisioned and then deleted through `operator-cli`.

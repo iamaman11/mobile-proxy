@@ -19,6 +19,9 @@ pub enum Command {
     Proxy,
     Rotate(RotateArgs),
     AirplaneStudy(AirplaneStudyArgs),
+    PrepareRuntimeBinaries(PrepareRuntimeBinariesArgs),
+    ProvisionVm(ProvisionVmArgs),
+    DeleteVm(DeleteVmArgs),
     PackageDeviceRelease(PackageDeviceReleaseArgs),
     InstallDeviceRelease(InstallDeviceReleaseArgs),
     VerifyDevice(VerifyDeviceArgs),
@@ -51,6 +54,42 @@ pub struct AirplaneStudyArgs {
     pub reason_prefix: String,
     #[arg(long, default_value_t = 2)]
     pub poll_secs: u64,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct PrepareRuntimeBinariesArgs {
+    #[arg(long, default_value = "1.13.12")]
+    pub sing_box_version: String,
+    #[arg(long, default_value = "/usr/lib/android-ndk")]
+    pub android_ndk: String,
+    #[arg(long, default_value_t = false)]
+    pub skip_android_rust_build: bool,
+    #[arg(long, default_value_t = false)]
+    pub skip_sing_box_download: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ProvisionVmArgs {
+    #[arg(long)]
+    pub manifest_path: String,
+    #[arg(long, default_value = "target/vm-releases")]
+    pub output_dir: String,
+    #[arg(long, default_value = "manual")]
+    pub release_id: String,
+    #[arg(long, default_value = "bose")]
+    pub ssh_user: String,
+    #[arg(long, default_value = "~/.ssh/google_compute_engine")]
+    pub ssh_key: String,
+    #[arg(long, default_value_t = false)]
+    pub create_only: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DeleteVmArgs {
+    #[arg(long)]
+    pub manifest_path: String,
+    #[arg(long, default_value_t = false)]
+    pub delete_firewall_rules: bool,
 }
 
 #[derive(Args, Debug, Clone)]
