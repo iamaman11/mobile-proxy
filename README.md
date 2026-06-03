@@ -17,6 +17,7 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 - `config/` - example environment files and local configuration inputs
 - `scripts/` - legacy automation and local helper scripts pending Rust CLI replacement
 - root `*.md` documents - architecture map, plan, runtime layout, and operator reference
+- `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` - required reliability drill matrix for reproducible `10/10` acceptance
 
 Current primary entrypoints:
 
@@ -160,7 +161,7 @@ Legacy PowerShell path:
 6. Check fleet status:
 
 ```powershell
-.\scripts\ops\check-fleet.ps1 -ControlPlaneUrl http://34.118.26.142:8080
+.\scripts\ops\check-fleet.ps1 -ControlPlaneUrl http://34.118.88.54:8080
 ```
 
 ## Reproducible Provisioning
@@ -193,5 +194,6 @@ cargo run -p operator-cli -- delete-vm \
 
 - the control and operations path is Rust-first through `apps/operator-cli`
 - live phone testing on `2026-06-02` proved that `airplane_bounce` can change public IP while the old shell-owned runtime stayed in `waiting_cellular`; the repo now has Rust-owned recovery and policy-routing-aware health, but it still requires live phone validation
+- live migration on `2026-06-03` created `mobile-relaycontrolpoint-v2` as an `e2-micro` GCP relay, migrated the phone to `34.118.88.54`, verified control-plane health and public HTTP proxy serving, then deleted the old VM
 - the Android project stays intentionally thin until a Rust-backed mobile UI is chosen
 - docs and manifests use placeholders for secrets; do not store live credentials in repo-tracked files

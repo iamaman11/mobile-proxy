@@ -29,9 +29,9 @@ Boot behavior:
 
 Current observed layout:
 
-- host: `34.118.26.142`
+- host: `34.118.88.54`
 - GCP project: `project-56ecc519-f3ab-429a-b0a`
-- GCP instance: `mobile-relaycontrolpoint`
+- GCP instance: `mobile-relaycontrolpoint-v2`
 - GCP zone: `europe-central2-a`
 - control plane binary:
   - `/opt/mobile-relaycontrolpoint/current/control-plane`

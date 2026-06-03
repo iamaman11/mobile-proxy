@@ -1,5 +1,5 @@
 param(
-    [string]$RelayHost = "34.118.26.142",
+    [string]$RelayHost = "34.118.88.54",
     [string]$Username = "",
     [string]$Password = "",
     [string]$HttpTestUrl = "http://httpbin.org/ip",

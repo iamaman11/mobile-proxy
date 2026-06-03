@@ -1,4 +1,4 @@
-pub const RELAY_IP: &str = "34.118.26.142";
+pub const RELAY_IP: &str = "34.118.88.54";
 pub const MIXED_PORT: u16 = 1080;
 pub const SOCKS5_PORT: u16 = 1081;
 pub const HTTP_PORT: u16 = 3128;

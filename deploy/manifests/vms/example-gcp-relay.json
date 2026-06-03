@@ -1,13 +1,13 @@
 {
   "project": "project-56ecc519-f3ab-429a-b0a",
   "zone": "europe-central2-a",
-  "instanceName": "mobile-relaycontrolpoint",
+  "instanceName": "mobile-relaycontrolpoint-v2",
   "machineType": "e2-micro",
   "imageFamily": "debian-12",
   "imageProject": "debian-cloud",
   "network": "default",
   "tags": [
-    "mobile-relaycontrolpoint"
+    "mobile-relaycontrolpoint-v2"
   ],
   "tokens": {
     "controlTokenEnv": "MOBILE_PROXY_CONTROL_TOKEN",

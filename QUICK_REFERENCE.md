@@ -10,13 +10,13 @@
 
 ## Public Relay
 
-- relay IP: `34.118.26.142`
+- relay IP: `34.118.88.54`
 - GCP project: `project-56ecc519-f3ab-429a-b0a`
 - GCP zone: `europe-central2-a`
-- GCP instance: `mobile-relaycontrolpoint`
-- mixed: `34.118.26.142:1080`
-- SOCKS5: `34.118.26.142:1081`
-- HTTP/HTTPS CONNECT: `34.118.26.142:3128`
+- GCP instance: `mobile-relaycontrolpoint-v2`
+- mixed: `34.118.88.54:1080`
+- SOCKS5: `34.118.88.54:1081`
+- HTTP/HTTPS CONNECT: `34.118.88.54:3128`
 
 Credentials are not committed. Set runtime credentials in environment variables:
 

@@ -35,14 +35,15 @@ These are not theoretical concerns. They are visible in the current codebase.
    Evidence: in-memory maps in [main.rs](/home/bose/projects/mobile-proxy/services/control-plane/src/main.rs:31)
    Current VM identity:
    - project: `project-56ecc519-f3ab-429a-b0a`
-   - instance: `mobile-relaycontrolpoint`
+   - instance: `mobile-relaycontrolpoint-v2`
    - zone: `europe-central2-a`
-   - IP: `34.118.26.142`
+   - IP: `34.118.88.54`
    Current blocker:
    - GCP describe access works
    - SSH shell access previously failed with `Permission denied (publickey)` even after OS Login key add
    - fixed on `2026-06-03` by snapshotting the boot disk and installing a local `bose` sudo SSH user through controlled recovery metadata
-   - `operator-cli provision-vm` can now re-provision the VM runtime from repo artifacts and env secrets
+   - `operator-cli provision-vm` can now create and re-provision the VM runtime from repo artifacts and env secrets
+   - `mobile-relaycontrolpoint-v2` is the current production relay, created from the application as a low-cost `e2-micro` instance with a 10 GB boot disk and static in-use IPv4 `34.118.88.54`
 
 4. Device operations still depend on PowerShell orchestration, including route repair and runtime restart.
    Evidence: [rotate-ip.ps1](/home/bose/projects/mobile-proxy/scripts/device/rotate-ip.ps1:54), [rotate-ip.ps1](/home/bose/projects/mobile-proxy/scripts/device/rotate-ip.ps1:145)
@@ -79,6 +80,7 @@ These are not theoretical concerns. They are visible in the current codebase.
    - health returned `healthy`, `serving=true`, `cellular_route_ready=true`, `tun0_present=true`
    - single `4s` rotation changed IP and returned to `healthy`
    - full programmatic timing matrix completed; see [AIRPLANE_TIMING_STUDY_2026_06_03.md](/home/bose/projects/mobile-proxy/AIRPLANE_TIMING_STUDY_2026_06_03.md)
+   - phone was migrated to the newly created VM endpoint `34.118.88.54`; control-plane reported `healthy`, `serving=true`, `publicly_serving=true`
 
 
 ## 3. Non-negotiable target
@@ -299,7 +301,7 @@ Current status:
 - Rust `provision-vm` now creates/configures a GCP relay VM from manifest/env and can re-provision the current VM
 - current VM was re-provisioned from the application as release `vm-hard-check-20260603`
 - fresh VM smoke passed on `2026-06-03`: `mobile-relaycontrolpoint-repro-test` was created from the application, provisioned, verified with active services/listening ports, then deleted with `operator-cli delete-vm`
-- remaining full migration proof: switch a phone manifest to a newly created VM endpoint, install phone release, verify public proxy end-to-end, then delete the old production VM
+- full migration proof completed on `2026-06-03`: phone manifest was switched to a newly created VM endpoint, device release `phone-v2-relay-20260603` was installed, public HTTP proxy on `34.118.88.54:3128` returned a mobile-carrier IP, and the old production VM was deleted through `operator-cli delete-vm`
 
 ### Workstream 6. Rotation engine
 
