@@ -17,6 +17,7 @@ Current observed device:
 
 Boot behavior:
 
+- `/data/adb/service.d/99-mobile-proxy-runtime.sh` is a minimal boot hook that starts the active runtime release
 - `service.sh` is bootstrap-only and starts `bin/runtime-supervisor`
 - `runtime-supervisor` starts and supervises `host-daemon` and `sing-box`
 - `runtime-supervisor` attempts WireGuard activation when `tun0` is missing
@@ -24,6 +25,7 @@ Boot behavior:
 - `host-daemon` reports health from real probes: cellular route, proxy TCP bind, public IP observer, and `tun0`
 - cellular route detection is Android policy-routing aware and accepts default routes in tables such as `rmnet*`, not only `main`
 - public serving is exposed only after VM gate confirms readiness
+- legacy shell route guards such as `/data/adb/service.d/99-mobile-proxy-routefix.sh` must not exist after a Rust-managed install
 
 ## VM
 

@@ -75,7 +75,7 @@ pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<(
     )?;
 
     let apply_script = format!(
-        "set -eu\nROOT='{device_root}'\nREL='{release_id}'\nTMP='{temp_root}/{release_id}'\nmkdir -p \"$ROOT/releases/$REL\"\ncp -R \"$TMP/\"* \"$ROOT/releases/$REL/\"\nchmod +x \"$ROOT/releases/$REL/service.sh\" \"$ROOT/releases/$REL/bin/runtime-supervisor\" \"$ROOT/releases/$REL/bin/host-daemon\" \"$ROOT/releases/$REL/bin/sing-box\" \"$ROOT/releases/$REL/bin/curl\"\nln -sfn \"$ROOT/releases/$REL\" \"$ROOT/current\"\nsh \"$ROOT/current/service.sh\"\n",
+        "set -eu\nROOT='{device_root}'\nREL='{release_id}'\nTMP='{temp_root}/{release_id}'\nBOOT='/data/adb/service.d/99-mobile-proxy-runtime.sh'\nmkdir -p \"$ROOT/releases/$REL\" /data/adb/service.d\ncp -R \"$TMP/\"* \"$ROOT/releases/$REL/\"\nchmod +x \"$ROOT/releases/$REL/service.sh\" \"$ROOT/releases/$REL/bin/runtime-supervisor\" \"$ROOT/releases/$REL/bin/host-daemon\" \"$ROOT/releases/$REL/bin/sing-box\" \"$ROOT/releases/$REL/bin/curl\"\nln -sfn \"$ROOT/releases/$REL\" \"$ROOT/current\"\nrm -f /data/adb/service.d/99-mobile-proxy-routefix.sh\ncat > \"$BOOT\" <<'MOBILE_PROXY_BOOT'\n#!/system/bin/sh\nROOT='/data/adb/mobile-proxy-node'\nLOG_DIR='/data/local/tmp/mobile-proxy-logs'\nmkdir -p \"$LOG_DIR\"\nsleep 20\nif [ -x \"$ROOT/current/service.sh\" ]; then\n  sh \"$ROOT/current/service.sh\" >> \"$LOG_DIR/boot-service.log\" 2>&1\nelse\n  echo \"$(date '+%Y-%m-%dT%H:%M:%S%z') missing $ROOT/current/service.sh\" >> \"$LOG_DIR/boot-service.log\"\nfi\nMOBILE_PROXY_BOOT\nchmod 0700 \"$BOOT\"\nsh \"$ROOT/current/service.sh\"\n",
         device_root = args.device_root,
         release_id = args.release_id,
         temp_root = args.temp_root,
@@ -396,6 +396,7 @@ fn required_env(name: &str) -> Result<String> {
 
 fn detect_adb() -> Result<PathBuf> {
     let candidates = [
+        "/mnt/c/Users/Bose/tools/platform-tools/adb.exe",
         "/mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe",
         "/usr/bin/adb",
         "adb",

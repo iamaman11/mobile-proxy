@@ -20,6 +20,7 @@ Cost guardrail:
 - use `e2-micro` unless a measured CPU or memory bottleneck requires escalation
 - do not add GPU, local SSD, load balancer, or oversized boot disks
 - reserve the external IPv4 only for the active production relay
+- keep `staticExternalIp` in the VM manifest so delete-and-recreate reattaches the same relay endpoint
 - delete test VMs immediately after validation
 
 ## Source and artifact gates
@@ -52,6 +53,7 @@ cargo run -p operator-cli -- provision-vm \
 
 Acceptance:
 - instance exists with the manifest machine type and zone
+- instance uses the manifest `staticExternalIp`
 - SSH admin access works
 - `wg-quick@wg0`, `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-public-proxy`, and `nginx` are active
 - ports `8080`, `1080`, `1081`, `3128`, and `51820/udp` are reachable as designed
@@ -72,6 +74,8 @@ Acceptance:
 - root access is detected before installation
 - release bundle contains architecture-correct Android binaries
 - `service.sh` starts only `runtime-supervisor`
+- `/data/adb/service.d/99-mobile-proxy-runtime.sh` exists and only starts the active Rust-owned release
+- legacy route guard scripts are absent
 - `runtime-supervisor` owns `host-daemon` and `sing-box`
 - local health reaches `healthy`
 - control-plane reports the device as `serving=true` and `publicly_serving=true`
@@ -127,3 +131,9 @@ The system is not 10/10 until all of these are true:
 - control-plane state survives restart or has a documented durable replacement
 - release artifacts are reproducible and rollback-safe
 - docs in the project root explain the architecture, runtime layout, and validation procedure
+
+Current live destructive test result:
+- see [REPRODUCIBILITY_TEST_2026_06_04.md](/home/bose/projects/mobile-proxy/REPRODUCIBILITY_TEST_2026_06_04.md)
+- VM delete-and-recreate passed with static IP reattach
+- phone runtime delete-and-reinstall passed
+- full end-to-end public proxy recovery is blocked until the phone again reports a present SIM and cellular service

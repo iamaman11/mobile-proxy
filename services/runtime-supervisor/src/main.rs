@@ -212,6 +212,11 @@ fn reconcile_health(
     state: &mut SupervisorState,
     health: &HealthRecord,
 ) -> Result<()> {
+    if config.wireguard_enabled && health.wg_handshake_recent == Some(false) {
+        warn!("WireGuard gateway is unreachable; attempting app/broadcast kick");
+        kick_wireguard();
+    }
+
     if health.cellular_route_ready != Some(false) {
         return Ok(());
     }
@@ -248,8 +253,16 @@ fn reconcile_wireguard(config: &SupervisorConfig) {
     }
 
     warn!("wireguard enabled but tun0 is absent; attempting app/broadcast kick");
+    kick_wireguard();
+}
+
+fn kick_wireguard() {
     let _ = run_shell("settings put secure always_on_vpn_app com.wireguard.android");
     let _ = run_shell("settings put secure always_on_vpn_lockdown 0");
+    let _ = run_shell(
+        "am broadcast --user 0 --receiver-foreground -a com.wireguard.android.action.SET_TUNNEL_DOWN --es tunnel WiGandroid",
+    );
+    let _ = run_shell("sleep 1");
     let _ = run_shell("monkey -p com.wireguard.android -c android.intent.category.LAUNCHER 1");
     let _ = run_shell(
         "am broadcast --user 0 --receiver-foreground -a com.wireguard.android.action.SET_TUNNEL_UP --es tunnel WiGandroid",

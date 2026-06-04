@@ -37,7 +37,7 @@ async fn get_ip() -> Json<serde_json::Value> {
 
 async fn list_devices(State(state): State<AppState>) -> Json<Vec<DeviceRecord>> {
     let devices = state.devices.lock().await;
-    Json(devices.values().cloned().collect())
+    Json(devices.values().cloned().map(mark_stale).collect())
 }
 
 async fn list_ready_devices(State(state): State<AppState>) -> Json<Vec<DeviceRecord>> {
@@ -45,8 +45,9 @@ async fn list_ready_devices(State(state): State<AppState>) -> Json<Vec<DeviceRec
     Json(
         devices
             .values()
-            .filter(|device| device.availability == "ready")
             .cloned()
+            .map(mark_stale)
+            .filter(|device| device.availability == "ready")
             .collect(),
     )
 }
@@ -180,10 +181,37 @@ async fn ack_command(
     Json(serde_json::json!({ "accepted": removed || !req.ok }))
 }
 
+fn mark_stale(mut device: DeviceRecord) -> DeviceRecord {
+    const HEARTBEAT_TTL_SECS: u64 = 30;
+    let Some(last) = device
+        .last_heartbeat_at
+        .as_deref()
+        .and_then(|raw| raw.parse::<u64>().ok())
+    else {
+        return device;
+    };
+    let Ok(now) = now_unix_secs().parse::<u64>() else {
+        return device;
+    };
+    if now.saturating_sub(last) <= HEARTBEAT_TTL_SECS {
+        return device;
+    }
+
+    device.readiness_state = "waiting_cellular".into();
+    device.serving = false;
+    device.publicly_serving = false;
+    device.availability = "degraded".into();
+    device.degradation_reason_code = Some("heartbeat_stale".into());
+    device.serving_failure_reason = Some("device heartbeat is stale".into());
+    device
+}
+
 #[cfg(test)]
 mod tests {
     use crate::projection::now_unix_secs;
-    use proxy_core::{Availability, RuntimeProjectionInput, RuntimeReadiness, project_runtime};
+    use proxy_core::{
+        Availability, DeviceRecord, RuntimeProjectionInput, RuntimeReadiness, project_runtime,
+    };
 
     #[test]
     fn availability_requires_public_probe() {
@@ -203,5 +231,44 @@ mod tests {
     fn unix_clock_is_serialized() {
         let ts = now_unix_secs();
         assert!(ts.parse::<u64>().is_ok());
+    }
+
+    #[test]
+    fn stale_heartbeat_is_not_ready() {
+        let device = DeviceRecord {
+            node_id: "n".into(),
+            node_name: "node".into(),
+            readiness_state: "healthy".into(),
+            serving: true,
+            proxy_status: "running".into(),
+            proxy_pid: None,
+            last_public_ip: None,
+            current_job: None,
+            last_proxy_error: None,
+            version: None,
+            config_fingerprint: None,
+            binary_fingerprint: None,
+            active_operator_profile: None,
+            active_operator_plmn: None,
+            publicly_serving: true,
+            public_probe_error: None,
+            public_probe_at: None,
+            cellular_route_ready: Some(true),
+            proxy_bind_ready: Some(true),
+            local_serving_ready: Some(true),
+            last_heartbeat_at: Some("1".into()),
+            availability: "ready".into(),
+            degradation_reason_code: None,
+            serving_failure_reason: None,
+            desired_state: None,
+            recovery_intent: None,
+            last_event_at: None,
+        };
+        let projected = super::mark_stale(device);
+        assert_eq!(projected.availability, "degraded");
+        assert_eq!(
+            projected.degradation_reason_code.as_deref(),
+            Some("heartbeat_stale")
+        );
     }
 }

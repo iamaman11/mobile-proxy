@@ -34,6 +34,10 @@ pub fn build_registered_device(req: RegisterDeviceRequest) -> DeviceRecord {
         publicly_serving: false,
         public_probe_error: None,
         public_probe_at: None,
+        cellular_route_ready: None,
+        proxy_bind_ready: None,
+        local_serving_ready: None,
+        last_heartbeat_at: None,
         availability: projection.availability,
         degradation_reason_code: projection.degradation_reason_code,
         serving_failure_reason: projection.serving_failure_reason,
@@ -58,6 +62,7 @@ pub fn build_heartbeat_device(
         proxy_bind_ready: req.proxy_bind_ready,
         local_serving_ready: req.local_serving_ready,
     });
+    let now = now_unix_secs();
 
     DeviceRecord {
         node_id: req.node_id,
@@ -77,12 +82,16 @@ pub fn build_heartbeat_device(
         publicly_serving,
         public_probe_error,
         public_probe_at,
+        cellular_route_ready: req.cellular_route_ready,
+        proxy_bind_ready: req.proxy_bind_ready,
+        local_serving_ready: req.local_serving_ready,
+        last_heartbeat_at: Some(now.clone()),
         availability: projection.availability,
         degradation_reason_code: projection.degradation_reason_code,
         serving_failure_reason: projection.serving_failure_reason,
         desired_state: Some("healthy_serving".into()),
         recovery_intent: Some("none".into()),
-        last_event_at: Some(now_unix_secs()),
+        last_event_at: Some(now),
     }
 }
 
@@ -95,9 +104,9 @@ pub fn apply_public_probe(device: &mut DeviceRecord, req: PublicProbeReport) {
         serving: device.serving,
         publicly_serving: device.publicly_serving,
         current_job: device.current_job,
-        cellular_route_ready: None,
-        proxy_bind_ready: None,
-        local_serving_ready: None,
+        cellular_route_ready: device.cellular_route_ready,
+        proxy_bind_ready: device.proxy_bind_ready,
+        local_serving_ready: device.local_serving_ready,
     });
     device.readiness_state = projection.readiness_state;
     device.serving = projection.serving;

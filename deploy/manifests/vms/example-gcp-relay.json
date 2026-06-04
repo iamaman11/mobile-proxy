@@ -6,6 +6,7 @@
   "imageFamily": "debian-12",
   "imageProject": "debian-cloud",
   "network": "default",
+  "staticExternalIp": "34.118.88.54",
   "tags": [
     "mobile-relaycontrolpoint-v2"
   ],

@@ -25,7 +25,7 @@
     "listen_address": "10.66.66.2:1080"
   },
   "wireguard": {
-    "enabled": false,
+    "enabled": true,
     "up_command": "true",
     "down_command": "true"
   },

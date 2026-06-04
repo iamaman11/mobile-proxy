@@ -25,6 +25,8 @@ struct VmManifest {
     #[serde(rename = "imageProject")]
     image_project: Option<String>,
     network: Option<String>,
+    #[serde(rename = "staticExternalIp")]
+    static_external_ip: Option<String>,
     tags: Option<Vec<String>>,
     tokens: VmTokenEnv,
     wireguard: VmWireguard,
@@ -291,38 +293,40 @@ fn ensure_instance(args: &ProvisionVmArgs, manifest: &VmManifest, ssh_pub: &str)
         "mobile-proxy-vm-bootstrap.sh",
         &bootstrap_script(&args.ssh_user, ssh_pub),
     )?;
-    run(
-        Command::new("gcloud")
-            .arg("compute")
-            .arg("instances")
-            .arg("create")
-            .arg(&manifest.instance_name)
-            .arg("--project")
-            .arg(&manifest.project)
-            .arg("--zone")
-            .arg(&manifest.zone)
-            .arg("--machine-type")
-            .arg(manifest.machine_type.as_deref().unwrap_or("e2-micro"))
-            .arg("--image-family")
-            .arg(manifest.image_family.as_deref().unwrap_or("debian-12"))
-            .arg("--image-project")
-            .arg(manifest.image_project.as_deref().unwrap_or("debian-cloud"))
-            .arg("--network")
-            .arg(manifest.network.as_deref().unwrap_or("default"))
-            .arg("--tags")
-            .arg(
-                manifest
-                    .tags
-                    .clone()
-                    .unwrap_or_else(|| vec![primary_tag(manifest).into()])
-                    .join(","),
-            )
-            .arg("--metadata")
-            .arg("enable-oslogin=FALSE")
-            .arg("--metadata-from-file")
-            .arg(format!("startup-script={}", startup.display())),
-        Path::new("."),
-    )
+    let mut command = Command::new("gcloud");
+    command
+        .arg("compute")
+        .arg("instances")
+        .arg("create")
+        .arg(&manifest.instance_name)
+        .arg("--project")
+        .arg(&manifest.project)
+        .arg("--zone")
+        .arg(&manifest.zone)
+        .arg("--machine-type")
+        .arg(manifest.machine_type.as_deref().unwrap_or("e2-micro"))
+        .arg("--image-family")
+        .arg(manifest.image_family.as_deref().unwrap_or("debian-12"))
+        .arg("--image-project")
+        .arg(manifest.image_project.as_deref().unwrap_or("debian-cloud"))
+        .arg("--network")
+        .arg(manifest.network.as_deref().unwrap_or("default"))
+        .arg("--tags")
+        .arg(
+            manifest
+                .tags
+                .clone()
+                .unwrap_or_else(|| vec![primary_tag(manifest).into()])
+                .join(","),
+        )
+        .arg("--metadata")
+        .arg("enable-oslogin=FALSE")
+        .arg("--metadata-from-file")
+        .arg(format!("startup-script={}", startup.display()));
+    if let Some(ip) = &manifest.static_external_ip {
+        command.arg("--address").arg(ip);
+    }
+    run(&mut command, Path::new("."))
 }
 
 fn wait_for_ssh(args: &ProvisionVmArgs, manifest: &VmManifest, ssh_key: &Path) -> Result<()> {
