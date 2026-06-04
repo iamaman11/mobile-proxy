@@ -141,3 +141,4 @@ Current live destructive test result:
 - live phone release `checkall-phone-observability-20260604` is active
 - end-to-end public proxy currently passes and returns a carrier IP
 - remaining non-10/10 blocker: fully programmatic WireGuard activation through the stock WireGuard Android app is blocked by Android broadcast/background/permission behavior; remove this dependency with a companion APK that requests `com.wireguard.android.permission.CONTROL_TUNNELS` or a Rust-owned WireGuard backend before claiming no-compromise recovery
+- architecture decision: use first-party app-owned `VpnService`; see [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)

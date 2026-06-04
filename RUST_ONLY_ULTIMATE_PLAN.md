@@ -85,6 +85,14 @@ These are not theoretical concerns. They are visible in the current codebase.
    - stock WireGuard Android app cannot be controlled 100% programmatically by raw shell/root `am broadcast`; Android blocks the receiver path and shell cannot hold `CONTROL_TUNNELS`
    - target architecture must add a permissioned companion APK or replace the dependency with a Rust-owned/native WireGuard backend
 
+10. Architecture decision on `2026-06-04`: choose the app-owned tunnel architecture, not a production companion for stock WireGuard.
+   Decision:
+   - final target is option 3 from [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)
+   - `apps/android-app` must become the first-party `VpnService` owner
+   - `runtime-supervisor` remains the Rust policy owner
+   - sing-box/libbox or a Rust tunnel engine may be used inside our APK boundary
+   - stock WireGuard Android app is allowed only as a temporary bridge for live validation
+
 8. Live Rust-owned runtime validation on `2026-06-03`.
    Current state:
    - installed release `hard-rust-supervisor-20260603-1733` on `SM_A022G`
