@@ -92,6 +92,12 @@ These are not theoretical concerns. They are visible in the current codebase.
    - `runtime-supervisor` remains the Rust policy owner
    - sing-box/libbox or a Rust tunnel engine may be used inside our APK boundary
    - stock WireGuard Android app is allowed only as a temporary bridge for live validation
+   Implemented first step:
+   - Android `MobileProxyVpnService`, `TunnelCommandReceiver`, `BootReceiver`, and desired-state storage now exist
+   - APK install was verified on `SM_A022G`
+   - Android package manager resolves our `VpnService` and tunnel command receiver
+   Remaining:
+   - embed the real tunnel engine and switch live traffic away from stock WireGuard Android
 
 8. Live Rust-owned runtime validation on `2026-06-03`.
    Current state:

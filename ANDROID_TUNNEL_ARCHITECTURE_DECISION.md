@@ -70,11 +70,30 @@ VM:
 
 ## Tested Facts
 
-- Current Android project builds via Windows Gradle wrapper from WSL UNC path.
+- Current Android project builds via Windows Gradle wrapper from a Windows-path copy of `apps/android-app`.
+- Building through the WSL UNC path produced stale APK output and must not be treated as a valid release build path.
 - WSL Linux Gradle cannot currently build the Android app against the Windows SDK because the SDK contains Windows build-tools binaries.
-- Current APK is only a thin `MainActivity`; it does not yet declare `VpnService`.
+- The first app-owned tunnel scaffold is implemented:
+  - `MobileProxyVpnService`
+  - `TunnelCommandReceiver`
+  - `BootReceiver`
+  - persistent desired-state flag
+  - UI VPN consent entry point
+- The APK was built from a Windows-path copy of `apps/android-app` and installed on `SM_A022G`.
+- Android package manager sees `com.example.mobileproxy/.MobileProxyVpnService` under `android.net.VpnService`.
+- Android package manager sees explicit start/stop tunnel command receivers.
 - Current phone can run stock WireGuard UI and produce `tun0=10.66.66.2/32`.
 - Current phone does not accept raw shell/root broadcast tunnel-up as a reliable programmatic control path.
+- Safe `START_TUNNEL` broadcast without VPN consent was tested and did not disrupt the live stock-WireGuard path.
+
+## Remaining Implementation Gap
+
+The first-party app now owns the Android VPN lifecycle surface, but it does not yet contain the real tunnel engine. The next implementation step is to embed or bind a real engine under `MobileProxyVpnService`:
+
+- preferred: sing-box/libbox with the phone-side overlay/reverse-tunnel config under our APK boundary
+- acceptable: Rust-owned tunnel engine with JNI or local control from `runtime-supervisor`
+
+The current scaffold intentionally does not replace the live stock-WireGuard tunnel until that engine exists and passes reboot/process/rotation drills.
 
 ## Source References
 

@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Mobile Proxy</string>
-    <string name="app_subtitle">Reconstructed operator client with current relay reference data.</string>
+    <string name="app_subtitle">First-party Android runtime owner for the mobile relay tunnel.</string>
+    <string name="prepare_vpn">Prepare VPN Permission</string>
+    <string name="start_tunnel">Start App-Owned Tunnel</string>
+    <string name="stop_tunnel">Stop App-Owned Tunnel</string>
+    <string name="status_unknown">Status: not checked</string>
+    <string name="status_prepared">Status: VPN permission prepared</string>
+    <string name="status_needs_consent">Status: VPN permission needs consent</string>
+    <string name="status_started">Status: tunnel start requested</string>
+    <string name="status_stopped">Status: tunnel stop requested</string>
+    <string name="vpn_notification_channel">Mobile Proxy Tunnel</string>
+    <string name="vpn_notification_title">Mobile Proxy tunnel</string>
+    <string name="vpn_notification_text">App-owned relay tunnel is active.</string>
 </resources>
