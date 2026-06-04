@@ -15,7 +15,6 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 - `services/` - long-running backend and device services
 - `deploy/` - deployable runtime bundles, templates, and device manifests
 - `config/` - example environment files and local configuration inputs
-- `scripts/` - legacy automation and local helper scripts pending Rust CLI replacement
 - root `*.md` documents - architecture map, plan, runtime layout, and operator reference
 - `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` - required reliability drill matrix for reproducible `10/10` acceptance
 
@@ -55,23 +54,6 @@ cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy\apps\android-app
 gradle.bat assembleDebug
 ```
 
-## Local Stack
-
-Start the reconstructed local stack:
-
-```powershell
-cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy
-.\scripts\start-local-stack.ps1 -Token replace_me
-```
-
-`start-local-stack.ps1` now sets `HOST_DAEMON_CONTROL_PLANE_URL=http://127.0.0.1:8080`, so host-daemon self-registers and keeps control-plane heartbeats in sync during rotate jobs.
-
-Smoke-test it:
-
-```powershell
-.\scripts\test-local-stack.ps1 -Token replace_me
-```
-
 ## Device Runtime Rollout
 
 Prerequisites on phone:
@@ -95,20 +77,10 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 
 2. Install a release to a phone:
 
-Preferred Rust path:
-
 ```bash
 cargo run -p operator-cli -- install-device-release \
   --manifest-path deploy/manifests/devices/example-device.json \
   --release-id 2026.06.01
-```
-
-Legacy PowerShell path:
-
-```powershell
-.\scripts\device\install-device.ps1 `
-  -ManifestPath .\deploy\manifests\devices\example-device.json `
-  -ReleaseId 2026.06.01
 ```
 
 2a. Or package the device release locally through Rust before pushing it to a phone:
@@ -121,47 +93,30 @@ cargo run -p operator-cli -- package-device-release \
 
 3. Verify health and public proxy:
 
-Preferred Rust path:
-
 ```bash
 cargo run -p operator-cli -- verify-device \
   --manifest-path deploy/manifests/devices/example-device.json
 ```
 
-Legacy PowerShell path:
-
-```powershell
-.\scripts\device\verify-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
-```
-
 4. Perform managed IP rotation (auto-heals route/runtimes if airplane bounce stalls):
 
-```powershell
-.\scripts\device\rotate-ip.ps1 `
-  -ManifestPath .\deploy\manifests\devices\example-device.json `
-  -Strategy airplane_bounce `
-  -RequirePublicIpChange $true
+```bash
+cargo run -p operator-cli -- rotate \
+  --strategy airplane_bounce \
+  --require-public-ip-change true
 ```
 
 5. Roll back if needed:
-
-Preferred Rust path:
 
 ```bash
 cargo run -p operator-cli -- rollback-device \
   --manifest-path deploy/manifests/devices/example-device.json
 ```
 
-Legacy PowerShell path:
+6. Check fleet status through the control-plane API:
 
-```powershell
-.\scripts\device\rollback-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
-```
-
-6. Check fleet status:
-
-```powershell
-.\scripts\ops\check-fleet.ps1 -ControlPlaneUrl http://34.118.88.54:8080
+```bash
+curl --noproxy '*' http://34.118.88.54:8080/api/v1/devices
 ```
 
 ## Reproducible Provisioning
@@ -193,6 +148,7 @@ cargo run -p operator-cli -- delete-vm \
 ## Notes
 
 - the control and operations path is Rust-first through `apps/operator-cli`
+- legacy PowerShell operator scripts were removed after Rust CLI parity became the source of truth
 - live phone testing on `2026-06-02` proved that `airplane_bounce` can change public IP while the old shell-owned runtime stayed in `waiting_cellular`; the repo now has Rust-owned recovery and policy-routing-aware health, but it still requires live phone validation
 - live migration on `2026-06-03` created `mobile-relaycontrolpoint-v2` as an `e2-micro` GCP relay, migrated the phone to `34.118.88.54`, verified control-plane health and public HTTP proxy serving, then deleted the old VM
 - the Android project stays intentionally thin until a Rust-backed mobile UI is chosen

@@ -12,7 +12,7 @@ This directory defines the reproducible runtime layout for rooted Android phones
 
 ## Build/Install Contract
 
-1. `scripts/device/install-device.ps1` renders config templates with secrets from environment variables and a per-device manifest.
+1. `cargo run -p operator-cli -- package-device-release` renders config templates with secrets from environment variables and a per-device manifest.
 2. The script pushes a versioned release to `/data/adb/mobile-proxy-node/releases/<release-id>`.
 3. `current` is switched atomically to the new release.
 4. `service.sh` starts `runtime-supervisor` from `current`.

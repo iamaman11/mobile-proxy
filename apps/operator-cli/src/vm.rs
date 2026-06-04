@@ -408,7 +408,7 @@ fn install_script(release_id: &str) -> String {
         r#"set -euxo pipefail
 REL='{release_id}'
 SRC="/tmp/mobile-proxy-vm-release-{release_id}"
-install -d /opt/mobile-relaycontrolpoint/releases/"$REL" /opt/mobile-public-proxy /etc/mobile-relaycontrolpoint /etc/wireguard /etc/nginx/stream-available /etc/nginx/stream-enabled
+install -d /opt/mobile-relaycontrolpoint/releases/"$REL" /opt/mobile-public-proxy /etc/mobile-relaycontrolpoint /var/lib/mobile-relaycontrolpoint /etc/wireguard /etc/nginx/stream-available /etc/nginx/stream-enabled
 install -m 0755 "$SRC/bin/control-plane" /opt/mobile-relaycontrolpoint/releases/"$REL"/control-plane
 install -m 0755 "$SRC/bin/relay-gate" /opt/mobile-relaycontrolpoint/releases/"$REL"/relay-gate
 install -m 0755 "$SRC/bin/sing-box" /opt/mobile-public-proxy/sing-box

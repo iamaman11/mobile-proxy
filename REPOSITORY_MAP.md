@@ -11,7 +11,7 @@ The working rule is simple:
 - shared contracts live in `crates/`
 - executable products live in `apps/` and `services/`
 - deployable runtime bundles live in `deploy/`
-- local/operator automation lives in `scripts/`
+- local/operator automation lives in `apps/operator-cli`
 - architecture and operations documents live as root-level `*.md` files
 
 ## Current Top-Level Ownership
@@ -61,10 +61,6 @@ The working rule is simple:
 
 - `config/*.example.env`
   - local environment examples for services and operators
-
-- `scripts/`
-  - legacy local and device automation
-  - target state: thin compatibility wrappers or removal after Rust CLI parity is complete
 
 - root `*.md` documents
   - repository map, architecture plan, runtime layout, quick reference
@@ -150,7 +146,7 @@ Rule:
 - new phone supervision loop: `services/runtime-supervisor`
 - new operator commands: `apps/operator-cli`
 - new deployment template or bundle artifact: `deploy/`
-- temporary/manual ops workaround: `scripts/`, but only if Rust CLI parity does not yet exist
+- temporary/manual ops workaround: add an `operator-cli` command or a documented root-level runbook; do not add new persistent shell/PowerShell automation
 
 ## Naming Rules
 
@@ -171,24 +167,24 @@ Allowed top-level groups:
 - `services/`
 - `deploy/`
 - `config/`
-- `scripts/`
 - root `*.md` docs
 
 Do not add new top-level folders for one-off experiments.
 Put experiments under one of:
-- `scripts/`
 - a dedicated crate/app/service if it is real product code
 - a root markdown document if it is architecture or operations knowledge
 
 ## Codebase Findings That Must Be Fixed
 
-The major monolithic `main.rs` problem has been reduced, but structural work is not finished.
+The major monolithic `main.rs` problem has been reduced further, but structural work is not finished.
 
 Concrete problems:
 - `crates/proxy-core` still contains projection policy together with shared contracts
 - `services/runtime-supervisor` is now the real phone-side process supervisor, but it still needs live reboot/airplane/kill validation on the phone
-- phone packaging/install/verify/rollback have Rust CLI coverage; VM from-zero provisioning and durable VM control-plane are still pending
-- VM durability and device-runtime convergence are not yet implemented
+- phone packaging/install/verify/rollback have Rust CLI coverage
+- VM from-zero provisioning has Rust CLI coverage
+- control-plane now has JSON-backed restart persistence; stronger transactional storage remains a future hardening step
+- device-runtime convergence still depends on live cellular/SIM availability
 
 Corrective rule:
 - one file or module should have one clear responsibility
@@ -200,6 +196,7 @@ Corrective rule:
 From this point forward:
 - architecture and ops documents stay at repository root
 - root markdown files are the only place for persistent repo documentation
-- runtime policy must stay out of `service.sh`; any remaining `*.ps1` behavior is legacy compatibility and must not become source of truth
+- runtime policy must stay out of `service.sh`; persistent PowerShell operator automation is no longer part of the active tree
+- persistent `*.ps1` operator scripts have been removed from the active tree
 - each new responsibility must have one obvious owner directory
 - each executable should be split into `config`, `state`, `api`, `application`, and `infra` modules before it grows further

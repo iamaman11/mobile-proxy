@@ -60,6 +60,8 @@ async fn register_device(
     devices
         .entry(req.node_id.clone())
         .or_insert_with(|| build_registered_device(req));
+    drop(devices);
+    let _ = state.persist().await;
     Json(serde_json::json!({ "accepted": true }))
 }
 
@@ -82,6 +84,8 @@ async fn heartbeat(
         node_id,
         build_heartbeat_device(req, publicly_serving, public_probe_error, public_probe_at),
     );
+    drop(devices);
+    let _ = state.persist().await;
     Json(serde_json::json!({ "accepted": true }))
 }
 
@@ -94,6 +98,8 @@ async fn public_probe(
     if let Some(device) = devices.get_mut(&id) {
         apply_public_probe(device, req);
     }
+    drop(devices);
+    let _ = state.persist().await;
     Json(serde_json::json!({ "accepted": true }))
 }
 
@@ -137,6 +143,8 @@ async fn issue_command(
         device.recovery_intent = Some(command.recovery_intent.to_string());
         device.last_event_at = Some(command.issued_at.clone());
     }
+    drop(devices);
+    let _ = state.persist().await;
     Json(command)
 }
 
@@ -176,6 +184,8 @@ async fn ack_command(
             device.recovery_intent = Some(RecoveryIntent::None.to_string());
             device.last_event_at = Some(now_unix_secs());
         }
+        drop(devices);
+        let _ = state.persist().await;
     }
 
     Json(serde_json::json!({ "accepted": removed || !req.ok }))

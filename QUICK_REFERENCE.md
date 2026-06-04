@@ -5,8 +5,6 @@
 - project root: `\\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy`
 - build Rust workspace: `cargo build`
 - run Rust tests: `cargo test`
-- start local dev stack: `.\scripts\start-local-stack.ps1 -Token replace_me`
-- smoke-test local dev stack: `.\scripts\test-local-stack.ps1 -Token replace_me`
 
 ## Public Relay
 
@@ -23,11 +21,7 @@ Credentials are not committed. Set runtime credentials in environment variables:
 - `MOBILE_PROXY_RELAY_USER`
 - `MOBILE_PROXY_RELAY_PASSWORD`
 
-Quick public proxy smoke test:
-
-```powershell
-.\scripts\test-public-proxy.ps1
-```
+Quick public proxy smoke test: configure `MOBILE_PROXY_RELAY_USER` and `MOBILE_PROXY_RELAY_PASSWORD`, then use `curl -x http://user:pass@34.118.88.54:3128 http://api.ipify.org`.
 
 ## Required Secrets
 
@@ -58,14 +52,6 @@ cargo run -p operator-cli -- install-device-release \
   --release-id 2026.06.01
 ```
 
-Legacy PowerShell path:
-
-```powershell
-.\scripts\device\install-device.ps1 `
-  -ManifestPath .\deploy\manifests\devices\example-device.json `
-  -ReleaseId 2026.06.01
-```
-
 Package a versioned release locally through Rust:
 
 ```bash
@@ -86,24 +72,11 @@ cargo run -p operator-cli -- verify-device \
   --manifest-path deploy/manifests/devices/example-device.json
 ```
 
-Legacy PowerShell path:
-
-```powershell
-.\scripts\device\verify-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
-```
-
 Roll back to previous or explicit release:
 
 ```bash
 cargo run -p operator-cli -- rollback-device \
   --manifest-path deploy/manifests/devices/example-device.json
-```
-
-Legacy PowerShell path:
-
-```powershell
-.\scripts\device\rollback-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json
-.\scripts\device\rollback-device.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json -ReleaseId 2026.05.31
 ```
 
 ## Rotate IP
@@ -114,10 +87,10 @@ If local API access is not configured yet:
 & "C:\Users\Bose\AppData\Local\Android\Sdk\platform-tools\adb.exe" forward tcp:18088 tcp:8088
 ```
 
-Managed rotation (recommended, includes auto-repair if airplane bounce stalls):
+Managed rotation through Rust CLI:
 
-```powershell
-.\scripts\device\rotate-ip.ps1 -ManifestPath .\deploy\manifests\devices\example-device.json -Strategy airplane_bounce -RequirePublicIpChange $true
+```bash
+cargo run -p operator-cli -- rotate --strategy airplane_bounce --require-public-ip-change true
 ```
 
 Raw API rotation (fallback):

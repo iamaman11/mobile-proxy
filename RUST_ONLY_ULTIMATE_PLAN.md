@@ -31,8 +31,8 @@ These are not theoretical concerns. They are visible in the current codebase.
 2. `host-daemon` is no longer a fixed IP-pool simulation.
    Current state: rotation execution is command-backed, health is probe-backed, startup is fail-closed, and public serving is not accepted without route/proxy/public-observer success.
 
-3. VM-side `control-plane` is in-memory only and has no persistence, no durable command queue, and no restart recovery.
-   Evidence: in-memory maps in [main.rs](/home/bose/projects/mobile-proxy/services/control-plane/src/main.rs:31)
+3. VM-side `control-plane` is no longer memory-only.
+   Current state: control-plane loads and persists registry/command state as JSON at `CONTROL_PLANE_STATE_PATH`, defaulting to `/var/lib/mobile-relaycontrolpoint/control-plane-state.json`.
    Current VM identity:
    - project: `project-56ecc519-f3ab-429a-b0a`
    - instance: `mobile-relaycontrolpoint-v2`
@@ -45,8 +45,8 @@ These are not theoretical concerns. They are visible in the current codebase.
    - `operator-cli provision-vm` can now create and re-provision the VM runtime from repo artifacts and env secrets
    - `mobile-relaycontrolpoint-v2` is the current production relay, created from the application as a low-cost `e2-micro` instance with a 10 GB boot disk and static in-use IPv4 `34.118.88.54`
 
-4. Device operations still depend on PowerShell orchestration, including route repair and runtime restart.
-   Evidence: [rotate-ip.ps1](/home/bose/projects/mobile-proxy/scripts/device/rotate-ip.ps1:54), [rotate-ip.ps1](/home/bose/projects/mobile-proxy/scripts/device/rotate-ip.ps1:145)
+4. Device operations no longer depend on tracked PowerShell orchestration.
+   Current state: persistent `*.ps1` operator scripts were removed from the active repo; install, verify, rollback, rotate, artifact prep, VM provision, and VM delete are Rust CLI commands.
 
 5. The repo currently proves local compilation and packaging gates, not production reliability.
    Verified locally:
@@ -54,11 +54,13 @@ These are not theoretical concerns. They are visible in the current codebase.
    - `cargo clippy --all-targets --all-features -- -D warnings` passes
    - Android ARM binaries for `runtime-supervisor`, `host-daemon`, and `sing-box` are validated as ELF32 ARM for `/system/bin/linker`
    - Rust packaging rejects missing or wrong-architecture phone runtime binaries
-   - there is still no evidence of reboot/airplane/soak validation automation in Rust
+   - full reboot/airplane/soak validation is still required before `10/10`
 
-6. Executable crates were previously too monolithic; the first modularization pass is now done, but the architecture is still incomplete.
+6. Executable crates were previously too monolithic; the modularization pass now covers runtime-supervisor, relay-gate, host-daemon, control-plane, operator-cli, and proxy-core.
    Evidence:
-   - `services/runtime-supervisor` now owns phone-side process lifecycle and recovery, but needs live validation
+   - `services/runtime-supervisor` is split into `cli`, `config`, `process`, `android`, and `health`
+   - `services/relay-gate` is split into `cli`, `probe`, and `report`
+   - `services/runtime-supervisor` owns phone-side process lifecycle and recovery, but still needs live validation after cellular/SIM service is restored
    - `crates/runtime-domain` exists as first pure domain slice and needs broader replay/property coverage
    - `crates/proxy-core` is now module-split, but projection policy still lives there and should eventually be extracted if shared policy grows further
 
@@ -175,7 +177,7 @@ Repository documentation rule:
 ### Workstream 0. Baseline truth audit
 
 Deliverables:
-- map every responsibility currently living in `service.sh` and `scripts/device/*.ps1`
+- map every responsibility currently living in `service.sh` and removed legacy operator scripts
 - map every recovery path currently expected in production
 - define exact boot sequence for phone and VM
 

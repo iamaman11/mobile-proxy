@@ -56,6 +56,7 @@ Acceptance:
 - instance uses the manifest `staticExternalIp`
 - SSH admin access works
 - `wg-quick@wg0`, `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-public-proxy`, and `nginx` are active
+- control-plane state exists at `/var/lib/mobile-relaycontrolpoint/control-plane-state.json` after registration/heartbeat and survives service restart
 - ports `8080`, `1080`, `1081`, `3128`, and `51820/udp` are reachable as designed
 - the provision command is idempotent against an existing VM
 - deleting a test VM with `operator-cli delete-vm --delete-firewall-rules` leaves no orphan test instance

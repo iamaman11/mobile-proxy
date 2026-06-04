@@ -37,6 +37,8 @@ Current observed layout:
 - GCP zone: `europe-central2-a`
 - control plane binary:
   - `/opt/mobile-relaycontrolpoint/current/control-plane`
+- control plane state:
+  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.json`
 - relay gate binary:
   - `/opt/mobile-relaycontrolpoint/current/relay-gate`
 - public proxy backend:
