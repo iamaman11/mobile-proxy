@@ -307,7 +307,7 @@ async fn proxy_smoke(manifest: &DeviceManifest) -> Result<()> {
         .build()
         .context("failed to build proxy smoke client")?;
     client
-        .get("https://api.ipify.org?format=json")
+        .get("http://api.ipify.org")
         .send()
         .await?
         .error_for_status()?;

@@ -75,6 +75,16 @@ These are not theoretical concerns. They are visible in the current codebase.
    - `cellular_route_ready` must not be coupled only to the `main` table
    - the new host-daemon health probe now accepts policy-table cellular defaults, but this fix still needs live phone verification
 
+9. Live validation on `2026-06-04` found and fixed the `rotate/IP changed -> waiting_cellular` diagnosis bug.
+   Current state:
+   - when WireGuard is enabled and `tun0` is missing, health reports `waiting_wireguard` with `wireguard_path_not_ready`
+   - `runtime-supervisor` defers `sing-box` startup until `tun0` exists
+   - control-plane heartbeat/device records now expose `tun0_present` and `wg_handshake_recent`
+   - phone release `checkall-phone-observability-20260604` and VM release `checkall-vm-observability-20260604` are live and healthy
+   Remaining hard blocker:
+   - stock WireGuard Android app cannot be controlled 100% programmatically by raw shell/root `am broadcast`; Android blocks the receiver path and shell cannot hold `CONTROL_TUNNELS`
+   - target architecture must add a permissioned companion APK or replace the dependency with a Rust-owned/native WireGuard backend
+
 8. Live Rust-owned runtime validation on `2026-06-03`.
    Current state:
    - installed release `hard-rust-supervisor-20260603-1733` on `SM_A022G`

@@ -158,6 +158,15 @@ fn derive_degradation_reason(
     if input.current_job.is_some() {
         return Some(DegradationReasonCode::RotationInProgress);
     }
+    match readiness {
+        RuntimeReadiness::WaitingWireguard => {
+            return Some(DegradationReasonCode::WireguardPathNotReady);
+        }
+        RuntimeReadiness::WaitingCellular => {
+            return Some(DegradationReasonCode::CellularRouteMissing);
+        }
+        _ => {}
+    }
     if !serving {
         if input.cellular_route_ready == Some(false) {
             return Some(DegradationReasonCode::CellularRouteMissing);

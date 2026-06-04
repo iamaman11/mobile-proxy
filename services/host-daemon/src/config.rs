@@ -69,6 +69,7 @@ pub struct LoadedConfig {
 pub struct ProbeConfig {
     pub observer_urls: Vec<String>,
     pub proxy_listen_address: String,
+    pub wireguard_enabled: bool,
 }
 
 pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
@@ -184,6 +185,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         probe: ProbeConfig {
             observer_urls,
             proxy_listen_address,
+            wireguard_enabled,
         },
     })
 }

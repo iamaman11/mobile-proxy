@@ -99,6 +99,8 @@ async fn send_heartbeat(
         cellular_route_ready: runtime.health.cellular_route_ready,
         proxy_bind_ready: runtime.health.proxy_bind_ready,
         local_serving_ready: runtime.health.local_serving_ready,
+        tun0_present: runtime.health.tun0_present,
+        wg_handshake_recent: runtime.health.wg_handshake_recent,
     };
     drop(runtime);
 

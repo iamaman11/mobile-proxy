@@ -46,13 +46,17 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
         let healthy = snapshot.cellular_route_ready
             && snapshot.proxy_bind_ready
             && snapshot.local_serving_ready
-            && snapshot.wg_gateway_reachable
+            && snapshot.wireguard_path_ready
             && public_probe_ready
             && runtime.current_job.is_none();
         runtime.health.readiness_state = if healthy {
             RuntimeReadiness::Healthy.to_string()
-        } else {
+        } else if config.wireguard_enabled && !snapshot.wireguard_path_ready {
+            RuntimeReadiness::WaitingWireguard.to_string()
+        } else if !snapshot.cellular_route_ready {
             RuntimeReadiness::WaitingCellular.to_string()
+        } else {
+            RuntimeReadiness::StartingProxy.to_string()
         };
         runtime.health.serving = healthy;
         runtime.health.proxy_status = if healthy {
@@ -62,12 +66,12 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
         };
         runtime.health.degradation_reason_code = if healthy {
             None
+        } else if config.wireguard_enabled && !snapshot.wireguard_path_ready {
+            Some("wireguard_path_not_ready".into())
         } else if !snapshot.cellular_route_ready {
             Some("cellular_route_missing".into())
         } else if !snapshot.proxy_bind_ready {
             Some("proxy_bind_failed".into())
-        } else if !snapshot.wg_gateway_reachable {
-            Some("wireguard_gateway_unreachable".into())
         } else if !public_probe_ready {
             Some("public_probe_failed".into())
         } else {
@@ -80,9 +84,7 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
             .map(|code| match code.as_str() {
                 "cellular_route_missing" => "cellular route is not ready".into(),
                 "proxy_bind_failed" => "proxy is not accepting local connections".into(),
-                "wireguard_gateway_unreachable" => {
-                    "WireGuard gateway 10.66.66.1 is not reachable".into()
-                }
+                "wireguard_path_not_ready" => "WireGuard path is not ready".into(),
                 "public_probe_failed" => "public IP observer probe failed".into(),
                 _ => "local serving probe failed".into(),
             });
@@ -96,6 +98,7 @@ struct ProbeSnapshot {
     local_serving_ready: bool,
     tun0_present: bool,
     wg_gateway_reachable: bool,
+    wireguard_path_ready: bool,
     public_ip: Option<String>,
 }
 
@@ -103,13 +106,15 @@ async fn probe_once(client: &reqwest::Client, config: &ProbeConfig) -> ProbeSnap
     let proxy_bind_ready = tcp_ready(&config.proxy_listen_address);
     let tun0_present = tun0_present();
     let wg_gateway_reachable = tun0_present && wg_gateway_reachable();
+    let wireguard_path_ready = !config.wireguard_enabled || (tun0_present && wg_gateway_reachable);
     let public_ip = fetch_public_ip(client, &config.observer_urls).await;
     ProbeSnapshot {
         cellular_route_ready: cellular_route_ready(),
         proxy_bind_ready,
-        local_serving_ready: proxy_bind_ready && wg_gateway_reachable,
+        local_serving_ready: proxy_bind_ready && wireguard_path_ready,
         tun0_present,
         wg_gateway_reachable,
+        wireguard_path_ready,
         public_ip,
     }
 }

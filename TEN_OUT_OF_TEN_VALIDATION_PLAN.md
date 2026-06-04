@@ -137,4 +137,7 @@ Current live destructive test result:
 - see [REPRODUCIBILITY_TEST_2026_06_04.md](/home/bose/projects/mobile-proxy/REPRODUCIBILITY_TEST_2026_06_04.md)
 - VM delete-and-recreate passed with static IP reattach
 - phone runtime delete-and-reinstall passed
-- full end-to-end public proxy recovery is blocked until the phone again reports a present SIM and cellular service
+- live VM release `checkall-vm-observability-20260604` is active
+- live phone release `checkall-phone-observability-20260604` is active
+- end-to-end public proxy currently passes and returns a carrier IP
+- remaining non-10/10 blocker: fully programmatic WireGuard activation through the stock WireGuard Android app is blocked by Android broadcast/background/permission behavior; remove this dependency with a companion APK that requests `com.wireguard.android.permission.CONTROL_TUNNELS` or a Rust-owned WireGuard backend before claiming no-compromise recovery

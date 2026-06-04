@@ -14,7 +14,7 @@ use tracing::warn;
 use crate::cli::Cli;
 use crate::config::load_config;
 use crate::health::{SupervisorState, fetch_health, reconcile_health, reconcile_wireguard};
-use crate::process::RuntimeChildren;
+use crate::process::{RuntimeChildren, cleanup_stale_runtime_processes};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,6 +26,8 @@ async fn main() -> Result<()> {
         .context("failed to build HTTP client")?;
     let mut children = RuntimeChildren::new();
     let mut state = SupervisorState::new();
+
+    cleanup_stale_runtime_processes();
 
     loop {
         children.ensure(&config)?;

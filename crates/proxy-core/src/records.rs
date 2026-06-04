@@ -73,6 +73,8 @@ pub struct HeartbeatRequest {
     pub cellular_route_ready: Option<bool>,
     pub proxy_bind_ready: Option<bool>,
     pub local_serving_ready: Option<bool>,
+    pub tun0_present: Option<bool>,
+    pub wg_handshake_recent: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +106,8 @@ pub struct DeviceRecord {
     pub cellular_route_ready: Option<bool>,
     pub proxy_bind_ready: Option<bool>,
     pub local_serving_ready: Option<bool>,
+    pub tun0_present: Option<bool>,
+    pub wg_handshake_recent: Option<bool>,
     pub last_heartbeat_at: Option<String>,
     pub availability: String,
     pub degradation_reason_code: Option<String>,

@@ -62,6 +62,24 @@ mod tests {
     }
 
     #[test]
+    fn projection_prioritizes_wireguard_readiness_over_proxy_bind() {
+        let projected = project_runtime(RuntimeProjectionInput {
+            readiness_state: RuntimeReadiness::WaitingWireguard.to_string(),
+            serving: false,
+            publicly_serving: false,
+            current_job: None,
+            cellular_route_ready: Some(true),
+            proxy_bind_ready: Some(false),
+            local_serving_ready: Some(false),
+        });
+        assert!(!projected.serving);
+        assert_eq!(
+            projected.degradation_reason_code.as_deref(),
+            Some("wireguard_path_not_ready")
+        );
+    }
+
+    #[test]
     fn projection_rejects_serving_while_rotation_job_exists() {
         let projected = project_runtime(RuntimeProjectionInput {
             readiness_state: RuntimeReadiness::Healthy.to_string(),

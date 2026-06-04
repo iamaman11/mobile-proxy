@@ -21,11 +21,13 @@ Boot behavior:
 - `service.sh` is bootstrap-only and starts `bin/runtime-supervisor`
 - `runtime-supervisor` starts and supervises `host-daemon` and `sing-box`
 - `runtime-supervisor` attempts WireGuard activation when `tun0` is missing
+- when WireGuard is enabled, `runtime-supervisor` defers `sing-box` startup until `tun0` exists so proxy bind failures do not mask a missing tunnel
 - `runtime-supervisor` attempts route repair and falls back to data bounce when health reports missing cellular route
-- `host-daemon` reports health from real probes: cellular route, proxy TCP bind, public IP observer, and `tun0`
+- `host-daemon` reports health from real probes: cellular route, proxy TCP bind, public IP observer, `tun0`, and WireGuard gateway reachability
 - cellular route detection is Android policy-routing aware and accepts default routes in tables such as `rmnet*`, not only `main`
 - public serving is exposed only after VM gate confirms readiness
 - legacy shell route guards such as `/data/adb/service.d/99-mobile-proxy-routefix.sh` must not exist after a Rust-managed install
+- current remaining gap: stock WireGuard Android tunnel activation still requires UI or a permissioned companion APK; raw shell/root broadcasts are blocked by Android background-execution/permission rules
 
 ## VM
 

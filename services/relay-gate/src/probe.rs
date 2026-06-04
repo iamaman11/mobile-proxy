@@ -76,6 +76,8 @@ mod tests {
             cellular_route_ready: Some(true),
             proxy_bind_ready: Some(true),
             local_serving_ready: Some(true),
+            tun0_present: Some(true),
+            wg_handshake_recent: Some(true),
             last_heartbeat_at: Some("1".into()),
             availability: "ready".into(),
             degradation_reason_code: None,
