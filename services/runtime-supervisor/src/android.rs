@@ -2,10 +2,14 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-pub fn kick_wireguard() {
+pub fn kick_first_party_vpn_service() {
     let _ = run_shell(
         "am broadcast --user 0 --receiver-foreground -a com.example.mobileproxy.action.START_TUNNEL -n com.example.mobileproxy/.TunnelCommandReceiver",
     );
+}
+
+pub fn kick_stock_wireguard_bridge() {
+    kick_first_party_vpn_service();
     let _ = run_shell("sleep 1");
     if tun0_ready() {
         return;

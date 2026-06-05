@@ -63,6 +63,7 @@ async fn send_register(
         node_id: runtime.health.node_id.clone(),
         node_name: runtime.health.node_name.clone(),
         proxy_status: runtime.health.proxy_status.clone(),
+        tunnel_owner: runtime.tunnel_owner.clone(),
     };
     drop(runtime);
 
@@ -101,6 +102,7 @@ async fn send_heartbeat(
         local_serving_ready: runtime.health.local_serving_ready,
         tun0_present: runtime.health.tun0_present,
         wg_handshake_recent: runtime.health.wg_handshake_recent,
+        tunnel_owner: runtime.tunnel_owner.clone(),
     };
     drop(runtime);
 

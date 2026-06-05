@@ -5,9 +5,10 @@ use proxy_core::HealthRecord;
 use tracing::{info, warn};
 
 use crate::android::{
-    bounce_mobile_data, ensure_cellular_default_route, kick_wireguard, tun0_ready,
+    bounce_mobile_data, ensure_cellular_default_route, kick_first_party_vpn_service,
+    kick_stock_wireguard_bridge, tun0_ready,
 };
-use crate::config::SupervisorConfig;
+use crate::config::{SupervisorConfig, TunnelOwner};
 
 #[derive(Debug)]
 pub struct SupervisorState {
@@ -44,8 +45,11 @@ pub fn reconcile_wireguard(config: &SupervisorConfig) {
         return;
     }
 
-    warn!("wireguard enabled but tun0 is absent; attempting app/broadcast kick");
-    kick_wireguard();
+    warn!(
+        tunnel_owner = config.tunnel_owner.as_str(),
+        "wireguard enabled but tun0 is absent; attempting tunnel kick"
+    );
+    kick_tunnel(config);
 }
 
 pub fn reconcile_health(
@@ -54,8 +58,11 @@ pub fn reconcile_health(
     health: &HealthRecord,
 ) -> Result<()> {
     if config.wireguard_enabled && health.wg_handshake_recent == Some(false) {
-        warn!("WireGuard gateway is unreachable; attempting app/broadcast kick");
-        kick_wireguard();
+        warn!(
+            tunnel_owner = config.tunnel_owner.as_str(),
+            "WireGuard gateway is unreachable; attempting tunnel kick"
+        );
+        kick_tunnel(config);
     }
 
     if health.cellular_route_ready != Some(false) {
@@ -78,6 +85,13 @@ pub fn reconcile_health(
     }
 
     Ok(())
+}
+
+fn kick_tunnel(config: &SupervisorConfig) {
+    match config.tunnel_owner {
+        TunnelOwner::FirstPartyVpnService => kick_first_party_vpn_service(),
+        TunnelOwner::StockWireguardBridge => kick_stock_wireguard_bridge(),
+    }
 }
 
 fn route_repair_allowed(config: &SupervisorConfig, state: &SupervisorState) -> bool {

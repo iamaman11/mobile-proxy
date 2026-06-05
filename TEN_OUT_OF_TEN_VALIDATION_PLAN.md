@@ -148,6 +148,7 @@ Current live destructive test result:
 - VM service check passed for `wg-quick@wg0`, `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-public-proxy`, and `nginx`
 - end-to-end public proxy currently passes and returns a carrier IP
 - live rotation smoke on 2026-06-05: `4s` and `5s` programmatic airplane bounces did not change IP on the tested run; `5s` temporarily degraded to `waiting_wireguard` and then recovered to `healthy`
+- live VM and phone release `tunnel-owner-contract-20260605` deployed; control-plane now reports `tunnel_owner=stock_wireguard_bridge`, making the remaining external tunnel dependency explicit and machine-readable
 - remaining non-10/10 blocker: fully programmatic tunnel activation through the stock WireGuard Android app is blocked by Android broadcast/background/permission behavior; remove this dependency with the selected first-party app-owned `VpnService` tunnel engine before claiming no-compromise recovery
 - architecture decision: use first-party app-owned `VpnService`; see [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)
 - first implementation step completed: Android APK now declares and installs an app-owned `VpnService`, command receiver, and boot receiver; real embedded tunnel engine is still required before 10/10

@@ -237,6 +237,7 @@ mod tests {
             local_serving_ready: Some(true),
             tun0_present: Some(true),
             wg_handshake_recent: Some(true),
+            tunnel_owner: Some("stock_wireguard_bridge".into()),
         };
         assert!(is_successful_rotation(&job, &health, true));
 

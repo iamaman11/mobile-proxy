@@ -18,6 +18,7 @@ pub struct RuntimeState {
     pub jobs: HashMap<Uuid, JobRecord>,
     pub current_job: Option<Uuid>,
     pub wireguard_enabled: bool,
+    pub tunnel_owner: Option<String>,
     pub proxy_listen_address: String,
     pub proxy_pid: Option<u32>,
     pub rotation_commands: RotationCommands,
@@ -36,6 +37,7 @@ impl RuntimeState {
     pub fn new(
         health: HealthRecord,
         wireguard_enabled: bool,
+        tunnel_owner: Option<String>,
         proxy_listen_address: String,
         rotation_commands: RotationCommands,
         observer_urls: Vec<String>,
@@ -45,6 +47,7 @@ impl RuntimeState {
             jobs: HashMap::new(),
             current_job: None,
             wireguard_enabled,
+            tunnel_owner,
             proxy_listen_address,
             proxy_pid: None,
             rotation_commands,

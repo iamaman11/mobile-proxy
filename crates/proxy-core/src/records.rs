@@ -30,6 +30,7 @@ pub struct HealthRecord {
     pub local_serving_ready: Option<bool>,
     pub tun0_present: Option<bool>,
     pub wg_handshake_recent: Option<bool>,
+    pub tunnel_owner: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ pub struct RuntimeStatusRecord {
     pub node_name: String,
     pub current_job: Option<Uuid>,
     pub wireguard_enabled: bool,
+    pub tunnel_owner: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +54,7 @@ pub struct RegisterDeviceRequest {
     pub node_id: String,
     pub node_name: String,
     pub proxy_status: String,
+    pub tunnel_owner: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +78,7 @@ pub struct HeartbeatRequest {
     pub local_serving_ready: Option<bool>,
     pub tun0_present: Option<bool>,
     pub wg_handshake_recent: Option<bool>,
+    pub tunnel_owner: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +112,7 @@ pub struct DeviceRecord {
     pub local_serving_ready: Option<bool>,
     pub tun0_present: Option<bool>,
     pub wg_handshake_recent: Option<bool>,
+    pub tunnel_owner: Option<String>,
     pub last_heartbeat_at: Option<String>,
     pub availability: String,
     pub degradation_reason_code: Option<String>,

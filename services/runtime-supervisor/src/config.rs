@@ -24,6 +24,7 @@ struct ProxyConfig {
 #[derive(Debug, Deserialize)]
 struct WireguardConfig {
     enabled: Option<bool>,
+    owner: Option<String>,
 }
 
 #[derive(Debug)]
@@ -36,11 +37,34 @@ pub struct SupervisorConfig {
     pub proxy_args: Vec<String>,
     pub proxy_working_dir: PathBuf,
     pub wireguard_enabled: bool,
+    pub tunnel_owner: TunnelOwner,
     pub poll_secs: u64,
     pub repair_cooldown_secs: u64,
     pub data_bounce_down_secs: u64,
     pub data_bounce_settle_secs: u64,
     pub once: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunnelOwner {
+    StockWireguardBridge,
+    FirstPartyVpnService,
+}
+
+impl TunnelOwner {
+    pub fn parse(raw: Option<String>) -> Self {
+        match raw.as_deref() {
+            Some("first_party_vpn_service") => Self::FirstPartyVpnService,
+            _ => Self::StockWireguardBridge,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StockWireguardBridge => "stock_wireguard_bridge",
+            Self::FirstPartyVpnService => "first_party_vpn_service",
+        }
+    }
 }
 
 pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
@@ -66,11 +90,42 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         proxy_binary,
         proxy_args: file.proxy.args,
         proxy_working_dir,
-        wireguard_enabled: file.wireguard.and_then(|w| w.enabled).unwrap_or(false),
+        wireguard_enabled: file
+            .wireguard
+            .as_ref()
+            .and_then(|w| w.enabled)
+            .unwrap_or(false),
+        tunnel_owner: TunnelOwner::parse(file.wireguard.and_then(|w| w.owner)),
         poll_secs: cli.poll_secs,
         repair_cooldown_secs: cli.repair_cooldown_secs,
         data_bounce_down_secs: cli.data_bounce_down_secs,
         data_bounce_settle_secs: cli.data_bounce_settle_secs,
         once: cli.once,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TunnelOwner;
+
+    #[test]
+    fn tunnel_owner_defaults_to_explicit_stock_bridge() {
+        assert_eq!(TunnelOwner::parse(None), TunnelOwner::StockWireguardBridge);
+        assert_eq!(
+            TunnelOwner::parse(Some("stock_wireguard_bridge".into())),
+            TunnelOwner::StockWireguardBridge
+        );
+    }
+
+    #[test]
+    fn tunnel_owner_accepts_first_party_mode() {
+        assert_eq!(
+            TunnelOwner::parse(Some("first_party_vpn_service".into())),
+            TunnelOwner::FirstPartyVpnService
+        );
+        assert_eq!(
+            TunnelOwner::FirstPartyVpnService.as_str(),
+            "first_party_vpn_service"
+        );
+    }
 }

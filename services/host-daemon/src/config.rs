@@ -35,6 +35,7 @@ struct FileProxyConfig {
 #[derive(Debug, Deserialize, Clone)]
 struct FileWireguardConfig {
     enabled: Option<bool>,
+    owner: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -104,6 +105,10 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .and_then(|c| c.wireguard.as_ref())
         .and_then(|w| w.enabled)
         .unwrap_or(false);
+    let tunnel_owner = file_config
+        .as_ref()
+        .and_then(|c| c.wireguard.as_ref())
+        .and_then(|w| w.owner.clone());
     let proxy_listen_address = file_config
         .as_ref()
         .and_then(|c| c.proxy.as_ref())
@@ -169,6 +174,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         local_serving_ready: None,
         tun0_present: None,
         wg_handshake_recent: None,
+        tunnel_owner: tunnel_owner.clone(),
     };
 
     Ok(LoadedConfig {
@@ -178,6 +184,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         runtime_state: RuntimeState::new(
             health,
             wireguard_enabled,
+            tunnel_owner.clone(),
             proxy_listen_address.clone(),
             rotation_commands,
             observer_urls.clone(),

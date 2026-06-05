@@ -41,6 +41,7 @@ async fn get_status(
         node_name: runtime.health.node_name.clone(),
         current_job: runtime.current_job,
         wireguard_enabled: runtime.wireguard_enabled,
+        tunnel_owner: runtime.tunnel_owner.clone(),
     }))
 }
 
