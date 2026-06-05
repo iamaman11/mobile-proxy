@@ -142,7 +142,10 @@ Current live destructive test result:
 - VM delete-and-recreate passed with static IP reattach
 - phone runtime delete-and-reinstall passed
 - live VM release `checkall-vm-observability-20260604` is active
-- live phone release `checkall-phone-observability-20260604` is active
+- live phone release `validation-phone-stack-20260605` is active after `operator-cli install-device-stack`
+- `operator-cli verify-device` passed against `SM_A022G` and validated the first-party Android `VpnService` package surface
+- relay control-plane reports `healthy`, `serving=true`, `publicly_serving=true`, `tun0_present=true`, and recent WireGuard handshake
+- VM service check passed for `wg-quick@wg0`, `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-public-proxy`, and `nginx`
 - end-to-end public proxy currently passes and returns a carrier IP
 - remaining non-10/10 blocker: fully programmatic tunnel activation through the stock WireGuard Android app is blocked by Android broadcast/background/permission behavior; remove this dependency with the selected first-party app-owned `VpnService` tunnel engine before claiming no-compromise recovery
 - architecture decision: use first-party app-owned `VpnService`; see [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)
