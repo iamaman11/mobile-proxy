@@ -3,6 +3,7 @@ mod artifacts;
 mod cli;
 mod commands;
 mod device;
+mod device_stack;
 mod http;
 mod provision;
 mod vm;
@@ -44,6 +45,7 @@ async fn main() -> Result<()> {
         Command::ProvisionVm(args) => provision_vm(&args)?,
         Command::DeleteVm(args) => delete_vm(&args)?,
         Command::InstallAndroidApp(args) => android_app::install_android_app(&args)?,
+        Command::InstallDeviceStack(args) => device_stack::install_device_stack(&args).await?,
         Command::PackageDeviceRelease(args) => package_device_release(&args)?,
         Command::InstallDeviceRelease(args) => install_device_release(&args).await?,
         Command::VerifyDevice(args) => verify_device(&args).await?,

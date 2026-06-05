@@ -15,7 +15,9 @@ use crate::cli::{
 };
 use crate::provision::package_device_release;
 
-const WIREGUARD_PACKAGE: &str = "com.wireguard.android";
+const FIRST_PARTY_ANDROID_PACKAGE: &str = "com.example.mobileproxy";
+const FIRST_PARTY_VPN_SERVICE: &str = "MobileProxyVpnService";
+const FIRST_PARTY_TUNNEL_RECEIVER: &str = "TunnelCommandReceiver";
 
 #[derive(Debug, Deserialize)]
 struct DeviceManifest {
@@ -133,14 +135,32 @@ pub async fn verify_device(args: &VerifyDeviceArgs) -> Result<()> {
     .await?;
     let packages = adb(
         args.device_serial.as_deref(),
-        &["shell", "pm", "list", "packages", WIREGUARD_PACKAGE],
+        &[
+            "shell",
+            "pm",
+            "list",
+            "packages",
+            FIRST_PARTY_ANDROID_PACKAGE,
+        ],
     )?;
-    let wireguard_installed = packages.contains(WIREGUARD_PACKAGE);
+    let app_installed = packages.contains(FIRST_PARTY_ANDROID_PACKAGE);
     assert_healthy(&health)?;
-    if !wireguard_installed {
+    if !app_installed {
         bail!(
-            "device health is healthy, but WireGuard package {} is missing",
-            WIREGUARD_PACKAGE
+            "device health is healthy, but first-party Android package {} is missing",
+            FIRST_PARTY_ANDROID_PACKAGE
+        );
+    }
+    let package_dump = adb(
+        args.device_serial.as_deref(),
+        &["shell", "dumpsys", "package", FIRST_PARTY_ANDROID_PACKAGE],
+    )?;
+    if !package_dump.contains(FIRST_PARTY_VPN_SERVICE)
+        || !package_dump.contains(FIRST_PARTY_TUNNEL_RECEIVER)
+    {
+        bail!(
+            "first-party Android package {} is installed, but required VPN service/receiver entries are missing",
+            FIRST_PARTY_ANDROID_PACKAGE
         );
     }
     if !args.skip_proxy_smoke {

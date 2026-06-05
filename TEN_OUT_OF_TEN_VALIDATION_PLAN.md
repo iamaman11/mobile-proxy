@@ -31,6 +31,7 @@ Required:
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo run -p operator-cli -- prepare-runtime-binaries`
 - `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
+- `cargo run -p operator-cli -- install-device-stack --manifest-path deploy/manifests/devices/example-device.json --release-id validation-phone --device-serial R58T10QKGBE`
 - `cargo run -p operator-cli -- package-device-release --manifest-path deploy/manifests/devices/example-device.json --release-id validation-package`
 
 Acceptance:
@@ -67,12 +68,14 @@ Acceptance:
 Command:
 
 ```bash
-cargo run -p operator-cli -- install-device-release \
+cargo run -p operator-cli -- install-device-stack \
   --manifest-path deploy/manifests/devices/example-device.json \
-  --release-id validation-phone
+  --release-id validation-phone \
+  --device-serial R58T10QKGBE
 ```
 
 Acceptance:
+- first-party Android `VpnService` APK is installed
 - root access is detected before installation
 - release bundle contains architecture-correct Android binaries
 - `service.sh` starts only `runtime-supervisor`
@@ -141,6 +144,6 @@ Current live destructive test result:
 - live VM release `checkall-vm-observability-20260604` is active
 - live phone release `checkall-phone-observability-20260604` is active
 - end-to-end public proxy currently passes and returns a carrier IP
-- remaining non-10/10 blocker: fully programmatic WireGuard activation through the stock WireGuard Android app is blocked by Android broadcast/background/permission behavior; remove this dependency with a companion APK that requests `com.wireguard.android.permission.CONTROL_TUNNELS` or a Rust-owned WireGuard backend before claiming no-compromise recovery
+- remaining non-10/10 blocker: fully programmatic tunnel activation through the stock WireGuard Android app is blocked by Android broadcast/background/permission behavior; remove this dependency with the selected first-party app-owned `VpnService` tunnel engine before claiming no-compromise recovery
 - architecture decision: use first-party app-owned `VpnService`; see [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)
 - first implementation step completed: Android APK now declares and installs an app-owned `VpnService`, command receiver, and boot receiver; real embedded tunnel engine is still required before 10/10

@@ -55,16 +55,19 @@ The current Windows Android SDK is not a Linux SDK. `operator-cli install-androi
 
 ## Device Runtime Rollout
 
-Prerequisites on phone:
+Target phone prerequisites:
 
 - rooted device with `adb shell su 0 sh -c "id"` returning `uid=0`
 - first-party Android app installed through `cargo run -p operator-cli -- install-android-app`
+
+Temporary live bridge prerequisites until the app-owned tunnel engine replaces stock WireGuard:
+
 - WireGuard Android app installed (`com.wireguard.android`)
 - WireGuard tunnel named `WiGandroid` configured and valid
 - WireGuard set as always-on VPN:
   - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
   - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
-- Screen unlock available for first tunnel bootstrap until the app-owned tunnel engine replaces stock WireGuard
+- screen unlock available for first tunnel bootstrap
 
 1. Set required secrets in the shell:
 
@@ -78,10 +81,13 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 2. Install a release to a phone:
 
 ```bash
-cargo run -p operator-cli -- install-device-release \
+cargo run -p operator-cli -- install-device-stack \
   --manifest-path deploy/manifests/devices/example-device.json \
-  --release-id 2026.06.01
+  --release-id 2026.06.01 \
+  --device-serial R58T10QKGBE
 ```
+
+This installs the first-party Android `VpnService` APK and then installs the Rust runtime release. Use `install-device-release` only when the Android app is already installed and you intentionally want to update only the rooted runtime.
 
 2a. Or package the device release locally through Rust before pushing it to a phone:
 

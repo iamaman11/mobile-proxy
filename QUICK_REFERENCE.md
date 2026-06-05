@@ -34,17 +34,20 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 
 ## Device Runtime Deployment
 
-Phone prerequisites:
+Target phone prerequisites:
 
 - `adb shell su 0 sh -c "id"` returns `uid=0`
 - first-party Android app installed:
   - `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
+
+Temporary live bridge prerequisites until the app-owned tunnel engine replaces stock WireGuard:
+
 - `adb shell pm list packages com.wireguard.android` returns installed package
 - tunnel `WiGandroid` exists in WireGuard app and can be started
 - always-on VPN is pinned to WireGuard:
   - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
   - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
-- first bootstrap after reboot/install must allow screen unlock (runtime uses UI fallback to toggle WireGuard if Android blocks background broadcast)
+- first bootstrap after reboot/install must allow screen unlock
 
 Check app-owned VPN scaffold:
 
@@ -52,12 +55,22 @@ Check app-owned VPN scaffold:
 adb shell dumpsys package com.example.mobileproxy | grep -E 'MobileProxyVpnService|TunnelCommandReceiver|BootReceiver'
 ```
 
-Install a versioned release:
+Install the full phone stack:
+
+```bash
+cargo run -p operator-cli -- install-device-stack \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --release-id 2026.06.01 \
+  --device-serial R58T10QKGBE
+```
+
+Runtime-only update:
 
 ```bash
 cargo run -p operator-cli -- install-device-release \
   --manifest-path deploy/manifests/devices/example-device.json \
-  --release-id 2026.06.01
+  --release-id 2026.06.01 \
+  --device-serial R58T10QKGBE
 ```
 
 Package a versioned release locally through Rust:

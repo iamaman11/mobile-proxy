@@ -23,10 +23,46 @@ pub enum Command {
     ProvisionVm(ProvisionVmArgs),
     DeleteVm(DeleteVmArgs),
     InstallAndroidApp(InstallAndroidAppArgs),
+    InstallDeviceStack(InstallDeviceStackArgs),
     PackageDeviceRelease(PackageDeviceReleaseArgs),
     InstallDeviceRelease(InstallDeviceReleaseArgs),
     VerifyDevice(VerifyDeviceArgs),
     RollbackDevice(RollbackDeviceArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InstallDeviceStackArgs {
+    #[arg(long)]
+    pub manifest_path: String,
+    #[arg(long)]
+    pub release_id: String,
+    #[arg(long, default_value = "target/device-releases")]
+    pub output_dir: String,
+    #[arg(long)]
+    pub host_daemon_config_path: Option<String>,
+    #[arg(long)]
+    pub sing_box_config_path: Option<String>,
+    #[arg(long, default_value = "/data/adb/mobile-proxy-node")]
+    pub device_root: String,
+    #[arg(long, default_value = "/data/local/tmp/mobile-proxy-install")]
+    pub temp_root: String,
+    #[arg(long)]
+    pub device_serial: Option<String>,
+    #[arg(long, default_value_t = 18088)]
+    pub health_port: u16,
+    #[arg(long, default_value_t = false)]
+    pub skip_proxy_smoke: bool,
+    #[arg(long, default_value = "apps/android-app")]
+    pub android_project_dir: String,
+    #[arg(long, default_value = "/mnt/c/Users/Bose/mobile-proxy-android-build")]
+    pub android_windows_build_dir: String,
+    #[arg(long, default_value = "C:\\Users\\Bose\\mobile-proxy-android-build")]
+    pub android_windows_build_dir_cmd: String,
+    #[arg(
+        long,
+        default_value = "C:\\Users\\Bose\\mobile-proxy-android-build\\app\\build\\outputs\\apk\\debug\\app-debug.apk"
+    )]
+    pub android_apk_windows_path: String,
 }
 
 #[derive(Args, Debug, Clone)]
