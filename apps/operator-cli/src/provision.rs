@@ -171,6 +171,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     let device_token = required_env(&manifest.tokens.device_token_env)?;
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
+    validate_tunnel_owner(&args.tunnel_owner)?;
 
     let bin_dir = repo_root.join("deploy/device-runtime/bin");
     let runtime_supervisor_bin = bin_dir.join("runtime-supervisor");
@@ -219,6 +220,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
                 ("DEVICE_TOKEN", device_token.as_str()),
                 ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
+                ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
                 (
                     "AIRPLANE_HOLD_SECS",
                     &profile.airplane_hold_secs.to_string(),
@@ -248,6 +250,16 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
     println!("{}", release_root.display());
     Ok(())
+}
+
+fn validate_tunnel_owner(raw: &str) -> Result<()> {
+    match raw {
+        "stock_wireguard_bridge" | "first_party_vpn_service" => Ok(()),
+        _ => bail!(
+            "invalid tunnel owner {}; expected stock_wireguard_bridge or first_party_vpn_service",
+            raw
+        ),
+    }
 }
 
 fn repo_root() -> Result<PathBuf> {

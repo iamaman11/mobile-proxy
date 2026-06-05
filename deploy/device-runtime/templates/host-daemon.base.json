@@ -26,7 +26,7 @@
   },
   "wireguard": {
     "enabled": true,
-    "owner": "stock_wireguard_bridge",
+    "owner": "{{TUNNEL_OWNER}}",
     "up_command": "true",
     "down_command": "true"
   },

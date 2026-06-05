@@ -52,6 +52,8 @@ pub struct InstallDeviceStackArgs {
     pub health_port: u16,
     #[arg(long, default_value_t = false)]
     pub skip_proxy_smoke: bool,
+    #[arg(long, default_value = "stock_wireguard_bridge")]
+    pub tunnel_owner: String,
     #[arg(long, default_value = "apps/android-app")]
     pub android_project_dir: String,
     #[arg(long, default_value = "/mnt/c/Users/Bose/mobile-proxy-android-build")]
@@ -160,6 +162,8 @@ pub struct PackageDeviceReleaseArgs {
     pub host_daemon_config_path: Option<String>,
     #[arg(long)]
     pub sing_box_config_path: Option<String>,
+    #[arg(long, default_value = "stock_wireguard_bridge")]
+    pub tunnel_owner: String,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -184,6 +188,8 @@ pub struct InstallDeviceReleaseArgs {
     pub health_port: u16,
     #[arg(long, default_value_t = false)]
     pub skip_proxy_smoke: bool,
+    #[arg(long, default_value = "stock_wireguard_bridge")]
+    pub tunnel_owner: String,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -196,6 +202,8 @@ pub struct VerifyDeviceArgs {
     pub health_port: u16,
     #[arg(long, default_value_t = false)]
     pub skip_proxy_smoke: bool,
+    #[arg(long)]
+    pub required_tunnel_owner: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]

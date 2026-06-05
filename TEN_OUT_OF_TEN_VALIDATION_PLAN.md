@@ -32,6 +32,7 @@ Required:
 - `cargo run -p operator-cli -- prepare-runtime-binaries`
 - `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
 - `cargo run -p operator-cli -- install-device-stack --manifest-path deploy/manifests/devices/example-device.json --release-id validation-phone --device-serial R58T10QKGBE`
+- `cargo run -p operator-cli -- verify-device --manifest-path deploy/manifests/devices/example-device.json --device-serial R58T10QKGBE --required-tunnel-owner first_party_vpn_service`
 - `cargo run -p operator-cli -- package-device-release --manifest-path deploy/manifests/devices/example-device.json --release-id validation-package`
 
 Acceptance:
@@ -84,6 +85,7 @@ Acceptance:
 - `runtime-supervisor` owns `host-daemon` and `sing-box`
 - local health reaches `healthy`
 - control-plane reports the device as `serving=true` and `publicly_serving=true`
+- local health and control-plane report `tunnel_owner=first_party_vpn_service`
 - public HTTP proxy `:3128` returns the phone carrier IP
 
 ## Rotation timing gate

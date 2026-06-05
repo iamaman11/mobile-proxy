@@ -93,6 +93,20 @@ cargo run -p operator-cli -- verify-device \
   --manifest-path deploy/manifests/devices/example-device.json
 ```
 
+Strict tunnel-owner checks:
+
+```bash
+cargo run -p operator-cli -- verify-device \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --device-serial R58T10QKGBE \
+  --required-tunnel-owner stock_wireguard_bridge
+
+cargo run -p operator-cli -- verify-device \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --device-serial R58T10QKGBE \
+  --required-tunnel-owner first_party_vpn_service
+```
+
 Roll back to previous or explicit release:
 
 ```bash

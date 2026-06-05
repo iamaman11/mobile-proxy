@@ -51,6 +51,7 @@ pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<(
         output_dir: args.output_dir.clone(),
         host_daemon_config_path: args.host_daemon_config_path.clone(),
         sing_box_config_path: args.sing_box_config_path.clone(),
+        tunnel_owner: args.tunnel_owner.clone(),
     })?;
 
     let manifest = load_manifest(&args.manifest_path)?;
@@ -133,6 +134,15 @@ pub async fn verify_device(args: &VerifyDeviceArgs) -> Result<()> {
         &admin_token,
     )
     .await?;
+    if let Some(required) = &args.required_tunnel_owner
+        && health.tunnel_owner.as_deref() != Some(required.as_str())
+    {
+        bail!(
+            "device tunnel owner mismatch: expected={} actual={:?}",
+            required,
+            health.tunnel_owner
+        );
+    }
     let packages = adb(
         args.device_serial.as_deref(),
         &[

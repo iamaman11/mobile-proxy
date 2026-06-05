@@ -104,6 +104,17 @@ cargo run -p operator-cli -- verify-device \
   --manifest-path deploy/manifests/devices/example-device.json
 ```
 
+For the final no-compromise gate, require the app-owned tunnel owner explicitly:
+
+```bash
+cargo run -p operator-cli -- verify-device \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --device-serial R58T10QKGBE \
+  --required-tunnel-owner first_party_vpn_service
+```
+
+The current live bridge should be verified with `--required-tunnel-owner stock_wireguard_bridge`; it is healthy but not the final `10/10` tunnel architecture.
+
 4. Perform managed IP rotation (auto-heals route/runtimes if airplane bounce stalls):
 
 ```bash
