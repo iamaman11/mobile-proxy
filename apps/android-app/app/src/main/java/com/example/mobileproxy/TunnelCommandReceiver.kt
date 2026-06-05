@@ -5,12 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import android.util.Base64
 
 class TunnelCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_SET_CONFIG -> {
                 val config = intent.getStringExtra(EXTRA_CONFIG)
+                    ?: intent.getStringExtra(EXTRA_CONFIG_B64)?.let(::decodeConfig)
                 if (!config.isNullOrBlank()) {
                     TunnelState.setConfig(context, config)
                 }
@@ -41,5 +43,9 @@ class TunnelCommandReceiver : BroadcastReceiver() {
         const val ACTION_STOP = "com.example.mobileproxy.action.STOP_TUNNEL"
         const val ACTION_SET_CONFIG = "com.example.mobileproxy.action.SET_TUNNEL_CONFIG"
         const val EXTRA_CONFIG = "config"
+        const val EXTRA_CONFIG_B64 = "config_b64"
+
+        private fun decodeConfig(raw: String): String =
+            String(Base64.decode(raw, Base64.DEFAULT), Charsets.UTF_8)
     }
 }

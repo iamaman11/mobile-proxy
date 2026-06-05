@@ -2,10 +2,12 @@ use std::process::Command;
 use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
 
 pub fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
     let config = fs::read_to_string(config_path)
         .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(config.as_bytes());
     run_command(
         "am",
         &[
@@ -18,8 +20,8 @@ pub fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
             "-n",
             "com.example.mobileproxy/.TunnelCommandReceiver",
             "--es",
-            "config",
-            &config,
+            "config_b64",
+            &encoded,
         ],
     )?;
     run_command(

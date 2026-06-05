@@ -336,12 +336,21 @@ async fn proxy_smoke(manifest: &DeviceManifest) -> Result<()> {
         .timeout(Duration::from_secs(15))
         .build()
         .context("failed to build proxy smoke client")?;
-    client
-        .get("http://api.ipify.org")
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(())
+    let mut last_error = None;
+    for _ in 0..5 {
+        match client.get("http://api.ipify.org").send().await {
+            Ok(response) => match response.error_for_status() {
+                Ok(_) => return Ok(()),
+                Err(err) => last_error = Some(err.to_string()),
+            },
+            Err(err) => last_error = Some(err.to_string()),
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+    bail!(
+        "proxy smoke failed after retries: {}",
+        last_error.unwrap_or_else(|| "unknown error".into())
+    )
 }
 
 fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> {
