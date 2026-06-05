@@ -4,15 +4,21 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
-import android.os.ParcelFileDescriptor
+import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.wireguard.android.backend.GoBackend
+import com.wireguard.android.backend.Tunnel
+import com.wireguard.config.Config
+import java.io.ByteArrayInputStream
 
-class MobileProxyVpnService : VpnService() {
-    private var tun: ParcelFileDescriptor? = null
+class MobileProxyVpnService : Service() {
+    private val tunnel = MobileProxyTunnel()
+    private var backend: GoBackend? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -27,22 +33,40 @@ class MobileProxyVpnService : VpnService() {
         super.onDestroy()
     }
 
+    override fun onBind(intent: Intent?): IBinder? = null
+
     private fun startTunnel() {
         startForeground(NOTIFICATION_ID, buildNotification())
-        if (tun != null) {
+        if (VpnService.prepare(this) != null) {
+            TunnelState.setLastError(this, "vpn consent is required")
             return
         }
-        tun = Builder()
-            .setSession("Mobile Proxy")
-            .setMtu(1280)
-            .addAddress("10.66.66.2", 32)
-            .addRoute("10.66.66.1", 32)
-            .establish()
+
+        val configText = TunnelState.getConfig(this)
+        if (configText.isNullOrBlank()) {
+            TunnelState.setLastError(this, "wireguard config is missing")
+            return
+        }
+
+        try {
+            val parsed = Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
+            val currentBackend = backend ?: GoBackend(applicationContext).also { backend = it }
+            val state = currentBackend.setState(tunnel, Tunnel.State.UP, parsed)
+            TunnelState.setLastState(this, state.name)
+            TunnelState.setLastError(this, null)
+        } catch (error: Exception) {
+            TunnelState.setLastError(this, error.message ?: error.javaClass.name)
+        }
     }
 
     private fun stopTunnel() {
-        tun?.close()
-        tun = null
+        try {
+            backend?.setState(tunnel, Tunnel.State.DOWN, null)
+            TunnelState.setLastState(this, Tunnel.State.DOWN.name)
+            TunnelState.setLastError(this, null)
+        } catch (error: Exception) {
+            TunnelState.setLastError(this, error.message ?: error.javaClass.name)
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -94,4 +118,10 @@ class MobileProxyVpnService : VpnService() {
         fun stopIntent(context: Context): Intent =
             Intent(context, MobileProxyVpnService::class.java).setAction(ACTION_STOP)
     }
+}
+
+private class MobileProxyTunnel : Tunnel {
+    override fun getName(): String = "mobile-proxy"
+
+    override fun onStateChange(newState: Tunnel.State) = Unit
 }

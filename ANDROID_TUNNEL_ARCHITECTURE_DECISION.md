@@ -82,8 +82,9 @@ VM:
 - The APK was built from a Windows-path copy of `apps/android-app` and installed on `SM_A022G`.
 - `operator-cli install-android-app --device-serial R58T10QKGBE` now performs that copy/build/install path from Rust.
 - `operator-cli install-device-stack` now installs the Android APK and Rust phone runtime in one reproducible command.
-- Android package manager sees `com.example.mobileproxy/.MobileProxyVpnService` under `android.net.VpnService`.
+- Android package manager sees `com.example.mobileproxy/com.wireguard.android.backend.GoBackend$VpnService` under `android.net.VpnService`.
 - Android package manager sees explicit start/stop tunnel command receivers.
+- The Android APK now embeds a WireGuard userspace backend through `wireguard-tunnel-1.0.20260102.aar`; runtime-supervisor can deliver `config/app-wireguard.conf` before starting first-party mode.
 - Current phone can run stock WireGuard UI and produce `tun0=10.66.66.2/32`.
 - Current phone does not accept raw shell/root broadcast tunnel-up as a reliable programmatic control path.
 - Safe `START_TUNNEL` broadcast without VPN consent was tested and did not disrupt the live stock-WireGuard path.
@@ -95,7 +96,7 @@ The first-party app now owns the Android VPN lifecycle surface, but it does not 
 - preferred: sing-box/libbox with the phone-side overlay/reverse-tunnel config under our APK boundary
 - acceptable: Rust-owned tunnel engine with JNI or local control from `runtime-supervisor`
 
-The current scaffold intentionally does not replace the live stock-WireGuard tunnel until that engine exists and passes reboot/process/rotation drills.
+The current scaffold intentionally does not replace the live stock-WireGuard tunnel until the first-party backend has a rendered WireGuard config and passes reboot/process/rotation drills.
 
 ## Source References
 

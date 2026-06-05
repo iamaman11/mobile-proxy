@@ -16,7 +16,7 @@ use crate::cli::{
 use crate::provision::package_device_release;
 
 const FIRST_PARTY_ANDROID_PACKAGE: &str = "com.example.mobileproxy";
-const FIRST_PARTY_VPN_SERVICE: &str = "MobileProxyVpnService";
+const FIRST_PARTY_VPN_SERVICE: &str = "GoBackend$VpnService";
 const FIRST_PARTY_TUNNEL_RECEIVER: &str = "TunnelCommandReceiver";
 
 #[derive(Debug, Deserialize)]

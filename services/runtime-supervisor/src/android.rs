@@ -1,15 +1,57 @@
 use std::process::Command;
+use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
 
-pub fn kick_first_party_vpn_service() {
-    let _ = run_shell(
-        "am broadcast --user 0 --receiver-foreground -a com.example.mobileproxy.action.START_TUNNEL -n com.example.mobileproxy/.TunnelCommandReceiver",
-    );
+pub fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
+    let config = fs::read_to_string(config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    run_command(
+        "am",
+        &[
+            "broadcast",
+            "--user",
+            "0",
+            "--receiver-foreground",
+            "-a",
+            "com.example.mobileproxy.action.SET_TUNNEL_CONFIG",
+            "-n",
+            "com.example.mobileproxy/.TunnelCommandReceiver",
+            "--es",
+            "config",
+            &config,
+        ],
+    )?;
+    run_command(
+        "am",
+        &[
+            "broadcast",
+            "--user",
+            "0",
+            "--receiver-foreground",
+            "-a",
+            "com.example.mobileproxy.action.START_TUNNEL",
+            "-n",
+            "com.example.mobileproxy/.TunnelCommandReceiver",
+        ],
+    )?;
+    Ok(())
 }
 
 pub fn kick_stock_wireguard_bridge() {
-    kick_first_party_vpn_service();
+    let _ = run_command(
+        "am",
+        &[
+            "broadcast",
+            "--user",
+            "0",
+            "--receiver-foreground",
+            "-a",
+            "com.example.mobileproxy.action.START_TUNNEL",
+            "-n",
+            "com.example.mobileproxy/.TunnelCommandReceiver",
+        ],
+    );
     let _ = run_shell("sleep 1");
     if tun0_ready() {
         return;

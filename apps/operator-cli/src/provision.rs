@@ -127,6 +127,7 @@ struct DeviceManifest {
     #[serde(rename = "controlPlaneUrl")]
     control_plane_url: String,
     tokens: ManifestTokens,
+    relay: Option<ManifestRelay>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +140,17 @@ struct ManifestTokens {
     relay_user_env: String,
     #[serde(rename = "relayPasswordEnv")]
     relay_password_env: String,
+    #[serde(rename = "wireguardPhonePrivateKeyEnv")]
+    wireguard_phone_private_key_env: Option<String>,
+    #[serde(rename = "wireguardServerPublicKeyEnv")]
+    wireguard_server_public_key_env: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManifestRelay {
+    host: String,
+    #[serde(rename = "wireguardPort")]
+    wireguard_port: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +240,42 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ],
         )
     };
+    if args.tunnel_owner == "first_party_vpn_service" {
+        let phone_private_key = required_env(
+            manifest
+                .tokens
+                .wireguard_phone_private_key_env
+                .as_deref()
+                .unwrap_or("MOBILE_PROXY_WG_PHONE_PRIVATE_KEY"),
+        )?;
+        let server_public_key = required_env(
+            manifest
+                .tokens
+                .wireguard_server_public_key_env
+                .as_deref()
+                .unwrap_or("MOBILE_PROXY_WG_SERVER_PUBLIC_KEY"),
+        )?;
+        let relay = manifest
+            .relay
+            .as_ref()
+            .context("first_party_vpn_service requires relay host in device manifest")?;
+        let template = fs::read_to_string(
+            repo_root.join("deploy/device-runtime/templates/app-wireguard.conf"),
+        )?;
+        let rendered = render_template(
+            &template,
+            &[
+                ("WG_PHONE_PRIVATE_KEY", phone_private_key.as_str()),
+                ("WG_SERVER_PUBLIC_KEY", server_public_key.as_str()),
+                ("WG_ENDPOINT_HOST", relay.host.as_str()),
+                (
+                    "WG_ENDPOINT_PORT",
+                    &relay.wireguard_port.unwrap_or(51820).to_string(),
+                ),
+            ],
+        );
+        fs::write(release_root.join("config/app-wireguard.conf"), rendered)?;
+    }
 
     let sing_box_rendered = if let Some(path) = &args.sing_box_config_path {
         fs::read_to_string(resolve_path(&repo_root, path))?

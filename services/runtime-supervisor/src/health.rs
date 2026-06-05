@@ -89,7 +89,11 @@ pub fn reconcile_health(
 
 fn kick_tunnel(config: &SupervisorConfig) {
     match config.tunnel_owner {
-        TunnelOwner::FirstPartyVpnService => kick_first_party_vpn_service(),
+        TunnelOwner::FirstPartyVpnService => {
+            if let Err(err) = kick_first_party_vpn_service(&config.app_tunnel_config) {
+                warn!("first-party VPN kick failed: {err:#}");
+            }
+        }
         TunnelOwner::StockWireguardBridge => kick_stock_wireguard_bridge(),
     }
 }

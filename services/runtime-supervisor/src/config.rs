@@ -38,6 +38,7 @@ pub struct SupervisorConfig {
     pub proxy_working_dir: PathBuf,
     pub wireguard_enabled: bool,
     pub tunnel_owner: TunnelOwner,
+    pub app_tunnel_config: PathBuf,
     pub poll_secs: u64,
     pub repair_cooldown_secs: u64,
     pub data_bounce_down_secs: u64,
@@ -96,6 +97,7 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
             .and_then(|w| w.enabled)
             .unwrap_or(false),
         tunnel_owner: TunnelOwner::parse(file.wireguard.and_then(|w| w.owner)),
+        app_tunnel_config: runtime_root.join("config/app-wireguard.conf"),
         poll_secs: cli.poll_secs,
         repair_cooldown_secs: cli.repair_cooldown_secs,
         data_bounce_down_secs: cli.data_bounce_down_secs,

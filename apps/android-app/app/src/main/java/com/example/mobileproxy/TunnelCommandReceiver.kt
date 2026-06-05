@@ -9,6 +9,12 @@ import android.os.Build
 class TunnelCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
+            ACTION_SET_CONFIG -> {
+                val config = intent.getStringExtra(EXTRA_CONFIG)
+                if (!config.isNullOrBlank()) {
+                    TunnelState.setConfig(context, config)
+                }
+            }
             ACTION_START -> startTunnel(context)
             ACTION_STOP -> {
                 TunnelState.setDesired(context, false)
@@ -33,5 +39,7 @@ class TunnelCommandReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_START = "com.example.mobileproxy.action.START_TUNNEL"
         const val ACTION_STOP = "com.example.mobileproxy.action.STOP_TUNNEL"
+        const val ACTION_SET_CONFIG = "com.example.mobileproxy.action.SET_TUNNEL_CONFIG"
+        const val EXTRA_CONFIG = "config"
     }
 }
