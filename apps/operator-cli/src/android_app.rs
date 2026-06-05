@@ -13,6 +13,7 @@ pub fn install_android_app(args: &InstallAndroidAppArgs) -> Result<()> {
     let project_dir = repo_root()?.join(&args.project_dir);
     let build_dir = PathBuf::from(&args.windows_build_dir);
     copy_project(&project_dir, &build_dir)?;
+    write_local_properties(&build_dir)?;
     run_windows_gradle(&build_dir, &args.windows_build_dir_cmd)?;
     verify_apk_exists(&build_dir)?;
 
@@ -30,6 +31,17 @@ pub fn install_android_app(args: &InstallAndroidAppArgs) -> Result<()> {
         args.apk_windows_path
     );
     Ok(())
+}
+
+fn write_local_properties(build_dir: &Path) -> Result<()> {
+    let sdk_dir = "C:/Users/Bose/AppData/Local/Android/Sdk";
+    let local_properties = build_dir.join("local.properties");
+    fs::write(&local_properties, format!("sdk.dir={sdk_dir}\n")).with_context(|| {
+        format!(
+            "failed to write Android local properties to {}",
+            local_properties.display()
+        )
+    })
 }
 
 fn copy_project(src: &Path, dst: &Path) -> Result<()> {
@@ -134,12 +146,29 @@ fn repo_root() -> Result<PathBuf> {
 mod tests {
     use std::ffi::OsStr;
 
-    use super::is_ignored_dir;
+    use super::{is_ignored_dir, write_local_properties};
 
     #[test]
     fn android_copy_skips_build_outputs() {
         assert!(is_ignored_dir(OsStr::new("build")));
         assert!(is_ignored_dir(OsStr::new(".gradle")));
         assert!(!is_ignored_dir(OsStr::new("src")));
+    }
+
+    #[test]
+    fn android_build_dir_gets_local_properties() {
+        let build_dir = std::env::temp_dir().join(format!(
+            "mobile-proxy-android-local-properties-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&build_dir).expect("create temp build dir");
+
+        write_local_properties(&build_dir).expect("write local.properties");
+
+        let content = std::fs::read_to_string(build_dir.join("local.properties"))
+            .expect("read local.properties");
+        assert!(content.contains("sdk.dir=C:/Users/Bose/AppData/Local/Android/Sdk"));
+
+        std::fs::remove_dir_all(build_dir).expect("cleanup temp build dir");
     }
 }

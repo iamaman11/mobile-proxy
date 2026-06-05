@@ -89,11 +89,40 @@ pub async fn execute_rotation(
     let command_output = run_shell_command(&command);
     let new_ip = observe_public_ip(&observer_urls).await;
 
+    let command_error = command_output.as_ref().err().map(ToString::to_string);
     let mut runtime = runtime_arc.lock().await;
+    apply_rotation_result(
+        &mut runtime,
+        job_id,
+        request.require_public_ip_change,
+        command_output.is_ok(),
+        command_error,
+        new_ip.clone(),
+    );
+
+    info!(
+        "rotation finished in {:?}: {:?} -> {:?}",
+        started.elapsed(),
+        old_ip,
+        new_ip
+    );
+    Ok(())
+}
+
+fn apply_rotation_result(
+    runtime: &mut crate::state::RuntimeState,
+    job_id: Uuid,
+    require_public_ip_change: bool,
+    command_succeeded: bool,
+    command_error: Option<String>,
+    new_ip: Option<String>,
+) {
+    let old_ip = runtime
+        .jobs
+        .get(&job_id)
+        .and_then(|job| job.old_public_ip.clone());
     let changed = old_ip.as_deref() != new_ip.as_deref();
-    let succeeded = command_output.is_ok()
-        && new_ip.is_some()
-        && (!request.require_public_ip_change || changed);
+    let succeeded = command_succeeded && new_ip.is_some() && (!require_public_ip_change || changed);
 
     if let Some(ip) = new_ip.clone() {
         runtime.health.last_public_ip = Some(ip);
@@ -109,6 +138,9 @@ pub async fn execute_rotation(
     } else {
         "degraded".into()
     };
+    runtime.health.cellular_route_ready = Some(succeeded);
+    runtime.health.local_serving_ready = Some(succeeded);
+    runtime.health.proxy_bind_ready = Some(succeeded);
     runtime.health.degradation_reason_code = if succeeded {
         None
     } else {
@@ -117,9 +149,7 @@ pub async fn execute_rotation(
     runtime.health.serving_failure_reason = if succeeded {
         None
     } else {
-        command_output
-            .err()
-            .map(|err| err.to_string())
+        command_error
             .or_else(|| Some("rotation did not produce the required public IP change".into()))
     };
     runtime.current_job = None;
@@ -130,17 +160,9 @@ pub async fn execute_rotation(
         } else {
             "failed".into()
         };
-        job.new_public_ip = new_ip.clone();
+        job.new_public_ip = new_ip;
         job.changed = Some(changed);
     }
-
-    info!(
-        "rotation finished in {:?}: {:?} -> {:?}",
-        started.elapsed(),
-        old_ip,
-        new_ip
-    );
-    Ok(())
 }
 
 pub fn normalize_rotate_request(mut request: RotateRequest) -> RotateRequest {
@@ -217,4 +239,84 @@ async fn observe_public_ip(urls: &[String]) -> Option<String> {
         sleep(Duration::from_secs(2)).await;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use proxy_core::{HealthRecord, JobRecord, RuntimeReadiness};
+    use uuid::Uuid;
+
+    use crate::rotation::apply_rotation_result;
+    use crate::state::{RotationCommands, RuntimeState};
+
+    #[test]
+    fn successful_rotation_restores_readiness_flags() {
+        let job_id = Uuid::new_v4();
+        let mut jobs = HashMap::new();
+        jobs.insert(
+            job_id,
+            JobRecord {
+                id: job_id,
+                kind: "rotate_ip".into(),
+                status: "running".into(),
+                old_public_ip: Some("1.1.1.1".into()),
+                new_public_ip: None,
+                changed: None,
+            },
+        );
+        let mut runtime = RuntimeState::new(
+            HealthRecord {
+                node_id: "node".into(),
+                node_name: "node".into(),
+                binary_fingerprint: "fp".into(),
+                readiness_state: RuntimeReadiness::WaitingCellular.to_string(),
+                serving: false,
+                proxy_status: "draining".into(),
+                last_public_ip: Some("1.1.1.1".into()),
+                active_operator_profile: None,
+                active_operator_plmn: None,
+                last_proxy_error: None,
+                serving_failure_reason: Some("rotation job is in progress".into()),
+                degradation_reason_code: Some("rotation_in_progress".into()),
+                cellular_route_ready: Some(false),
+                proxy_bind_ready: Some(false),
+                local_serving_ready: Some(false),
+                tun0_present: Some(true),
+                wg_handshake_recent: Some(true),
+            },
+            true,
+            "10.66.66.2:1080".into(),
+            RotationCommands::default(),
+            Vec::new(),
+        );
+        runtime.jobs = jobs;
+        runtime.current_job = Some(job_id);
+
+        apply_rotation_result(
+            &mut runtime,
+            job_id,
+            true,
+            true,
+            None,
+            Some("2.2.2.2".into()),
+        );
+
+        let job = runtime.jobs.get(&job_id).expect("job remains recorded");
+        assert_eq!(job.status, "succeeded");
+        assert_eq!(job.changed, Some(true));
+        assert_eq!(runtime.current_job, None);
+        assert_eq!(
+            runtime.health.readiness_state,
+            RuntimeReadiness::Healthy.to_string()
+        );
+        assert!(runtime.health.serving);
+        assert_eq!(runtime.health.proxy_status, "running");
+        assert_eq!(runtime.health.cellular_route_ready, Some(true));
+        assert_eq!(runtime.health.proxy_bind_ready, Some(true));
+        assert_eq!(runtime.health.local_serving_ready, Some(true));
+        assert_eq!(runtime.health.degradation_reason_code, None);
+        assert_eq!(runtime.health.serving_failure_reason, None);
+    }
 }
