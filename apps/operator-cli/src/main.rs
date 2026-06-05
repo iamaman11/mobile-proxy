@@ -1,3 +1,4 @@
+mod android_app;
 mod artifacts;
 mod cli;
 mod commands;
@@ -42,6 +43,7 @@ async fn main() -> Result<()> {
         Command::PrepareRuntimeBinaries(args) => artifacts::prepare_runtime_binaries(&args)?,
         Command::ProvisionVm(args) => provision_vm(&args)?,
         Command::DeleteVm(args) => delete_vm(&args)?,
+        Command::InstallAndroidApp(args) => android_app::install_android_app(&args)?,
         Command::PackageDeviceRelease(args) => package_device_release(&args)?,
         Command::InstallDeviceRelease(args) => install_device_release(&args).await?,
         Command::VerifyDevice(args) => verify_device(&args).await?,

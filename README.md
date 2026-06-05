@@ -6,7 +6,7 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 
 - keep a local source-of-truth that matches the current production architecture closely enough to rebuild and evolve it
 - prioritize reliability and operability over historical fidelity
-- keep the Android app as a thin shell and move control logic into Rust
+- keep runtime policy in Rust while moving Android VPN ownership into the first-party app
 
 ## Layout
 
@@ -27,7 +27,7 @@ Current primary entrypoints:
 - `services/control-plane` - registry and readiness service baseline
 - `services/relay-gate` - VM-side readiness gate baseline
 - `services/runtime-supervisor` - phone-side owner for process lifecycle and runtime recovery
-- `apps/android-app` - minimal Android shell source
+- `apps/android-app` - first-party Android VPN lifecycle owner scaffold
 
 ## Reality Check
 
@@ -45,26 +45,26 @@ cargo build
 cargo test
 ```
 
-Android shell:
+Android app:
 
-```powershell
-$env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot'
-$env:Path="$env:JAVA_HOME\bin;C:\Users\Bose\tools\gradle-8.10.2\bin;$env:Path"
-cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy\apps\android-app
-gradle.bat assembleDebug
+```bash
+cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE
 ```
+
+The current Windows Android SDK is not a Linux SDK. `operator-cli install-android-app` copies `apps/android-app` to a Windows-path build directory, runs `gradlew.bat`, and installs the APK with `adb.exe`.
 
 ## Device Runtime Rollout
 
 Prerequisites on phone:
 
 - rooted device with `adb shell su 0 sh -c "id"` returning `uid=0`
+- first-party Android app installed through `cargo run -p operator-cli -- install-android-app`
 - WireGuard Android app installed (`com.wireguard.android`)
 - WireGuard tunnel named `WiGandroid` configured and valid
 - WireGuard set as always-on VPN:
   - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
   - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
-- Screen unlock available for first tunnel bootstrap after install/reboot (runtime can toggle tunnel via UI fallback when broadcast is blocked)
+- Screen unlock available for first tunnel bootstrap until the app-owned tunnel engine replaces stock WireGuard
 
 1. Set required secrets in the shell:
 
@@ -151,5 +151,5 @@ cargo run -p operator-cli -- delete-vm \
 - legacy PowerShell operator scripts were removed after Rust CLI parity became the source of truth
 - live phone testing on `2026-06-02` proved that `airplane_bounce` can change public IP while the old shell-owned runtime stayed in `waiting_cellular`; the repo now has Rust-owned recovery and policy-routing-aware health, but it still requires live phone validation
 - live migration on `2026-06-03` created `mobile-relaycontrolpoint-v2` as an `e2-micro` GCP relay, migrated the phone to `34.118.88.54`, verified control-plane health and public HTTP proxy serving, then deleted the old VM
-- the Android project stays intentionally thin until a Rust-backed mobile UI is chosen
+- the Android project now owns the `VpnService` lifecycle surface; the real embedded tunnel engine is still the next required step before removing stock WireGuard from production
 - docs and manifests use placeholders for secrets; do not store live credentials in repo-tracked files

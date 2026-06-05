@@ -30,6 +30,7 @@ Required:
 - `cargo test`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo run -p operator-cli -- prepare-runtime-binaries`
+- `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
 - `cargo run -p operator-cli -- package-device-release --manifest-path deploy/manifests/devices/example-device.json --release-id validation-package`
 
 Acceptance:

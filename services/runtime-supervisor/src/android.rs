@@ -3,6 +3,14 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 
 pub fn kick_wireguard() {
+    let _ = run_shell(
+        "am broadcast --user 0 --receiver-foreground -a com.example.mobileproxy.action.START_TUNNEL -n com.example.mobileproxy/.TunnelCommandReceiver",
+    );
+    let _ = run_shell("sleep 1");
+    if tun0_ready() {
+        return;
+    }
+
     let _ = run_shell("settings put secure always_on_vpn_app com.wireguard.android");
     let _ = run_shell("settings put secure always_on_vpn_lockdown 0");
     let _ = run_shell(

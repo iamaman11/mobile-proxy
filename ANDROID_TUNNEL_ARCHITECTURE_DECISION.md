@@ -80,6 +80,7 @@ VM:
   - persistent desired-state flag
   - UI VPN consent entry point
 - The APK was built from a Windows-path copy of `apps/android-app` and installed on `SM_A022G`.
+- `operator-cli install-android-app --device-serial R58T10QKGBE` now performs that copy/build/install path from Rust.
 - Android package manager sees `com.example.mobileproxy/.MobileProxyVpnService` under `android.net.VpnService`.
 - Android package manager sees explicit start/stop tunnel command receivers.
 - Current phone can run stock WireGuard UI and produce `tun0=10.66.66.2/32`.

@@ -22,10 +22,30 @@ pub enum Command {
     PrepareRuntimeBinaries(PrepareRuntimeBinariesArgs),
     ProvisionVm(ProvisionVmArgs),
     DeleteVm(DeleteVmArgs),
+    InstallAndroidApp(InstallAndroidAppArgs),
     PackageDeviceRelease(PackageDeviceReleaseArgs),
     InstallDeviceRelease(InstallDeviceReleaseArgs),
     VerifyDevice(VerifyDeviceArgs),
     RollbackDevice(RollbackDeviceArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InstallAndroidAppArgs {
+    #[arg(long, default_value = "apps/android-app")]
+    pub project_dir: String,
+    #[arg(long, default_value = "/mnt/c/Users/Bose/mobile-proxy-android-build")]
+    pub windows_build_dir: String,
+    #[arg(long, default_value = "C:\\Users\\Bose\\mobile-proxy-android-build")]
+    pub windows_build_dir_cmd: String,
+    #[arg(
+        long,
+        default_value = "C:\\Users\\Bose\\mobile-proxy-android-build\\app\\build\\outputs\\apk\\debug\\app-debug.apk"
+    )]
+    pub apk_windows_path: String,
+    #[arg(long)]
+    pub device_serial: Option<String>,
+    #[arg(long, default_value_t = false)]
+    pub skip_install: bool,
 }
 
 #[derive(Args, Debug, Clone)]
