@@ -38,6 +38,10 @@ struct VmTokenEnv {
     control_token_env: String,
     #[serde(rename = "deviceTokenEnv")]
     device_token_env: String,
+    #[serde(rename = "reverseTunnelCertDerB64Env")]
+    reverse_tunnel_cert_der_b64_env: String,
+    #[serde(rename = "reverseTunnelKeyDerB64Env")]
+    reverse_tunnel_key_der_b64_env: String,
     #[serde(rename = "relayUserEnv")]
     relay_user_env: String,
     #[serde(rename = "relayPasswordEnv")]
@@ -59,6 +63,8 @@ struct VmWireguard {
 struct VmSecrets {
     control_token: String,
     device_token: String,
+    reverse_tunnel_cert_der_b64: String,
+    reverse_tunnel_key_der_b64: String,
     relay_user: String,
     relay_password: String,
     server_private_key: String,
@@ -224,8 +230,10 @@ fn build_vm_release(
     fs::write(
         release_root.join("config/reverse-tunnel-server.env"),
         format!(
-            "REVERSE_TUNNEL_LISTEN='0.0.0.0:18090'\nREVERSE_TUNNEL_AUTH_TOKEN='{}'\n",
-            shell_escape(&secrets.device_token)
+            "REVERSE_TUNNEL_LISTEN='0.0.0.0:18090'\nREVERSE_TUNNEL_PUBLIC_PROXY_LISTEN='127.0.0.1:14080,127.0.0.1:14081,127.0.0.1:14128'\nREVERSE_TUNNEL_AUTH_TOKEN='{}'\nREVERSE_TUNNEL_SERVER_NAME='mobile-proxy-relay'\nREVERSE_TUNNEL_CERT_DER_B64='{}'\nREVERSE_TUNNEL_KEY_DER_B64='{}'\n",
+            shell_escape(&secrets.device_token),
+            shell_escape(&secrets.reverse_tunnel_cert_der_b64),
+            shell_escape(&secrets.reverse_tunnel_key_der_b64)
         ),
     )?;
     fs::write(
@@ -261,7 +269,7 @@ fn ensure_firewall_rules(manifest: &VmManifest) -> Result<()> {
     let rules = [
         (
             format!("{}-ingress", manifest.instance_name),
-            "tcp:22,tcp:80,tcp:443,tcp:18090,udp:51820",
+            "tcp:22,tcp:80,tcp:443,udp:18090,udp:51820",
         ),
         (format!("{}-control", manifest.instance_name), "tcp:8080"),
         (
@@ -419,7 +427,7 @@ fn verify_vm(args: &ProvisionVmArgs, manifest: &VmManifest, ssh_key: &Path) -> R
         args,
         manifest,
         ssh_key,
-        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service mobile-reverse-tunnel-server.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(1080|1081|3128|8080|18090) '",
+        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service mobile-reverse-tunnel-server.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(1080|1081|3128|8080|14080|14081|14128|18090) '",
     )
 }
 
@@ -639,9 +647,9 @@ const NGINX_HTTP_CONFIG: &str = r#"server {
 }
 "#;
 
-const NGINX_STREAM_CONFIG: &str = r#"server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:11080; }
-server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:11081; }
-server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:13128; }
+const NGINX_STREAM_CONFIG: &str = r#"server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14128; }
 "#;
 
 fn load_manifest(repo: &Path, raw: &str) -> Result<VmManifest> {
@@ -654,6 +662,10 @@ fn load_secrets(manifest: &VmManifest) -> Result<VmSecrets> {
     Ok(VmSecrets {
         control_token: required_env(&manifest.tokens.control_token_env)?,
         device_token: required_env(&manifest.tokens.device_token_env)?,
+        reverse_tunnel_cert_der_b64: required_env(
+            &manifest.tokens.reverse_tunnel_cert_der_b64_env,
+        )?,
+        reverse_tunnel_key_der_b64: required_env(&manifest.tokens.reverse_tunnel_key_der_b64_env)?,
         relay_user: required_env(&manifest.tokens.relay_user_env)?,
         relay_password: required_env(&manifest.tokens.relay_password_env)?,
         server_private_key: required_env(&manifest.wireguard.server_private_key_env)?,

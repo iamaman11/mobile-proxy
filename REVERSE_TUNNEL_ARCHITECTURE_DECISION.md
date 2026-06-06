@@ -6,7 +6,7 @@ Date: 2026-06-06
 
 The target 10/10 runtime path is `first_party_reverse_tunnel`.
 
-WireGuard remains an optional backend, not the required production path. The required path is a first-party Rust userspace tunnel where the phone initiates and maintains an encrypted outbound session to the VM.
+WireGuard remains an optional backend, not the required production path. The required path is a first-party Rust userspace tunnel where the phone initiates and maintains an encrypted outbound QUIC/TLS session to the VM.
 
 ## Why This Replaces The Required Android VPN Path
 
@@ -25,9 +25,10 @@ For a fully reproducible phone + VM product, the required path must not depend o
 phone runtime-supervisor
   -> phone host-daemon
   -> reverse-tunnel client
-  -> outbound encrypted session
+  -> outbound QUIC/TLS session
   -> VM reverse-tunnel server
-  -> relay/control-plane/public proxy
+  -> VM loopback public proxy listeners
+  -> nginx public ports
 ```
 
 The phone remains the connection initiator. This matches mobile NAT and carrier networks better than inbound VM-to-phone dialing.
@@ -36,11 +37,12 @@ The phone remains the connection initiator. This matches mobile NAT and carrier 
 
 Primary path:
 
-- Rust userspace reverse tunnel
+- Rust userspace reverse tunnel over QUIC/TLS
 - persistent outbound session from phone to VM
-- mutual authentication with env-provided device credentials
+- pinned server certificate and token-authenticated device hello
 - stream framing, heartbeats, reconnect, backoff, and replay-safe session identity
-- TLS/QUIC hardening before final live acceptance
+- server-opened bidirectional streams for public proxy TCP forwarding
+- phone-local proxy target fixed by phone config, not chosen by the VM
 
 WireGuard:
 
@@ -57,6 +59,9 @@ The new `crates/reverse-tunnel` PoC has deterministic local Rust tests:
 - client preserves session identity across reconnects
 - server tracks connected/disconnected state from heartbeat flow
 - server rejects clients with the wrong tunnel token
+- QUIC/TLS transport carries the heartbeat/session protocol
+- QUIC/TLS server rejects wrong-token clients without registering a session
+- QUIC/TLS reverse tunnel forwards TCP bytes from a VM-side listener to the phone-local proxy and back
 
 Command:
 
@@ -67,23 +72,23 @@ cargo test -p reverse-tunnel
 Result on 2026-06-06:
 
 ```text
-5 passed
+8 passed
 ```
 
 ## Implemented Baseline Components
 
-- `crates/reverse-tunnel`: shared protocol, heartbeat, reconnect, server session registry, required token authentication
-- `services/reverse-tunnel-server`: VM-side listener on `0.0.0.0:18090`
+- `crates/reverse-tunnel`: shared protocol, QUIC/TLS transport, heartbeat, reconnect, server session registry, required token authentication, and public TCP stream forwarding
+- `services/reverse-tunnel-server`: VM-side QUIC listener on `0.0.0.0:18090/udp` and loopback public proxy forward listeners on `127.0.0.1:14080,14081,14128`
 - `services/host-daemon`: optional phone-side reverse-tunnel client from `reverse_tunnel` config
-- `apps/operator-cli provision-vm`: packages `reverse-tunnel-server`, writes its systemd unit, and includes `tcp:18090` in the VM firewall rule
-- `apps/operator-cli package-device-release --tunnel-owner first_party_reverse_tunnel`: disables WireGuard, enables reverse tunnel, injects the device tunnel token, and binds local proxy to `127.0.0.1:1080`
+- `apps/operator-cli provision-vm`: packages `reverse-tunnel-server`, writes its systemd unit, and includes `udp:18090` in the VM firewall rule
+- `apps/operator-cli package-device-release --tunnel-owner first_party_reverse_tunnel`: disables WireGuard, enables QUIC reverse tunnel, injects the device tunnel token and pinned server certificate, and binds local proxy to `127.0.0.1:1080`
 
 ## Remaining Acceptance Work
 
-Before this can replace the live path:
+Before this can be called live 10/10:
 
-- forward public proxy streams over the reverse tunnel
-- harden transport encryption beyond token-authenticated TCP
+- replace JSON control frames with compact binary frames before performance acceptance
+- deploy the first-party reverse tunnel to a fresh VM and fresh rooted phone
 - run phone reboot, VM reboot, process kill, mobile data loss, airplane toggle, and long soak drills
 
 The architecture is not final 10/10 until those live drills pass and `stock_wireguard_bridge` is no longer in the required runtime path.

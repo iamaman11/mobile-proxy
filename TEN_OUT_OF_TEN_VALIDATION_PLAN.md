@@ -35,6 +35,7 @@ Required:
 - `cargo test -p reverse-tunnel`
 - `cargo run -p operator-cli -- verify-device --manifest-path deploy/manifests/devices/example-device.json --device-serial R58T10QKGBE --required-tunnel-owner first_party_reverse_tunnel`
 - `cargo run -p operator-cli -- package-device-release --manifest-path deploy/manifests/devices/example-device.json --release-id validation-package`
+- `cargo test -p reverse-tunnel quic_reverse_tunnel_forwards_tcp_bytes_to_phone_proxy`
 
 Acceptance:
 - all Rust sources, configs, manifests, docs, VM provisioning code, `runtime-supervisor`, and `host-daemon` source are in git
@@ -59,9 +60,11 @@ Acceptance:
 - instance exists with the manifest machine type and zone
 - instance uses the manifest `staticExternalIp`
 - SSH admin access works
-- `wg-quick@wg0`, `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-public-proxy`, and `nginx` are active
+- `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-reverse-tunnel-server`, and `nginx` are active
+- `wg-quick@wg0` and `mobile-public-proxy` may remain installed only as optional WireGuard backend components, not as required first-party reverse-tunnel dependencies
 - control-plane state exists at `/var/lib/mobile-relaycontrolpoint/control-plane-state.json` after registration/heartbeat and survives service restart
-- ports `8080`, `1080`, `1081`, `3128`, and `51820/udp` are reachable as designed
+- ports `8080`, `1080`, `1081`, `3128`, and `18090/udp` are reachable as designed
+- VM nginx public ports `1080`, `1081`, and `3128` forward to Rust reverse-tunnel-server loopback listeners `14080`, `14081`, and `14128`
 - the provision command is idempotent against an existing VM
 - deleting a test VM with `operator-cli delete-vm --delete-firewall-rules` leaves no orphan test instance
 
@@ -164,4 +167,7 @@ Current live destructive test result:
 - first reverse-tunnel PoC completed: `cargo test -p reverse-tunnel` passed locally on 2026-06-06 for reconnect after server drop, reconnect after VM listener restart, and stable session identity across reconnects
 - reverse-tunnel baseline expanded: VM `reverse-tunnel-server` service, phone `host-daemon` reverse client config, token-authenticated hello, server heartbeat registry, wrong-token rejection test, and operator VM/device packaging are implemented
 - package checks passed with dummy env: `first_party_reverse_tunnel` phone release renders `wireguard.enabled=false`, `reverse_tunnel.enabled=true`, and VM release includes `mobile-reverse-tunnel-server.service`
-- remaining non-10/10 blocker after reverse baseline: public proxy streams are not yet forwarded over the reverse tunnel, so live production traffic still uses the optional stock WireGuard bridge
+- QUIC/TLS baseline added: reverse tunnel now supports pinned-certificate QUIC transport on `udp:18090`; local tests cover QUIC heartbeat/disconnect and wrong-token rejection
+- reverse tunnel secrets now require `MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64` and `MOBILE_PROXY_REVERSE_TUNNEL_KEY_DER_B64` for VM packaging, and the certificate pin for phone packaging
+- QUIC/TLS data-plane added: `cargo test -p reverse-tunnel` now includes `quic_reverse_tunnel_forwards_tcp_bytes_to_phone_proxy`, proving local VM-side TCP listener -> QUIC/TLS -> phone-local proxy -> QUIC/TLS -> VM response forwarding
+- remaining non-10/10 blocker after reverse data-plane: live production traffic has not yet been switched and destructively validated on a fresh VM plus fresh phone with `tunnel_owner=first_party_reverse_tunnel`

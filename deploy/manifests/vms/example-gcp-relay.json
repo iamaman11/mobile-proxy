@@ -13,6 +13,8 @@
   "tokens": {
     "controlTokenEnv": "MOBILE_PROXY_CONTROL_TOKEN",
     "deviceTokenEnv": "MOBILE_PROXY_DEVICE_TOKEN",
+    "reverseTunnelCertDerB64Env": "MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64",
+    "reverseTunnelKeyDerB64Env": "MOBILE_PROXY_REVERSE_TUNNEL_KEY_DER_B64",
     "relayUserEnv": "MOBILE_PROXY_RELAY_USER",
     "relayPasswordEnv": "MOBILE_PROXY_RELAY_PASSWORD"
   },

@@ -4,8 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
+use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
+use rustls::RootCertStore;
+use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, watch};
 use tokio::time::{Instant, sleep, timeout};
@@ -33,11 +39,19 @@ pub enum ClientFrame {
     Heartbeat(TunnelHeartbeat),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ServerFrame {
+    OpenProxy { stream_id: Uuid },
+}
+
 #[derive(Debug, Clone)]
 pub struct ReverseTunnelClientConfig {
     pub node_id: String,
     pub server_addr: SocketAddr,
+    pub local_proxy_addr: SocketAddr,
     pub auth_token: String,
+    pub transport: TunnelTransport,
     pub connect_timeout: Duration,
     pub heartbeat_interval: Duration,
     pub reconnect_floor: Duration,
@@ -47,6 +61,23 @@ pub struct ReverseTunnelClientConfig {
 #[derive(Debug, Clone)]
 pub struct ReverseTunnelServerConfig {
     pub auth_token: String,
+    pub transport: TunnelTransport,
+}
+
+#[derive(Debug, Clone)]
+pub enum TunnelTransport {
+    Tcp,
+    Quic {
+        server_name: String,
+        server_cert_der: Vec<u8>,
+        server_key_der: Option<Vec<u8>>,
+    },
+}
+
+pub fn decode_der_base64(raw: &str) -> Result<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD
+        .decode(raw.trim())
+        .context("failed to decode base64 DER")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +101,7 @@ pub struct ServerSessionSnapshot {
 #[derive(Debug, Clone, Default)]
 pub struct ReverseTunnelServerState {
     sessions: Arc<Mutex<HashMap<String, ServerSessionSnapshot>>>,
+    connections: Arc<Mutex<HashMap<String, quinn::Connection>>>,
 }
 
 impl ReverseTunnelServerState {
@@ -77,6 +109,23 @@ impl ReverseTunnelServerState {
         let mut sessions: Vec<_> = self.sessions.lock().await.values().cloned().collect();
         sessions.sort_by(|left, right| left.node_id.cmp(&right.node_id));
         sessions
+    }
+
+    pub async fn active_connection(&self, node_id: Option<&str>) -> Option<quinn::Connection> {
+        let sessions = self.sessions.lock().await;
+        let selected_node = if let Some(node_id) = node_id {
+            sessions
+                .get(node_id)
+                .filter(|session| session.connected)
+                .map(|session| session.node_id.clone())
+        } else {
+            sessions
+                .values()
+                .find(|session| session.connected)
+                .map(|session| session.node_id.clone())
+        }?;
+        drop(sessions);
+        self.connections.lock().await.get(&selected_node).cloned()
     }
 }
 
@@ -151,12 +200,103 @@ pub async fn run_server(
     }
 }
 
+pub async fn run_quic_server(
+    bind_addr: SocketAddr,
+    config: ReverseTunnelServerConfig,
+    state: ReverseTunnelServerState,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    let TunnelTransport::Quic {
+        server_cert_der, ..
+    } = &config.transport
+    else {
+        bail!("run_quic_server requires TunnelTransport::Quic");
+    };
+    let key = quic_server_key(&config.transport)?;
+    let mut server_config = ServerConfig::with_single_cert(
+        vec![CertificateDer::from(server_cert_der.clone())],
+        key.into(),
+    )
+    .context("failed to create QUIC server config")?;
+    Arc::get_mut(&mut server_config.transport)
+        .context("QUIC transport config is unexpectedly shared")?
+        .max_concurrent_bidi_streams(256_u16.into())
+        .max_concurrent_uni_streams(0_u8.into());
+    let endpoint = Endpoint::server(server_config, bind_addr)?;
+
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => {
+                endpoint.close(0_u32.into(), b"shutdown");
+                return Ok(());
+            }
+            incoming = endpoint.accept() => {
+                let Some(incoming) = incoming else {
+                    return Ok(());
+                };
+                let state = state.clone();
+                let config = config.clone();
+                tokio::spawn(async move {
+                    let _ = handle_quic_incoming(incoming, config, state).await;
+                });
+            }
+        }
+    }
+}
+
+pub async fn run_quic_tcp_forward_listener(
+    listener: TcpListener,
+    state: ReverseTunnelServerState,
+    target_node_id: Option<String>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => return Ok(()),
+            accepted = listener.accept() => {
+                let (stream, _) = accepted.context("reverse tunnel TCP forward accept failed")?;
+                let state = state.clone();
+                let target_node_id = target_node_id.clone();
+                tokio::spawn(async move {
+                    let _ = forward_tcp_over_quic(stream, state, target_node_id.as_deref()).await;
+                });
+            }
+        }
+    }
+}
+
+async fn forward_tcp_over_quic(
+    tcp_stream: TcpStream,
+    state: ReverseTunnelServerState,
+    target_node_id: Option<&str>,
+) -> Result<()> {
+    let connection = state
+        .active_connection(target_node_id)
+        .await
+        .context("no authenticated reverse tunnel connection is active")?;
+    let (mut quic_send, quic_recv) = connection
+        .open_bi()
+        .await
+        .context("failed to open reverse tunnel proxy stream")?;
+    write_server_frame(
+        &mut quic_send,
+        &ServerFrame::OpenProxy {
+            stream_id: Uuid::new_v4(),
+        },
+    )
+    .await?;
+    pipe_tcp_and_quic(tcp_stream, quic_send, quic_recv).await
+}
+
 async fn connect_and_pump(
     config: &ReverseTunnelClientConfig,
     session_id: Uuid,
     shutdown: &mut watch::Receiver<bool>,
     snapshot: &mut ClientSnapshot,
 ) -> Result<()> {
+    if matches!(config.transport, TunnelTransport::Quic { .. }) {
+        return connect_and_pump_quic(config, session_id, shutdown, snapshot).await;
+    }
     let stream = timeout(
         config.connect_timeout,
         TcpStream::connect(config.server_addr),
@@ -203,6 +343,205 @@ async fn connect_and_pump(
     }
 }
 
+async fn connect_and_pump_quic(
+    config: &ReverseTunnelClientConfig,
+    session_id: Uuid,
+    shutdown: &mut watch::Receiver<bool>,
+    snapshot: &mut ClientSnapshot,
+) -> Result<()> {
+    let TunnelTransport::Quic {
+        server_name,
+        server_cert_der,
+        ..
+    } = &config.transport
+    else {
+        bail!("connect_and_pump_quic requires TunnelTransport::Quic");
+    };
+    let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
+    endpoint.set_default_client_config(quic_client_config(server_cert_der.clone())?);
+    let connecting = endpoint.connect(config.server_addr, server_name)?;
+    let connection = timeout(config.connect_timeout, connecting)
+        .await
+        .context("QUIC connect timed out")?
+        .context("QUIC connect failed")?;
+    let (mut send, recv) = connection.open_bi().await?;
+    let mut reader = BufReader::new(recv);
+    let hello = ClientFrame::Hello(TunnelHello {
+        node_id: config.node_id.clone(),
+        session_id,
+        protocol_version: 1,
+        auth_token: config.auth_token.clone(),
+    });
+    write_frame(&mut send, &hello).await?;
+
+    snapshot.connected = true;
+    snapshot.last_error = None;
+    let mut sequence = snapshot.sent_heartbeats;
+    let proxy_connection = connection.clone();
+    let local_proxy_addr = config.local_proxy_addr;
+    tokio::spawn(async move {
+        while let Ok((send, recv)) = proxy_connection.accept_bi().await {
+            tokio::spawn(async move {
+                let _ = handle_client_proxy_stream(send, recv, local_proxy_addr).await;
+            });
+        }
+    });
+
+    loop {
+        let deadline = Instant::now() + config.heartbeat_interval;
+        tokio::select! {
+            _ = shutdown.changed() => {
+                let _ = send.finish();
+                connection.close(0_u32.into(), b"shutdown");
+                endpoint.close(0_u32.into(), b"shutdown");
+                return Ok(());
+            }
+            maybe_line = read_optional_line(&mut reader) => {
+                let line = maybe_line?;
+                if line.is_none() {
+                    return Err(anyhow::anyhow!("server closed reverse tunnel"));
+                }
+            }
+            _ = sleep_until(deadline) => {
+                sequence += 1;
+                write_frame(&mut send, &ClientFrame::Heartbeat(TunnelHeartbeat {
+                    node_id: config.node_id.clone(),
+                    session_id,
+                    sequence,
+                })).await?;
+                snapshot.sent_heartbeats = sequence;
+            }
+        }
+    }
+}
+
+async fn handle_quic_incoming(
+    incoming: quinn::Incoming,
+    config: ReverseTunnelServerConfig,
+    state: ReverseTunnelServerState,
+) -> Result<()> {
+    let connection = incoming.await.context("QUIC incoming connection failed")?;
+    let (send, recv) = connection.accept_bi().await?;
+    handle_quic_control_stream(send, recv, connection, config, state).await
+}
+
+async fn handle_quic_control_stream(
+    _send: quinn::SendStream,
+    recv: quinn::RecvStream,
+    connection: quinn::Connection,
+    config: ReverseTunnelServerConfig,
+    state: ReverseTunnelServerState,
+) -> Result<()> {
+    let mut reader = BufReader::new(recv);
+    let first = read_required_frame(&mut reader).await?;
+    let ClientFrame::Hello(hello) = first else {
+        bail!("reverse tunnel connection did not start with hello");
+    };
+    if hello.auth_token != config.auth_token {
+        bail!("reverse tunnel authentication failed");
+    }
+    mark_connected(&state, &hello, Some(connection)).await;
+
+    loop {
+        match read_optional_frame(&mut reader).await {
+            Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
+                mark_heartbeat(&state, &heartbeat).await;
+            }
+            Ok(Some(ClientFrame::Hello(_))) => {
+                bail!("unexpected repeated hello on reverse tunnel session");
+            }
+            Ok(None) => {
+                mark_disconnected(&state, &hello).await;
+                return Ok(());
+            }
+            Err(err) => {
+                mark_disconnected(&state, &hello).await;
+                return Err(err);
+            }
+        }
+    }
+}
+
+fn quic_client_config(server_cert_der: Vec<u8>) -> Result<ClientConfig> {
+    let mut roots = RootCertStore::empty();
+    roots.add(CertificateDer::from(server_cert_der))?;
+    let mut config = ClientConfig::with_root_certificates(Arc::new(roots))?;
+    let mut transport = TransportConfig::default();
+    transport
+        .max_concurrent_bidi_streams(256_u16.into())
+        .max_concurrent_uni_streams(0_u8.into());
+    config.transport_config(Arc::new(transport));
+    Ok(config)
+}
+
+fn quic_server_key(transport: &TunnelTransport) -> Result<PrivatePkcs8KeyDer<'static>> {
+    let TunnelTransport::Quic { server_key_der, .. } = transport else {
+        bail!("QUIC server key requested for non-QUIC transport");
+    };
+    let key = server_key_der
+        .clone()
+        .context("QUIC server transport requires server_key_der")?;
+    Ok(PrivatePkcs8KeyDer::from(key))
+}
+
+async fn handle_client_proxy_stream(
+    quic_send: quinn::SendStream,
+    quic_recv: quinn::RecvStream,
+    local_proxy_addr: SocketAddr,
+) -> Result<()> {
+    let mut reader = BufReader::new(quic_recv);
+    let first = read_required_server_frame(&mut reader).await?;
+    match first {
+        ServerFrame::OpenProxy { .. } => {
+            let tcp_stream = TcpStream::connect(local_proxy_addr)
+                .await
+                .with_context(|| format!("failed to connect local proxy at {local_proxy_addr}"))?;
+            pipe_tcp_and_quic(tcp_stream, quic_send, reader).await
+        }
+    }
+}
+
+async fn pipe_tcp_and_quic<R>(
+    tcp_stream: TcpStream,
+    mut quic_send: quinn::SendStream,
+    mut quic_recv: R,
+) -> Result<()>
+where
+    R: AsyncRead + Unpin,
+{
+    let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
+    let to_quic = async {
+        pump_with_flush(&mut tcp_read, &mut quic_send).await?;
+        let _ = quic_send.finish();
+        Result::<u64>::Ok(0)
+    };
+    let to_tcp = async {
+        pump_with_flush(&mut quic_recv, &mut tcp_write).await?;
+        tcp_write.shutdown().await?;
+        Result::<u64>::Ok(0)
+    };
+    tokio::try_join!(to_quic, to_tcp).context("reverse tunnel byte stream copy failed")?;
+    Ok(())
+}
+
+async fn pump_with_flush<R, W>(reader: &mut R, writer: &mut W) -> Result<u64>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut copied = 0_u64;
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(copied);
+        }
+        writer.write_all(&buffer[..read]).await?;
+        writer.flush().await?;
+        copied += read as u64;
+    }
+}
+
 async fn handle_server_connection(
     stream: TcpStream,
     config: ReverseTunnelServerConfig,
@@ -216,19 +555,23 @@ async fn handle_server_connection(
     if hello.auth_token != config.auth_token {
         bail!("reverse tunnel authentication failed");
     }
-    mark_connected(&state, &hello).await;
+    mark_connected(&state, &hello, None).await;
 
     loop {
-        match read_optional_frame(&mut reader).await? {
-            Some(ClientFrame::Heartbeat(heartbeat)) => {
+        match read_optional_frame(&mut reader).await {
+            Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
                 mark_heartbeat(&state, &heartbeat).await;
             }
-            Some(ClientFrame::Hello(_)) => {
+            Ok(Some(ClientFrame::Hello(_))) => {
                 bail!("unexpected repeated hello on reverse tunnel session");
             }
-            None => {
+            Ok(None) => {
                 mark_disconnected(&state, &hello).await;
                 return Ok(());
+            }
+            Err(err) => {
+                mark_disconnected(&state, &hello).await;
+                return Err(err);
             }
         }
     }
@@ -243,6 +586,15 @@ where
         .context("reverse tunnel connection closed before first frame")
 }
 
+async fn read_required_server_frame<R>(reader: &mut R) -> Result<ServerFrame>
+where
+    R: AsyncBufRead + Unpin,
+{
+    read_optional_server_frame(reader)
+        .await?
+        .context("reverse tunnel proxy stream closed before first frame")
+}
+
 async fn read_optional_frame<R>(reader: &mut R) -> Result<Option<ClientFrame>>
 where
     R: AsyncBufRead + Unpin,
@@ -255,7 +607,23 @@ where
         .map(Some)
 }
 
-async fn mark_connected(state: &ReverseTunnelServerState, hello: &TunnelHello) {
+async fn read_optional_server_frame<R>(reader: &mut R) -> Result<Option<ServerFrame>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let Some(line) = read_optional_line(reader).await? else {
+        return Ok(None);
+    };
+    serde_json::from_str(&line)
+        .context("failed to decode reverse tunnel server frame")
+        .map(Some)
+}
+
+async fn mark_connected(
+    state: &ReverseTunnelServerState,
+    hello: &TunnelHello,
+    connection: Option<quinn::Connection>,
+) {
     let mut sessions = state.sessions.lock().await;
     let accepted_connections = sessions
         .get(&hello.node_id)
@@ -271,6 +639,14 @@ async fn mark_connected(state: &ReverseTunnelServerState, hello: &TunnelHello) {
             last_heartbeat_sequence: None,
         },
     );
+    drop(sessions);
+    if let Some(connection) = connection {
+        state
+            .connections
+            .lock()
+            .await
+            .insert(hello.node_id.clone(), connection);
+    }
 }
 
 async fn mark_heartbeat(state: &ReverseTunnelServerState, heartbeat: &TunnelHeartbeat) {
@@ -290,6 +666,8 @@ async fn mark_disconnected(state: &ReverseTunnelServerState, hello: &TunnelHello
     {
         session.connected = false;
     }
+    drop(sessions);
+    state.connections.lock().await.remove(&hello.node_id);
 }
 
 async fn read_optional_line<R>(reader: &mut R) -> Result<Option<String>>
@@ -305,6 +683,17 @@ where
 }
 
 async fn write_frame<W>(writer: &mut W, frame: &ClientFrame) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let mut body = serde_json::to_vec(frame)?;
+    body.push(b'\n');
+    writer.write_all(&body).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+async fn write_server_frame<W>(writer: &mut W, frame: &ServerFrame) -> Result<()>
 where
     W: AsyncWrite + Unpin,
 {
@@ -332,6 +721,8 @@ fn next_backoff(current: Duration, ceiling: Duration) -> Duration {
 
 #[cfg(test)]
 mod tests {
+    use std::net::UdpSocket;
+
     use tokio::sync::Mutex;
 
     use super::*;
@@ -444,7 +835,7 @@ mod tests {
         let (status_tx, status_rx) = watch::channel(ClientSnapshot::new(Uuid::nil()));
         let client = tokio::spawn(run_client(test_config(addr), client_shutdown_rx, status_tx));
 
-        wait_for_heartbeat(&state).await;
+        wait_for_heartbeat_with_status(&state, status_rx.clone()).await;
         let sessions = state.snapshot().await;
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].connected);
@@ -488,11 +879,136 @@ mod tests {
         server.await.unwrap().unwrap();
     }
 
+    #[tokio::test]
+    async fn quic_server_tracks_heartbeat_and_disconnect_state() {
+        let addr = unused_udp_addr();
+        let identity = test_quic_identity();
+        let state = ReverseTunnelServerState::default();
+        let (server_shutdown_tx, server_shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run_quic_server(
+            addr,
+            test_quic_server_config(&identity),
+            state.clone(),
+            server_shutdown_rx,
+        ));
+        let (client_shutdown_tx, client_shutdown_rx) = watch::channel(false);
+        let (status_tx, status_rx) = watch::channel(ClientSnapshot::new(Uuid::nil()));
+        let client = tokio::spawn(run_client(
+            test_quic_client_config(addr, &identity),
+            client_shutdown_rx,
+            status_tx,
+        ));
+
+        wait_for_heartbeat(&state).await;
+        let sessions = state.snapshot().await;
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions[0].connected);
+        assert!(sessions[0].last_heartbeat_sequence.unwrap_or_default() >= 1);
+
+        client_shutdown_tx.send(true).unwrap();
+        client.await.unwrap();
+        wait_for_disconnected(&state).await;
+        assert!(!state.snapshot().await[0].connected);
+
+        server_shutdown_tx.send(true).unwrap();
+        server.await.unwrap().unwrap();
+        drop(status_rx);
+    }
+
+    #[tokio::test]
+    async fn quic_server_rejects_wrong_auth_token() {
+        let addr = unused_udp_addr();
+        let identity = test_quic_identity();
+        let state = ReverseTunnelServerState::default();
+        let (server_shutdown_tx, server_shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run_quic_server(
+            addr,
+            test_quic_server_config(&identity),
+            state.clone(),
+            server_shutdown_rx,
+        ));
+        let (client_shutdown_tx, client_shutdown_rx) = watch::channel(false);
+        let (status_tx, status_rx) = watch::channel(ClientSnapshot::new(Uuid::nil()));
+        let mut client_config = test_quic_client_config(addr, &identity);
+        client_config.auth_token = "wrong-token".into();
+        let client = tokio::spawn(run_client(client_config, client_shutdown_rx, status_tx));
+
+        wait_for_attempts(status_rx, 2).await;
+        assert!(state.snapshot().await.is_empty());
+
+        client_shutdown_tx.send(true).unwrap();
+        client.await.unwrap();
+        server_shutdown_tx.send(true).unwrap();
+        server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn quic_reverse_tunnel_forwards_tcp_bytes_to_phone_proxy() {
+        let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = proxy_listener.local_addr().unwrap();
+        let proxy = tokio::spawn(async move {
+            let (mut stream, _) = proxy_listener.accept().await.unwrap();
+            let mut request = [0_u8; 4];
+            stream.read_exact(&mut request).await.unwrap();
+            assert_eq!(&request, b"ping");
+            stream.write_all(b"pong").await.unwrap();
+        });
+
+        let quic_addr = unused_udp_addr();
+        let identity = test_quic_identity();
+        let state = ReverseTunnelServerState::default();
+        let (server_shutdown_tx, server_shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run_quic_server(
+            quic_addr,
+            test_quic_server_config(&identity),
+            state.clone(),
+            server_shutdown_rx,
+        ));
+
+        let mut client_config = test_quic_client_config(quic_addr, &identity);
+        client_config.local_proxy_addr = proxy_addr;
+        let (client_shutdown_tx, client_shutdown_rx) = watch::channel(false);
+        let (status_tx, status_rx) = watch::channel(ClientSnapshot::new(Uuid::nil()));
+        let client = tokio::spawn(run_client(client_config, client_shutdown_rx, status_tx));
+        wait_for_heartbeat(&state).await;
+
+        let forward_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let forward_addr = forward_listener.local_addr().unwrap();
+        let (forward_shutdown_tx, forward_shutdown_rx) = watch::channel(false);
+        let forwarder = tokio::spawn(run_quic_tcp_forward_listener(
+            forward_listener,
+            state.clone(),
+            Some("test-phone".into()),
+            forward_shutdown_rx,
+        ));
+
+        timeout(Duration::from_secs(2), async {
+            let mut stream = TcpStream::connect(forward_addr).await.unwrap();
+            stream.write_all(b"ping").await.unwrap();
+            let mut response = [0_u8; 4];
+            stream.read_exact(&mut response).await.unwrap();
+            assert_eq!(&response, b"pong");
+        })
+        .await
+        .unwrap();
+
+        forward_shutdown_tx.send(true).unwrap();
+        client_shutdown_tx.send(true).unwrap();
+        server_shutdown_tx.send(true).unwrap();
+        forwarder.await.unwrap().unwrap();
+        client.await.unwrap();
+        server.await.unwrap().unwrap();
+        proxy.await.unwrap();
+        drop(status_rx);
+    }
+
     fn test_config(server_addr: SocketAddr) -> ReverseTunnelClientConfig {
         ReverseTunnelClientConfig {
             node_id: "test-phone".into(),
             server_addr,
+            local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
             auth_token: "test-token".into(),
+            transport: TunnelTransport::Tcp,
             connect_timeout: Duration::from_millis(100),
             heartbeat_interval: Duration::from_millis(20),
             reconnect_floor: Duration::from_millis(10),
@@ -503,7 +1019,58 @@ mod tests {
     fn test_server_config() -> ReverseTunnelServerConfig {
         ReverseTunnelServerConfig {
             auth_token: "test-token".into(),
+            transport: TunnelTransport::Tcp,
         }
+    }
+
+    fn test_quic_client_config(
+        server_addr: SocketAddr,
+        identity: &TestQuicIdentity,
+    ) -> ReverseTunnelClientConfig {
+        ReverseTunnelClientConfig {
+            node_id: "test-phone".into(),
+            server_addr,
+            local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
+            auth_token: "test-token".into(),
+            transport: TunnelTransport::Quic {
+                server_name: "localhost".into(),
+                server_cert_der: identity.cert_der.clone(),
+                server_key_der: None,
+            },
+            connect_timeout: Duration::from_millis(500),
+            heartbeat_interval: Duration::from_millis(20),
+            reconnect_floor: Duration::from_millis(10),
+            reconnect_ceiling: Duration::from_millis(50),
+        }
+    }
+
+    fn test_quic_server_config(identity: &TestQuicIdentity) -> ReverseTunnelServerConfig {
+        ReverseTunnelServerConfig {
+            auth_token: "test-token".into(),
+            transport: TunnelTransport::Quic {
+                server_name: "localhost".into(),
+                server_cert_der: identity.cert_der.clone(),
+                server_key_der: Some(identity.key_der.clone()),
+            },
+        }
+    }
+
+    struct TestQuicIdentity {
+        cert_der: Vec<u8>,
+        key_der: Vec<u8>,
+    }
+
+    fn test_quic_identity() -> TestQuicIdentity {
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        TestQuicIdentity {
+            cert_der: certified.cert.der().as_ref().to_vec(),
+            key_der: certified.signing_key.serialize_der(),
+        }
+    }
+
+    fn unused_udp_addr() -> SocketAddr {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.local_addr().unwrap()
     }
 
     async fn wait_for_attempts(mut status: watch::Receiver<ClientSnapshot>, attempts: u64) {
@@ -536,6 +1103,35 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    async fn wait_for_heartbeat_with_status(
+        state: &ReverseTunnelServerState,
+        status: watch::Receiver<ClientSnapshot>,
+    ) {
+        if timeout(Duration::from_secs(2), async {
+            loop {
+                if state
+                    .snapshot()
+                    .await
+                    .first()
+                    .and_then(|session| session.last_heartbeat_sequence)
+                    .is_some()
+                {
+                    return;
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_err()
+        {
+            panic!(
+                "timed out waiting for reverse tunnel heartbeat; client={:?} server={:?}",
+                status.borrow().clone(),
+                state.snapshot().await
+            );
+        }
     }
 
     async fn wait_for_disconnected(state: &ReverseTunnelServerState) {

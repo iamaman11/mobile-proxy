@@ -32,7 +32,11 @@
   },
   "reverse_tunnel": {
     "enabled": {{REVERSE_TUNNEL_ENABLED}},
+    "transport": "quic",
     "server_addr": "{{REVERSE_TUNNEL_ADDR}}",
+    "local_proxy_addr": "127.0.0.1:1080",
+    "server_name": "{{REVERSE_TUNNEL_SERVER_NAME}}",
+    "server_cert_der_b64": "{{REVERSE_TUNNEL_CERT_DER_B64}}",
     "auth_token": "{{DEVICE_TOKEN}}",
     "connect_timeout_ms": 2000,
     "heartbeat_interval_ms": 2000,

@@ -2,7 +2,7 @@ use std::{env, fs, net::SocketAddr, time::Duration};
 
 use anyhow::{Result, bail};
 use proxy_core::{HealthRecord, RuntimeReadiness};
-use reverse_tunnel::ReverseTunnelClientConfig;
+use reverse_tunnel::{ReverseTunnelClientConfig, TunnelTransport, decode_der_base64};
 use serde::Deserialize;
 
 use crate::cli::Cli;
@@ -43,7 +43,11 @@ struct FileWireguardConfig {
 #[derive(Debug, Deserialize, Clone)]
 struct FileReverseTunnelConfig {
     enabled: Option<bool>,
+    transport: Option<String>,
     server_addr: Option<String>,
+    local_proxy_addr: Option<String>,
+    server_name: Option<String>,
+    server_cert_der_b64: Option<String>,
     auth_token: Option<String>,
     connect_timeout_ms: Option<u64>,
     heartbeat_interval_ms: Option<u64>,
@@ -231,10 +235,31 @@ fn reverse_tunnel_config(
     let Some(auth_token) = config.auth_token.clone().filter(|token| !token.is_empty()) else {
         bail!("reverse_tunnel.auth_token is required when reverse_tunnel.enabled=true");
     };
+    let local_proxy_addr: SocketAddr = config
+        .local_proxy_addr
+        .as_deref()
+        .unwrap_or("127.0.0.1:1080")
+        .parse()?;
+    let transport = match config.transport.as_deref().unwrap_or("quic") {
+        "tcp" => TunnelTransport::Tcp,
+        "quic" => TunnelTransport::Quic {
+            server_name: config
+                .server_name
+                .clone()
+                .unwrap_or_else(|| "mobile-proxy-relay".into()),
+            server_cert_der: decode_der_base64(config.server_cert_der_b64.as_deref().ok_or_else(
+                || anyhow::anyhow!("reverse_tunnel.server_cert_der_b64 is required for QUIC"),
+            )?)?,
+            server_key_der: None,
+        },
+        other => bail!("unsupported reverse_tunnel.transport: {other}"),
+    };
     Ok(Some(ReverseTunnelClientConfig {
         node_id: node_id.to_string(),
         server_addr,
+        local_proxy_addr,
         auth_token,
+        transport,
         connect_timeout: Duration::from_millis(config.connect_timeout_ms.unwrap_or(2_000)),
         heartbeat_interval: Duration::from_millis(config.heartbeat_interval_ms.unwrap_or(2_000)),
         reconnect_floor: Duration::from_millis(config.reconnect_floor_ms.unwrap_or(1_000)),

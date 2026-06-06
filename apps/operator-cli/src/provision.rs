@@ -144,6 +144,8 @@ struct ManifestTokens {
     wireguard_phone_private_key_env: Option<String>,
     #[serde(rename = "wireguardServerPublicKeyEnv")]
     wireguard_server_public_key_env: Option<String>,
+    #[serde(rename = "reverseTunnelCertDerB64Env")]
+    reverse_tunnel_cert_der_b64_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,6 +251,11 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                     "REVERSE_TUNNEL_ADDR",
                     &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?,
                 ),
+                ("REVERSE_TUNNEL_SERVER_NAME", "mobile-proxy-relay"),
+                (
+                    "REVERSE_TUNNEL_CERT_DER_B64",
+                    &reverse_tunnel_cert_der_b64(&manifest, &args.tunnel_owner)?,
+                ),
                 (
                     "AIRPLANE_HOLD_SECS",
                     &profile.airplane_hold_secs.to_string(),
@@ -349,6 +356,19 @@ fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<
         .as_ref()
         .context("first_party_reverse_tunnel requires relay host in device manifest")?;
     Ok(format!("{}:{}", relay.host, 18090))
+}
+
+fn reverse_tunnel_cert_der_b64(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
+    if tunnel_owner != "first_party_reverse_tunnel" {
+        return Ok(String::new());
+    }
+    required_env(
+        manifest
+            .tokens
+            .reverse_tunnel_cert_der_b64_env
+            .as_deref()
+            .unwrap_or("MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64"),
+    )
 }
 
 fn repo_root() -> Result<PathBuf> {

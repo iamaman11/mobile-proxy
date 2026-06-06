@@ -37,8 +37,8 @@ The working rule is simple:
 
 - `services/reverse-tunnel-server`
   - VM-side first-party reverse tunnel ingress
-  - owns phone session acceptance, token-authenticated hello validation, and heartbeat tracking
-  - target home for VM-side stream forwarding once `crates/reverse-tunnel` defines the stream contract
+  - owns QUIC/TLS phone session acceptance, token-authenticated hello validation, heartbeat tracking, and VM-side public TCP forward listeners
+  - public VM ports are exposed by nginx and forwarded to Rust loopback listeners for the first-party reverse-tunnel path
 
 - `apps/operator-cli`
   - operator-facing Rust CLI
@@ -51,8 +51,8 @@ The working rule is simple:
 
 - `crates/reverse-tunnel`
   - first-party Rust userspace reverse tunnel core
-  - current PoC covers reconnect after server drop, reconnect after VM listener restart, and stable session identity
-  - target home for transport framing, heartbeat, reconnect policy, and stream contracts before VM/phone service integration
+  - current tests cover reconnect after server drop, reconnect after VM listener restart, stable session identity, QUIC/TLS heartbeat, wrong-token rejection, and VM TCP listener to phone-local proxy byte forwarding
+  - target home for transport framing, heartbeat, reconnect policy, stream contracts, and future compact binary frame encoding
 
 - `services/runtime-supervisor`
   - phone-side supervision process
