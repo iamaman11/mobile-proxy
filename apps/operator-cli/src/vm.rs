@@ -36,6 +36,8 @@ struct VmManifest {
 struct VmTokenEnv {
     #[serde(rename = "controlTokenEnv")]
     control_token_env: String,
+    #[serde(rename = "deviceTokenEnv")]
+    device_token_env: String,
     #[serde(rename = "relayUserEnv")]
     relay_user_env: String,
     #[serde(rename = "relayPasswordEnv")]
@@ -56,6 +58,7 @@ struct VmWireguard {
 
 struct VmSecrets {
     control_token: String,
+    device_token: String,
     relay_user: String,
     relay_password: String,
     server_private_key: String,
@@ -153,7 +156,9 @@ fn build_linux_binaries(repo: &Path) -> Result<()> {
             .arg("-p")
             .arg("control-plane")
             .arg("-p")
-            .arg("relay-gate"),
+            .arg("relay-gate")
+            .arg("-p")
+            .arg("reverse-tunnel-server"),
         repo,
     )
 }
@@ -175,12 +180,22 @@ fn build_vm_release(
 
     let control_plane = repo.join("target/release/control-plane");
     let relay_gate = repo.join("target/release/relay-gate");
+    let reverse_tunnel_server = repo.join("target/release/reverse-tunnel-server");
     let sing_box = repo.join("deploy/vm-runtime/bin/sing-box");
     ensure_elf_machine(&control_plane, 62, "Linux x86_64 control-plane")?;
     ensure_elf_machine(&relay_gate, 62, "Linux x86_64 relay-gate")?;
+    ensure_elf_machine(
+        &reverse_tunnel_server,
+        62,
+        "Linux x86_64 reverse-tunnel-server",
+    )?;
     ensure_elf_machine(&sing_box, 62, "Linux x86_64 sing-box")?;
     fs::copy(control_plane, release_root.join("bin/control-plane"))?;
     fs::copy(relay_gate, release_root.join("bin/relay-gate"))?;
+    fs::copy(
+        reverse_tunnel_server,
+        release_root.join("bin/reverse-tunnel-server"),
+    )?;
     fs::copy(sing_box, release_root.join("bin/sing-box"))?;
 
     fs::write(
@@ -207,6 +222,13 @@ fn build_vm_release(
         ),
     )?;
     fs::write(
+        release_root.join("config/reverse-tunnel-server.env"),
+        format!(
+            "REVERSE_TUNNEL_LISTEN='0.0.0.0:18090'\nREVERSE_TUNNEL_AUTH_TOKEN='{}'\n",
+            shell_escape(&secrets.device_token)
+        ),
+    )?;
+    fs::write(
         release_root.join("systemd/mobile-relaycontrolpoint.service"),
         CONTROL_PLANE_UNIT,
     )?;
@@ -217,6 +239,10 @@ fn build_vm_release(
     fs::write(
         release_root.join("systemd/mobile-public-proxy.service"),
         PUBLIC_PROXY_UNIT,
+    )?;
+    fs::write(
+        release_root.join("systemd/mobile-reverse-tunnel-server.service"),
+        REVERSE_TUNNEL_SERVER_UNIT,
     )?;
     fs::write(
         release_root.join("nginx/mobile-relaycontrolpoint"),
@@ -235,7 +261,7 @@ fn ensure_firewall_rules(manifest: &VmManifest) -> Result<()> {
     let rules = [
         (
             format!("{}-ingress", manifest.instance_name),
-            "tcp:22,tcp:80,tcp:443,udp:51820",
+            "tcp:22,tcp:80,tcp:443,tcp:18090,udp:51820",
         ),
         (format!("{}-control", manifest.instance_name), "tcp:8080"),
         (
@@ -252,6 +278,18 @@ fn ensure_firewall_rules(manifest: &VmManifest) -> Result<()> {
             "--project",
             &manifest.project,
         ])? {
+            run(
+                Command::new("gcloud")
+                    .arg("compute")
+                    .arg("firewall-rules")
+                    .arg("update")
+                    .arg(&name)
+                    .arg("--project")
+                    .arg(&manifest.project)
+                    .arg("--allow")
+                    .arg(ports),
+                Path::new("."),
+            )?;
             continue;
         }
         run(
@@ -381,7 +419,7 @@ fn verify_vm(args: &ProvisionVmArgs, manifest: &VmManifest, ssh_key: &Path) -> R
         args,
         manifest,
         ssh_key,
-        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(1080|1081|3128|8080) '",
+        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service mobile-reverse-tunnel-server.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(1080|1081|3128|8080|18090) '",
     )
 }
 
@@ -411,14 +449,17 @@ SRC="/tmp/mobile-proxy-vm-release-{release_id}"
 install -d /opt/mobile-relaycontrolpoint/releases/"$REL" /opt/mobile-public-proxy /etc/mobile-relaycontrolpoint /var/lib/mobile-relaycontrolpoint /etc/wireguard /etc/nginx/stream-available /etc/nginx/stream-enabled
 install -m 0755 "$SRC/bin/control-plane" /opt/mobile-relaycontrolpoint/releases/"$REL"/control-plane
 install -m 0755 "$SRC/bin/relay-gate" /opt/mobile-relaycontrolpoint/releases/"$REL"/relay-gate
+install -m 0755 "$SRC/bin/reverse-tunnel-server" /opt/mobile-relaycontrolpoint/releases/"$REL"/reverse-tunnel-server
 install -m 0755 "$SRC/bin/sing-box" /opt/mobile-public-proxy/sing-box
 install -m 0600 "$SRC/config/control-plane.env" /etc/mobile-relaycontrolpoint/control-plane.env
 install -m 0600 "$SRC/config/relay-gate.env" /etc/mobile-relaycontrolpoint/relay-gate.env
+install -m 0600 "$SRC/config/reverse-tunnel-server.env" /etc/mobile-relaycontrolpoint/reverse-tunnel-server.env
 install -m 0600 "$SRC/config/wg0.conf" /etc/wireguard/wg0.conf
 install -m 0600 "$SRC/config/public-proxy.json" /opt/mobile-public-proxy/config.json
 install -m 0644 "$SRC/systemd/mobile-relaycontrolpoint.service" /etc/systemd/system/mobile-relaycontrolpoint.service
 install -m 0644 "$SRC/systemd/mobile-relay-gate.service" /etc/systemd/system/mobile-relay-gate.service
 install -m 0644 "$SRC/systemd/mobile-public-proxy.service" /etc/systemd/system/mobile-public-proxy.service
+install -m 0644 "$SRC/systemd/mobile-reverse-tunnel-server.service" /etc/systemd/system/mobile-reverse-tunnel-server.service
 install -m 0644 "$SRC/nginx/mobile-relaycontrolpoint" /etc/nginx/sites-available/mobile-relaycontrolpoint
 install -m 0644 "$SRC/nginx/mobile-public-proxy.conf" /etc/nginx/stream-available/mobile-public-proxy.conf
 ln -sfn /opt/mobile-relaycontrolpoint/releases/"$REL" /opt/mobile-relaycontrolpoint/current
@@ -427,8 +468,8 @@ ln -sfn /etc/nginx/sites-available/mobile-relaycontrolpoint /etc/nginx/sites-ena
 ln -sfn /etc/nginx/stream-available/mobile-public-proxy.conf /etc/nginx/stream-enabled/mobile-public-proxy.conf
 grep -q 'stream-enabled' /etc/nginx/nginx.conf || printf '\nstream {{ include /etc/nginx/stream-enabled/*.conf; }}\n' >> /etc/nginx/nginx.conf
 systemctl daemon-reload
-systemctl enable --now wg-quick@wg0 mobile-relaycontrolpoint.service mobile-public-proxy.service nginx.service mobile-relay-gate.service
-systemctl restart wg-quick@wg0 mobile-relaycontrolpoint.service mobile-public-proxy.service nginx.service mobile-relay-gate.service
+systemctl enable --now wg-quick@wg0 mobile-relaycontrolpoint.service mobile-public-proxy.service nginx.service mobile-relay-gate.service mobile-reverse-tunnel-server.service
+systemctl restart wg-quick@wg0 mobile-relaycontrolpoint.service mobile-public-proxy.service nginx.service mobile-relay-gate.service mobile-reverse-tunnel-server.service
 nginx -t
 "#
     )
@@ -565,6 +606,23 @@ User=root
 WantedBy=multi-user.target
 "#;
 
+const REVERSE_TUNNEL_SERVER_UNIT: &str = r#"[Unit]
+Description=Mobile Reverse Tunnel Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/mobile-relaycontrolpoint/reverse-tunnel-server.env
+ExecStart=/opt/mobile-relaycontrolpoint/current/reverse-tunnel-server
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
+"#;
+
 const NGINX_HTTP_CONFIG: &str = r#"server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -595,6 +653,7 @@ fn load_manifest(repo: &Path, raw: &str) -> Result<VmManifest> {
 fn load_secrets(manifest: &VmManifest) -> Result<VmSecrets> {
     Ok(VmSecrets {
         control_token: required_env(&manifest.tokens.control_token_env)?,
+        device_token: required_env(&manifest.tokens.device_token_env)?,
         relay_user: required_env(&manifest.tokens.relay_user_env)?,
         relay_password: required_env(&manifest.tokens.relay_password_env)?,
         server_private_key: required_env(&manifest.wireguard.server_private_key_env)?,

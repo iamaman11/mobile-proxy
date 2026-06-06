@@ -50,12 +50,14 @@ pub struct SupervisorConfig {
 pub enum TunnelOwner {
     StockWireguardBridge,
     FirstPartyVpnService,
+    FirstPartyReverseTunnel,
 }
 
 impl TunnelOwner {
     pub fn parse(raw: Option<String>) -> Self {
         match raw.as_deref() {
             Some("first_party_vpn_service") => Self::FirstPartyVpnService,
+            Some("first_party_reverse_tunnel") => Self::FirstPartyReverseTunnel,
             _ => Self::StockWireguardBridge,
         }
     }
@@ -64,6 +66,7 @@ impl TunnelOwner {
         match self {
             Self::StockWireguardBridge => "stock_wireguard_bridge",
             Self::FirstPartyVpnService => "first_party_vpn_service",
+            Self::FirstPartyReverseTunnel => "first_party_reverse_tunnel",
         }
     }
 }
@@ -128,6 +131,18 @@ mod tests {
         assert_eq!(
             TunnelOwner::FirstPartyVpnService.as_str(),
             "first_party_vpn_service"
+        );
+    }
+
+    #[test]
+    fn tunnel_owner_accepts_reverse_tunnel_mode() {
+        assert_eq!(
+            TunnelOwner::parse(Some("first_party_reverse_tunnel".into())),
+            TunnelOwner::FirstPartyReverseTunnel
+        );
+        assert_eq!(
+            TunnelOwner::FirstPartyReverseTunnel.as_str(),
+            "first_party_reverse_tunnel"
         );
     }
 }

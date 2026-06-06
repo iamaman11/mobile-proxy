@@ -422,6 +422,7 @@ dependencies = [
  "clap",
  "proxy-core",
  "reqwest",
+ "reverse-tunnel",
  "serde",
  "serde_json",
  "tokio",
@@ -1048,6 +1049,18 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "reverse-tunnel-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "reverse-tunnel",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

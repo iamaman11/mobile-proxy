@@ -35,6 +35,11 @@ The working rule is simple:
   - VM-side public readiness/probe gate
   - should stay narrowly focused on public exposure and probe reporting
 
+- `services/reverse-tunnel-server`
+  - VM-side first-party reverse tunnel ingress
+  - owns phone session acceptance, token-authenticated hello validation, and heartbeat tracking
+  - target home for VM-side stream forwarding once `crates/reverse-tunnel` defines the stream contract
+
 - `apps/operator-cli`
   - operator-facing Rust CLI
   - now split into `cli`, `commands`, and `http`

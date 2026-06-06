@@ -191,8 +191,9 @@ fn assert_active_vpn_owner(device_serial: Option<&str>, required_tunnel_owner: &
     let expected_package = match required_tunnel_owner {
         "first_party_vpn_service" => FIRST_PARTY_ANDROID_PACKAGE,
         "stock_wireguard_bridge" => STOCK_WIREGUARD_PACKAGE,
+        "first_party_reverse_tunnel" => return Ok(()),
         other => bail!(
-            "unsupported required tunnel owner {}; expected first_party_vpn_service or stock_wireguard_bridge",
+            "unsupported required tunnel owner {}; expected first_party_vpn_service, first_party_reverse_tunnel, or stock_wireguard_bridge",
             other
         ),
     };

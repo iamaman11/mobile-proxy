@@ -12,6 +12,7 @@
   ],
   "tokens": {
     "controlTokenEnv": "MOBILE_PROXY_CONTROL_TOKEN",
+    "deviceTokenEnv": "MOBILE_PROXY_DEVICE_TOKEN",
     "relayUserEnv": "MOBILE_PROXY_RELAY_USER",
     "relayPasswordEnv": "MOBILE_PROXY_RELAY_PASSWORD"
   },

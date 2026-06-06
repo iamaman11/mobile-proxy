@@ -234,6 +234,22 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
                 ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
                 (
+                    "PROXY_LISTEN_ADDRESS",
+                    proxy_listen_address(&args.tunnel_owner),
+                ),
+                (
+                    "WIREGUARD_ENABLED",
+                    bool_literal(args.tunnel_owner != "first_party_reverse_tunnel"),
+                ),
+                (
+                    "REVERSE_TUNNEL_ENABLED",
+                    bool_literal(args.tunnel_owner == "first_party_reverse_tunnel"),
+                ),
+                (
+                    "REVERSE_TUNNEL_ADDR",
+                    &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?,
+                ),
+                (
                     "AIRPLANE_HOLD_SECS",
                     &profile.airplane_hold_secs.to_string(),
                 ),
@@ -302,12 +318,37 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
 fn validate_tunnel_owner(raw: &str) -> Result<()> {
     match raw {
-        "stock_wireguard_bridge" | "first_party_vpn_service" => Ok(()),
+        "stock_wireguard_bridge" | "first_party_vpn_service" | "first_party_reverse_tunnel" => {
+            Ok(())
+        }
         _ => bail!(
-            "invalid tunnel owner {}; expected stock_wireguard_bridge or first_party_vpn_service",
+            "invalid tunnel owner {}; expected stock_wireguard_bridge, first_party_vpn_service, or first_party_reverse_tunnel",
             raw
         ),
     }
+}
+
+fn bool_literal(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
+}
+
+fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
+    if tunnel_owner == "first_party_reverse_tunnel" {
+        "127.0.0.1:1080"
+    } else {
+        "10.66.66.2:1080"
+    }
+}
+
+fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
+    if tunnel_owner != "first_party_reverse_tunnel" {
+        return Ok("127.0.0.1:18090".into());
+    }
+    let relay = manifest
+        .relay
+        .as_ref()
+        .context("first_party_reverse_tunnel requires relay host in device manifest")?;
+    Ok(format!("{}:{}", relay.host, 18090))
 }
 
 fn repo_root() -> Result<PathBuf> {

@@ -1,7 +1,8 @@
-use std::{env, fs};
+use std::{env, fs, net::SocketAddr, time::Duration};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use proxy_core::{HealthRecord, RuntimeReadiness};
+use reverse_tunnel::ReverseTunnelClientConfig;
 use serde::Deserialize;
 
 use crate::cli::Cli;
@@ -18,6 +19,7 @@ pub struct FileConfig {
     operator_profiles: Option<FileOperatorProfiles>,
     proxy: Option<FileProxyConfig>,
     wireguard: Option<FileWireguardConfig>,
+    reverse_tunnel: Option<FileReverseTunnelConfig>,
     control_plane: Option<FileControlPlaneConfig>,
     rotation: Option<FileRotationConfig>,
 }
@@ -36,6 +38,17 @@ struct FileProxyConfig {
 struct FileWireguardConfig {
     enabled: Option<bool>,
     owner: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FileReverseTunnelConfig {
+    enabled: Option<bool>,
+    server_addr: Option<String>,
+    auth_token: Option<String>,
+    connect_timeout_ms: Option<u64>,
+    heartbeat_interval_ms: Option<u64>,
+    reconnect_floor_ms: Option<u64>,
+    reconnect_ceiling_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -62,6 +75,7 @@ pub struct LoadedConfig {
     pub listen: String,
     pub admin_token: String,
     pub control_plane_sync: Option<ControlPlaneSyncConfig>,
+    pub reverse_tunnel: Option<ReverseTunnelClientConfig>,
     pub runtime_state: RuntimeState,
     pub probe: ProbeConfig,
 }
@@ -154,6 +168,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
             })
             .unwrap_or(5),
     });
+    let reverse_tunnel = reverse_tunnel_config(file_config.as_ref(), &node_id)?;
 
     let health = HealthRecord {
         node_id,
@@ -181,6 +196,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         listen,
         admin_token,
         control_plane_sync,
+        reverse_tunnel,
         runtime_state: RuntimeState::new(
             health,
             wireguard_enabled,
@@ -195,6 +211,35 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
             wireguard_enabled,
         },
     })
+}
+
+fn reverse_tunnel_config(
+    file_config: Option<&FileConfig>,
+    node_id: &str,
+) -> Result<Option<ReverseTunnelClientConfig>> {
+    let Some(config) = file_config.and_then(|c| c.reverse_tunnel.as_ref()) else {
+        return Ok(None);
+    };
+    if !config.enabled.unwrap_or(false) {
+        return Ok(None);
+    }
+    let server_addr: SocketAddr = config
+        .server_addr
+        .as_deref()
+        .unwrap_or("127.0.0.1:18090")
+        .parse()?;
+    let Some(auth_token) = config.auth_token.clone().filter(|token| !token.is_empty()) else {
+        bail!("reverse_tunnel.auth_token is required when reverse_tunnel.enabled=true");
+    };
+    Ok(Some(ReverseTunnelClientConfig {
+        node_id: node_id.to_string(),
+        server_addr,
+        auth_token,
+        connect_timeout: Duration::from_millis(config.connect_timeout_ms.unwrap_or(2_000)),
+        heartbeat_interval: Duration::from_millis(config.heartbeat_interval_ms.unwrap_or(2_000)),
+        reconnect_floor: Duration::from_millis(config.reconnect_floor_ms.unwrap_or(1_000)),
+        reconnect_ceiling: Duration::from_millis(config.reconnect_ceiling_ms.unwrap_or(30_000)),
+    }))
 }
 
 fn rotation_command(

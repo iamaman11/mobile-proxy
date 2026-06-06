@@ -22,13 +22,22 @@
     ],
     "working_dir": "/data/adb/mobile-proxy-node/current",
     "env": {},
-    "listen_address": "10.66.66.2:1080"
+    "listen_address": "{{PROXY_LISTEN_ADDRESS}}"
   },
   "wireguard": {
-    "enabled": true,
+    "enabled": {{WIREGUARD_ENABLED}},
     "owner": "{{TUNNEL_OWNER}}",
     "up_command": "true",
     "down_command": "true"
+  },
+  "reverse_tunnel": {
+    "enabled": {{REVERSE_TUNNEL_ENABLED}},
+    "server_addr": "{{REVERSE_TUNNEL_ADDR}}",
+    "auth_token": "{{DEVICE_TOKEN}}",
+    "connect_timeout_ms": 2000,
+    "heartbeat_interval_ms": 2000,
+    "reconnect_floor_ms": 1000,
+    "reconnect_ceiling_ms": 30000
   },
   "network": {
     "cellular_only": true,

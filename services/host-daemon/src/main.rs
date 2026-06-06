@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod control_plane;
 mod health;
+mod reverse_tunnel;
 mod rotation;
 mod state;
 
@@ -19,6 +20,7 @@ use crate::cli::Cli;
 use crate::config::load_runtime_config;
 use crate::control_plane::run_control_plane_sync;
 use crate::health::run_health_probe;
+use crate::reverse_tunnel::spawn_reverse_tunnel;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -37,6 +39,9 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             run_control_plane_sync(runtime_arc, sync).await;
         });
+    }
+    if let Some(reverse_tunnel) = loaded.reverse_tunnel {
+        spawn_reverse_tunnel(reverse_tunnel);
     }
     {
         let runtime_arc = state.runtime.clone();

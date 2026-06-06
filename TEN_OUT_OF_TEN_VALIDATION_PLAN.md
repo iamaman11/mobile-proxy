@@ -162,3 +162,6 @@ Current live destructive test result:
 - first implementation step completed: Android APK now declares and installs an app-owned `VpnService`, command receiver, and boot receiver; real embedded tunnel engine is still required before 10/10
 - superseding architecture decision: make `first_party_reverse_tunnel` the required 10/10 path and keep WireGuard/Android `VpnService` optional; see [REVERSE_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/REVERSE_TUNNEL_ARCHITECTURE_DECISION.md)
 - first reverse-tunnel PoC completed: `cargo test -p reverse-tunnel` passed locally on 2026-06-06 for reconnect after server drop, reconnect after VM listener restart, and stable session identity across reconnects
+- reverse-tunnel baseline expanded: VM `reverse-tunnel-server` service, phone `host-daemon` reverse client config, token-authenticated hello, server heartbeat registry, wrong-token rejection test, and operator VM/device packaging are implemented
+- package checks passed with dummy env: `first_party_reverse_tunnel` phone release renders `wireguard.enabled=false`, `reverse_tunnel.enabled=true`, and VM release includes `mobile-reverse-tunnel-server.service`
+- remaining non-10/10 blocker after reverse baseline: public proxy streams are not yet forwarded over the reverse tunnel, so live production traffic still uses the optional stock WireGuard bridge

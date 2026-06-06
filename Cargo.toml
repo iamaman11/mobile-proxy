@@ -6,6 +6,7 @@ members = [
     "services/host-daemon",
     "services/control-plane",
     "services/relay-gate",
+    "services/reverse-tunnel-server",
     "services/runtime-supervisor",
     "crates/reverse-tunnel",
 ]

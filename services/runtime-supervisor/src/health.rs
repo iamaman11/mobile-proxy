@@ -94,6 +94,7 @@ fn kick_tunnel(config: &SupervisorConfig) {
                 warn!("first-party VPN kick failed: {err:#}");
             }
         }
+        TunnelOwner::FirstPartyReverseTunnel => {}
         TunnelOwner::StockWireguardBridge => kick_stock_wireguard_bridge(),
     }
 }
