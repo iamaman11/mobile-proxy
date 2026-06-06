@@ -44,6 +44,11 @@ The working rule is simple:
   - pure runtime state machine baseline
   - current home for deterministic runtime transition logic
 
+- `crates/reverse-tunnel`
+  - first-party Rust userspace reverse tunnel core
+  - current PoC covers reconnect after server drop, reconnect after VM listener restart, and stable session identity
+  - target home for transport framing, heartbeat, reconnect policy, and stream contracts before VM/phone service integration
+
 - `services/runtime-supervisor`
   - phone-side supervision process
   - owns `host-daemon` and `sing-box` lifecycle, health reconciliation, WireGuard kick attempts, route repair attempts, and data-bounce fallback
@@ -142,6 +147,7 @@ Rule:
 
 - new shared request/response types: `crates/proxy-core`
 - new pure runtime state machine: new crate under `crates/`
+- new reverse-tunnel protocol or reconnect policy: `crates/reverse-tunnel`
 - new VM registry persistence: crate under `crates/` or focused module inside `services/control-plane`
 - new phone supervision loop: `services/runtime-supervisor`
 - new operator commands: `apps/operator-cli`

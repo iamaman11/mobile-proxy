@@ -32,7 +32,8 @@ Required:
 - `cargo run -p operator-cli -- prepare-runtime-binaries`
 - `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
 - `cargo run -p operator-cli -- install-device-stack --manifest-path deploy/manifests/devices/example-device.json --release-id validation-phone --device-serial R58T10QKGBE`
-- `cargo run -p operator-cli -- verify-device --manifest-path deploy/manifests/devices/example-device.json --device-serial R58T10QKGBE --required-tunnel-owner first_party_vpn_service`
+- `cargo test -p reverse-tunnel`
+- `cargo run -p operator-cli -- verify-device --manifest-path deploy/manifests/devices/example-device.json --device-serial R58T10QKGBE --required-tunnel-owner first_party_reverse_tunnel`
 - `cargo run -p operator-cli -- package-device-release --manifest-path deploy/manifests/devices/example-device.json --release-id validation-package`
 
 Acceptance:
@@ -76,7 +77,7 @@ cargo run -p operator-cli -- install-device-stack \
 ```
 
 Acceptance:
-- first-party Android `VpnService` APK is installed
+- first-party Android APK is installed for boot/enrollment UI only; the required runtime path does not depend on Android `VpnService`
 - root access is detected before installation
 - release bundle contains architecture-correct Android binaries
 - `service.sh` starts only `runtime-supervisor`
@@ -85,8 +86,9 @@ Acceptance:
 - `runtime-supervisor` owns `host-daemon` and `sing-box`
 - local health reaches `healthy`
 - control-plane reports the device as `serving=true` and `publicly_serving=true`
-- local health and control-plane report `tunnel_owner=first_party_vpn_service`
+- local health and control-plane report `tunnel_owner=first_party_reverse_tunnel`
 - public HTTP proxy `:3128` returns the phone carrier IP
+- active Android VPN ownership is not required for the primary path
 
 ## Rotation timing gate
 
@@ -138,6 +140,7 @@ The system is not 10/10 until all of these are true:
 - control-plane state survives restart or has a documented durable replacement
 - release artifacts are reproducible and rollback-safe
 - docs in the project root explain the architecture, runtime layout, and validation procedure
+- stock WireGuard and Android `VpnService` are optional backends, not required for the production runtime path
 
 Current live destructive test result:
 - see [REPRODUCIBILITY_TEST_2026_06_04.md](/home/bose/projects/mobile-proxy/REPRODUCIBILITY_TEST_2026_06_04.md)
@@ -157,3 +160,5 @@ Current live destructive test result:
 - remaining non-10/10 blocker: fully programmatic tunnel activation through the stock WireGuard Android app is blocked by Android broadcast/background/permission behavior; remove this dependency with the selected first-party app-owned `VpnService` tunnel engine before claiming no-compromise recovery
 - architecture decision: use first-party app-owned `VpnService`; see [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)
 - first implementation step completed: Android APK now declares and installs an app-owned `VpnService`, command receiver, and boot receiver; real embedded tunnel engine is still required before 10/10
+- superseding architecture decision: make `first_party_reverse_tunnel` the required 10/10 path and keep WireGuard/Android `VpnService` optional; see [REVERSE_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/REVERSE_TUNNEL_ARCHITECTURE_DECISION.md)
+- first reverse-tunnel PoC completed: `cargo test -p reverse-tunnel` passed locally on 2026-06-06 for reconnect after server drop, reconnect after VM listener restart, and stable session identity across reconnects

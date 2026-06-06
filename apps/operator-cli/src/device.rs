@@ -18,6 +18,7 @@ use crate::provision::package_device_release;
 const FIRST_PARTY_ANDROID_PACKAGE: &str = "com.example.mobileproxy";
 const FIRST_PARTY_VPN_SERVICE: &str = "GoBackend$VpnService";
 const FIRST_PARTY_TUNNEL_RECEIVER: &str = "TunnelCommandReceiver";
+const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 
 #[derive(Debug, Deserialize)]
 struct DeviceManifest {
@@ -143,6 +144,9 @@ pub async fn verify_device(args: &VerifyDeviceArgs) -> Result<()> {
             health.tunnel_owner
         );
     }
+    if let Some(required) = &args.required_tunnel_owner {
+        assert_active_vpn_owner(args.device_serial.as_deref(), required)?;
+    }
     let packages = adb(
         args.device_serial.as_deref(),
         &[
@@ -181,6 +185,72 @@ pub async fn verify_device(args: &VerifyDeviceArgs) -> Result<()> {
         health.node_id, health.last_public_ip
     );
     Ok(())
+}
+
+fn assert_active_vpn_owner(device_serial: Option<&str>, required_tunnel_owner: &str) -> Result<()> {
+    let expected_package = match required_tunnel_owner {
+        "first_party_vpn_service" => FIRST_PARTY_ANDROID_PACKAGE,
+        "stock_wireguard_bridge" => STOCK_WIREGUARD_PACKAGE,
+        other => bail!(
+            "unsupported required tunnel owner {}; expected first_party_vpn_service or stock_wireguard_bridge",
+            other
+        ),
+    };
+
+    let expected_uid = package_uid(device_serial, expected_package)?;
+    let connectivity_dump = adb(device_serial, &["shell", "dumpsys", "connectivity"])?;
+    let active_vpn_owner_uid = parse_active_vpn_owner_uid(&connectivity_dump)
+        .context("active Android VPN owner uid was not found in dumpsys connectivity")?;
+    if active_vpn_owner_uid != expected_uid {
+        bail!(
+            "active Android VPN owner mismatch: expected_package={} expected_uid={} actual_owner_uid={}",
+            expected_package,
+            expected_uid,
+            active_vpn_owner_uid
+        );
+    }
+    Ok(())
+}
+
+fn package_uid(device_serial: Option<&str>, package_name: &str) -> Result<u32> {
+    let output = adb(
+        device_serial,
+        &[
+            "shell",
+            "cmd",
+            "package",
+            "list",
+            "packages",
+            "-U",
+            package_name,
+        ],
+    )?;
+    parse_package_uid(&output, package_name)
+        .with_context(|| format!("package uid for {} was not found", package_name))
+}
+
+fn parse_package_uid(output: &str, package_name: &str) -> Option<u32> {
+    output.lines().find_map(|line| {
+        if !line.contains(&format!("package:{package_name}")) {
+            return None;
+        }
+        line.split_whitespace()
+            .find_map(|part| part.strip_prefix("uid:")?.parse().ok())
+    })
+}
+
+fn parse_active_vpn_owner_uid(connectivity_dump: &str) -> Option<u32> {
+    connectivity_dump.lines().find_map(|line| {
+        if !line.contains("Transports:") || !line.contains("VPN") || !line.contains("OwnerUid:") {
+            return None;
+        }
+        line.split("OwnerUid:")
+            .nth(1)?
+            .split(|ch: char| !ch.is_ascii_digit())
+            .find(|part| !part.is_empty())?
+            .parse()
+            .ok()
+    })
 }
 
 pub async fn rollback_device(args: &RollbackDeviceArgs) -> Result<()> {
@@ -465,4 +535,31 @@ fn write_temp_file(name: &str, body: &str) -> Result<PathBuf> {
     let path = env::temp_dir().join(name);
     fs::write(&path, body).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_active_vpn_owner_uid, parse_package_uid};
+
+    #[test]
+    fn parses_package_uid() {
+        let output = "package:com.example.mobileproxy uid:10209\n";
+        assert_eq!(
+            parse_package_uid(output, "com.example.mobileproxy"),
+            Some(10209)
+        );
+        assert_eq!(parse_package_uid(output, "com.wireguard.android"), None);
+    }
+
+    #[test]
+    fn parses_active_vpn_owner_uid() {
+        let dump = "NetworkAgentInfo{ nc{[ Transports: CELLULAR|VPN Capabilities: INTERNET OwnerUid: 10212 RequestorUid: -1 ]} }\n";
+        assert_eq!(parse_active_vpn_owner_uid(dump), Some(10212));
+    }
+
+    #[test]
+    fn ignores_non_vpn_network_owner_uid() {
+        let dump = "NetworkAgentInfo{ nc{[ Transports: CELLULAR Capabilities: INTERNET OwnerUid: 1000 ]} }\n";
+        assert_eq!(parse_active_vpn_owner_uid(dump), None);
+    }
 }
