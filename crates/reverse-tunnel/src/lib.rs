@@ -15,6 +15,7 @@ use tokio::io::{
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, watch};
 use tokio::time::{Instant, sleep, timeout};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,7 +194,9 @@ pub async fn run_server(
                 let state = state.clone();
                 let config = config.clone();
                 tokio::spawn(async move {
-                    let _ = handle_server_connection(stream, config, state).await;
+                    if let Err(err) = handle_server_connection(stream, config, state).await {
+                        warn!(error = %err, "TCP reverse tunnel control connection ended");
+                    }
                 });
             }
         }
@@ -237,7 +240,9 @@ pub async fn run_quic_server(
                 let state = state.clone();
                 let config = config.clone();
                 tokio::spawn(async move {
-                    let _ = handle_quic_incoming(incoming, config, state).await;
+                    if let Err(err) = handle_quic_incoming(incoming, config, state).await {
+                        warn!(error = %err, "QUIC reverse tunnel connection ended");
+                    }
                 });
             }
         }
@@ -258,7 +263,9 @@ pub async fn run_quic_tcp_forward_listener(
                 let state = state.clone();
                 let target_node_id = target_node_id.clone();
                 tokio::spawn(async move {
-                    let _ = forward_tcp_over_quic(stream, state, target_node_id.as_deref()).await;
+                    if let Err(err) = forward_tcp_over_quic(stream, state, target_node_id.as_deref()).await {
+                        warn!(error = %err, "reverse tunnel TCP forward failed");
+                    }
                 });
             }
         }
@@ -274,6 +281,7 @@ async fn forward_tcp_over_quic(
         .active_connection(target_node_id)
         .await
         .context("no authenticated reverse tunnel connection is active")?;
+    debug!("opening reverse tunnel proxy stream");
     let (mut quic_send, quic_recv) = connection
         .open_bi()
         .await
@@ -285,6 +293,7 @@ async fn forward_tcp_over_quic(
         },
     )
     .await?;
+    debug!("reverse tunnel proxy stream opened");
     pipe_tcp_and_quic(tcp_stream, quic_send, quic_recv).await
 }
 
@@ -364,6 +373,7 @@ async fn connect_and_pump_quic(
         .await
         .context("QUIC connect timed out")?
         .context("QUIC connect failed")?;
+    info!(server_addr = %config.server_addr, "QUIC reverse tunnel connected");
     let (mut send, recv) = connection.open_bi().await?;
     let mut reader = BufReader::new(recv);
     let hello = ClientFrame::Hello(TunnelHello {
@@ -382,9 +392,12 @@ async fn connect_and_pump_quic(
     tokio::spawn(async move {
         while let Ok((send, recv)) = proxy_connection.accept_bi().await {
             tokio::spawn(async move {
-                let _ = handle_client_proxy_stream(send, recv, local_proxy_addr).await;
+                if let Err(err) = handle_client_proxy_stream(send, recv, local_proxy_addr).await {
+                    warn!(error = %err, "client proxy stream failed");
+                }
             });
         }
+        warn!("QUIC reverse tunnel proxy stream accept loop ended");
     });
 
     loop {
@@ -421,6 +434,7 @@ async fn handle_quic_incoming(
     state: ReverseTunnelServerState,
 ) -> Result<()> {
     let connection = incoming.await.context("QUIC incoming connection failed")?;
+    debug!("accepted QUIC reverse tunnel connection");
     let (send, recv) = connection.accept_bi().await?;
     handle_quic_control_stream(send, recv, connection, config, state).await
 }
@@ -440,6 +454,7 @@ async fn handle_quic_control_stream(
     if hello.auth_token != config.auth_token {
         bail!("reverse tunnel authentication failed");
     }
+    info!(node_id = %hello.node_id, session_id = %hello.session_id, "reverse tunnel authenticated");
     mark_connected(&state, &hello, Some(connection)).await;
 
     loop {
@@ -493,6 +508,7 @@ async fn handle_client_proxy_stream(
     let first = read_required_server_frame(&mut reader).await?;
     match first {
         ServerFrame::OpenProxy { .. } => {
+            debug!(local_proxy_addr = %local_proxy_addr, "opening phone-local proxy stream");
             let tcp_stream = TcpStream::connect(local_proxy_addr)
                 .await
                 .with_context(|| format!("failed to connect local proxy at {local_proxy_addr}"))?;

@@ -5,7 +5,7 @@
   "inbounds": [
     {
       "type": "mixed",
-      "listen": "10.66.66.2",
+      "listen": "{{SING_BOX_LISTEN_HOST}}",
       "listen_port": 1080,
       "users": [
         {
@@ -16,7 +16,7 @@
     },
     {
       "type": "socks",
-      "listen": "10.66.66.2",
+      "listen": "{{SING_BOX_LISTEN_HOST}}",
       "listen_port": 1081,
       "users": [
         {
@@ -27,7 +27,7 @@
     },
     {
       "type": "http",
-      "listen": "10.66.66.2",
+      "listen": "{{SING_BOX_LISTEN_HOST}}",
       "listen_port": 3128,
       "users": [
         {

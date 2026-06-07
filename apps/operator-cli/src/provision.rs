@@ -311,6 +311,10 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             &[
                 ("RELAY_USER", relay_user.as_str()),
                 ("RELAY_PASSWORD", relay_password.as_str()),
+                (
+                    "SING_BOX_LISTEN_HOST",
+                    sing_box_listen_host(&args.tunnel_owner),
+                ),
             ],
         )
     };
@@ -344,6 +348,14 @@ fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
         "127.0.0.1:1080"
     } else {
         "10.66.66.2:1080"
+    }
+}
+
+fn sing_box_listen_host(tunnel_owner: &str) -> &'static str {
+    if tunnel_owner == "first_party_reverse_tunnel" {
+        "127.0.0.1"
+    } else {
+        "10.66.66.2"
     }
 }
 

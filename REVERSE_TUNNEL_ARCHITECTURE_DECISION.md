@@ -87,8 +87,18 @@ Result on 2026-06-06:
 
 Before this can be called live 10/10:
 
+- complete destructive recovery drills for phone reboot, VM reboot, process kill, mobile data loss, and airplane toggle
 - replace JSON control frames with compact binary frames before performance acceptance
-- deploy the first-party reverse tunnel to a fresh VM and fresh rooted phone
-- run phone reboot, VM reboot, process kill, mobile data loss, airplane toggle, and long soak drills
+- run long soak and rotation matrix acceptance on the first-party reverse-tunnel runtime
 
-The architecture is not final 10/10 until those live drills pass and `stock_wireguard_bridge` is no longer in the required runtime path.
+## Live Switch Evidence
+
+On 2026-06-07, the live VM and rooted Samsung `SM_A022G` were switched to the first-party reverse tunnel:
+
+- VM release: `first-party-quic-live-20260607-obs`
+- phone release: `first-party-quic-phone-20260607-obs`
+- `operator-cli verify-device --required-tunnel-owner first_party_reverse_tunnel` passed
+- public proxy `34.118.88.54:3128` returned carrier IP `178.168.185.80`
+- `stock_wireguard_bridge` is no longer the required live traffic path
+
+The architecture is not final 10/10 until destructive recovery, rotation matrix, and soak drills pass on this runtime.

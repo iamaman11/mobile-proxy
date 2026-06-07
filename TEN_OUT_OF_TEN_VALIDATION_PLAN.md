@@ -172,4 +172,8 @@ Current live destructive test result:
 - QUIC/TLS baseline added: reverse tunnel now supports pinned-certificate QUIC transport on `udp:18090`; local tests cover QUIC heartbeat/disconnect and wrong-token rejection
 - reverse tunnel secrets now require `MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64` and `MOBILE_PROXY_REVERSE_TUNNEL_KEY_DER_B64` for VM packaging, and the certificate pin for phone packaging
 - QUIC/TLS data-plane added: `cargo test -p reverse-tunnel` now includes `quic_reverse_tunnel_forwards_tcp_bytes_to_phone_proxy`, proving local VM-side TCP listener -> QUIC/TLS -> phone-local proxy -> QUIC/TLS -> VM response forwarding
-- remaining non-10/10 blocker after reverse data-plane: live production traffic has not yet been switched and destructively validated on a fresh VM plus fresh phone with `tunnel_owner=first_party_reverse_tunnel`
+- live first-party reverse tunnel switch completed on 2026-06-07: VM release `first-party-quic-live-20260607-obs` and phone release `first-party-quic-phone-20260607-obs` are active
+- `operator-cli verify-device --required-tunnel-owner first_party_reverse_tunnel` passed on 2026-06-07, including public proxy smoke
+- public proxy `34.118.88.54:3128` returned carrier IP `178.168.185.80` through the Rust QUIC/TLS reverse tunnel
+- packaging bug fixed: `first_party_reverse_tunnel` phone releases now render `sing-box` loopback listeners on `127.0.0.1`, matching `host-daemon` and reverse tunnel local proxy config
+- remaining non-10/10 blocker after live reverse switch: destructive recovery and rotation matrices have not yet been completed for the new first-party reverse-tunnel runtime
