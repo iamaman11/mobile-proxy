@@ -101,6 +101,6 @@ On 2026-06-07, the live VM and rooted Samsung `SM_A022G` were switched to the fi
 - `operator-cli verify-device --required-tunnel-owner first_party_reverse_tunnel` passed
 - public proxy `34.118.88.54:3128` returned carrier IP `178.168.185.80`
 - `stock_wireguard_bridge` is no longer the required live traffic path
-- recovery drills passed for `host-daemon` kill, `sing-box` kill, `runtime-supervisor` kill, and VM reverse tunnel service restart after adding watchdog and QUIC keepalive hardening
+- recovery drills passed for `host-daemon` kill, `sing-box` kill, `runtime-supervisor` kill, VM reverse tunnel service restart, one full phone reboot, and one full VM reboot after adding watchdog and QUIC keepalive hardening
 
 The architecture is not final 10/10 until destructive recovery, rotation matrix, and soak drills pass on this runtime.

@@ -177,6 +177,6 @@ Current live destructive test result:
 - public proxy `34.118.88.54:3128` returned carrier IP `178.168.185.80` through the Rust QUIC/TLS reverse tunnel
 - packaging bug fixed: `first_party_reverse_tunnel` phone releases now render `sing-box` loopback listeners on `127.0.0.1`, matching `host-daemon` and reverse tunnel local proxy config
 - recovery fixes added on 2026-06-07: Android bootstrap now runs a watchdog loop for `runtime-supervisor`; supervisor no longer exits on failed Android recovery commands; proxy restarts in reverse-tunnel mode refresh `host-daemon` and the QUIC session
-- live recovery drills passed on 2026-06-07 for `host-daemon` kill, `sing-box` kill, `runtime-supervisor` kill, and VM `mobile-reverse-tunnel-server.service` restart
+- live recovery drills passed on 2026-06-07 for `host-daemon` kill, `sing-box` kill, `runtime-supervisor` kill, VM `mobile-reverse-tunnel-server.service` restart, one full phone reboot, and one full VM reboot
 - QUIC keepalive/idle timeout added so phone reconnects automatically after VM reverse tunnel service restart
-- remaining non-10/10 blocker after live reverse switch: full repeated destructive matrices, phone reboot, full VM reboot, rotation matrix, and soak have not yet been completed for the new first-party reverse-tunnel runtime
+- remaining non-10/10 blocker after live reverse switch: repeated destructive matrices, rotation matrix, and soak have not yet been completed for the new first-party reverse-tunnel runtime
