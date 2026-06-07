@@ -29,6 +29,7 @@ Required:
 - `cargo fmt --check`
 - `cargo test`
 - `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo run -p operator-cli -- generate-reverse-tunnel-identity --output-env-file .secrets/reverse-tunnel.env`
 - `cargo run -p operator-cli -- prepare-runtime-binaries`
 - `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
 - `cargo run -p operator-cli -- install-device-stack --manifest-path deploy/manifests/devices/example-device.json --release-id validation-phone --device-serial R58T10QKGBE`
@@ -43,6 +44,7 @@ Acceptance:
 - `runtime-supervisor` and `host-daemon` are rebuildable from source
 - `sing-box` is downloaded or supplied separately by `prepare-runtime-binaries`
 - live secrets are supplied only through environment variables
+- reverse tunnel cert/key env can be generated reproducibly with `operator-cli generate-reverse-tunnel-identity`; the generated `.secrets/` file is local-only and ignored by git
 
 ## Fresh VM drill
 

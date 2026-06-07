@@ -6,6 +6,7 @@ mod device;
 mod device_stack;
 mod http;
 mod provision;
+mod secrets;
 mod vm;
 
 use anyhow::{Context, Result};
@@ -50,6 +51,9 @@ async fn main() -> Result<()> {
         Command::InstallDeviceRelease(args) => install_device_release(&args).await?,
         Command::VerifyDevice(args) => verify_device(&args).await?,
         Command::RollbackDevice(args) => rollback_device(&args).await?,
+        Command::GenerateReverseTunnelIdentity(args) => {
+            secrets::generate_reverse_tunnel_identity(&args)?
+        }
     }
 
     Ok(())

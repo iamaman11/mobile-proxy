@@ -28,6 +28,17 @@ pub enum Command {
     InstallDeviceRelease(InstallDeviceReleaseArgs),
     VerifyDevice(VerifyDeviceArgs),
     RollbackDevice(RollbackDeviceArgs),
+    GenerateReverseTunnelIdentity(GenerateReverseTunnelIdentityArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct GenerateReverseTunnelIdentityArgs {
+    #[arg(long, default_value = ".secrets/reverse-tunnel.env")]
+    pub output_env_file: String,
+    #[arg(long, default_value = "mobile-proxy-relay")]
+    pub server_name: String,
+    #[arg(long, default_value_t = false)]
+    pub overwrite: bool,
 }
 
 #[derive(Args, Debug, Clone)]
