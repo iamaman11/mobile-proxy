@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
 use crate::android::tun0_ready;
-use crate::config::SupervisorConfig;
+use crate::config::{SupervisorConfig, TunnelOwner};
 
 const STALE_RUNTIME_PATTERNS: &[&str] = &[
     "/data/adb/mobile-proxy-node/.*/bin/runtime-supervisor",
@@ -31,6 +31,9 @@ impl RuntimeChildren {
         if child_exited(&mut self.proxy)? {
             warn!("proxy process exited; restarting");
             self.proxy = None;
+            if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel {
+                restart_host_daemon_after_proxy_exit(&mut self.host_daemon);
+            }
         }
         if child_exited(&mut self.host_daemon)? {
             warn!("host-daemon process exited; restarting");
@@ -45,6 +48,19 @@ impl RuntimeChildren {
         }
         Ok(())
     }
+}
+
+fn restart_host_daemon_after_proxy_exit(host_daemon: &mut Option<Child>) {
+    let Some(mut child) = host_daemon.take() else {
+        return;
+    };
+    warn!(
+        "proxy exited under first-party reverse tunnel; restarting host-daemon to refresh QUIC session"
+    );
+    if let Err(err) = child.kill() {
+        warn!("failed to kill host-daemon after proxy exit: {err:#}");
+    }
+    let _ = child.wait();
 }
 
 fn proxy_start_allowed(config: &SupervisorConfig) -> bool {

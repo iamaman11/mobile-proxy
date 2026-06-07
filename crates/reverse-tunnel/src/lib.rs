@@ -221,10 +221,8 @@ pub async fn run_quic_server(
         key.into(),
     )
     .context("failed to create QUIC server config")?;
-    Arc::get_mut(&mut server_config.transport)
-        .context("QUIC transport config is unexpectedly shared")?
-        .max_concurrent_bidi_streams(256_u16.into())
-        .max_concurrent_uni_streams(0_u8.into());
+    *Arc::get_mut(&mut server_config.transport)
+        .context("QUIC transport config is unexpectedly shared")? = quic_transport_config()?;
     let endpoint = Endpoint::server(server_config, bind_addr)?;
 
     loop {
@@ -481,12 +479,18 @@ fn quic_client_config(server_cert_der: Vec<u8>) -> Result<ClientConfig> {
     let mut roots = RootCertStore::empty();
     roots.add(CertificateDer::from(server_cert_der))?;
     let mut config = ClientConfig::with_root_certificates(Arc::new(roots))?;
+    config.transport_config(Arc::new(quic_transport_config()?));
+    Ok(config)
+}
+
+fn quic_transport_config() -> Result<TransportConfig> {
     let mut transport = TransportConfig::default();
     transport
         .max_concurrent_bidi_streams(256_u16.into())
-        .max_concurrent_uni_streams(0_u8.into());
-    config.transport_config(Arc::new(transport));
-    Ok(config)
+        .max_concurrent_uni_streams(0_u8.into())
+        .keep_alive_interval(Some(Duration::from_secs(2)))
+        .max_idle_timeout(Some(Duration::from_secs(10).try_into()?));
+    Ok(transport)
 }
 
 fn quic_server_key(transport: &TunnelTransport) -> Result<PrivatePkcs8KeyDer<'static>> {

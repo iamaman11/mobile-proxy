@@ -34,7 +34,11 @@ async fn main() -> Result<()> {
         reconcile_wireguard(&config);
 
         match fetch_health(&client, &config).await {
-            Ok(health) => reconcile_health(&config, &mut state, &health)?,
+            Ok(health) => {
+                if let Err(err) = reconcile_health(&config, &mut state, &health) {
+                    warn!("runtime health reconciliation failed: {err:#}");
+                }
+            }
             Err(err) => warn!("host-daemon health unavailable: {err:#}"),
         }
 

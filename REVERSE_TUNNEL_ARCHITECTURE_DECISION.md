@@ -43,6 +43,7 @@ Primary path:
 - stream framing, heartbeats, reconnect, backoff, and replay-safe session identity
 - server-opened bidirectional streams for public proxy TCP forwarding
 - phone-local proxy target fixed by phone config, not chosen by the VM
+- QUIC keepalive and idle timeout for automatic reconnect after VM-side tunnel restarts
 
 WireGuard:
 
@@ -100,5 +101,6 @@ On 2026-06-07, the live VM and rooted Samsung `SM_A022G` were switched to the fi
 - `operator-cli verify-device --required-tunnel-owner first_party_reverse_tunnel` passed
 - public proxy `34.118.88.54:3128` returned carrier IP `178.168.185.80`
 - `stock_wireguard_bridge` is no longer the required live traffic path
+- recovery drills passed for `host-daemon` kill, `sing-box` kill, `runtime-supervisor` kill, and VM reverse tunnel service restart after adding watchdog and QUIC keepalive hardening
 
 The architecture is not final 10/10 until destructive recovery, rotation matrix, and soak drills pass on this runtime.
