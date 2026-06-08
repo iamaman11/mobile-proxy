@@ -30,6 +30,8 @@ pub struct HealthRecord {
     pub local_serving_ready: Option<bool>,
     pub tun0_present: Option<bool>,
     pub wg_handshake_recent: Option<bool>,
+    pub reverse_tunnel_connected: Option<bool>,
+    pub reverse_tunnel_last_error: Option<String>,
     pub tunnel_owner: Option<String>,
 }
 
@@ -78,6 +80,8 @@ pub struct HeartbeatRequest {
     pub local_serving_ready: Option<bool>,
     pub tun0_present: Option<bool>,
     pub wg_handshake_recent: Option<bool>,
+    pub reverse_tunnel_connected: Option<bool>,
+    pub reverse_tunnel_last_error: Option<String>,
     pub tunnel_owner: Option<String>,
 }
 
@@ -112,6 +116,8 @@ pub struct DeviceRecord {
     pub local_serving_ready: Option<bool>,
     pub tun0_present: Option<bool>,
     pub wg_handshake_recent: Option<bool>,
+    pub reverse_tunnel_connected: Option<bool>,
+    pub reverse_tunnel_last_error: Option<String>,
     pub tunnel_owner: Option<String>,
     pub last_heartbeat_at: Option<String>,
     pub availability: String,

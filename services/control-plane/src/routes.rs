@@ -1,6 +1,7 @@
 use axum::{
     Json, Router,
     extract::{Path, State},
+    http::StatusCode,
     routing::{get, post},
 };
 use proxy_core::{
@@ -31,8 +32,13 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn get_ip() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "ip": "178.168.186.196" }))
+async fn get_ip() -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({
+            "error": "control-plane /api/v1/ip is not a phone public IP observer",
+        })),
+    )
 }
 
 async fn list_devices(State(state): State<AppState>) -> Json<Vec<DeviceRecord>> {
@@ -268,6 +274,8 @@ mod tests {
             local_serving_ready: Some(true),
             tun0_present: Some(true),
             wg_handshake_recent: Some(true),
+            reverse_tunnel_connected: None,
+            reverse_tunnel_last_error: None,
             tunnel_owner: Some("stock_wireguard_bridge".into()),
             last_heartbeat_at: Some("1".into()),
             availability: "ready".into(),

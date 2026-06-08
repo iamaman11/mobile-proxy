@@ -90,12 +90,14 @@ pub async fn execute_rotation(
     let new_ip = observe_public_ip(&observer_urls).await;
 
     let command_error = command_output.as_ref().err().map(ToString::to_string);
+    let reverse_tunnel_ready = refresh_reverse_tunnel_after_rotation(&runtime_arc).await;
     let mut runtime = runtime_arc.lock().await;
     apply_rotation_result(
         &mut runtime,
         job_id,
         request.require_public_ip_change,
         command_output.is_ok(),
+        reverse_tunnel_ready,
         command_error,
         new_ip.clone(),
     );
@@ -114,6 +116,7 @@ fn apply_rotation_result(
     job_id: Uuid,
     require_public_ip_change: bool,
     command_succeeded: bool,
+    reverse_tunnel_ready: bool,
     command_error: Option<String>,
     new_ip: Option<String>,
 ) {
@@ -122,7 +125,10 @@ fn apply_rotation_result(
         .get(&job_id)
         .and_then(|job| job.old_public_ip.clone());
     let changed = old_ip.as_deref() != new_ip.as_deref();
-    let succeeded = command_succeeded && new_ip.is_some() && (!require_public_ip_change || changed);
+    let succeeded = command_succeeded
+        && reverse_tunnel_ready
+        && new_ip.is_some()
+        && (!require_public_ip_change || changed);
 
     if let Some(ip) = new_ip.clone() {
         runtime.health.last_public_ip = Some(ip);
@@ -149,8 +155,13 @@ fn apply_rotation_result(
     runtime.health.serving_failure_reason = if succeeded {
         None
     } else {
-        command_error
-            .or_else(|| Some("rotation did not produce the required public IP change".into()))
+        command_error.or_else(|| {
+            if reverse_tunnel_ready {
+                Some("rotation did not produce the required public IP change".into())
+            } else {
+                Some("reverse tunnel did not reconnect after rotation".into())
+            }
+        })
     };
     runtime.current_job = None;
 
@@ -163,6 +174,36 @@ fn apply_rotation_result(
         job.new_public_ip = new_ip;
         job.changed = Some(changed);
     }
+}
+
+async fn refresh_reverse_tunnel_after_rotation(runtime_arc: &SharedRuntime) -> bool {
+    let restart_tx = {
+        let runtime = runtime_arc.lock().await;
+        if runtime.tunnel_owner.as_deref() != Some("first_party_reverse_tunnel") {
+            return true;
+        }
+        runtime.reverse_tunnel_restart.clone()
+    };
+    let Some(restart_tx) = restart_tx else {
+        return false;
+    };
+    let next_generation = restart_tx.borrow().saturating_add(1);
+    if restart_tx.send(next_generation).is_err() {
+        return false;
+    }
+
+    for _ in 0..20 {
+        sleep(Duration::from_secs(1)).await;
+        let runtime = runtime_arc.lock().await;
+        if runtime
+            .reverse_tunnel
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.connected)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn normalize_rotate_request(mut request: RotateRequest) -> RotateRequest {
@@ -190,7 +231,7 @@ fn rotation_command(
 
 fn fallback_airplane_command(hold_secs: Option<u64>) -> String {
     format!(
-        "cmd connectivity airplane-mode enable && sleep {} && cmd connectivity airplane-mode disable",
+        "settings put global airplane_mode_on 1 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true && sleep {} && settings put global airplane_mode_on 0 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false",
         hold_secs.unwrap_or(DEFAULT_AIRPLANE_HOLD_SECS)
     )
 }
@@ -248,7 +289,7 @@ mod tests {
     use proxy_core::{HealthRecord, JobRecord, RuntimeReadiness};
     use uuid::Uuid;
 
-    use crate::rotation::apply_rotation_result;
+    use crate::rotation::{apply_rotation_result, fallback_airplane_command};
     use crate::state::{RotationCommands, RuntimeState};
 
     #[test]
@@ -285,6 +326,8 @@ mod tests {
                 local_serving_ready: Some(false),
                 tun0_present: Some(true),
                 wg_handshake_recent: Some(true),
+                reverse_tunnel_connected: None,
+                reverse_tunnel_last_error: None,
                 tunnel_owner: Some("stock_wireguard_bridge".into()),
             },
             true,
@@ -299,6 +342,7 @@ mod tests {
         apply_rotation_result(
             &mut runtime,
             job_id,
+            true,
             true,
             true,
             None,
@@ -320,5 +364,15 @@ mod tests {
         assert_eq!(runtime.health.local_serving_ready, Some(true));
         assert_eq!(runtime.health.degradation_reason_code, None);
         assert_eq!(runtime.health.serving_failure_reason, None);
+    }
+
+    #[test]
+    fn fallback_airplane_command_uses_settings_broadcast_path() {
+        let command = fallback_airplane_command(Some(5));
+        assert!(command.contains("settings put global airplane_mode_on 1"));
+        assert!(command.contains("android.intent.action.AIRPLANE_MODE --ez state true"));
+        assert!(command.contains("sleep 5"));
+        assert!(command.contains("settings put global airplane_mode_on 0"));
+        assert!(command.contains("android.intent.action.AIRPLANE_MODE --ez state false"));
     }
 }

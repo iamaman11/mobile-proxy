@@ -111,6 +111,15 @@ Acceptance:
 - no false success while runtime remains degraded
 - failure reason is machine-readable
 - route readiness distinguishes Android policy routing from true cellular unavailability
+- first-party reverse tunnel is refreshed after each successful cellular bounce before rotation is accepted as `succeeded`
+
+Latest live evidence:
+- invalid pre-fix matrix `target/rotation-matrix-20260607-sessionfix.jsonl` exposed the bug: rapid back-to-back rotations could leave VM public proxy streams returning `Empty reply from server` while phone-local health was already `healthy`
+- fix added: post-rotation QUIC client restart/refresh in `host-daemon`, session-aware disconnect handling in `reverse-tunnel-server`, and reverse tunnel connected state in phone/control-plane health records
+- valid post-fix matrix `target/rotation-matrix-20260608-rt-refresh-4s-strict-retry.jsonl`: `4s` programmatic airplane bounce passed `30/30`; every run changed IP, returned to `healthy`, kept `reverse_tunnel_connected=true`, and public proxy smoke returned a non-empty carrier IPv4
+- supporting matrix `target/rotation-matrix-20260608-rt-refresh-4s5s.jsonl`: `4s` and `5s` both passed `30/30` for job + health + reverse-tunnel readiness; single-shot public smoke had transient empty bodies, so the strict retry matrix is the acceptance source
+- measured rejected windows before the refresh fix: `1s=23/30`, `2s=26/30`, `3s=28/30`; they do not meet the `>=99%` rule
+- selected minimum window: `4s`
 
 ## Recovery drills
 
@@ -179,4 +188,13 @@ Current live destructive test result:
 - recovery fixes added on 2026-06-07: Android bootstrap now runs a watchdog loop for `runtime-supervisor`; supervisor no longer exits on failed Android recovery commands; proxy restarts in reverse-tunnel mode refresh `host-daemon` and the QUIC session
 - live recovery drills passed on 2026-06-07 for `host-daemon` kill, `sing-box` kill, `runtime-supervisor` kill, VM `mobile-reverse-tunnel-server.service` restart, one full phone reboot, and one full VM reboot
 - QUIC keepalive/idle timeout added so phone reconnects automatically after VM reverse tunnel service restart
-- remaining non-10/10 blocker after live reverse switch: repeated destructive matrices, rotation matrix, and soak have not yet been completed for the new first-party reverse-tunnel runtime
+- 2026-06-08 hardening completed: control-plane `/api/v1/ip` no longer returns a stale fake observer IP; phone observer uses external `api.ipify.org`; airplane fallback uses Android `settings put global airplane_mode_on` plus `AIRPLANE_MODE` broadcast
+- 2026-06-08 watchdog fix completed: Android runtime watchdog now runs from `runtime-watchdog.sh`, so `pkill runtime-supervisor` no longer kills the watchdog command line; installer cleanup removes both old and new watchdog forms before applying a release
+- 2026-06-08 reverse tunnel health fix completed: `HealthRecord`, heartbeat, and control-plane records include `reverse_tunnel_connected` and `reverse_tunnel_last_error`; first-party reverse-tunnel health cannot be `healthy` unless QUIC client status is connected
+- 2026-06-08 reverse tunnel session fix completed: stale session disconnects no longer delete newer active server connections
+- 2026-06-08 post-rotation refresh completed: after airplane bounce, host-daemon restarts the QUIC reverse tunnel client and waits for a fresh connected session before accepting rotation success
+- live releases after hardening: VM `first-party-quic-live-20260607-sessionfix`, phone `first-party-quic-phone-20260608-rotation-rt-refresh`
+- `cargo fmt --check && cargo test && cargo clippy --all-targets --all-features -- -D warnings` passed after these changes
+- `operator-cli verify-device --required-tunnel-owner first_party_reverse_tunnel` passed after VM restart and after `runtime-supervisor` kill recovery
+- strict rotation acceptance passed for selected `4s`: `target/rotation-matrix-20260608-rt-refresh-4s-strict-retry.jsonl` reports `30/30`
+- remaining non-10/10 blocker after live reverse switch: long soak and high-count reboot/process-kill drills still need to be expanded from smoke/destructive spot checks to the full counts above

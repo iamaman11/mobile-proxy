@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     if let Some(reverse_tunnel) = loaded.reverse_tunnel {
-        spawn_reverse_tunnel(reverse_tunnel);
+        spawn_reverse_tunnel(state.runtime.clone(), reverse_tunnel).await;
     }
     {
         let runtime_arc = state.runtime.clone();

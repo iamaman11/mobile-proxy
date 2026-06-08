@@ -89,6 +89,7 @@ pub struct ProbeConfig {
     pub observer_urls: Vec<String>,
     pub proxy_listen_address: String,
     pub wireguard_enabled: bool,
+    pub tunnel_owner: Option<String>,
 }
 
 pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
@@ -193,6 +194,8 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         local_serving_ready: None,
         tun0_present: None,
         wg_handshake_recent: None,
+        reverse_tunnel_connected: None,
+        reverse_tunnel_last_error: None,
         tunnel_owner: tunnel_owner.clone(),
     };
 
@@ -213,6 +216,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
             observer_urls,
             proxy_listen_address,
             wireguard_enabled,
+            tunnel_owner,
         },
     })
 }

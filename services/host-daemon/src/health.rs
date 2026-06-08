@@ -42,17 +42,35 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
         if let Some(ip) = snapshot.public_ip {
             runtime.health.last_public_ip = Some(ip);
         }
+        let reverse_tunnel_required =
+            config.tunnel_owner.as_deref() == Some("first_party_reverse_tunnel");
+        let reverse_tunnel_ready = !reverse_tunnel_required
+            || runtime
+                .reverse_tunnel
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.connected);
+        runtime.health.reverse_tunnel_connected = runtime
+            .reverse_tunnel
+            .as_ref()
+            .map(|snapshot| snapshot.connected);
+        runtime.health.reverse_tunnel_last_error = runtime
+            .reverse_tunnel
+            .as_ref()
+            .and_then(|snapshot| snapshot.last_error.clone());
 
         let healthy = snapshot.cellular_route_ready
             && snapshot.proxy_bind_ready
             && snapshot.local_serving_ready
             && snapshot.wireguard_path_ready
+            && reverse_tunnel_ready
             && public_probe_ready
             && runtime.current_job.is_none();
         runtime.health.readiness_state = if healthy {
             RuntimeReadiness::Healthy.to_string()
         } else if config.wireguard_enabled && !snapshot.wireguard_path_ready {
             RuntimeReadiness::WaitingWireguard.to_string()
+        } else if reverse_tunnel_required && !reverse_tunnel_ready {
+            RuntimeReadiness::StartingProxy.to_string()
         } else if !snapshot.cellular_route_ready {
             RuntimeReadiness::WaitingCellular.to_string()
         } else {
@@ -68,6 +86,8 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
             None
         } else if config.wireguard_enabled && !snapshot.wireguard_path_ready {
             Some("wireguard_path_not_ready".into())
+        } else if reverse_tunnel_required && !reverse_tunnel_ready {
+            Some("reverse_tunnel_not_ready".into())
         } else if !snapshot.cellular_route_ready {
             Some("cellular_route_missing".into())
         } else if !snapshot.proxy_bind_ready {
@@ -85,6 +105,7 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
                 "cellular_route_missing" => "cellular route is not ready".into(),
                 "proxy_bind_failed" => "proxy is not accepting local connections".into(),
                 "wireguard_path_not_ready" => "WireGuard path is not ready".into(),
+                "reverse_tunnel_not_ready" => "reverse tunnel is not connected".into(),
                 "public_probe_failed" => "public IP observer probe failed".into(),
                 _ => "local serving probe failed".into(),
             });

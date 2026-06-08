@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use proxy_core::{HealthRecord, JobRecord};
-use tokio::sync::Mutex;
+use reverse_tunnel::ClientSnapshot;
+use tokio::sync::{Mutex, watch};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -21,6 +22,8 @@ pub struct RuntimeState {
     pub tunnel_owner: Option<String>,
     pub proxy_listen_address: String,
     pub proxy_pid: Option<u32>,
+    pub reverse_tunnel: Option<ClientSnapshot>,
+    pub reverse_tunnel_restart: Option<watch::Sender<u64>>,
     pub rotation_commands: RotationCommands,
     pub observer_urls: Vec<String>,
 }
@@ -50,6 +53,8 @@ impl RuntimeState {
             tunnel_owner,
             proxy_listen_address,
             proxy_pid: None,
+            reverse_tunnel: None,
+            reverse_tunnel_restart: None,
             rotation_commands,
             observer_urls,
         }

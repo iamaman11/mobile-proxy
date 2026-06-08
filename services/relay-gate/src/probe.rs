@@ -78,6 +78,8 @@ mod tests {
             local_serving_ready: Some(true),
             tun0_present: Some(true),
             wg_handshake_recent: Some(true),
+            reverse_tunnel_connected: None,
+            reverse_tunnel_last_error: None,
             tunnel_owner: Some("stock_wireguard_bridge".into()),
             last_heartbeat_at: Some("1".into()),
             availability: "ready".into(),

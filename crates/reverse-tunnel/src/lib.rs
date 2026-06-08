@@ -126,7 +126,16 @@ impl ReverseTunnelServerState {
                 .map(|session| session.node_id.clone())
         }?;
         drop(sessions);
-        self.connections.lock().await.get(&selected_node).cloned()
+        let connection = self.connections.lock().await.get(&selected_node).cloned()?;
+        if connection.close_reason().is_none() {
+            return Some(connection);
+        }
+
+        self.connections.lock().await.remove(&selected_node);
+        if let Some(session) = self.sessions.lock().await.get_mut(&selected_node) {
+            session.connected = false;
+        }
+        None
     }
 }
 
@@ -161,7 +170,7 @@ pub async fn run_client(
         snapshot.attempts += 1;
         let _ = status.send(snapshot.clone());
 
-        match connect_and_pump(&config, session_id, &mut shutdown, &mut snapshot).await {
+        match connect_and_pump(&config, session_id, &mut shutdown, &mut snapshot, &status).await {
             Ok(()) => {
                 snapshot.connected = false;
                 snapshot.last_error = None;
@@ -300,9 +309,10 @@ async fn connect_and_pump(
     session_id: Uuid,
     shutdown: &mut watch::Receiver<bool>,
     snapshot: &mut ClientSnapshot,
+    status: &watch::Sender<ClientSnapshot>,
 ) -> Result<()> {
     if matches!(config.transport, TunnelTransport::Quic { .. }) {
-        return connect_and_pump_quic(config, session_id, shutdown, snapshot).await;
+        return connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await;
     }
     let stream = timeout(
         config.connect_timeout,
@@ -323,6 +333,7 @@ async fn connect_and_pump(
 
     snapshot.connected = true;
     snapshot.last_error = None;
+    let _ = status.send(snapshot.clone());
     let mut sequence = snapshot.sent_heartbeats;
 
     loop {
@@ -345,6 +356,7 @@ async fn connect_and_pump(
                     sequence,
                 })).await?;
                 snapshot.sent_heartbeats = sequence;
+                let _ = status.send(snapshot.clone());
             }
         }
     }
@@ -355,6 +367,7 @@ async fn connect_and_pump_quic(
     session_id: Uuid,
     shutdown: &mut watch::Receiver<bool>,
     snapshot: &mut ClientSnapshot,
+    status: &watch::Sender<ClientSnapshot>,
 ) -> Result<()> {
     let TunnelTransport::Quic {
         server_name,
@@ -384,6 +397,7 @@ async fn connect_and_pump_quic(
 
     snapshot.connected = true;
     snapshot.last_error = None;
+    let _ = status.send(snapshot.clone());
     let mut sequence = snapshot.sent_heartbeats;
     let proxy_connection = connection.clone();
     let local_proxy_addr = config.local_proxy_addr;
@@ -421,6 +435,7 @@ async fn connect_and_pump_quic(
                     sequence,
                 })).await?;
                 snapshot.sent_heartbeats = sequence;
+                let _ = status.send(snapshot.clone());
             }
         }
     }
@@ -681,13 +696,17 @@ async fn mark_heartbeat(state: &ReverseTunnelServerState, heartbeat: &TunnelHear
 
 async fn mark_disconnected(state: &ReverseTunnelServerState, hello: &TunnelHello) {
     let mut sessions = state.sessions.lock().await;
+    let mut remove_connection = false;
     if let Some(session) = sessions.get_mut(&hello.node_id)
         && session.session_id == hello.session_id
     {
         session.connected = false;
+        remove_connection = true;
     }
     drop(sessions);
-    state.connections.lock().await.remove(&hello.node_id);
+    if remove_connection {
+        state.connections.lock().await.remove(&hello.node_id);
+    }
 }
 
 async fn read_optional_line<R>(reader: &mut R) -> Result<Option<String>>
@@ -870,6 +889,32 @@ mod tests {
         server_shutdown_tx.send(true).unwrap();
         server.await.unwrap().unwrap();
         drop(status_rx);
+    }
+
+    #[tokio::test]
+    async fn stale_disconnect_does_not_clear_newer_session() {
+        let state = ReverseTunnelServerState::default();
+        let old = TunnelHello {
+            node_id: "test-phone".into(),
+            session_id: Uuid::new_v4(),
+            protocol_version: 1,
+            auth_token: "test-token".into(),
+        };
+        let new = TunnelHello {
+            node_id: old.node_id.clone(),
+            session_id: Uuid::new_v4(),
+            protocol_version: 1,
+            auth_token: "test-token".into(),
+        };
+
+        mark_connected(&state, &old, None).await;
+        mark_connected(&state, &new, None).await;
+        mark_disconnected(&state, &old).await;
+
+        let sessions = state.snapshot().await;
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, new.session_id);
+        assert!(sessions[0].connected);
     }
 
     #[tokio::test]

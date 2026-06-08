@@ -7,6 +7,7 @@ LOG_DIR="/data/local/tmp/mobile-proxy-logs"
 BOOT_LOG="$LOG_DIR/runtime-boot.log"
 SUPERVISOR_LOG="$LOG_DIR/runtime-supervisor.log"
 WATCHDOG_PID="$LOG_DIR/runtime-watchdog.pid"
+WATCHDOG_SCRIPT="$LOG_DIR/runtime-watchdog.sh"
 
 export PATH="$BIN:$PATH"
 
@@ -35,7 +36,9 @@ if [ -f "$WATCHDOG_PID" ] && kill -0 "$(cat "$WATCHDOG_PID")" 2>/dev/null; then
   exit 0
 fi
 
-nohup sh -c '
+cat > "$WATCHDOG_SCRIPT" <<'EOF'
+#!/system/bin/sh
+set -u
 ROOT="$1"
 BIN="$ROOT/bin"
 LOG_DIR="/data/local/tmp/mobile-proxy-logs"
@@ -48,5 +51,8 @@ while true; do
   date "+%Y-%m-%dT%H:%M:%S%z runtime_supervisor_exited code=$code; restarting" >> "$SUPERVISOR_LOG"
   sleep 2
 done
-' mobile-proxy-runtime-watchdog "$ROOT" >/dev/null 2>&1 &
+EOF
+chmod 0700 "$WATCHDOG_SCRIPT"
+
+nohup sh "$WATCHDOG_SCRIPT" "$ROOT" >/dev/null 2>&1 &
 log_boot "runtime_watchdog_spawned pid=$!"

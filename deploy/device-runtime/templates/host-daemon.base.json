@@ -10,7 +10,6 @@
     "poll_interval_secs": 5
   },
   "observer_urls": [
-    "{{CONTROL_PLANE_URL}}/api/v1/ip",
     "https://api.ipify.org?format=json"
   ],
   "proxy": {
@@ -56,7 +55,7 @@
     },
     "airplane_bounce": {
       "enabled": true,
-      "command": "cmd connectivity airplane-mode enable && sleep {{AIRPLANE_HOLD_SECS}} && cmd connectivity airplane-mode disable"
+      "command": "settings put global airplane_mode_on 1 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true && sleep {{AIRPLANE_HOLD_SECS}} && settings put global airplane_mode_on 0 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false"
     },
     "network_mode_bounce": {
       "enabled": true,
