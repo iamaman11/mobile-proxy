@@ -411,7 +411,11 @@ async fn proxy_smoke(manifest: &DeviceManifest) -> Result<()> {
     for _ in 0..5 {
         match client.get("http://api.ipify.org").send().await {
             Ok(response) => match response.error_for_status() {
-                Ok(_) => return Ok(()),
+                Ok(response) => match response.text().await {
+                    Ok(body) if is_ipv4(body.trim()) => return Ok(()),
+                    Ok(body) => last_error = Some(format!("invalid proxy IP body: {body:?}")),
+                    Err(err) => last_error = Some(err.to_string()),
+                },
                 Err(err) => last_error = Some(err.to_string()),
             },
             Err(err) => last_error = Some(err.to_string()),
@@ -422,6 +426,31 @@ async fn proxy_smoke(manifest: &DeviceManifest) -> Result<()> {
         "proxy smoke failed after retries: {}",
         last_error.unwrap_or_else(|| "unknown error".into())
     )
+}
+
+fn is_ipv4(value: &str) -> bool {
+    let mut parts = value.split('.');
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    if parse_ipv4_octet(first).is_none() {
+        return false;
+    }
+    let mut count = 1;
+    for part in parts {
+        count += 1;
+        if parse_ipv4_octet(part).is_none() {
+            return false;
+        }
+    }
+    count == 4
+}
+
+fn parse_ipv4_octet(value: &str) -> Option<u8> {
+    if value.is_empty() || (value.len() > 1 && value.starts_with('0')) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> {
@@ -540,7 +569,7 @@ fn write_temp_file(name: &str, body: &str) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_active_vpn_owner_uid, parse_package_uid};
+    use super::{is_ipv4, parse_active_vpn_owner_uid, parse_package_uid};
 
     #[test]
     fn parses_package_uid() {
@@ -562,5 +591,15 @@ mod tests {
     fn ignores_non_vpn_network_owner_uid() {
         let dump = "NetworkAgentInfo{ nc{[ Transports: CELLULAR Capabilities: INTERNET OwnerUid: 1000 ]} }\n";
         assert_eq!(parse_active_vpn_owner_uid(dump), None);
+    }
+
+    #[test]
+    fn validates_proxy_smoke_ipv4_body() {
+        assert!(is_ipv4("178.168.185.116"));
+        assert!(!is_ipv4(""));
+        assert!(!is_ipv4("178.168.185"));
+        assert!(!is_ipv4("178.168.185.999"));
+        assert!(!is_ipv4("178.168.185.01"));
+        assert!(!is_ipv4("not-an-ip"));
     }
 }
