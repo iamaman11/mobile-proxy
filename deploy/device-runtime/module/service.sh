@@ -21,6 +21,17 @@ log_boot() {
   echo "$(timestamp) $*" >> "$BOOT_LOG"
 }
 
+watchdog_running() {
+  if [ ! -f "$WATCHDOG_PID" ]; then
+    return 1
+  fi
+  pid="$(cat "$WATCHDOG_PID" 2>/dev/null || true)"
+  if [ -z "$pid" ] || [ ! -r "/proc/$pid/cmdline" ]; then
+    return 1
+  fi
+  tr '\000' ' ' < "/proc/$pid/cmdline" | grep -q "$WATCHDOG_SCRIPT"
+}
+
 if [ ! -x "$BIN/runtime-supervisor" ]; then
   echo "missing runtime-supervisor binary: $BIN/runtime-supervisor" >&2
   exit 1
@@ -31,10 +42,11 @@ if [ ! -f "$ROOT/config/host-daemon.json" ]; then
   exit 1
 fi
 
-if [ -f "$WATCHDOG_PID" ] && kill -0 "$(cat "$WATCHDOG_PID")" 2>/dev/null; then
+if watchdog_running; then
   log_boot "runtime_watchdog_already_running pid=$(cat "$WATCHDOG_PID")"
   exit 0
 fi
+rm -f "$WATCHDOG_PID"
 
 cat > "$WATCHDOG_SCRIPT" <<'EOF'
 #!/system/bin/sh

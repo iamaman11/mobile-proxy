@@ -13,7 +13,10 @@ use tracing::warn;
 
 use crate::cli::Cli;
 use crate::config::load_config;
-use crate::health::{SupervisorState, fetch_health, reconcile_health, reconcile_wireguard};
+use crate::health::{
+    SupervisorState, fetch_health, reconcile_health, reconcile_startup_cellular_bootstrap,
+    reconcile_wireguard,
+};
 use crate::process::{RuntimeChildren, cleanup_stale_runtime_processes};
 
 #[tokio::main]
@@ -28,6 +31,7 @@ async fn main() -> Result<()> {
     let mut state = SupervisorState::new();
 
     cleanup_stale_runtime_processes();
+    reconcile_startup_cellular_bootstrap(&config, &mut state);
 
     loop {
         children.ensure(&config)?;

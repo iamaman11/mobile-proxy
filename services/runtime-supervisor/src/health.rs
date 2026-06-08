@@ -5,8 +5,8 @@ use proxy_core::HealthRecord;
 use tracing::{info, warn};
 
 use crate::android::{
-    bounce_mobile_data, ensure_cellular_default_route, kick_first_party_vpn_service,
-    kick_stock_wireguard_bridge, tun0_ready,
+    bootstrap_cellular_data, bounce_mobile_data, ensure_cellular_default_route,
+    kick_first_party_vpn_service, kick_stock_wireguard_bridge, tun0_ready,
 };
 use crate::config::{SupervisorConfig, TunnelOwner};
 
@@ -66,6 +66,7 @@ pub fn reconcile_health(
     }
 
     if health.cellular_route_ready != Some(false) {
+        reconcile_reverse_tunnel_cellular_bootstrap(config, state, health);
         return Ok(());
     }
     if !route_repair_allowed(config, state) {
@@ -85,6 +86,52 @@ pub fn reconcile_health(
     }
 
     Ok(())
+}
+
+pub fn reconcile_startup_cellular_bootstrap(
+    config: &SupervisorConfig,
+    state: &mut SupervisorState,
+) {
+    if config.tunnel_owner != TunnelOwner::FirstPartyReverseTunnel {
+        return;
+    }
+    if !route_repair_allowed(config, state) {
+        return;
+    }
+
+    state.last_route_repair = Some(Instant::now());
+    if let Err(err) = bootstrap_cellular_data() {
+        warn!("startup cellular bootstrap failed: {err:#}");
+    }
+}
+
+fn reconcile_reverse_tunnel_cellular_bootstrap(
+    config: &SupervisorConfig,
+    state: &mut SupervisorState,
+    health: &HealthRecord,
+) {
+    if config.tunnel_owner != TunnelOwner::FirstPartyReverseTunnel || health.serving {
+        return;
+    }
+
+    let Some(reason) = health.degradation_reason_code.as_deref() else {
+        return;
+    };
+    if !matches!(reason, "public_probe_failed" | "reverse_tunnel_not_ready") {
+        return;
+    }
+    if !route_repair_allowed(config, state) {
+        return;
+    }
+
+    state.last_route_repair = Some(Instant::now());
+    info!(
+        "cellular bootstrap triggered readiness={} reason={reason}",
+        health.readiness_state
+    );
+    if let Err(err) = bootstrap_cellular_data() {
+        warn!("cellular bootstrap failed: {err:#}");
+    }
 }
 
 fn kick_tunnel(config: &SupervisorConfig) {

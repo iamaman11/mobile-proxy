@@ -40,7 +40,7 @@
     "connect_timeout_ms": 2000,
     "heartbeat_interval_ms": 2000,
     "reconnect_floor_ms": 1000,
-    "reconnect_ceiling_ms": 30000
+    "reconnect_ceiling_ms": 5000
   },
   "network": {
     "cellular_only": true,

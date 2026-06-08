@@ -197,4 +197,13 @@ Current live destructive test result:
 - `cargo fmt --check && cargo test && cargo clippy --all-targets --all-features -- -D warnings` passed after these changes
 - `operator-cli verify-device --required-tunnel-owner first_party_reverse_tunnel` passed after VM restart and after `runtime-supervisor` kill recovery
 - strict rotation acceptance passed for selected `4s`: `target/rotation-matrix-20260608-rt-refresh-4s-strict-retry.jsonl` reports `30/30`
-- remaining non-10/10 blocker after live reverse switch: long soak and high-count reboot/process-kill drills still need to be expanded from smoke/destructive spot checks to the full counts above
+- 2026-06-08 counted phone process recovery passed: `target/recovery-drill-phone-processes-20260608.jsonl` reports `host-daemon=20/20`, `sing-box=20/20`, and `runtime-supervisor=20/20`
+- 2026-06-08 counted VM service recovery passed: `target/recovery-drill-vm-services-20260608-retry.jsonl` reports `mobile-relaycontrolpoint=20/20`, `mobile-relay-gate=20/20`, and `mobile-public-proxy=20/20`
+- 2026-06-08 VM reverse-tunnel restart backoff bug fixed: the phone QUIC client now resets reconnect backoff after a previously connected session drops; `target/recovery-drill-vm-reverse-tunnel-20260608-backoff-reset.jsonl` reports `mobile-reverse-tunnel-server=20/20`, median `14.357s`, p95 `17.358s`
+- 2026-06-08 nginx restart recovery passed: `target/recovery-drill-vm-nginx-20260608.jsonl` reports `20/20`, median `1.09s`, p95 `2.324s`
+- 2026-06-08 full VM reset recovery passed: `target/recovery-drill-vm-reboots-20260608.jsonl` reports `10/10`, median `28.916s`, p95 `38.042s`
+- 2026-06-08 Android boot hook hardening completed: `/data/adb/service.d/99-mobile-proxy-runtime.sh` no longer has a fixed `sleep 20`; it starts the active release immediately with a bounded retry loop and timestamp logs
+- 2026-06-08 Android watchdog stale-PID bug fixed: `service.sh` now validates the watchdog PID through `/proc/<pid>/cmdline`, not only `kill -0`; this prevents a reused Android PID from blocking runtime startup after reboot
+- 2026-06-08 phone reboot recovery after stale-PID fix passed as a smoke: `target/recovery-drill-phone-reboots-20260608-watchdog-pidfix-smoke.jsonl` reports automatic recovery and public proxy success, but elapsed time is `141.324s`
+- remaining non-10/10 blocker after live reverse switch: phone full-reboot recovery on `SM-A022G`/`MTS BY` is reliable but too slow for the target p95 `<60s`; observed successful reboot recoveries are roughly `138-145s`, with about `44s` to ADB/root and about `92-96s` additional wait for cellular/reverse-tunnel health
+- remaining work before claiming 10/10: solve or explicitly re-baseline the modem/cellular boot latency, then run the full `20` phone-reboot matrix and the long soak on the final runtime

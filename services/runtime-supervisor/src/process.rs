@@ -1,3 +1,4 @@
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
@@ -93,12 +94,16 @@ fn child_exited(child: &mut Option<Child>) -> Result<bool> {
 
 fn spawn_host_daemon(config: &SupervisorConfig) -> Result<Child> {
     ensure_executable(&config.host_binary)?;
+    let stdout = append_log("/data/local/tmp/mobile-proxy-logs/host-daemon.log")?;
+    let stderr = stdout
+        .try_clone()
+        .context("failed to clone host-daemon log")?;
     let child = Command::new(&config.host_binary)
         .arg("--config")
         .arg(&config.host_config)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
         .spawn()
         .with_context(|| format!("failed to spawn {}", config.host_binary.display()))?;
     info!("host-daemon spawned pid={}", child.id());
@@ -107,16 +112,26 @@ fn spawn_host_daemon(config: &SupervisorConfig) -> Result<Child> {
 
 fn spawn_proxy(config: &SupervisorConfig) -> Result<Child> {
     ensure_executable(&config.proxy_binary)?;
+    let stdout = append_log("/data/local/tmp/mobile-proxy-logs/sing-box.log")?;
+    let stderr = stdout.try_clone().context("failed to clone sing-box log")?;
     let child = Command::new(&config.proxy_binary)
         .args(&config.proxy_args)
         .current_dir(&config.proxy_working_dir)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
         .spawn()
         .with_context(|| format!("failed to spawn {}", config.proxy_binary.display()))?;
     info!("proxy spawned pid={}", child.id());
     Ok(child)
+}
+
+fn append_log(path: &str) -> Result<std::fs::File> {
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("failed to open runtime log {path}"))
 }
 
 fn ensure_executable(path: &Path) -> Result<()> {

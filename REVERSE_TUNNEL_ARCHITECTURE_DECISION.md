@@ -93,7 +93,7 @@ Result on 2026-06-06:
 
 Before this can be called live 10/10:
 
-- expand destructive recovery drills from smoke checks to the full counted matrix for phone reboot, VM reboot, process kill, mobile data loss, and airplane toggle
+- complete the phone reboot matrix after fixing the current `SM-A022G`/`MTS BY` cellular boot latency; current automatic recovery is reliable in smoke but takes roughly `138-145s`, above the p95 `<60s` target
 - replace JSON control frames with compact binary frames before performance acceptance
 - run long soak on the first-party reverse-tunnel runtime
 
@@ -116,5 +116,9 @@ On 2026-06-08, live hardening closed the main reverse-tunnel recovery bugs:
 - Android watchdog process no longer matches `pkill -f runtime-supervisor`
 - post-rotation airplane bounce restarts the QUIC client and waits for a fresh connected session
 - `4s` programmatic airplane bounce passed strict live validation `30/30` with IP change, healthy return, connected reverse tunnel, and public proxy carrier-IP smoke
+- counted phone process recovery passed for `host-daemon`, `sing-box`, and `runtime-supervisor` kills, `20/20` each
+- counted VM service recovery passed for `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-public-proxy`, `mobile-reverse-tunnel-server`, and `nginx`; full VM reset passed `10/10`
+- QUIC client reconnect backoff now resets after a connected session drops, preventing VM reverse-tunnel service restarts from growing recovery time over repeated drills
+- Android `service.sh` now validates the watchdog PID by `/proc/<pid>/cmdline`, preventing stale PID reuse from blocking runtime startup after phone reboot
 
-The architecture is not final 10/10 until long soak and the full counted destructive recovery matrix pass on this runtime.
+The architecture is not final 10/10 until phone reboot recovery meets the accepted threshold or the threshold is explicitly re-baselined for this hardware/operator, followed by the full counted phone-reboot matrix and long soak.

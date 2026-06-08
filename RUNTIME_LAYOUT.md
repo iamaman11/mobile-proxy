@@ -20,14 +20,17 @@ Boot behavior:
 - `/data/adb/service.d/99-mobile-proxy-runtime.sh` is a minimal boot hook that starts the active runtime release
 - `service.sh` is bootstrap-only and starts `bin/runtime-supervisor`
 - `runtime-supervisor` starts and supervises `host-daemon` and `sing-box`
-- `runtime-supervisor` attempts WireGuard activation when `tun0` is missing
-- when WireGuard is enabled, `runtime-supervisor` defers `sing-box` startup until `tun0` exists so proxy bind failures do not mask a missing tunnel
-- `runtime-supervisor` attempts route repair and falls back to data bounce when health reports missing cellular route
+- `runtime-supervisor` attempts WireGuard activation only when an optional WireGuard backend is enabled
+- when WireGuard is enabled, `runtime-supervisor` defers `sing-box` startup until `tun0` exists so proxy bind failures do not mask a missing optional tunnel
+- in the required `first_party_reverse_tunnel` path, `runtime-supervisor` starts `sing-box` on loopback and `host-daemon` owns the QUIC/TLS reverse tunnel to the VM
+- `runtime-supervisor` attempts route repair, mobile-data enable, and data bounce when health reports cellular or public reachability degradation
+- `service.sh` validates the watchdog PID by checking `/proc/<pid>/cmdline`, not only `kill -0`, so a stale PID reused by another Android process cannot block runtime startup
 - `host-daemon` reports health from real probes: cellular route, proxy TCP bind, public IP observer, `tun0`, and WireGuard gateway reachability
 - cellular route detection is Android policy-routing aware and accepts default routes in tables such as `rmnet*`, not only `main`
 - public serving is exposed only after VM gate confirms readiness
 - legacy shell route guards such as `/data/adb/service.d/99-mobile-proxy-routefix.sh` must not exist after a Rust-managed install
-- current remaining gap: stock WireGuard Android tunnel activation still requires UI or a permissioned companion APK; raw shell/root broadcasts are blocked by Android background-execution/permission rules
+- stock WireGuard and Android `VpnService` are optional backends, not the required production traffic path
+- current remaining recovery gap on `SM-A022G`: after full phone reboot, Android/MTS cellular Internet becomes usable roughly 135-145 seconds after reboot in live tests, so the system recovers automatically but does not yet meet the target p95 `<60s` phone-reboot threshold
 
 ## VM
 
@@ -50,6 +53,7 @@ Active services:
 
 - `mobile-relaycontrolpoint.service`
 - `mobile-relay-gate.service`
+- `mobile-reverse-tunnel-server.service`
 - `mobile-public-proxy.service`
 - `nginx.service`
 
@@ -82,3 +86,5 @@ Current exposure model:
 - `airplane_bounce` rotation holds airplane mode for 4 seconds before disabling it
 - current deployment is effectively IPv4-only
 - public relay is fail-closed
+- required live tunnel owner: `first_party_reverse_tunnel`
+- optional WireGuard backend remains installable for experiments/fallback, but is not required for production traffic

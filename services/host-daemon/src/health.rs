@@ -162,6 +162,8 @@ fn tun0_present() -> bool {
 fn wg_gateway_reachable() -> bool {
     Command::new("ping")
         .args(["-c", "1", "-W", "1", "10.66.66.1"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false)

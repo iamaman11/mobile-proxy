@@ -177,9 +177,13 @@ pub async fn run_client(
                 backoff = config.reconnect_floor;
             }
             Err(err) => {
+                let had_connected_session = snapshot.connected;
                 snapshot.connected = false;
                 snapshot.last_error = Some(err.to_string());
                 let _ = status.send(snapshot.clone());
+                if had_connected_session {
+                    backoff = config.reconnect_floor;
+                }
                 if sleep_or_shutdown(backoff, &mut shutdown).await {
                     return;
                 }
@@ -797,6 +801,49 @@ mod tests {
             let frame: ClientFrame = serde_json::from_str(raw).unwrap();
             assert!(matches!(frame, ClientFrame::Hello(_)));
         }
+    }
+
+    #[tokio::test]
+    async fn client_resets_backoff_after_connected_session_drops() {
+        let first_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = first_listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (status_tx, status_rx) = watch::channel(ClientSnapshot::new(Uuid::nil()));
+        let mut config = test_config(addr);
+        config.reconnect_floor = Duration::from_millis(20);
+        config.reconnect_ceiling = Duration::from_secs(5);
+        let client = tokio::spawn(run_client(config, shutdown_rx, status_tx));
+
+        let (first_stream, _) = first_listener.accept().await.unwrap();
+        let mut reader = BufReader::new(first_stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        wait_for_connected(status_rx.clone()).await;
+        drop(reader);
+        drop(first_listener);
+
+        sleep(Duration::from_millis(80)).await;
+        let second_listener = TcpListener::bind(addr).await.unwrap();
+        timeout(Duration::from_millis(500), second_listener.accept())
+            .await
+            .expect("client did not reconnect at floor backoff after connected drop")
+            .unwrap();
+
+        shutdown_tx.send(true).unwrap();
+        client.await.unwrap();
+    }
+
+    async fn wait_for_connected(mut status: watch::Receiver<ClientSnapshot>) {
+        timeout(Duration::from_secs(2), async move {
+            loop {
+                if status.borrow().connected {
+                    return;
+                }
+                status.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

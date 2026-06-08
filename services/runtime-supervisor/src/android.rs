@@ -86,6 +86,25 @@ pub fn ensure_cellular_default_route() -> Result<()> {
     Ok(())
 }
 
+pub fn bootstrap_cellular_data() -> Result<()> {
+    let mut failures = Vec::new();
+    for command in [
+        "svc wifi disable",
+        "settings put global mobile_data 1",
+        "svc data enable",
+    ] {
+        if let Err(err) = run_shell(command) {
+            failures.push(format!("{command}: {err:#}"));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!("cellular bootstrap failed: {}", failures.join("; "))
+    }
+}
+
 pub fn tun0_ready() -> bool {
     run_ip(&["-4", "addr", "show", "tun0"])
         .map(|output| output.contains("inet "))
