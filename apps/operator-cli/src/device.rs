@@ -538,9 +538,28 @@ fn detect_adb() -> Result<PathBuf> {
         .or_else(|_| env::var("USERNAME"))
         .unwrap_or_else(|_| "Bose".to_string());
 
-    let path_custom_tools = format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user);
-    let path_sdk = format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user);
+    #[cfg(windows)]
+    let (path_custom_tools, path_sdk) = (
+        format!("C:\\Users\\{}\\tools\\platform-tools\\adb.exe", user),
+        format!("C:\\Users\\{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe", user),
+    );
 
+    #[cfg(not(windows))]
+    let (path_custom_tools, path_sdk) = (
+        format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user),
+        format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user),
+    );
+
+    #[cfg(windows)]
+    let candidates = [
+        path_custom_tools.as_str(),
+        path_sdk.as_str(),
+        "C:\\Users\\Bose\\tools\\platform-tools\\adb.exe",
+        "C:\\Users\\Bose\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+        "adb",
+    ];
+
+    #[cfg(not(windows))]
     let candidates = [
         path_custom_tools.as_str(),
         path_sdk.as_str(),
@@ -549,10 +568,14 @@ fn detect_adb() -> Result<PathBuf> {
         "/usr/bin/adb",
         "adb",
     ];
+
     detect_tool(&candidates, "adb")
 }
 
 fn detect_windows_curl() -> Result<PathBuf> {
+    #[cfg(windows)]
+    let candidates = ["C:\\Windows\\System32\\curl.exe", "curl.exe"];
+    #[cfg(not(windows))]
     let candidates = ["/mnt/c/Windows/System32/curl.exe", "curl.exe"];
     detect_tool(&candidates, "curl.exe")
 }
