@@ -194,13 +194,13 @@ pub fn ensure_elf_machine(path: &Path, expected_machine: u16, label: &str) -> Re
     Ok(())
 }
 
-fn set_executable(path: &Path) -> Result<()> {
+fn set_executable(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(path)?.permissions();
+        let mut permissions = fs::metadata(_path)?.permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)?;
+        fs::set_permissions(_path, permissions)?;
     }
     Ok(())
 }
