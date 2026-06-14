@@ -230,11 +230,15 @@ pub async fn run_quic_server(
         bail!("run_quic_server requires TunnelTransport::Quic");
     };
     let key = quic_server_key(&config.transport)?;
-    let mut server_config = ServerConfig::with_single_cert(
-        vec![CertificateDer::from(server_cert_der.clone())],
-        key.into(),
-    )
-    .context("failed to create QUIC server config")?;
+    let mut crypto = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![CertificateDer::from(server_cert_der.clone())],
+            key.into(),
+        )
+        .context("failed to build rustls server config")?;
+    crypto.alpn_protocols = vec![b"mobile-proxy-tunnel".to_vec()];
+    let mut server_config = ServerConfig::with_crypto(Arc::new(quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?));
     *Arc::get_mut(&mut server_config.transport)
         .context("QUIC transport config is unexpectedly shared")? = quic_transport_config()?;
     let endpoint = Endpoint::server(server_config, bind_addr)?;
@@ -498,7 +502,11 @@ async fn handle_quic_control_stream(
 fn quic_client_config(server_cert_der: Vec<u8>) -> Result<ClientConfig> {
     let mut roots = RootCertStore::empty();
     roots.add(CertificateDer::from(server_cert_der))?;
-    let mut config = ClientConfig::with_root_certificates(Arc::new(roots))?;
+    let mut crypto = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    crypto.alpn_protocols = vec![b"mobile-proxy-tunnel".to_vec()];
+    let mut config = ClientConfig::new(Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto)?));
     config.transport_config(Arc::new(quic_transport_config()?));
     Ok(config)
 }

@@ -43,24 +43,30 @@
     }
   ],
   "route": {
-    "default_domain_resolver": "dns-cf"
+    "default_domain_resolver": "dns-mts1"
   },
   "dns": {
     "strategy": "ipv4_only",
     "servers": [
       {
         "type": "udp",
-        "tag": "dns-cf",
-        "server": "1.1.1.1",
+        "tag": "dns-mts1",
+        "server": "194.158.196.141",
         "server_port": 53
       },
       {
         "type": "udp",
-        "tag": "dns-google",
-        "server": "8.8.8.8",
+        "tag": "dns-mts2",
+        "server": "194.158.196.137",
+        "server_port": 53
+      },
+      {
+        "type": "udp",
+        "tag": "dns-cf",
+        "server": "1.1.1.1",
         "server_port": 53
       }
     ],
-    "final": "dns-cf"
+    "final": "dns-mts1"
   }
 }
