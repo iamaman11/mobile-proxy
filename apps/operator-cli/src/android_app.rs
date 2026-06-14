@@ -142,8 +142,17 @@ fn detect_adb() -> Result<PathBuf> {
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "Bose".to_string());
 
-    let path_custom_tools = PathBuf::from(format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user));
-    let path_sdk = PathBuf::from(format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user));
+    #[cfg(windows)]
+    let (path_custom_tools, path_sdk) = (
+        PathBuf::from(format!("C:\\Users\\{}\\tools\\platform-tools\\adb.exe", user)),
+        PathBuf::from(format!("C:\\Users\\{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe", user)),
+    );
+
+    #[cfg(not(windows))]
+    let (path_custom_tools, path_sdk) = (
+        PathBuf::from(format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user)),
+        PathBuf::from(format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user)),
+    );
 
     if path_custom_tools.is_file() {
         return Ok(path_custom_tools);
@@ -152,8 +161,17 @@ fn detect_adb() -> Result<PathBuf> {
         return Ok(path_sdk);
     }
 
-    let bose_custom_tools = PathBuf::from("/mnt/c/Users/Bose/tools/platform-tools/adb.exe");
-    let bose_sdk = PathBuf::from("/mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe");
+    #[cfg(windows)]
+    let (bose_custom_tools, bose_sdk) = (
+        PathBuf::from("C:\\Users\\Bose\\tools\\platform-tools\\adb.exe"),
+        PathBuf::from("C:\\Users\\Bose\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"),
+    );
+
+    #[cfg(not(windows))]
+    let (bose_custom_tools, bose_sdk) = (
+        PathBuf::from("/mnt/c/Users/Bose/tools/platform-tools/adb.exe"),
+        PathBuf::from("/mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
+    );
 
     if bose_custom_tools.is_file() {
         return Ok(bose_custom_tools);

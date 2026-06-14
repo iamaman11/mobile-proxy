@@ -460,7 +460,7 @@ fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> {
         command.arg("-s").arg(serial);
     }
     command.args(args);
-    let output = command.output().context("failed to start adb")?;
+    let output = command.output().with_context(|| format!("failed to start adb at {}", adb_path.display()))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
