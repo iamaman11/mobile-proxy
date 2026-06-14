@@ -124,18 +124,27 @@ struct ProbeSnapshot {
 }
 
 async fn probe_once(client: &reqwest::Client, config: &ProbeConfig) -> ProbeSnapshot {
-    let proxy_bind_ready = tcp_ready(&config.proxy_listen_address);
-    let tun0_present = tun0_present();
-    let wg_gateway_reachable = tun0_present && wg_gateway_reachable();
-    let wireguard_path_ready = !config.wireguard_enabled || (tun0_present && wg_gateway_reachable);
+    let config_clone = config.clone();
+    let blocking_res = tokio::task::spawn_blocking(move || {
+        let proxy_bind_ready = tcp_ready(&config_clone.proxy_listen_address);
+        let tun0_present = tun0_present();
+        let wg_gateway_reachable = tun0_present && wg_gateway_reachable();
+        let wireguard_path_ready = !config_clone.wireguard_enabled || (tun0_present && wg_gateway_reachable);
+        let cellular_route_ready = cellular_route_ready();
+        (proxy_bind_ready, tun0_present, wg_gateway_reachable, wireguard_path_ready, cellular_route_ready)
+    })
+    .await
+    .unwrap_or((false, false, false, false, false));
+
     let public_ip = fetch_public_ip(client, &config.observer_urls).await;
+
     ProbeSnapshot {
-        cellular_route_ready: cellular_route_ready(),
-        proxy_bind_ready,
-        local_serving_ready: proxy_bind_ready && wireguard_path_ready,
-        tun0_present,
-        wg_gateway_reachable,
-        wireguard_path_ready,
+        cellular_route_ready: blocking_res.4,
+        proxy_bind_ready: blocking_res.0,
+        local_serving_ready: blocking_res.0 && blocking_res.3,
+        tun0_present: blocking_res.1,
+        wg_gateway_reachable: blocking_res.2,
+        wireguard_path_ready: blocking_res.3,
         public_ip,
     }
 }
@@ -148,9 +157,9 @@ fn cellular_route_ready() -> bool {
 }
 
 fn is_cellular_route(line: &str) -> bool {
-    [" rmnet", " ccmni", " pdp", " wwan"]
+    ["rmnet", "ccmni", "pdp", "wwan"]
         .iter()
-        .any(|prefix| line.contains(&format!(" dev{prefix}")))
+        .any(|prefix| line.contains(&format!(" dev {prefix}")) || line.contains(&format!(" dev{prefix}")))
 }
 
 fn tun0_present() -> bool {

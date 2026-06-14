@@ -35,11 +35,11 @@ async fn main() -> Result<()> {
 
     loop {
         children.ensure(&config)?;
-        reconcile_wireguard(&config);
+        reconcile_wireguard(&config).await;
 
         match fetch_health(&client, &config).await {
             Ok(health) => {
-                if let Err(err) = reconcile_health(&config, &mut state, &health) {
+                if let Err(err) = reconcile_health(&config, &mut state, &health).await {
                     warn!("runtime health reconciliation failed: {err:#}");
                 }
             }

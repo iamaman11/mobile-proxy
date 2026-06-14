@@ -10,15 +10,23 @@ use crate::cli::InstallAndroidAppArgs;
 const IGNORED_DIRS: &[&str] = &["build", ".gradle", ".kotlin"];
 
 pub fn install_android_app(args: &InstallAndroidAppArgs) -> Result<()> {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "Bose".to_string());
+
+    let windows_build_dir = args.windows_build_dir.replace("Bose", &user);
+    let windows_build_dir_cmd = args.windows_build_dir_cmd.replace("Bose", &user);
+    let apk_windows_path = args.apk_windows_path.replace("Bose", &user);
+
     let project_dir = repo_root()?.join(&args.project_dir);
-    let build_dir = PathBuf::from(&args.windows_build_dir);
+    let build_dir = PathBuf::from(&windows_build_dir);
     copy_project(&project_dir, &build_dir)?;
     write_local_properties(&build_dir)?;
-    run_windows_gradle(&build_dir, &args.windows_build_dir_cmd)?;
+    run_windows_gradle(&build_dir, &windows_build_dir_cmd)?;
     verify_apk_exists(&build_dir)?;
 
     if !args.skip_install {
-        adb_install(args.device_serial.as_deref(), &args.apk_windows_path)?;
+        adb_install(args.device_serial.as_deref(), &apk_windows_path)?;
     }
 
     println!(
@@ -28,13 +36,20 @@ pub fn install_android_app(args: &InstallAndroidAppArgs) -> Result<()> {
         } else {
             " and installed"
         },
-        args.apk_windows_path
+        apk_windows_path
     );
     Ok(())
 }
 
 fn write_local_properties(build_dir: &Path) -> Result<()> {
-    let sdk_dir = "C:/Users/Bose/AppData/Local/Android/Sdk";
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "Bose".to_string());
+    
+    let sdk_dir = std::env::var("ANDROID_SDK_ROOT")
+        .or_else(|_| std::env::var("ANDROID_HOME"))
+        .unwrap_or_else(|_| format!("C:/Users/{}/AppData/Local/Android/Sdk", user));
+
     let local_properties = build_dir.join("local.properties");
     fs::write(&local_properties, format!("sdk.dir={sdk_dir}\n")).with_context(|| {
         format!(
@@ -123,15 +138,35 @@ fn adb_install(device_serial: Option<&str>, apk_windows_path: &str) -> Result<()
 }
 
 fn detect_adb() -> Result<PathBuf> {
-    let candidates = [
-        "/mnt/c/Users/Bose/tools/platform-tools/adb.exe",
-        "/mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe",
-    ];
-    candidates
-        .iter()
-        .map(PathBuf::from)
-        .find(|path| path.is_file())
-        .context("adb.exe not found")
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "Bose".to_string());
+
+    let path_custom_tools = PathBuf::from(format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user));
+    let path_sdk = PathBuf::from(format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user));
+
+    if path_custom_tools.is_file() {
+        return Ok(path_custom_tools);
+    }
+    if path_sdk.is_file() {
+        return Ok(path_sdk);
+    }
+
+    let bose_custom_tools = PathBuf::from("/mnt/c/Users/Bose/tools/platform-tools/adb.exe");
+    let bose_sdk = PathBuf::from("/mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe");
+
+    if bose_custom_tools.is_file() {
+        return Ok(bose_custom_tools);
+    }
+    if bose_sdk.is_file() {
+        return Ok(bose_sdk);
+    }
+
+    if Command::new("adb").arg("--version").output().is_ok() {
+        return Ok(PathBuf::from("adb"));
+    }
+
+    bail!("adb.exe not found")
 }
 
 fn repo_root() -> Result<PathBuf> {
@@ -167,7 +202,7 @@ mod tests {
 
         let content = std::fs::read_to_string(build_dir.join("local.properties"))
             .expect("read local.properties");
-        assert!(content.contains("sdk.dir=C:/Users/Bose/AppData/Local/Android/Sdk"));
+        assert!(content.starts_with("sdk.dir="));
 
         std::fs::remove_dir_all(build_dir).expect("cleanup temp build dir");
     }

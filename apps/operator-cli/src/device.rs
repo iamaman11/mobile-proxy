@@ -534,7 +534,16 @@ fn required_env(name: &str) -> Result<String> {
 }
 
 fn detect_adb() -> Result<PathBuf> {
+    let user = env::var("USER")
+        .or_else(|_| env::var("USERNAME"))
+        .unwrap_or_else(|_| "Bose".to_string());
+
+    let path_custom_tools = format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user);
+    let path_sdk = format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user);
+
     let candidates = [
+        path_custom_tools.as_str(),
+        path_sdk.as_str(),
         "/mnt/c/Users/Bose/tools/platform-tools/adb.exe",
         "/mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe",
         "/usr/bin/adb",

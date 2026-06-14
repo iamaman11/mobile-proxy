@@ -37,7 +37,7 @@ pub async fn fetch_health(
         .await?)
 }
 
-pub fn reconcile_wireguard(config: &SupervisorConfig) {
+pub async fn reconcile_wireguard(config: &SupervisorConfig) {
     if !config.wireguard_enabled {
         return;
     }
@@ -49,10 +49,10 @@ pub fn reconcile_wireguard(config: &SupervisorConfig) {
         tunnel_owner = config.tunnel_owner.as_str(),
         "wireguard enabled but tun0 is absent; attempting tunnel kick"
     );
-    kick_tunnel(config);
+    kick_tunnel(config).await;
 }
 
-pub fn reconcile_health(
+pub async fn reconcile_health(
     config: &SupervisorConfig,
     state: &mut SupervisorState,
     health: &HealthRecord,
@@ -62,7 +62,7 @@ pub fn reconcile_health(
             tunnel_owner = config.tunnel_owner.as_str(),
             "WireGuard gateway is unreachable; attempting tunnel kick"
         );
-        kick_tunnel(config);
+        kick_tunnel(config).await;
     }
 
     if health.cellular_route_ready != Some(false) {
@@ -82,6 +82,7 @@ pub fn reconcile_health(
     if let Err(err) = ensure_cellular_default_route() {
         warn!("direct route repair failed: {err:#}; bouncing mobile data");
         bounce_mobile_data(config.data_bounce_down_secs, config.data_bounce_settle_secs)
+            .await
             .context("mobile data bounce failed")?;
     }
 
@@ -134,7 +135,7 @@ fn reconcile_reverse_tunnel_cellular_bootstrap(
     }
 }
 
-fn kick_tunnel(config: &SupervisorConfig) {
+async fn kick_tunnel(config: &SupervisorConfig) {
     match config.tunnel_owner {
         TunnelOwner::FirstPartyVpnService => {
             if let Err(err) = kick_first_party_vpn_service(&config.app_tunnel_config) {
@@ -142,7 +143,7 @@ fn kick_tunnel(config: &SupervisorConfig) {
             }
         }
         TunnelOwner::FirstPartyReverseTunnel => {}
-        TunnelOwner::StockWireguardBridge => kick_stock_wireguard_bridge(),
+        TunnelOwner::StockWireguardBridge => kick_stock_wireguard_bridge().await,
     }
 }
 

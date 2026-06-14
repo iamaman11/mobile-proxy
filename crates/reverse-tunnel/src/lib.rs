@@ -17,6 +17,7 @@ use tokio::sync::{Mutex, watch};
 use tokio::time::{Instant, sleep, timeout};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+use subtle::ConstantTimeEq;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TunnelHello {
@@ -468,7 +469,7 @@ async fn handle_quic_control_stream(
     let ClientFrame::Hello(hello) = first else {
         bail!("reverse tunnel connection did not start with hello");
     };
-    if hello.auth_token != config.auth_token {
+    if !bool::from(hello.auth_token.as_bytes().ct_eq(config.auth_token.as_bytes())) {
         bail!("reverse tunnel authentication failed");
     }
     info!(node_id = %hello.node_id, session_id = %hello.session_id, "reverse tunnel authenticated");
@@ -591,7 +592,7 @@ async fn handle_server_connection(
     let ClientFrame::Hello(hello) = first else {
         bail!("reverse tunnel connection did not start with hello");
     };
-    if hello.auth_token != config.auth_token {
+    if !bool::from(hello.auth_token.as_bytes().ct_eq(config.auth_token.as_bytes())) {
         bail!("reverse tunnel authentication failed");
     }
     mark_connected(&state, &hello, None).await;
@@ -718,10 +719,43 @@ where
     R: AsyncBufRead + Unpin,
 {
     let mut line = String::new();
-    let bytes = reader.read_line(&mut line).await?;
-    if bytes == 0 {
-        return Ok(None);
+    const MAX_LINE_LENGTH: usize = 1024 * 1024; // 1 MB limit
+    let mut total_bytes = 0;
+
+    loop {
+        let buf = reader.fill_buf().await?;
+        if buf.is_empty() {
+            if total_bytes == 0 {
+                return Ok(None);
+            }
+            break;
+        }
+
+        let mut found_newline = false;
+        let mut chunk_len = 0;
+        for &b in buf {
+            chunk_len += 1;
+            if b == b'\n' {
+                found_newline = true;
+                break;
+            }
+        }
+
+        if total_bytes + chunk_len > MAX_LINE_LENGTH {
+            bail!("line length limit exceeded");
+        }
+
+        let s = std::str::from_utf8(&buf[..chunk_len]).context("invalid utf8 sequence")?;
+        line.push_str(s);
+        total_bytes += chunk_len;
+
+        reader.consume(chunk_len);
+
+        if found_newline {
+            break;
+        }
     }
+
     Ok(Some(line))
 }
 

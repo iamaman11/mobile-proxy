@@ -28,7 +28,14 @@ pub async fn wait_for_rotation(
     job_id: Uuid,
     poll_secs: u64,
 ) -> Result<(JobRecord, HealthRecord)> {
+    let started = std::time::Instant::now();
+    let max_wait = Duration::from_secs(300);
+
     loop {
+        if started.elapsed() > max_wait {
+            anyhow::bail!("timeout waiting for rotation job {}", job_id);
+        }
+
         let job: JobRecord = client
             .get(format!("{}/v1/jobs/{}", api, job_id))
             .headers(auth_headers(token)?)

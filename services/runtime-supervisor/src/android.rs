@@ -1,8 +1,10 @@
 use std::process::Command;
 use std::{fs, path::Path};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
+use tokio::time::sleep;
 
 pub fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
     let config = fs::read_to_string(config_path)
@@ -40,7 +42,7 @@ pub fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn kick_stock_wireguard_bridge() {
+pub async fn kick_stock_wireguard_bridge() {
     let _ = run_command(
         "am",
         &[
@@ -54,7 +56,7 @@ pub fn kick_stock_wireguard_bridge() {
             "com.example.mobileproxy/.TunnelCommandReceiver",
         ],
     );
-    let _ = run_shell("sleep 1");
+    sleep(Duration::from_secs(1)).await;
     if tun0_ready() {
         return;
     }
@@ -64,7 +66,7 @@ pub fn kick_stock_wireguard_bridge() {
     let _ = run_shell(
         "am broadcast --user 0 --receiver-foreground -a com.wireguard.android.action.SET_TUNNEL_DOWN --es tunnel WiGandroid",
     );
-    let _ = run_shell("sleep 1");
+    sleep(Duration::from_secs(1)).await;
     let _ = run_shell("monkey -p com.wireguard.android -c android.intent.category.LAUNCHER 1");
     let _ = run_shell(
         "am broadcast --user 0 --receiver-foreground -a com.wireguard.android.action.SET_TUNNEL_UP --es tunnel WiGandroid",
@@ -111,11 +113,11 @@ pub fn tun0_ready() -> bool {
         .unwrap_or(false)
 }
 
-pub fn bounce_mobile_data(down_secs: u64, settle_secs: u64) -> Result<()> {
+pub async fn bounce_mobile_data(down_secs: u64, settle_secs: u64) -> Result<()> {
     run_shell("svc data disable").context("failed to disable mobile data")?;
-    std::thread::sleep(std::time::Duration::from_secs(down_secs.max(1)));
+    sleep(Duration::from_secs(down_secs.max(1))).await;
     run_shell("svc data enable").context("failed to enable mobile data")?;
-    std::thread::sleep(std::time::Duration::from_secs(settle_secs.max(1)));
+    sleep(Duration::from_secs(settle_secs.max(1))).await;
     Ok(())
 }
 

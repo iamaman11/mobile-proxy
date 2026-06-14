@@ -42,6 +42,18 @@ pub async fn start_rotation(
     runtime.health.local_serving_ready = Some(false);
     runtime.health.proxy_bind_ready = Some(false);
     runtime.health.last_proxy_error = None;
+
+    if runtime.jobs.len() >= 100 {
+        let to_remove: Vec<Uuid> = runtime.jobs.iter()
+            .filter(|(id, job)| job.status != "running" && Some(**id) != runtime.current_job)
+            .map(|(id, _)| *id)
+            .take(50)
+            .collect();
+        for id in to_remove {
+            runtime.jobs.remove(&id);
+        }
+    }
+
     runtime.jobs.insert(
         job_id,
         JobRecord {
@@ -86,7 +98,7 @@ pub async fn execute_rotation(
     };
 
     let command = command.unwrap_or_else(|| fallback_airplane_command(request.hold_secs));
-    let command_output = run_shell_command(&command);
+    let command_output = run_shell_command(&command).await;
     let new_ip = observe_public_ip(&observer_urls).await;
 
     let command_error = command_output.as_ref().err().map(ToString::to_string);
@@ -236,13 +248,18 @@ fn fallback_airplane_command(hold_secs: Option<u64>) -> String {
     )
 }
 
-fn run_shell_command(command: &str) -> anyhow::Result<String> {
-    let output = Command::new("sh").arg("-c").arg(command).output()?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim())
-    }
+async fn run_shell_command(command: &str) -> anyhow::Result<String> {
+    let command = command.to_string();
+    tokio::task::spawn_blocking(move || {
+        let output = Command::new("sh").arg("-c").arg(&command).output()?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim())
+        }
+    })
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("spawn_blocking failed")))
 }
 
 #[derive(Debug, Deserialize)]

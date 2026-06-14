@@ -103,7 +103,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .admin_token
         .clone()
         .or_else(|| file_config.as_ref().and_then(|c| c.admin_token.clone()))
-        .unwrap_or_else(|| "change-me".into());
+        .ok_or_else(|| anyhow::anyhow!("admin_token is required (set it via command line or config file)"))?;
     let node_id = file_config
         .as_ref()
         .and_then(|c| c.node_id.clone())

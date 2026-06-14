@@ -135,12 +135,18 @@ async fn issue_command(
         idempotency_key: req.idempotency_key,
         issued_at: now_unix_secs(),
     };
-    commands
-        .queues
-        .entry(id.clone())
-        .or_default()
-        .push_back(command.clone());
+    let queue = commands.queues.entry(id.clone()).or_default();
+    queue.push_back(command.clone());
+    if queue.len() > 50 {
+        queue.pop_front();
+    }
     commands.idempotency.insert(dedupe_key, command.command_id);
+    if commands.idempotency.len() > 1000 {
+        let keys_to_remove: Vec<String> = commands.idempotency.keys().take(200).cloned().collect();
+        for k in keys_to_remove {
+            commands.idempotency.remove(&k);
+        }
+    }
     drop(commands);
 
     let mut devices = state.devices.lock().await;
