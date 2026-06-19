@@ -455,7 +455,7 @@ fn parse_ipv4_octet(value: &str) -> Option<u8> {
 
 fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> {
     let adb_path = detect_adb()?;
-    let mut command = Command::new(adb_path);
+    let mut command = Command::new(&adb_path);
     if let Some(serial) = device_serial {
         command.arg("-s").arg(serial);
     }

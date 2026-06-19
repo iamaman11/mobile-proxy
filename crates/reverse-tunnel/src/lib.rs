@@ -180,7 +180,7 @@ pub async fn run_client(
             Err(err) => {
                 let had_connected_session = snapshot.connected;
                 snapshot.connected = false;
-                snapshot.last_error = Some(err.to_string());
+                snapshot.last_error = Some(format!("{err:#}"));
                 let _ = status.send(snapshot.clone());
                 if had_connected_session {
                     backoff = config.reconnect_floor;
