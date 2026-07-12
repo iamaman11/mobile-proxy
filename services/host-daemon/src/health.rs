@@ -69,8 +69,6 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
             RuntimeReadiness::Healthy.to_string()
         } else if config.wireguard_enabled && !snapshot.wireguard_path_ready {
             RuntimeReadiness::WaitingWireguard.to_string()
-        } else if reverse_tunnel_required && !reverse_tunnel_ready {
-            RuntimeReadiness::StartingProxy.to_string()
         } else if !snapshot.cellular_route_ready {
             RuntimeReadiness::WaitingCellular.to_string()
         } else {
@@ -86,10 +84,10 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
             None
         } else if config.wireguard_enabled && !snapshot.wireguard_path_ready {
             Some("wireguard_path_not_ready".into())
+        } else if !snapshot.cellular_route_ready {
+            Some("cellular_network_unvalidated".into())
         } else if reverse_tunnel_required && !reverse_tunnel_ready {
             Some("reverse_tunnel_not_ready".into())
-        } else if !snapshot.cellular_route_ready {
-            Some("cellular_route_missing".into())
         } else if !snapshot.proxy_bind_ready {
             Some("proxy_bind_failed".into())
         } else if !public_probe_ready {
@@ -102,7 +100,9 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
             .degradation_reason_code
             .as_ref()
             .map(|code| match code.as_str() {
-                "cellular_route_missing" => "cellular route is not ready".into(),
+                "cellular_network_unvalidated" => {
+                    "cellular network is missing or not Android-validated".into()
+                }
                 "proxy_bind_failed" => "proxy is not accepting local connections".into(),
                 "wireguard_path_not_ready" => "WireGuard path is not ready".into(),
                 "reverse_tunnel_not_ready" => "reverse tunnel is not connected".into(),
@@ -129,9 +129,16 @@ async fn probe_once(client: &reqwest::Client, config: &ProbeConfig) -> ProbeSnap
         let proxy_bind_ready = tcp_ready(&config_clone.proxy_listen_address);
         let tun0_present = tun0_present();
         let wg_gateway_reachable = tun0_present && wg_gateway_reachable();
-        let wireguard_path_ready = !config_clone.wireguard_enabled || (tun0_present && wg_gateway_reachable);
+        let wireguard_path_ready =
+            !config_clone.wireguard_enabled || (tun0_present && wg_gateway_reachable);
         let cellular_route_ready = cellular_route_ready();
-        (proxy_bind_ready, tun0_present, wg_gateway_reachable, wireguard_path_ready, cellular_route_ready)
+        (
+            proxy_bind_ready,
+            tun0_present,
+            wg_gateway_reachable,
+            wireguard_path_ready,
+            cellular_route_ready,
+        )
     })
     .await
     .unwrap_or((false, false, false, false, false));
@@ -151,15 +158,29 @@ async fn probe_once(client: &reqwest::Client, config: &ProbeConfig) -> ProbeSnap
 
 fn cellular_route_ready() -> bool {
     let routes = run_command("ip", &["-4", "route", "show", "table", "all"]).unwrap_or_default();
-    routes.lines().any(|line| {
+    let route_present = routes.lines().any(|line| {
         line.starts_with("default ") && line.contains(" dev ") && is_cellular_route(line)
-    })
+    });
+    route_present && cellular_network_validated()
+}
+
+fn cellular_network_validated() -> bool {
+    let connectivity = run_command("dumpsys", &["connectivity"]).unwrap_or_default();
+    connectivity.lines().any(is_validated_cellular_network)
+}
+
+fn is_validated_cellular_network(line: &str) -> bool {
+    line.contains("NetworkAgentInfo")
+        && line.contains("type: MOBILE")
+        && line.contains("state: CONNECTED/CONNECTED")
+        && line.contains("VALIDATED")
+        && !line.contains("CAPTIVE_PORTAL")
 }
 
 fn is_cellular_route(line: &str) -> bool {
-    ["rmnet", "ccmni", "pdp", "wwan"]
-        .iter()
-        .any(|prefix| line.contains(&format!(" dev {prefix}")) || line.contains(&format!(" dev{prefix}")))
+    ["rmnet", "ccmni", "pdp", "wwan"].iter().any(|prefix| {
+        line.contains(&format!(" dev {prefix}")) || line.contains(&format!(" dev{prefix}"))
+    })
 }
 
 fn tun0_present() -> bool {
@@ -228,5 +249,13 @@ mod tests {
             "default via 10.159.140.1 dev rmnet4 table 1006 proto static"
         ));
         assert!(!is_cellular_route("default via 192.168.1.1 dev wlan0"));
+    }
+
+    #[test]
+    fn cellular_validation_rejects_captive_portal() {
+        let captive = "NetworkAgentInfo{ ni{[type: MOBILE[LTE], state: CONNECTED/CONNECTED]} nc{[ Transports: CELLULAR Capabilities: INTERNET&CAPTIVE_PORTAL ]}";
+        let valid = "NetworkAgentInfo{ ni{[type: MOBILE[LTE], state: CONNECTED/CONNECTED]} nc{[ Transports: CELLULAR Capabilities: INTERNET&VALIDATED ]}";
+        assert!(!super::is_validated_cellular_network(captive));
+        assert!(super::is_validated_cellular_network(valid));
     }
 }

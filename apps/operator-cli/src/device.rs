@@ -460,7 +460,9 @@ fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> {
         command.arg("-s").arg(serial);
     }
     command.args(args);
-    let output = command.output().with_context(|| format!("failed to start adb at {}", adb_path.display()))?;
+    let output = command
+        .output()
+        .with_context(|| format!("failed to start adb at {}", adb_path.display()))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
@@ -541,13 +543,19 @@ fn detect_adb() -> Result<PathBuf> {
     #[cfg(windows)]
     let (path_custom_tools, path_sdk) = (
         format!("C:\\Users\\{}\\tools\\platform-tools\\adb.exe", user),
-        format!("C:\\Users\\{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe", user),
+        format!(
+            "C:\\Users\\{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+            user
+        ),
     );
 
     #[cfg(not(windows))]
     let (path_custom_tools, path_sdk) = (
         format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user),
-        format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user),
+        format!(
+            "/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe",
+            user
+        ),
     );
 
     #[cfg(windows)]

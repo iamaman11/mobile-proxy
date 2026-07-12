@@ -12,15 +12,29 @@ use crate::state::SharedRuntime;
 #[derive(Debug, Clone)]
 pub struct ControlPlaneSyncConfig {
     pub base_url: String,
+    pub device_token: String,
+    pub server_name: Option<String>,
+    pub server_addr: Option<std::net::SocketAddr>,
+    pub server_cert_der: Option<Vec<u8>>,
     pub heartbeat_interval_secs: u64,
     pub poll_interval_secs: u64,
 }
 
 pub async fn run_control_plane_sync(runtime_arc: SharedRuntime, config: ControlPlaneSyncConfig) {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-    {
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(5));
+    if let (Some(server_name), Some(server_addr)) = (&config.server_name, config.server_addr) {
+        builder = builder.resolve(server_name, server_addr);
+    }
+    if let Some(cert_der) = &config.server_cert_der {
+        match reqwest::Certificate::from_der(cert_der) {
+            Ok(cert) => builder = builder.add_root_certificate(cert),
+            Err(err) => {
+                warn!("control-plane sync disabled: invalid pinned certificate: {err}");
+                return;
+            }
+        }
+    }
+    let client = match builder.build() {
         Ok(client) => client,
         Err(err) => {
             warn!("control-plane sync disabled: failed to create client: {err}");
@@ -33,19 +47,19 @@ pub async fn run_control_plane_sync(runtime_arc: SharedRuntime, config: ControlP
     let mut poll_tick = interval(Duration::from_secs(config.poll_interval_secs.max(1)));
     poll_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-    if let Err(err) = send_register(&client, &config.base_url, runtime_arc.clone()).await {
+    if let Err(err) = send_register(&client, &config, runtime_arc.clone()).await {
         warn!("control-plane register failed: {err}");
     }
 
     loop {
         tokio::select! {
             _ = heartbeat_tick.tick() => {
-                if let Err(err) = send_heartbeat(&client, &config.base_url, runtime_arc.clone()).await {
+                if let Err(err) = send_heartbeat(&client, &config, runtime_arc.clone()).await {
                     warn!("control-plane heartbeat failed: {err}");
                 }
             }
             _ = poll_tick.tick() => {
-                if let Err(err) = poll_and_ack_command(&client, &config.base_url, runtime_arc.clone()).await {
+                if let Err(err) = poll_and_ack_command(&client, &config, runtime_arc.clone()).await {
                     warn!("control-plane command poll failed: {err}");
                 }
             }
@@ -55,7 +69,7 @@ pub async fn run_control_plane_sync(runtime_arc: SharedRuntime, config: ControlP
 
 async fn send_register(
     client: &reqwest::Client,
-    base_url: &str,
+    config: &ControlPlaneSyncConfig,
     runtime_arc: SharedRuntime,
 ) -> anyhow::Result<()> {
     let runtime = runtime_arc.lock().await;
@@ -68,7 +82,8 @@ async fn send_register(
     drop(runtime);
 
     client
-        .post(format!("{base_url}/api/v1/devices/register"))
+        .post(format!("{}/api/v1/devices/register", config.base_url))
+        .bearer_auth(&config.device_token)
         .json(&body)
         .send()
         .await?
@@ -78,7 +93,7 @@ async fn send_register(
 
 async fn send_heartbeat(
     client: &reqwest::Client,
-    base_url: &str,
+    config: &ControlPlaneSyncConfig,
     runtime_arc: SharedRuntime,
 ) -> anyhow::Result<()> {
     let runtime = runtime_arc.lock().await;
@@ -109,7 +124,8 @@ async fn send_heartbeat(
     drop(runtime);
 
     client
-        .post(format!("{base_url}/api/v1/devices/heartbeat"))
+        .post(format!("{}/api/v1/devices/heartbeat", config.base_url))
+        .bearer_auth(&config.device_token)
         .json(&body)
         .send()
         .await?
@@ -119,7 +135,7 @@ async fn send_heartbeat(
 
 async fn poll_and_ack_command(
     client: &reqwest::Client,
-    base_url: &str,
+    config: &ControlPlaneSyncConfig,
     runtime_arc: SharedRuntime,
 ) -> anyhow::Result<()> {
     let device_id = {
@@ -128,8 +144,10 @@ async fn poll_and_ack_command(
     };
     let next: Option<DeviceCommand> = client
         .get(format!(
-            "{base_url}/api/v1/devices/{device_id}/commands/next"
+            "{}/api/v1/devices/{device_id}/commands/next",
+            config.base_url
         ))
+        .bearer_auth(&config.device_token)
         .send()
         .await?
         .error_for_status()?
@@ -146,9 +164,10 @@ async fn poll_and_ack_command(
     };
     client
         .post(format!(
-            "{base_url}/api/v1/devices/{device_id}/commands/{}/ack",
-            command.command_id
+            "{}/api/v1/devices/{device_id}/commands/{}/ack",
+            config.base_url, command.command_id
         ))
+        .bearer_auth(&config.device_token)
         .json(&ack)
         .send()
         .await?

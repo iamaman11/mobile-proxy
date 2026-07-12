@@ -15,3 +15,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+subtle.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

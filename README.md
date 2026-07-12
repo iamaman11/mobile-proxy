@@ -35,6 +35,16 @@ Current primary entrypoints:
 - live phone and VM runtimes are the current production reference
 - Rust services here are intentionally simpler than the live stack, but they track the same roles and interfaces
 
+## Security Model
+
+- the control plane requires two different bearer tokens: an admin token for operator/readiness routes and a device token for heartbeat and command-consumer routes
+- control-plane deployment binds to `127.0.0.1:8080`; phones reach it through the certificate-pinned TLS ingress on `8443`, and provisioning removes the legacy public `8080` firewall rule
+- the phone authenticates its QUIC reverse-tunnel session independently with the device token and pins the relay certificate
+- reverse tunnel transport is hybrid: certificate-pinned QUIC/UDP is always attempted first; certificate-pinned TLS/TCP is used only when the mobile network blocks QUIC, and reconnects retry QUIC
+- public proxy ports remain reachable, but return an explicit protocol-level unavailable response when no authenticated phone session is active
+- cellular readiness requires Android `VALIDATED` connectivity and rejects captive-portal/walled-garden sessions even when an `rmnet` default route exists
+- `.secrets/` is ignored by git; generated secret files are written with mode `0600`
+
 ## Build
 
 Rust workspace:
@@ -51,7 +61,9 @@ Android app:
 cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE
 ```
 
-The current Windows Android SDK is not a Linux SDK. `operator-cli install-android-app` copies `apps/android-app` to a Windows-path build directory, runs `gradlew.bat`, and installs the APK with `adb.exe`.
+The Windows Android SDK is used only for Windows builds and device installation. WSL quality checks use a native Linux SDK (by default `$HOME/Android/Sdk`); never point Linux Gradle at the Windows SDK because its build tools are `.exe` files. `operator-cli install-android-app` still copies `apps/android-app` to a Windows-path build directory, runs `gradlew.bat`, and installs the APK with `adb.exe`.
+
+The quality gate deliberately removes inherited WSL proxy variables for Gradle. The local proxy can terminate Maven TLS handshakes; dependency downloads must use the direct HTTPS path. Use `curl --noproxy '*'` for direct control-plane diagnostics for the same reason.
 
 ## Device Runtime Rollout
 
@@ -170,3 +182,20 @@ cargo run -p operator-cli -- delete-vm \
 - live migration on `2026-06-03` created `mobile-relaycontrolpoint-v2` as an `e2-micro` GCP relay, migrated the phone to `34.118.88.54`, verified control-plane health and public HTTP proxy serving, then deleted the old VM
 - the Android project now owns the `VpnService` lifecycle surface; the real embedded tunnel engine is still the next required step before removing stock WireGuard from production
 - docs and manifests use placeholders for secrets; do not store live credentials in repo-tracked files
+
+## Validation Gate
+
+Before a release, all of the following must pass:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo audit
+cargo deny check advisories licenses bans sources
+
+# Complete Rust + Android quality gate
+./scripts/quality-gate.sh
+```
+
+Android validation must run through the Windows-native SDK used by `operator-cli`; the WSL-visible SDK alone is not a valid Linux SDK because it contains Windows build-tool executables. Final acceptance additionally requires `verify-device`, an authenticated public proxy smoke test, reboot recovery, and an airplane-mode rotation on the physical phone.

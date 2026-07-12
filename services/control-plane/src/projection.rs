@@ -108,7 +108,7 @@ pub fn build_heartbeat_device(
 pub fn apply_public_probe(device: &mut DeviceRecord, req: PublicProbeReport) {
     device.publicly_serving = req.publicly_serving;
     device.public_probe_error = req.public_probe_error;
-    device.public_probe_at = Some(req.public_probe_at);
+    device.public_probe_at = Some(now_unix_secs());
     let projection = project_runtime(RuntimeProjectionInput {
         readiness_state: device.readiness_state.clone(),
         serving: device.serving,

@@ -17,6 +17,7 @@ pub async fn report_ready(client: &reqwest::Client, cli: &Cli, ready: bool) {
             "{}/api/v1/devices/{}/public-probe",
             cli.control_plane, cli.device_id
         ))
+        .bearer_auth(&cli.admin_token)
         .json(&report)
         .send()
         .await;

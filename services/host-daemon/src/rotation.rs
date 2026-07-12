@@ -44,7 +44,9 @@ pub async fn start_rotation(
     runtime.health.last_proxy_error = None;
 
     if runtime.jobs.len() >= 100 {
-        let to_remove: Vec<Uuid> = runtime.jobs.iter()
+        let to_remove: Vec<Uuid> = runtime
+            .jobs
+            .iter()
             .filter(|(id, job)| job.status != "running" && Some(**id) != runtime.current_job)
             .map(|(id, _)| *id)
             .take(50)
@@ -251,7 +253,10 @@ fn fallback_airplane_command(hold_secs: Option<u64>) -> String {
 async fn run_shell_command(command: &str) -> anyhow::Result<String> {
     let command = command.to_string();
     tokio::task::spawn_blocking(move || {
-        let output = Command::new("sh").arg("-c").arg(&command).output()?;
+        let output = Command::new("timeout")
+            .args(["90", "sh", "-c"])
+            .arg(&command)
+            .output()?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         } else {
@@ -268,12 +273,19 @@ struct IpifyResponse {
 }
 
 async fn observe_public_ip(urls: &[String]) -> Option<String> {
+    tokio::time::timeout(Duration::from_secs(60), observe_public_ip_inner(urls))
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn observe_public_ip_inner(urls: &[String]) -> Option<String> {
     sleep(Duration::from_secs(2)).await;
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(5))
         .build()
         .ok()?;
-    for _ in 0..10 {
+    for _ in 0..6 {
         for url in urls {
             let Ok(response) = client.get(url).send().await else {
                 continue;
@@ -294,7 +306,7 @@ async fn observe_public_ip(urls: &[String]) -> Option<String> {
                 return Some(trimmed.to_string());
             }
         }
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_secs(1)).await;
     }
     None
 }

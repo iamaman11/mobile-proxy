@@ -232,6 +232,17 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 ("NODE_NAME", manifest.node_name.as_str()),
                 ("ADMIN_TOKEN", admin_token.as_str()),
                 ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
+                (
+                    "CONTROL_PLANE_RESOLVE_ADDR",
+                    &format!(
+                        "{}:8443",
+                        manifest
+                            .relay
+                            .as_ref()
+                            .map(|relay| relay.host.as_str())
+                            .unwrap_or("34.118.88.54")
+                    ),
+                ),
                 ("DEVICE_TOKEN", device_token.as_str()),
                 ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
                 ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
@@ -250,6 +261,10 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 (
                     "REVERSE_TUNNEL_ADDR",
                     &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?,
+                ),
+                (
+                    "REVERSE_TUNNEL_TCP_ADDR",
+                    &reverse_tunnel_tcp_addr(&manifest, &args.tunnel_owner)?,
                 ),
                 ("REVERSE_TUNNEL_SERVER_NAME", "mobile-proxy-relay"),
                 (
@@ -368,6 +383,17 @@ fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<
         .as_ref()
         .context("first_party_reverse_tunnel requires relay host in device manifest")?;
     Ok(format!("{}:{}", relay.host, 18090))
+}
+
+fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
+    if tunnel_owner != "first_party_reverse_tunnel" {
+        return Ok("127.0.0.1:443".into());
+    }
+    let relay = manifest
+        .relay
+        .as_ref()
+        .context("first_party_reverse_tunnel requires relay config")?;
+    Ok(format!("{}:443", relay.host))
 }
 
 fn reverse_tunnel_cert_der_b64(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {

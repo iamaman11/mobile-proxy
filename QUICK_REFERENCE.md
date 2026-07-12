@@ -23,6 +23,8 @@ Credentials are not committed. Set runtime credentials in environment variables:
 
 Quick public proxy smoke test: configure `MOBILE_PROXY_RELAY_USER` and `MOBILE_PROXY_RELAY_PASSWORD`, then use `curl -x http://user:pass@34.118.88.54:3128 http://api.ipify.org`.
 
+The raw control plane is intentionally not public. Query it on the VM loopback interface with `Authorization: Bearer $MOBILE_PROXY_CONTROL_TOKEN`; phones use the pinned TLS ingress on `8443`, and port `8080` must not be allowed by a public firewall rule.
+
 ## Required Secrets
 
 ```powershell

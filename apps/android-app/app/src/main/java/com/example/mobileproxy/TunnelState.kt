@@ -1,6 +1,7 @@
 package com.example.mobileproxy
 
 import android.content.Context
+import androidx.core.content.edit
 
 object TunnelState {
     private const val PREFS = "mobile_proxy_tunnel"
@@ -10,10 +11,9 @@ object TunnelState {
     private const val LAST_ERROR = "last_error"
 
     fun setDesired(context: Context, desired: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(DESIRED, desired)
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putBoolean(DESIRED, desired)
+        }
     }
 
     fun isDesired(context: Context): Boolean =
@@ -21,10 +21,9 @@ object TunnelState {
             .getBoolean(DESIRED, false)
 
     fun setConfig(context: Context, config: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(CONFIG, config)
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString(CONFIG, config)
+        }
     }
 
     fun getConfig(context: Context): String? =
@@ -32,16 +31,14 @@ object TunnelState {
             .getString(CONFIG, null)
 
     fun setLastState(context: Context, state: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(LAST_STATE, state)
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString(LAST_STATE, state)
+        }
     }
 
     fun setLastError(context: Context, error: String?) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(LAST_ERROR, error)
-            .apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString(LAST_ERROR, error)
+        }
     }
 }

@@ -45,6 +45,7 @@ struct FileReverseTunnelConfig {
     enabled: Option<bool>,
     transport: Option<String>,
     server_addr: Option<String>,
+    tcp_fallback_addr: Option<String>,
     local_proxy_addr: Option<String>,
     server_name: Option<String>,
     server_cert_der_b64: Option<String>,
@@ -58,6 +59,10 @@ struct FileReverseTunnelConfig {
 #[derive(Debug, Deserialize, Clone)]
 struct FileControlPlaneConfig {
     base_url: Option<String>,
+    device_token: Option<String>,
+    server_name: Option<String>,
+    server_addr: Option<SocketAddr>,
+    server_cert_der_b64: Option<String>,
     heartbeat_interval_secs: Option<u64>,
     poll_interval_secs: Option<u64>,
 }
@@ -103,7 +108,9 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .admin_token
         .clone()
         .or_else(|| file_config.as_ref().and_then(|c| c.admin_token.clone()))
-        .ok_or_else(|| anyhow::anyhow!("admin_token is required (set it via command line or config file)"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("admin_token is required (set it via command line or config file)")
+        })?;
     let node_id = file_config
         .as_ref()
         .and_then(|c| c.node_id.clone())
@@ -150,29 +157,55 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .and_then(|c| c.control_plane.as_ref())
         .and_then(|cp| cp.base_url.clone())
         .or_else(|| env::var("HOST_DAEMON_CONTROL_PLANE_URL").ok());
-    let control_plane_sync = control_plane_base_url.map(|base_url| ControlPlaneSyncConfig {
-        base_url,
-        heartbeat_interval_secs: file_config
-            .as_ref()
-            .and_then(|c| c.control_plane.as_ref())
-            .and_then(|cp| cp.heartbeat_interval_secs)
-            .or_else(|| {
-                env::var("HOST_DAEMON_HEARTBEAT_INTERVAL_SECS")
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
+    let control_plane_sync = control_plane_base_url
+        .map(|base_url| -> Result<_> {
+            let device_token = file_config
+                .as_ref()
+                .and_then(|c| c.control_plane.as_ref())
+                .and_then(|cp| cp.device_token.clone())
+                .or_else(|| env::var("HOST_DAEMON_DEVICE_TOKEN").ok())
+                .filter(|token| !token.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("control_plane.device_token is required"))?;
+            Ok(ControlPlaneSyncConfig {
+                base_url,
+                device_token,
+                server_name: file_config
+                    .as_ref()
+                    .and_then(|c| c.control_plane.as_ref())
+                    .and_then(|cp| cp.server_name.clone()),
+                server_addr: file_config
+                    .as_ref()
+                    .and_then(|c| c.control_plane.as_ref())
+                    .and_then(|cp| cp.server_addr),
+                server_cert_der: file_config
+                    .as_ref()
+                    .and_then(|c| c.control_plane.as_ref())
+                    .and_then(|cp| cp.server_cert_der_b64.as_deref())
+                    .map(decode_der_base64)
+                    .transpose()?,
+                heartbeat_interval_secs: file_config
+                    .as_ref()
+                    .and_then(|c| c.control_plane.as_ref())
+                    .and_then(|cp| cp.heartbeat_interval_secs)
+                    .or_else(|| {
+                        env::var("HOST_DAEMON_HEARTBEAT_INTERVAL_SECS")
+                            .ok()
+                            .and_then(|value| value.parse::<u64>().ok())
+                    })
+                    .unwrap_or(2),
+                poll_interval_secs: file_config
+                    .as_ref()
+                    .and_then(|c| c.control_plane.as_ref())
+                    .and_then(|cp| cp.poll_interval_secs)
+                    .or_else(|| {
+                        env::var("HOST_DAEMON_COMMAND_POLL_INTERVAL_SECS")
+                            .ok()
+                            .and_then(|value| value.parse::<u64>().ok())
+                    })
+                    .unwrap_or(5),
             })
-            .unwrap_or(2),
-        poll_interval_secs: file_config
-            .as_ref()
-            .and_then(|c| c.control_plane.as_ref())
-            .and_then(|cp| cp.poll_interval_secs)
-            .or_else(|| {
-                env::var("HOST_DAEMON_COMMAND_POLL_INTERVAL_SECS")
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-            })
-            .unwrap_or(5),
-    });
+        })
+        .transpose()?;
     let reverse_tunnel = reverse_tunnel_config(file_config.as_ref(), &node_id)?;
 
     let health = HealthRecord {
@@ -244,23 +277,43 @@ fn reverse_tunnel_config(
         .as_deref()
         .unwrap_or("127.0.0.1:1080")
         .parse()?;
-    let transport = match config.transport.as_deref().unwrap_or("quic") {
+    let build_secure_transport = |hybrid: bool| -> Result<TunnelTransport> {
+        let server_name = config
+            .server_name
+            .clone()
+            .unwrap_or_else(|| "mobile-proxy-relay".into());
+        let server_cert_der =
+            decode_der_base64(config.server_cert_der_b64.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("reverse_tunnel.server_cert_der_b64 is required")
+            })?)?;
+        Ok(if hybrid {
+            TunnelTransport::Hybrid {
+                server_name,
+                server_cert_der,
+                server_key_der: None,
+            }
+        } else {
+            TunnelTransport::Quic {
+                server_name,
+                server_cert_der,
+                server_key_der: None,
+            }
+        })
+    };
+    let transport = match config.transport.as_deref().unwrap_or("hybrid") {
         "tcp" => TunnelTransport::Tcp,
-        "quic" => TunnelTransport::Quic {
-            server_name: config
-                .server_name
-                .clone()
-                .unwrap_or_else(|| "mobile-proxy-relay".into()),
-            server_cert_der: decode_der_base64(config.server_cert_der_b64.as_deref().ok_or_else(
-                || anyhow::anyhow!("reverse_tunnel.server_cert_der_b64 is required for QUIC"),
-            )?)?,
-            server_key_der: None,
-        },
+        "quic" => build_secure_transport(false)?,
+        "hybrid" => build_secure_transport(true)?,
         other => bail!("unsupported reverse_tunnel.transport: {other}"),
     };
     Ok(Some(ReverseTunnelClientConfig {
         node_id: node_id.to_string(),
         server_addr,
+        tcp_fallback_addr: config
+            .tcp_fallback_addr
+            .as_deref()
+            .map(str::parse)
+            .transpose()?,
         local_proxy_addr,
         auth_token,
         transport,

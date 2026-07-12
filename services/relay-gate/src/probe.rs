@@ -9,6 +9,7 @@ use crate::cli::Cli;
 pub async fn evaluate_ready(client: &reqwest::Client, cli: &Cli) -> bool {
     let response = match client
         .get(format!("{}/api/v1/devices", cli.control_plane))
+        .bearer_auth(&cli.admin_token)
         .send()
         .await
     {

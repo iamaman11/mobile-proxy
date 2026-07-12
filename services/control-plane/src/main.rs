@@ -1,8 +1,10 @@
+mod auth;
 mod cli;
 mod projection;
 mod routes;
 mod state;
 
+use crate::auth::AuthConfig;
 use crate::cli::Cli;
 use crate::routes::router;
 use crate::state::AppState;
@@ -14,7 +16,8 @@ use tracing::info;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
-    let app = router(AppState::load(cli.state_path).await?);
+    let auth = AuthConfig::new(cli.admin_token, cli.device_token)?;
+    let app = router(AppState::load(cli.state_path).await?, auth);
     let listener = TcpListener::bind(&cli.listen).await?;
     info!("control-plane listening on {}", cli.listen);
     axum::serve(listener, app).await?;

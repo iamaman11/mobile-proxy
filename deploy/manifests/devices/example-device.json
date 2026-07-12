@@ -2,7 +2,7 @@
   "deviceId": "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06",
   "nodeName": "galaxy-a02-gcp-relay",
   "operatorProfile": "mts_by",
-  "controlPlaneUrl": "http://34.118.88.54:8080",
+  "controlPlaneUrl": "https://mobile-proxy-relay:8443",
   "tokens": {
     "adminTokenEnv": "MOBILE_PROXY_ADMIN_TOKEN",
     "deviceTokenEnv": "MOBILE_PROXY_DEVICE_TOKEN",

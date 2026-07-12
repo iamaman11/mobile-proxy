@@ -6,6 +6,9 @@
   "control_plane": {
     "base_url": "{{CONTROL_PLANE_URL}}",
     "device_token": "{{DEVICE_TOKEN}}",
+    "server_name": "mobile-proxy-relay",
+    "server_addr": "{{CONTROL_PLANE_RESOLVE_ADDR}}",
+    "server_cert_der_b64": "{{REVERSE_TUNNEL_CERT_DER_B64}}",
     "heartbeat_interval_secs": 2,
     "poll_interval_secs": 5
   },
@@ -31,8 +34,9 @@
   },
   "reverse_tunnel": {
     "enabled": {{REVERSE_TUNNEL_ENABLED}},
-    "transport": "quic",
+    "transport": "hybrid",
     "server_addr": "{{REVERSE_TUNNEL_ADDR}}",
+    "tcp_fallback_addr": "{{REVERSE_TUNNEL_TCP_ADDR}}",
     "local_proxy_addr": "127.0.0.1:1080",
     "server_name": "{{REVERSE_TUNNEL_SERVER_NAME}}",
     "server_cert_der_b64": "{{REVERSE_TUNNEL_CERT_DER_B64}}",

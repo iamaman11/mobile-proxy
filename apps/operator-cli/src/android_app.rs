@@ -45,7 +45,7 @@ fn write_local_properties(build_dir: &Path) -> Result<()> {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "Bose".to_string());
-    
+
     let sdk_dir = std::env::var("ANDROID_SDK_ROOT")
         .or_else(|_| std::env::var("ANDROID_HOME"))
         .unwrap_or_else(|_| format!("C:/Users/{}/AppData/Local/Android/Sdk", user));
@@ -144,14 +144,26 @@ fn detect_adb() -> Result<PathBuf> {
 
     #[cfg(windows)]
     let (path_custom_tools, path_sdk) = (
-        PathBuf::from(format!("C:\\Users\\{}\\tools\\platform-tools\\adb.exe", user)),
-        PathBuf::from(format!("C:\\Users\\{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe", user)),
+        PathBuf::from(format!(
+            "C:\\Users\\{}\\tools\\platform-tools\\adb.exe",
+            user
+        )),
+        PathBuf::from(format!(
+            "C:\\Users\\{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+            user
+        )),
     );
 
     #[cfg(not(windows))]
     let (path_custom_tools, path_sdk) = (
-        PathBuf::from(format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user)),
-        PathBuf::from(format!("/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe", user)),
+        PathBuf::from(format!(
+            "/mnt/c/Users/{}/tools/platform-tools/adb.exe",
+            user
+        )),
+        PathBuf::from(format!(
+            "/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe",
+            user
+        )),
     );
 
     if path_custom_tools.is_file() {

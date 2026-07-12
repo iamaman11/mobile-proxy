@@ -2,6 +2,7 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
+    middleware,
     routing::{get, post},
 };
 use proxy_core::{
@@ -10,26 +11,30 @@ use proxy_core::{
 };
 use uuid::Uuid;
 
+use crate::auth::{AuthConfig, require_admin, require_device};
 use crate::projection::{
     apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
 };
 use crate::state::AppState;
 
-pub fn router(state: AppState) -> Router {
-    Router::new()
+pub fn router(state: AppState, auth: AuthConfig) -> Router {
+    let admin = Router::new()
         .route("/api/v1/ip", get(get_ip))
         .route("/api/v1/devices", get(list_devices))
         .route("/api/v1/devices/ready", get(list_ready_devices))
-        .route("/api/v1/devices/register", post(register_device))
-        .route("/api/v1/devices/heartbeat", post(heartbeat))
         .route("/api/v1/devices/{id}/public-probe", post(public_probe))
         .route("/api/v1/devices/{id}/commands", post(issue_command))
+        .route_layer(middleware::from_fn_with_state(auth.clone(), require_admin));
+    let device = Router::new()
+        .route("/api/v1/devices/register", post(register_device))
+        .route("/api/v1/devices/heartbeat", post(heartbeat))
         .route("/api/v1/devices/{id}/commands/next", get(next_command))
         .route(
             "/api/v1/devices/{id}/commands/{command_id}/ack",
             post(ack_command),
         )
-        .with_state(state)
+        .route_layer(middleware::from_fn_with_state(auth, require_device));
+    Router::new().merge(admin).merge(device).with_state(state)
 }
 
 async fn get_ip() -> (StatusCode, Json<serde_json::Value>) {
@@ -222,6 +227,8 @@ fn mark_stale(mut device: DeviceRecord) -> DeviceRecord {
     device.readiness_state = "waiting_cellular".into();
     device.serving = false;
     device.publicly_serving = false;
+    device.reverse_tunnel_connected = Some(false);
+    device.reverse_tunnel_last_error = Some("device heartbeat is stale".into());
     device.availability = "degraded".into();
     device.degradation_reason_code = Some("heartbeat_stale".into());
     device.serving_failure_reason = Some("device heartbeat is stale".into());
@@ -230,10 +237,61 @@ fn mark_stale(mut device: DeviceRecord) -> DeviceRecord {
 
 #[cfg(test)]
 mod tests {
-    use crate::projection::now_unix_secs;
+    use crate::{auth::AuthConfig, projection::now_unix_secs, routes::router, state::AppState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use proxy_core::{
         Availability, DeviceRecord, RuntimeProjectionInput, RuntimeReadiness, project_runtime,
     };
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    async fn test_app() -> axum::Router {
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-{}.json",
+            Uuid::new_v4()
+        ));
+        router(
+            AppState::load(path).await.unwrap(),
+            AuthConfig::new("admin-token".into(), "device-token".into()).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn routes_enforce_role_specific_bearer_tokens() {
+        let unauthorized = test_app()
+            .await
+            .oneshot(Request::get("/api/v1/devices").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let admin = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(admin.status(), StatusCode::OK);
+
+        let wrong_role = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer device-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrong_role.status(), StatusCode::UNAUTHORIZED);
+    }
 
     #[test]
     fn availability_requires_public_probe() {
@@ -293,6 +351,7 @@ mod tests {
         };
         let projected = super::mark_stale(device);
         assert_eq!(projected.availability, "degraded");
+        assert_eq!(projected.reverse_tunnel_connected, Some(false));
         assert_eq!(
             projected.degradation_reason_code.as_deref(),
             Some("heartbeat_stale")

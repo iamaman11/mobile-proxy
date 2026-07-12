@@ -11,7 +11,7 @@ pub fn authorize(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
-    
+
     let is_authorized = if let Some(actual_token) = actual {
         bool::from(actual_token.as_bytes().ct_eq(token.as_bytes()))
     } else {

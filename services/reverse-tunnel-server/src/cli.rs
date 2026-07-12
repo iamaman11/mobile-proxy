@@ -6,6 +6,14 @@ use clap::Parser;
 pub struct Cli {
     #[arg(long, env = "REVERSE_TUNNEL_LISTEN", default_value = "0.0.0.0:18090")]
     pub listen: String,
+    #[arg(long, env = "REVERSE_TUNNEL_TRANSPORT", default_value = "hybrid")]
+    pub transport: String,
+    #[arg(
+        long,
+        env = "REVERSE_TUNNEL_TCP_LISTEN",
+        default_value = "127.0.0.1:18091"
+    )]
+    pub tcp_listen: String,
     #[arg(
         long,
         env = "REVERSE_TUNNEL_PUBLIC_PROXY_LISTEN",

@@ -215,22 +215,23 @@ fn build_vm_release(
     fs::write(
         release_root.join("config/control-plane.env"),
         format!(
-            "CONTROL_PLANE_LISTEN='0.0.0.0:8080'\nCONTROL_PLANE_BEARER_TOKEN='{}'\n",
-            shell_escape(&secrets.control_token),
+            "CONTROL_PLANE_LISTEN=\"127.0.0.1:8080\"\nCONTROL_PLANE_ADMIN_TOKEN={}\nCONTROL_PLANE_DEVICE_TOKEN={}\n",
+            systemd_env_quote(&secrets.control_token),
+            systemd_env_quote(&secrets.device_token),
         ),
     )?;
     fs::write(
         release_root.join("config/relay-gate.env"),
         format!(
-            "CONTROL_PLANE_BEARER_TOKEN='{}'\nCONTROL_PLANE_URL='http://127.0.0.1:8080'\nRELAY_GATE_DEVICE_ID='{}'\nRELAY_GATE_UPSTREAM='10.66.66.2:1080'\n",
-            shell_escape(&secrets.control_token),
+            "CONTROL_PLANE_ADMIN_TOKEN={}\nCONTROL_PLANE_URL=\"http://127.0.0.1:8080\"\nRELAY_GATE_DEVICE_ID=\"{}\"\nRELAY_GATE_UPSTREAM=\"10.66.66.2:1080\"\n",
+            systemd_env_quote(&secrets.control_token),
             "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06"
         ),
     )?;
     fs::write(
         release_root.join("config/reverse-tunnel-server.env"),
         format!(
-            "REVERSE_TUNNEL_LISTEN='0.0.0.0:18090'\nREVERSE_TUNNEL_PUBLIC_PROXY_LISTEN='127.0.0.1:14080,127.0.0.1:14081,127.0.0.1:14128'\nREVERSE_TUNNEL_AUTH_TOKEN='{}'\nREVERSE_TUNNEL_SERVER_NAME='mobile-proxy-relay'\nREVERSE_TUNNEL_CERT_DER_B64='{}'\nREVERSE_TUNNEL_KEY_DER_B64='{}'\n",
+            "REVERSE_TUNNEL_LISTEN='0.0.0.0:18090'\nREVERSE_TUNNEL_TCP_LISTEN='127.0.0.1:18091'\nREVERSE_TUNNEL_TRANSPORT='hybrid'\nREVERSE_TUNNEL_PUBLIC_PROXY_LISTEN='127.0.0.1:14080,127.0.0.1:14081,127.0.0.1:14128'\nREVERSE_TUNNEL_AUTH_TOKEN='{}'\nREVERSE_TUNNEL_SERVER_NAME='mobile-proxy-relay'\nREVERSE_TUNNEL_CERT_DER_B64='{}'\nREVERSE_TUNNEL_KEY_DER_B64='{}'\n",
             shell_escape(&secrets.device_token),
             shell_escape(&secrets.reverse_tunnel_cert_der_b64),
             shell_escape(&secrets.reverse_tunnel_key_der_b64)
@@ -253,8 +254,8 @@ fn build_vm_release(
         REVERSE_TUNNEL_SERVER_UNIT,
     )?;
     fs::write(
-        release_root.join("nginx/mobile-relaycontrolpoint"),
-        NGINX_HTTP_CONFIG,
+        release_root.join("nginx/mobile-control-plane-tls"),
+        NGINX_CONTROL_PLANE_TLS_CONFIG,
     )?;
     fs::write(
         release_root.join("nginx/mobile-public-proxy.conf"),
@@ -269,9 +270,8 @@ fn ensure_firewall_rules(manifest: &VmManifest) -> Result<()> {
     let rules = [
         (
             format!("{}-ingress", manifest.instance_name),
-            "tcp:22,tcp:80,tcp:443,udp:18090,udp:51820",
+            "tcp:22,tcp:443,tcp:8443,udp:18090,udp:51820",
         ),
-        (format!("{}-control", manifest.instance_name), "tcp:8080"),
         (
             format!("{}-proxy", manifest.instance_name),
             "tcp:1080,tcp:1081,tcp:3128",
@@ -316,6 +316,27 @@ fn ensure_firewall_rules(manifest: &VmManifest) -> Result<()> {
                 .arg("0.0.0.0/0")
                 .arg("--target-tags")
                 .arg(tag),
+            Path::new("."),
+        )?;
+    }
+    let legacy_control_rule = format!("{}-control", manifest.instance_name);
+    if gcloud_status([
+        "compute",
+        "firewall-rules",
+        "describe",
+        &legacy_control_rule,
+        "--project",
+        &manifest.project,
+    ])? {
+        run(
+            Command::new("gcloud")
+                .arg("compute")
+                .arg("firewall-rules")
+                .arg("delete")
+                .arg(&legacy_control_rule)
+                .arg("--project")
+                .arg(&manifest.project)
+                .arg("--quiet"),
             Path::new("."),
         )?;
     }
@@ -407,6 +428,7 @@ fn deploy_release(
             .arg(&manifest.zone)
             .arg("--ssh-key-file")
             .arg(ssh_key)
+            .arg("--tunnel-through-iap")
             .arg(release_root)
             .arg(remote),
         Path::new("."),
@@ -427,7 +449,7 @@ fn verify_vm(args: &ProvisionVmArgs, manifest: &VmManifest, ssh_key: &Path) -> R
         args,
         manifest,
         ssh_key,
-        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service mobile-reverse-tunnel-server.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(1080|1081|3128|8080|14080|14081|14128|18090) '",
+        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service mobile-reverse-tunnel-server.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(443|1080|1081|3128|8080|14080|14081|14128) '",
     )
 }
 
@@ -443,6 +465,7 @@ fn ssh(args: &ProvisionVmArgs, manifest: &VmManifest, ssh_key: &Path, command: &
             .arg(&manifest.zone)
             .arg("--ssh-key-file")
             .arg(ssh_key)
+            .arg("--tunnel-through-iap")
             .arg("--command")
             .arg(command),
         Path::new("."),
@@ -462,17 +485,25 @@ install -m 0755 "$SRC/bin/sing-box" /opt/mobile-public-proxy/sing-box
 install -m 0600 "$SRC/config/control-plane.env" /etc/mobile-relaycontrolpoint/control-plane.env
 install -m 0600 "$SRC/config/relay-gate.env" /etc/mobile-relaycontrolpoint/relay-gate.env
 install -m 0600 "$SRC/config/reverse-tunnel-server.env" /etc/mobile-relaycontrolpoint/reverse-tunnel-server.env
+set +x
+set -a
+. /etc/mobile-relaycontrolpoint/reverse-tunnel-server.env
+set +a
+printf '%s' "$REVERSE_TUNNEL_CERT_DER_B64" | base64 -d | openssl x509 -inform DER -out /etc/mobile-relaycontrolpoint/control-plane.crt
+printf '%s' "$REVERSE_TUNNEL_KEY_DER_B64" | base64 -d | openssl pkey -inform DER -out /etc/mobile-relaycontrolpoint/control-plane.key
+chmod 0600 /etc/mobile-relaycontrolpoint/control-plane.crt /etc/mobile-relaycontrolpoint/control-plane.key
+set -x
 install -m 0600 "$SRC/config/wg0.conf" /etc/wireguard/wg0.conf
 install -m 0600 "$SRC/config/public-proxy.json" /opt/mobile-public-proxy/config.json
 install -m 0644 "$SRC/systemd/mobile-relaycontrolpoint.service" /etc/systemd/system/mobile-relaycontrolpoint.service
 install -m 0644 "$SRC/systemd/mobile-relay-gate.service" /etc/systemd/system/mobile-relay-gate.service
 install -m 0644 "$SRC/systemd/mobile-public-proxy.service" /etc/systemd/system/mobile-public-proxy.service
 install -m 0644 "$SRC/systemd/mobile-reverse-tunnel-server.service" /etc/systemd/system/mobile-reverse-tunnel-server.service
-install -m 0644 "$SRC/nginx/mobile-relaycontrolpoint" /etc/nginx/sites-available/mobile-relaycontrolpoint
+install -m 0644 "$SRC/nginx/mobile-control-plane-tls" /etc/nginx/sites-available/mobile-control-plane-tls
 install -m 0644 "$SRC/nginx/mobile-public-proxy.conf" /etc/nginx/stream-available/mobile-public-proxy.conf
 ln -sfn /opt/mobile-relaycontrolpoint/releases/"$REL" /opt/mobile-relaycontrolpoint/current
-rm -f /etc/nginx/sites-enabled/default
-ln -sfn /etc/nginx/sites-available/mobile-relaycontrolpoint /etc/nginx/sites-enabled/mobile-relaycontrolpoint
+rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/mobile-relaycontrolpoint
+ln -sfn /etc/nginx/sites-available/mobile-control-plane-tls /etc/nginx/sites-enabled/mobile-control-plane-tls
 ln -sfn /etc/nginx/stream-available/mobile-public-proxy.conf /etc/nginx/stream-enabled/mobile-public-proxy.conf
 grep -q 'stream-enabled' /etc/nginx/nginx.conf || printf '\nstream {{ include /etc/nginx/stream-enabled/*.conf; }}\n' >> /etc/nginx/nginx.conf
 systemctl daemon-reload
@@ -622,6 +653,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/mobile-relaycontrolpoint/reverse-tunnel-server.env
+Environment=RUST_LOG=info
 ExecStart=/opt/mobile-relaycontrolpoint/current/reverse-tunnel-server
 Restart=always
 RestartSec=2
@@ -631,18 +663,21 @@ User=root
 WantedBy=multi-user.target
 "#;
 
-const NGINX_HTTP_CONFIG: &str = r#"server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
+const NGINX_CONTROL_PLANE_TLS_CONFIG: &str = r#"server {
+    listen 8443 ssl;
+    listen [::]:8443 ssl;
+    server_name mobile-proxy-relay;
+    ssl_certificate /etc/mobile-relaycontrolpoint/control-plane.crt;
+    ssl_certificate_key /etc/mobile-relaycontrolpoint/control-plane.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    client_max_body_size 64k;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 "#;
@@ -650,6 +685,14 @@ const NGINX_HTTP_CONFIG: &str = r#"server {
 const NGINX_STREAM_CONFIG: &str = r#"server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14128; }
+server {
+    listen 0.0.0.0:443 ssl;
+    ssl_certificate /etc/mobile-relaycontrolpoint/control-plane.crt;
+    ssl_certificate_key /etc/mobile-relaycontrolpoint/control-plane.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    proxy_pass 127.0.0.1:18091;
+}
 "#;
 
 fn load_manifest(repo: &Path, raw: &str) -> Result<VmManifest> {
@@ -688,6 +731,17 @@ fn required_env(name: &str) -> Result<String> {
 
 fn shell_escape(value: &str) -> String {
     value.replace('\'', "'\\''")
+}
+
+fn systemd_env_quote(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`")
+    )
 }
 
 fn shell_quote(value: &str) -> String {

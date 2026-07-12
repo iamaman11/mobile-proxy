@@ -9,6 +9,8 @@ pub struct Cli {
         default_value = "http://127.0.0.1:8080"
     )]
     pub control_plane: String,
+    #[arg(long, env = "CONTROL_PLANE_ADMIN_TOKEN", hide_env_values = true)]
+    pub admin_token: String,
     #[arg(long, env = "RELAY_GATE_DEVICE_ID", default_value = proxy_core::DEVICE_ID)]
     pub device_id: String,
     #[arg(long, env = "RELAY_GATE_UPSTREAM", default_value = "10.66.66.2:1080")]

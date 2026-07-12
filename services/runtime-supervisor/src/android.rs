@@ -1,6 +1,6 @@
 use std::process::Command;
-use std::{fs, path::Path};
 use std::time::Duration;
+use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
