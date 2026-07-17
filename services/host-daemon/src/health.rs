@@ -16,13 +16,21 @@ struct IpifyResponse {
 }
 
 pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
-    let client = match reqwest::Client::builder()
+    let proxy = match reqwest::Proxy::all(format!("http://{}", config.proxy_listen_address)) {
+        Ok(proxy) => proxy.basic_auth(&config.proxy_username, &config.proxy_password),
+        Err(err) => {
+            warn!("health probe disabled: failed to configure local proxy: {err}");
+            return;
+        }
+    };
+    let proxy_client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
+        .proxy(proxy)
         .build()
     {
         Ok(client) => client,
         Err(err) => {
-            warn!("health probe disabled: failed to create client: {err}");
+            warn!("health probe disabled: failed to create proxied client: {err}");
             return;
         }
     };
@@ -31,7 +39,7 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
 
     loop {
         tick.tick().await;
-        let snapshot = probe_once(&client, &config).await;
+        let snapshot = probe_once(&proxy_client, &config).await;
         let public_probe_ready = snapshot.public_ip.is_some();
         let mut runtime = runtime_arc.lock().await;
         runtime.health.cellular_route_ready = Some(snapshot.cellular_route_ready);

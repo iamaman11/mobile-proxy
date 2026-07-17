@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -11,6 +12,7 @@ use crate::cli::PackageDeviceReleaseArgs;
 
 const CURL_SHIM: &str = r#"#!/system/bin/sh
 set -eu
+umask 077
 
 LOG_FILE="/data/adb/mobile-proxy-node/logs/curl-shim.log"
 
@@ -19,7 +21,6 @@ url=""
 proxy_url=""
 proxy_user=""
 
-echo "$(date '+%Y-%m-%dT%H:%M:%S%z') args:$*" >> "$LOG_FILE" 2>/dev/null || true
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -99,21 +100,8 @@ if run_wget "$url"; then
   exit 0
 fi
 
-case "$url" in
-  https://*)
-    alt_url="http://${url#https://}"
-    if run_wget "$alt_url"; then
-      echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:ok_alt url:$alt_url" >> "$LOG_FILE" 2>/dev/null || true
-      exit 0
-    fi
-    echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:fail url:$url alt:$alt_url" >> "$LOG_FILE" 2>/dev/null || true
-    exit 1
-    ;;
-  *)
-    echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:fail url:$url" >> "$LOG_FILE" 2>/dev/null || true
-    exit 1
-    ;;
-esac
+echo "$(date +%s) result:fail url:$url" >> "$LOG_FILE" 2>/dev/null || true
+exit 1
 "#;
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +219,8 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 ("NODE_ID", manifest.device_id.as_str()),
                 ("NODE_NAME", manifest.node_name.as_str()),
                 ("ADMIN_TOKEN", admin_token.as_str()),
+                ("RELAY_USER", relay_user.as_str()),
+                ("RELAY_PASSWORD", relay_password.as_str()),
                 ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
                 (
                     "CONTROL_PLANE_RESOLVE_ADDR",
@@ -336,9 +326,39 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
     fs::write(release_root.join("config/host-daemon.json"), host_rendered)?;
     fs::write(release_root.join("config/sing-box.json"), sing_box_rendered)?;
+    write_release_metadata(&repo_root, &release_root, &args.release_id)?;
     write_checksums(&release_root)?;
 
     println!("{}", release_root.display());
+    Ok(())
+}
+
+fn write_release_metadata(repo_root: &Path, release_root: &Path, release_id: &str) -> Result<()> {
+    let revision = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to read Git revision for release metadata")?;
+    if !revision.status.success() {
+        bail!("git rev-parse HEAD failed while packaging release");
+    }
+    let git_sha = String::from_utf8_lossy(&revision.stdout).trim().to_string();
+    let clean = Command::new("git")
+        .args(["diff", "--quiet", "--ignore-submodules", "HEAD", "--"])
+        .current_dir(repo_root)
+        .status()
+        .context("failed to inspect Git worktree for release metadata")?
+        .success();
+    let metadata = serde_json::json!({
+        "release_id": release_id,
+        "git_sha": git_sha,
+        "git_worktree_clean": clean,
+        "format_version": 1
+    });
+    fs::write(
+        release_root.join("release-metadata.json"),
+        serde_json::to_vec_pretty(&metadata)?,
+    )?;
     Ok(())
 }
 

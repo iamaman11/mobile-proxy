@@ -1,6 +1,7 @@
 mod android;
 mod cli;
 mod config;
+mod dns;
 mod health;
 mod process;
 
@@ -13,6 +14,7 @@ use tracing::warn;
 
 use crate::cli::Cli;
 use crate::config::load_config;
+use crate::dns::reconcile_cellular_dns;
 use crate::health::{
     SupervisorState, fetch_health, reconcile_health, reconcile_startup_cellular_bootstrap,
     reconcile_wireguard,
@@ -34,6 +36,11 @@ async fn main() -> Result<()> {
     reconcile_startup_cellular_bootstrap(&config, &mut state);
 
     loop {
+        match reconcile_cellular_dns(&config) {
+            Ok(true) => children.restart_proxy(&config),
+            Ok(false) => {}
+            Err(err) => warn!("cellular DNS reconciliation failed: {err:#}"),
+        }
         children.ensure(&config)?;
         reconcile_wireguard(&config).await;
 
@@ -41,6 +48,12 @@ async fn main() -> Result<()> {
             Ok(health) => {
                 if let Err(err) = reconcile_health(&config, &mut state, &health).await {
                     warn!("runtime health reconciliation failed: {err:#}");
+                }
+                if health.degradation_reason_code.as_deref() == Some("public_probe_failed")
+                    && state.claim_proxy_restart(config.repair_cooldown_secs)
+                {
+                    warn!("end-to-end proxy probe failed; restarting proxy and tunnel session");
+                    children.restart_proxy(&config);
                 }
             }
             Err(err) => warn!("host-daemon health unavailable: {err:#}"),

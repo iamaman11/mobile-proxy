@@ -32,6 +32,8 @@ struct FileOperatorProfiles {
 #[derive(Debug, Deserialize, Clone)]
 struct FileProxyConfig {
     listen_address: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -93,6 +95,8 @@ pub struct LoadedConfig {
 pub struct ProbeConfig {
     pub observer_urls: Vec<String>,
     pub proxy_listen_address: String,
+    pub proxy_username: String,
+    pub proxy_password: String,
     pub wireguard_enabled: bool,
     pub tunnel_owner: Option<String>,
 }
@@ -140,6 +144,16 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .and_then(|c| c.proxy.as_ref())
         .and_then(|p| p.listen_address.clone())
         .unwrap_or_else(|| "10.66.66.2:1080".into());
+    let proxy_username = file_config
+        .as_ref()
+        .and_then(|c| c.proxy.as_ref())
+        .and_then(|p| p.username.clone())
+        .unwrap_or_default();
+    let proxy_password = file_config
+        .as_ref()
+        .and_then(|c| c.proxy.as_ref())
+        .and_then(|p| p.password.clone())
+        .unwrap_or_default();
     let observer_urls = file_config
         .as_ref()
         .and_then(|c| c.observer_urls.clone())
@@ -248,6 +262,8 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         probe: ProbeConfig {
             observer_urls,
             proxy_listen_address,
+            proxy_username,
+            proxy_password,
             wireguard_enabled,
             tunnel_owner,
         },

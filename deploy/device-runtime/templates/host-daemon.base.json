@@ -24,6 +24,8 @@
     ],
     "working_dir": "/data/adb/mobile-proxy-node/current",
     "env": {},
+    "username": "{{RELAY_USER}}",
+    "password": "{{RELAY_PASSWORD}}",
     "listen_address": "{{PROXY_LISTEN_ADDRESS}}"
   },
   "wireguard": {

@@ -1,5 +1,6 @@
 #!/system/bin/sh
 set -eu
+umask 077
 
 ROOT="/data/adb/mobile-proxy-node/current"
 BIN="$ROOT/bin"
@@ -51,6 +52,7 @@ rm -f "$WATCHDOG_PID"
 cat > "$WATCHDOG_SCRIPT" <<'EOF'
 #!/system/bin/sh
 set -u
+umask 077
 ROOT="$1"
 BIN="$ROOT/bin"
 LOG_DIR="/data/local/tmp/mobile-proxy-logs"

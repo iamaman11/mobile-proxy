@@ -34,6 +34,7 @@ pub struct SupervisorConfig {
     pub host_listen: String,
     pub admin_token: String,
     pub proxy_binary: PathBuf,
+    pub proxy_config: PathBuf,
     pub proxy_args: Vec<String>,
     pub proxy_working_dir: PathBuf,
     pub wireguard_enabled: bool,
@@ -85,6 +86,7 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         .working_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| runtime_root.clone());
+    let proxy_config = proxy_config_path(&runtime_root, &file.proxy.args);
 
     Ok(SupervisorConfig {
         host_binary: runtime_root.join("bin/host-daemon"),
@@ -92,6 +94,7 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         host_listen,
         admin_token: file.admin_token,
         proxy_binary,
+        proxy_config,
         proxy_args: file.proxy.args,
         proxy_working_dir,
         wireguard_enabled: file
@@ -107,6 +110,13 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         data_bounce_settle_secs: cli.data_bounce_settle_secs,
         once: cli.once,
     })
+}
+
+fn proxy_config_path(runtime_root: &std::path::Path, args: &[String]) -> PathBuf {
+    args.windows(2)
+        .find(|parts| parts[0] == "-c" || parts[0] == "--config")
+        .map(|parts| PathBuf::from(&parts[1]))
+        .unwrap_or_else(|| runtime_root.join("config/sing-box.json"))
 }
 
 #[cfg(test)]

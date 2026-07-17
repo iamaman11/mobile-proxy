@@ -13,13 +13,26 @@ use crate::config::{SupervisorConfig, TunnelOwner};
 #[derive(Debug)]
 pub struct SupervisorState {
     last_route_repair: Option<Instant>,
+    last_proxy_restart: Option<Instant>,
 }
 
 impl SupervisorState {
     pub fn new() -> Self {
         Self {
             last_route_repair: None,
+            last_proxy_restart: None,
         }
+    }
+
+    pub fn claim_proxy_restart(&mut self, cooldown_secs: u64) -> bool {
+        if self
+            .last_proxy_restart
+            .is_some_and(|last| last.elapsed() < Duration::from_secs(cooldown_secs.max(1)))
+        {
+            return false;
+        }
+        self.last_proxy_restart = Some(Instant::now());
+        true
     }
 }
 

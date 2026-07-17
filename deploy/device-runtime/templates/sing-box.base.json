@@ -1,6 +1,6 @@
 {
   "log": {
-    "level": "warn"
+    "level": "fatal"
   },
   "inbounds": [
     {
@@ -43,30 +43,18 @@
     }
   ],
   "route": {
-    "default_domain_resolver": "dns-mts1"
+    "default_domain_resolver": "dns-bootstrap"
   },
   "dns": {
     "strategy": "ipv4_only",
     "servers": [
       {
         "type": "udp",
-        "tag": "dns-mts1",
-        "server": "194.158.196.141",
-        "server_port": 53
-      },
-      {
-        "type": "udp",
-        "tag": "dns-mts2",
-        "server": "194.158.196.137",
-        "server_port": 53
-      },
-      {
-        "type": "udp",
-        "tag": "dns-cf",
+        "tag": "dns-bootstrap",
         "server": "1.1.1.1",
         "server_port": 53
       }
     ],
-    "final": "dns-mts1"
+    "final": "dns-bootstrap"
   }
 }

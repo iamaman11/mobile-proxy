@@ -1,4 +1,6 @@
 use std::fs::OpenOptions;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
@@ -48,6 +50,20 @@ impl RuntimeChildren {
             self.host_daemon = Some(spawn_host_daemon(config)?);
         }
         Ok(())
+    }
+
+    pub fn restart_proxy(&mut self, config: &SupervisorConfig) {
+        let Some(mut proxy) = self.proxy.take() else {
+            return;
+        };
+        info!("proxy configuration changed; restarting proxy");
+        if let Err(err) = proxy.kill() {
+            warn!("failed to stop proxy for configuration reload: {err:#}");
+        }
+        let _ = proxy.wait();
+        if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel {
+            restart_host_daemon_after_proxy_exit(&mut self.host_daemon);
+        }
     }
 }
 
@@ -127,11 +143,31 @@ fn spawn_proxy(config: &SupervisorConfig) -> Result<Child> {
 }
 
 fn append_log(path: &str) -> Result<std::fs::File> {
-    OpenOptions::new()
+    rotate_log(path, 5 * 1024 * 1024)?;
+    let file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .with_context(|| format!("failed to open runtime log {path}"))
+        .with_context(|| format!("failed to open runtime log {path}"))?;
+    #[cfg(unix)]
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("failed to secure runtime log {path}"))?;
+    Ok(file)
+}
+
+fn rotate_log(path: &str, max_bytes: u64) -> Result<()> {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return Ok(());
+    };
+    if metadata.len() < max_bytes {
+        return Ok(());
+    }
+    let rotated = format!("{path}.1");
+    if std::path::Path::new(&rotated).exists() {
+        std::fs::remove_file(&rotated)
+            .with_context(|| format!("failed to remove old rotated log {rotated}"))?;
+    }
+    std::fs::rename(path, &rotated).with_context(|| format!("failed to rotate runtime log {path}"))
 }
 
 fn ensure_executable(path: &Path) -> Result<()> {
