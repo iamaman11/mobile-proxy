@@ -34,8 +34,12 @@ jobs:
         shell: bash
         run: |
           set +e
-          python3 .github/agent_observability.py > observability-error.txt 2>&1
+          python3 .github/agent_observability_fix.py > observability-error.txt 2>&1
           status=$?
+          if [ "$status" -eq 0 ]; then
+            python3 .github/agent_observability.py >> observability-error.txt 2>&1
+            status=$?
+          fi
           cat observability-error.txt
           exit "$status"
 
