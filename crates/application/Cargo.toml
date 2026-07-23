@@ -1,0 +1,9 @@
+[package]
+name = "mobile-proxy-application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mobile-proxy-foundation.workspace = true
+proxy-core = { path = "../proxy-core" }
