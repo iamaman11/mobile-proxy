@@ -39,7 +39,7 @@ jobs:
               raise SystemExit("builder diagnostic anchor drifted")
           builder_body = builder_body.replace(old_diagnostic, new_diagnostic, 1)
 
-          generic_route_call = '''replace_once(
+          generic_route_call = """replace_once(
               "contracts/governance/invariant-enforcement.json",
               '''        "crates/application/src/command_issue.rs",
                       "services/control-plane/src/routes.rs"
@@ -49,7 +49,7 @@ jobs:
                       "services/control-plane/src/routes.rs"
               ''',
           )
-          '''
+          """
           if builder_body.count(generic_route_call) != 1:
               raise SystemExit("generic governance route evidence builder anchor drifted")
           builder.write_text(
