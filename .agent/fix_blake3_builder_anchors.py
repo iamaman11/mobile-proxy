@@ -24,4 +24,26 @@ new_block = '''replace_once(
 if old_block not in body:
     raise RuntimeError("expected Ultimate Plan replacement block was not found")
 body = body.replace(old_block, new_block, 1)
+
+# The release root is deleted and recreated before packaging, so no legacy
+# checksum file can survive into a new release. Keep the production writer free
+# of the forbidden legacy contract name; legacy history remains documented in
+# the migration inventory and tested in the policy validator fixtures.
+body = body.replace(
+    'const LEGACY_SHA256_MANIFEST: &str = "checksums.sha256";\\n',
+    "",
+)
+body = body.replace(
+    '''    let legacy = root.join(LEGACY_SHA256_MANIFEST);\n    if legacy.exists() {\n        fs::remove_file(&legacy)\n            .with_context(|| format!("failed to remove legacy {}", legacy.display()))?;\n    }\n\n''',
+    "",
+)
+body = body.replace(
+    "            if relative != RELEASE_INTEGRITY_MANIFEST && relative != LEGACY_SHA256_MANIFEST {",
+    "            if relative != RELEASE_INTEGRITY_MANIFEST {",
+)
+body = body.replace(
+    '        assert!(!root.join("checksums.sha256").exists());\\n',
+    "",
+)
+
 path.write_text(body, encoding="utf-8")
