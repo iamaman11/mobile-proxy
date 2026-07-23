@@ -1,0 +1,9 @@
+error: expected expression, found `let` statement
+  --> /home/runner/work/mobile-proxy/mobile-proxy/services/host-daemon/src/health.rs:88:9
+   |
+88 |         let healthy = snapshot.cellular_route_ready
+   |         ^^^
+   |
+   = note: only supported directly in conditions of `if` and `while` expressions
+
+Error writing files: failed to resolve mod `health`: cannot parse /home/runner/work/mobile-proxy/mobile-proxy/services/host-daemon/src/health.rs
