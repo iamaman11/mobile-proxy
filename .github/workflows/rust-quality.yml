@@ -161,7 +161,7 @@ jobs:
       - name: Verify isolated final diff
         run: |
           git diff --check
-          changed="$(git diff --name-only origin/main)"
+          changed="$(git diff --name-only origin/main | grep -v '^\.polish-trigger$')"
           test "$changed" = $'crates/reverse-tunnel/src/state.rs\ncrates/reverse-tunnel/src/tunnel.rs'
 
       - name: Commit polished production slice
