@@ -23,6 +23,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Enforce architecture boundaries
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
       - name: Install stable Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
