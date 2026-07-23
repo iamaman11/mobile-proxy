@@ -1,0 +1,139 @@
+diff --git a/crates/application/src/command_delivery.rs b/crates/application/src/command_delivery.rs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/crates/application/src/command_delivery.rs
+@@ -0,0 +1,133 @@
++use std::error::Error;
++use std::fmt::{Display, Formatter};
++use std::future::Future;
++use std::pin::Pin;
++
++use mobile_proxy_foundation::CommandId;
++use proxy_core::{CommandAckRequest, DeviceCommand};
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct PollCommandInput {
++    pub device_id: String,
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum PollCommandOutcome {
++    Available(DeviceCommand),
++    Empty,
++}
++
++impl PollCommandOutcome {
++    pub fn into_option(self) -> Option<DeviceCommand> {
++        match self {
++            Self::Available(command) => Some(command),
++            Self::Empty => None,
++        }
++    }
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum PollCommandError {
++    StateConflict,
++}
++
++impl Display for PollCommandError {
++    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
++        formatter.write_str("persisted command queue is internally inconsistent")
++    }
++}
++
++impl Error for PollCommandError {}
++
++pub type PollCommandFuture<'a> =
++    Pin<Box<dyn Future<Output = Result<PollCommandOutcome, PollCommandError>> + Send + 'a>>;
++
++pub trait PollCommandPort {
++    fn poll_command(&self, input: PollCommandInput) -> PollCommandFuture<'_>;
++}
++
++#[derive(Debug, Clone)]
++pub struct AcknowledgeCommandInput {
++    pub device_id: String,
++    pub command_id: CommandId,
++    pub request: CommandAckRequest,
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum AcknowledgeCommandOutcome {
++    Acknowledged,
++    RetryRequested,
++    NotPending,
++}
++
++impl AcknowledgeCommandOutcome {
++    pub fn accepted(self) -> bool {
++        matches!(self, Self::Acknowledged | Self::RetryRequested)
++    }
++
++    pub fn classification(self) -> &'static str {
++        match self {
++            Self::Acknowledged => "acknowledged",
++            Self::RetryRequested => "retry_requested",
++            Self::NotPending => "not_pending",
++        }
++    }
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum AcknowledgeCommandError {
++    StateConflict,
++    Persistence,
++}
++
++impl Display for AcknowledgeCommandError {
++    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
++        formatter.write_str(match self {
++            Self::StateConflict => "persisted command queue is internally inconsistent",
++            Self::Persistence => "command acknowledgement state could not be persisted",
++        })
++    }
++}
++
++impl Error for AcknowledgeCommandError {}
++
++pub type AcknowledgeCommandFuture<'a> = Pin<
++    Box<
++        dyn Future<Output = Result<AcknowledgeCommandOutcome, AcknowledgeCommandError>>
++            + Send
++            + 'a,
++    >,
++>;
++
++pub trait AcknowledgeCommandPort {
++    fn acknowledge_command(&self, input: AcknowledgeCommandInput)
++    -> AcknowledgeCommandFuture<'_>;
++}
++
++#[cfg(test)]
++mod tests {
++    use super::AcknowledgeCommandOutcome;
++
++    #[test]
++    fn acknowledgement_outcomes_preserve_the_existing_accepted_shape() {
++        assert!(AcknowledgeCommandOutcome::Acknowledged.accepted());
++        assert!(AcknowledgeCommandOutcome::RetryRequested.accepted());
++        assert!(!AcknowledgeCommandOutcome::NotPending.accepted());
++    }
++
++    #[test]
++    fn acknowledgement_classifications_are_bounded() {
++        assert_eq!(
++            AcknowledgeCommandOutcome::Acknowledged.classification(),
++            "acknowledged"
++        );
++        assert_eq!(
++            AcknowledgeCommandOutcome::RetryRequested.classification(),
++            "retry_requested"
++        );
++        assert_eq!(
++            AcknowledgeCommandOutcome::NotPending.classification(),
++            "not_pending"
++        );
++    }
++}
