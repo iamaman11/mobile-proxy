@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install stable Rust toolchain
         run: |
@@ -29,7 +29,28 @@ jobs:
           rustup default stable
 
       - name: Verify formatting
+        id: formatting
+        continue-on-error: true
         run: cargo fmt --all -- --check
+
+      - name: Capture rustfmt patch
+        if: steps.formatting.outcome == 'failure'
+        run: |
+          cargo fmt --all
+          git diff --binary > rustfmt.patch
+
+      - name: Upload rustfmt patch
+        if: steps.formatting.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: rustfmt-patch
+          path: rustfmt.patch
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce formatting
+        if: steps.formatting.outcome == 'failure'
+        run: exit 1
 
       - name: Run strict Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
