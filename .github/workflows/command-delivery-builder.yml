@@ -37,25 +37,69 @@ jobs:
           new_diagnostic = 'raise SystemExit(f"{path}: expected exactly one replacement anchor, found {count}: {old!r}")'
           if builder_body.count(old_diagnostic) != 1:
               raise SystemExit("builder diagnostic anchor drifted")
+          builder_body = builder_body.replace(old_diagnostic, new_diagnostic, 1)
+
+          generic_route_call = '''replace_once(
+              "contracts/governance/invariant-enforcement.json",
+              '''        "crates/application/src/command_issue.rs",
+                      "services/control-plane/src/routes.rs"
+              ''',
+              '''        "crates/application/src/command_issue.rs",
+                      "crates/application/src/command_delivery.rs",
+                      "services/control-plane/src/routes.rs"
+              ''',
+          )
+          '''
+          if builder_body.count(generic_route_call) != 1:
+              raise SystemExit("generic governance route evidence builder anchor drifted")
           builder.write_text(
-              builder_body.replace(old_diagnostic, new_diagnostic, 1),
+              builder_body.replace(generic_route_call, "", 1),
               encoding="utf-8",
           )
 
           path = Path("contracts/governance/invariant-enforcement.json")
           body = path.read_text(encoding="utf-8")
-          old = '''        "crates/application/src/command_issue.rs",
-                  "services/control-plane/src/state.rs"
+          state_old = '''        "crates/application/src/command_issue.rs",
+                            "services/control-plane/src/state.rs"
           '''
-          new = '''        "crates/application/src/command_issue.rs",
-                  "crates/application/src/command_delivery.rs",
-                  "services/control-plane/src/state.rs"
+          state_new = '''        "crates/application/src/command_issue.rs",
+                            "crates/application/src/command_delivery.rs",
+                            "services/control-plane/src/state.rs"
           '''
-          if body.count(old) != 2:
+          if body.count(state_old) != 2:
               raise SystemExit(
-                  f"governance state evidence: expected exactly two anchors, found {body.count(old)}"
+                  f"governance state evidence: expected exactly two anchors, found {body.count(state_old)}"
               )
-          path.write_text(body.replace(old, new, 1), encoding="utf-8")
+          body = body.replace(state_old, state_new, 1)
+
+          arch_route_old = '''      "ARCH-005",
+                "A1",
+                "Decision 8",
+                "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
+                "partially_enforced",
+                "application",
+                [
+                  "crates/application/src/command_issue.rs",
+                  "services/control-plane/src/routes.rs"
+                ],
+          '''
+          arch_route_new = '''      "ARCH-005",
+                "A1",
+                "Decision 8",
+                "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
+                "partially_enforced",
+                "application",
+                [
+                  "crates/application/src/command_issue.rs",
+                  "crates/application/src/command_delivery.rs",
+                  "services/control-plane/src/routes.rs"
+                ],
+          '''
+          if body.count(arch_route_old) != 1:
+              raise SystemExit(
+                  f"ARCH-005 evidence: expected exactly one anchor, found {body.count(arch_route_old)}"
+              )
+          path.write_text(body.replace(arch_route_old, arch_route_new, 1), encoding="utf-8")
           PY
           python3 .agent/build.py >> command-delivery-builder.log 2>&1
 
