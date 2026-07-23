@@ -70,19 +70,22 @@ pub async fn run_server(
 ) -> Result<()> {
     loop {
         tokio::select! {
-            _ = shutdown.changed() => return Ok(()),
-            accepted = listener.accept() => {
-                let (stream, peer) = accepted.context("reverse tunnel accept failed")?;
-                debug!(%peer, "accepted TCP reverse tunnel connection");
-                let state = state.clone();
-                let config = config.clone();
-                tokio::spawn(async move {
-                    if let Err(err) = handle_server_connection(stream, config, state).await {
-                        warn!(error = %err, "TCP reverse tunnel control connection ended");
-                    }
-                });
-            }
-        }
+                  _ = shutdown.changed() => {
+            state.shutdown_tcp().await;
+            return Ok(());
+        },
+                  accepted = listener.accept() => {
+                      let (stream, peer) = accepted.context("reverse tunnel accept failed")?;
+                      debug!(%peer, "accepted TCP reverse tunnel connection");
+                      let state = state.clone();
+                      let config = config.clone();
+                      tokio::spawn(async move {
+                          if let Err(err) = handle_server_connection(stream, config, state).await {
+                              warn!(error = %err, "TCP reverse tunnel control connection ended");
+                          }
+                      });
+                  }
+              }
     }
 }
 
@@ -225,11 +228,17 @@ async fn connect_and_pump(
         return connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await;
     }
     if matches!(config.transport, TunnelTransport::Hybrid { .. }) {
-        if connect_and_pump_quic(config, session_id, shutdown, snapshot, status)
-            .await
-            .is_ok()
-        {
-            return Ok(());
+        match connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                warn!(
+                    node_id = %config.node_id,
+                    from_transport = "quic",
+                    to_transport = "tls_tcp",
+                    reason = quic_failover_reason(&error),
+                    "reverse tunnel transport failover"
+                );
+            }
         }
         return connect_and_pump_tls_tcp(config, session_id, shutdown, snapshot, status).await;
     }
@@ -289,6 +298,21 @@ async fn connect_and_pump(
                 let _ = status.send(snapshot.clone());
             }
         }
+    }
+}
+
+fn quic_failover_reason(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string();
+    if message.contains("timed out") {
+        "connect_timeout"
+    } else if message.contains("connect failed") {
+        "connect_failed"
+    } else if message.contains("authentication") {
+        "authentication_failed"
+    } else if message.contains("closed") {
+        "session_closed"
+    } else {
+        "session_error"
     }
 }
 
@@ -653,33 +677,18 @@ async fn handle_server_connection(
 ) -> Result<()> {
     let first = read_first_frame(&mut stream).await?;
     if let ClientFrame::ProxyStream {
+        node_id,
         session_id,
         stream_id,
         auth_token,
-        ..
     } = first
     {
         if !bool::from(auth_token.as_bytes().ct_eq(config.auth_token.as_bytes())) {
             bail!("reverse tunnel proxy stream authentication failed");
         }
-        let session_valid = state
-            .sessions
-            .lock()
-            .await
-            .values()
-            .any(|session| session.connected && session.session_id == session_id);
-        if !session_valid {
-            bail!("reverse tunnel proxy stream session is not active");
-        }
-        let sender = state
-            .pending_tcp
-            .lock()
-            .await
-            .remove(&stream_id)
-            .context("unexpected reverse tunnel proxy stream id")?;
-        sender
-            .send(stream)
-            .map_err(|_| anyhow::anyhow!("proxy requester closed"))?;
+        state
+            .accept_tcp_proxy_stream(&node_id, session_id, stream_id, stream)
+            .await?;
         return Ok(());
     }
     let ClientFrame::Hello(hello) = first else {
@@ -696,41 +705,37 @@ async fn handle_server_connection(
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let (control_tx, mut control_rx) = mpsc::channel(256);
-    state
-        .tcp_controls
-        .lock()
-        .await
-        .insert(hello.node_id.clone(), control_tx);
     info!(node_id = %hello.node_id, session_id = %hello.session_id, "TCP reverse tunnel authenticated");
     mark_connected(&state, &hello, None).await;
+    state
+        .register_tcp_control(hello.node_id.clone(), hello.session_id, control_tx)
+        .await;
 
-    loop {
+    let result = loop {
         tokio::select! {
-        frame = control_rx.recv() => {
-            let Some(frame) = frame else { break; };
-            write_server_frame(&mut writer, &frame).await?;
+              frame = control_rx.recv() => {
+        let Some(frame) = frame else { break Ok(()); };
+        if let Err(error) = write_server_frame(&mut writer, &frame).await {
+            break Err(error);
         }
-        incoming = read_optional_frame(&mut reader) => match incoming {
-            Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
-                mark_heartbeat(&state, &heartbeat).await;
-            }
-            Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
-                bail!("unexpected repeated hello on reverse tunnel session");
-            }
-            Ok(None) => {
-                mark_disconnected(&state, &hello).await;
-                return Ok(());
-            }
-            Err(err) => {
-                mark_disconnected(&state, &hello).await;
-                return Err(err);
-            }
+              }
+              incoming = read_optional_frame(&mut reader) => match incoming {
+        Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
+            mark_heartbeat(&state, &heartbeat).await;
         }
+        Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
+            break Err(anyhow::anyhow!("unexpected repeated hello on reverse tunnel session"));
         }
-    }
-    state.tcp_controls.lock().await.remove(&hello.node_id);
+        Ok(None) => break Ok(()),
+        Err(error) => break Err(error),
+              }
+              }
+    };
+    state
+        .remove_tcp_control_for_session(&hello.node_id, hello.session_id)
+        .await;
     mark_disconnected(&state, &hello).await;
-    Ok(())
+    result
 }
 
 async fn read_first_frame(stream: &mut TcpStream) -> Result<ClientFrame> {
@@ -799,6 +804,9 @@ async fn mark_connected(
     connection: Option<quinn::Connection>,
 ) {
     let mut sessions = state.sessions.lock().await;
+    let previous_session = sessions
+        .get(&hello.node_id)
+        .map(|session| session.session_id);
     let accepted_connections = sessions
         .get(&hello.node_id)
         .map(|existing| existing.accepted_connections + 1)
@@ -814,6 +822,12 @@ async fn mark_connected(
         },
     );
     drop(sessions);
+    if let Some(previous_session) = previous_session {
+        state.cancel_pending_for_session(&hello.node_id, previous_session);
+        state
+            .remove_tcp_control_for_session(&hello.node_id, previous_session)
+            .await;
+    }
     if let Some(connection) = connection {
         state
             .connections
@@ -835,16 +849,20 @@ async fn mark_heartbeat(state: &ReverseTunnelServerState, heartbeat: &TunnelHear
 
 async fn mark_disconnected(state: &ReverseTunnelServerState, hello: &TunnelHello) {
     let mut sessions = state.sessions.lock().await;
-    let mut remove_connection = false;
+    let mut remove_session_resources = false;
     if let Some(session) = sessions.get_mut(&hello.node_id)
         && session.session_id == hello.session_id
     {
         session.connected = false;
-        remove_connection = true;
+        remove_session_resources = true;
     }
     drop(sessions);
-    if remove_connection {
+    if remove_session_resources {
         state.connections.lock().await.remove(&hello.node_id);
+        state
+            .remove_tcp_control_for_session(&hello.node_id, hello.session_id)
+            .await;
+        state.cancel_pending_for_session(&hello.node_id, hello.session_id);
     }
 }
 
@@ -1188,6 +1206,45 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, new.session_id);
         assert!(sessions[0].connected);
+    }
+
+    #[tokio::test]
+    async fn replacing_tcp_session_cancels_pending_proxy_request() {
+        let state = ReverseTunnelServerState::default();
+        let old = TunnelHello {
+            node_id: "test-phone".into(),
+            session_id: Uuid::new_v4(),
+            protocol_version: 1,
+            auth_token: "test-token".into(),
+        };
+        mark_connected(&state, &old, None).await;
+        let (control_tx, mut control_rx) = mpsc::channel(1);
+        state
+            .register_tcp_control(old.node_id.clone(), old.session_id, control_tx)
+            .await;
+
+        let request_state = state.clone();
+        let request =
+            tokio::spawn(async move { request_state.open_tcp_proxy(Some("test-phone")).await });
+        timeout(Duration::from_secs(1), control_rx.recv())
+            .await
+            .expect("pending request must reach the old control channel")
+            .expect("old control channel must remain open");
+
+        let new = TunnelHello {
+            node_id: old.node_id.clone(),
+            session_id: Uuid::new_v4(),
+            protocol_version: 1,
+            auth_token: "test-token".into(),
+        };
+        mark_connected(&state, &new, None).await;
+
+        let error = timeout(Duration::from_secs(1), request)
+            .await
+            .expect("session replacement must cancel the pending request")
+            .expect("request task must finish")
+            .expect_err("old-session request must be cancelled");
+        assert!(error.to_string().contains("cancelled"));
     }
 
     #[tokio::test]
