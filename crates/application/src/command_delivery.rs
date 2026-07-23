@@ -95,15 +95,12 @@ impl Error for AcknowledgeCommandError {}
 
 pub type AcknowledgeCommandFuture<'a> = Pin<
     Box<
-        dyn Future<Output = Result<AcknowledgeCommandOutcome, AcknowledgeCommandError>>
-            + Send
-            + 'a,
+        dyn Future<Output = Result<AcknowledgeCommandOutcome, AcknowledgeCommandError>> + Send + 'a,
     >,
 >;
 
 pub trait AcknowledgeCommandPort {
-    fn acknowledge_command(&self, input: AcknowledgeCommandInput)
-    -> AcknowledgeCommandFuture<'_>;
+    fn acknowledge_command(&self, input: AcknowledgeCommandInput) -> AcknowledgeCommandFuture<'_>;
 }
 
 #[cfg(test)]

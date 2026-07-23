@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-07-23",
-  "baseline_main_sha": "3f6a2bb98807d289b5e436911b9dd92c102543d4",
+  "baseline_main_sha": "960745007e543c9245a69e57a4856b4f39ab3730",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -354,6 +354,7 @@
       "application",
       [
         "crates/application/src/command_issue.rs",
+        "crates/application/src/command_delivery.rs",
         "services/control-plane/src/state.rs"
       ],
       [
@@ -362,7 +363,7 @@
       ],
       "remaining-control-plane-application-ports",
       "",
-      "Command issuance mutates through a typed application port; registration, heartbeat, probe and acknowledgement are still direct handlers.",
+      "Command issuance and successful acknowledgement mutate through typed application ports; registration, heartbeat and probe are still direct handlers.",
       ""
     ],
     [
@@ -374,6 +375,7 @@
       "application",
       [
         "crates/application/src/command_issue.rs",
+        "crates/application/src/command_delivery.rs",
         "services/control-plane/src/routes.rs"
       ],
       [
@@ -382,7 +384,7 @@
       ],
       "remaining-control-plane-application-ports",
       "",
-      "issue_command authenticates at the router, accepts typed input, calls one use case and maps typed outcomes; other handlers remain transitional.",
+      "Command issue, poll and acknowledgement handlers authenticate at the router, call one typed use case and map typed outcomes; registration, heartbeat and probe remain transitional.",
       ""
     ],
     [
@@ -464,6 +466,7 @@
       "persistence",
       [
         "crates/application/src/command_issue.rs",
+        "crates/application/src/command_delivery.rs",
         "services/control-plane/src/state.rs"
       ],
       [
@@ -471,7 +474,7 @@
       ],
       "atomic-command-audit-outbox",
       "",
-      "Command queue, durable idempotency result and device projection are written as one fsynced candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
+      "Command issuance and successful acknowledgement write queue, durable idempotency result and device projection as one fsynced candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
       ""
     ],
     [

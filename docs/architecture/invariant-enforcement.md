@@ -1,7 +1,7 @@
 # Invariant enforcement audit
 
 Status: normative governance companion  
-Baseline `main`: `3f6a2bb98807d289b5e436911b9dd92c102543d4`
+Baseline `main`: `960745007e543c9245a69e57a4856b4f39ab3730`
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -64,8 +64,8 @@ This list is not a claim that every rule in ADR-001 or the Ultimate Plan is enfo
 The highest-impact active gaps remain explicit in the matrix:
 
 - single owner per aggregate and application ports for the remaining mutation routes;
-- thin transport handlers beyond the extracted command-issuance route and prohibition of SQL or business transitions in all HTTP routes;
-- durable SQLite canonical state, transactional audit/outbox semantics and JSON migration;
+- thin transport handlers beyond the extracted command lifecycle routes and prohibition of SQL or business transitions in all HTTP routes;
+- durable SQLite canonical state, durable acknowledgement history, transactional audit/outbox semantics and JSON migration;
 - repository-wide typed status/error taxonomies;
 - application-specific canonical-field detection;
 - repository-wide bounded queue/map/task enforcement;
@@ -75,9 +75,9 @@ The highest-impact active gaps remain explicit in the matrix:
 - removal of runtime fingerprint legacy readers after the accepted compatibility window;
 - physical reserve-tunnel acceptance on one immutable SHA.
 
-## Command issuance application-port enforcement
+## Command lifecycle application-port enforcement
 
-The existing admin `issue_command` capability now has one bounded clean-dependency slice:
+The existing command issue, poll and acknowledgement capabilities now have bounded clean-dependency slices:
 
 - `mobile-proxy-application` owns the typed port, deterministic request fingerprint, unambiguous BLAKE3 idempotency scope and exact/conflict classification;
 - the Axum handler calls one use case and maps only typed outcomes to bounded HTTP errors;
@@ -87,7 +87,9 @@ The existing admin `issue_command` capability now has one bounded clean-dependen
 - command queue, idempotency claim/result and device projection are fsynced and atomically renamed before in-memory publication;
 - a failed write returns `state_persistence_failed` and leaves the in-memory state unchanged.
 
-This evidence applies only to command issuance. Registration, heartbeat, public probe, command polling and acknowledgement remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
+Command polling validates queue ownership and returns a typed pending-or-empty outcome without transport logic reaching into the queue. Successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory. Negative acknowledgement preserves the pending command and the existing `{ \"accepted\": true }` compatibility shape.
+
+Registration, heartbeat and public probe remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
 
 ## Runtime fingerprint enforcement
 

@@ -10,7 +10,8 @@ use mobile_proxy_application::{
     AcknowledgeCommandOutcome, AcknowledgeCommandPort, IssueCommandError, IssueCommandFuture,
     IssueCommandInput, IssueCommandOutcome, IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE,
     MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS, PollCommandError, PollCommandFuture,
-    PollCommandInput, PollCommandOutcome, PollCommandPort, classify_existing, idempotency_scope_key,
+    PollCommandInput, PollCommandOutcome, PollCommandPort, classify_existing,
+    idempotency_scope_key,
 };
 use mobile_proxy_foundation::CommandId;
 use proxy_core::{DeviceCommand, DeviceRecord};
@@ -275,10 +276,7 @@ impl PollCommandPort for AppState {
 }
 
 impl AcknowledgeCommandPort for AppState {
-    fn acknowledge_command(
-        &self,
-        input: AcknowledgeCommandInput,
-    ) -> AcknowledgeCommandFuture<'_> {
+    fn acknowledge_command(&self, input: AcknowledgeCommandInput) -> AcknowledgeCommandFuture<'_> {
         Box::pin(async move { self.acknowledge_command_transaction(input).await })
     }
 }
@@ -973,7 +971,7 @@ mod tests {
         let state = AppState {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
-            state_path: Arc::new(PathBuf::from("unused")),
+            state_path: Arc::new(std::path::PathBuf::from("unused")),
         };
 
         assert_eq!(
