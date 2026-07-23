@@ -26,7 +26,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply production slice
-        run: python3 .agent/apply_blake3_internal_migration.py
+        run: |
+          python3 .agent/fix_blake3_builder_anchors.py
+          python3 .agent/apply_blake3_internal_migration.py
 
       - name: Enforce architecture and digest policy
         run: |
