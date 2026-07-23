@@ -58,6 +58,7 @@ jobs:
         run: |
           rm -rf .agent
           rm -f .github/workflows/agent-runtime-domain-boundary-builder.yml
+          git checkout origin/main -- .github/workflows/rust-quality.yml
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
