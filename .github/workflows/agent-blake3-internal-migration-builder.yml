@@ -1,0 +1,64 @@
+name: Agent BLAKE3 Internal Migration Builder
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-blake3-internal-migration-builder-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.pull_request.head.ref == 'agent/blake3-internal-migration-builder'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out builder source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Apply production slice
+        run: python3 .agent/apply_blake3_internal_migration.py
+
+      - name: Enforce architecture and digest policy
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format source
+        run: cargo fmt --all
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
+
+      - name: Publish clean final branch
+        env:
+          TARGET_BRANCH: agent/blake3-internal-migration
+        run: |
+          rm -rf .agent scripts/__pycache__ scripts/tests/__pycache__
+          rm -f .github/workflows/agent-blake3-internal-migration-builder.yml
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Migrate first internal digest contract to BLAKE3"
+          git push --force origin HEAD:refs/heads/$TARGET_BRANCH
