@@ -43,7 +43,7 @@ jobs:
           path = Path("/tmp/apply_command_issue_followup.py")
           body = path.read_text(encoding="utf-8").replace("ROOT = Path(__file__).resolve().parents[1]", "ROOT = Path.cwd()")
           original = "    count = body.count(old)\n    if count != 1:\n        raise SystemExit(f\"{relative}: expected one anchor, found {count}\")\n    path.write_text(body.replace(old, new), encoding=\"utf-8\")\n"
-          replacement = "    count = body.count(old)\n    first_only = relative == \"services/control-plane/src/routes.rs\" and old == \"use uuid::Uuid;\\\\n\\\\n\"\n    expected = 2 if first_only else 1\n    if count != expected:\n        raise SystemExit(f\"{relative}: expected {expected} anchors, found {count}\")\n    path.write_text(body.replace(old, new, 1 if first_only else -1), encoding=\"utf-8\")\n"
+          replacement = "    count = body.count(old)\n    first_only = relative == \"services/control-plane/src/routes.rs\" and old.startswith(\"use uuid::Uuid;\")\n    expected = 2 if first_only else 1\n    if count != expected:\n        raise SystemExit(f\"{relative}: expected {expected} anchors, found {count}\")\n    path.write_text(body.replace(old, new, 1 if first_only else -1), encoding=\"utf-8\")\n"
           if original not in body:
               raise SystemExit("builder helper anchor missing")
           body = body.replace(original, replacement)
