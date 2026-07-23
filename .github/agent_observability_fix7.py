@@ -80,10 +80,11 @@ replace_once(
         reverse_tunnel_failover_reason,
 ''',
 )
-replace_once(
-    projection,
-    "pub fn now_unix_secs() -> String {",
-    '''#[cfg(test)]
+projection_file = Path(projection)
+projection_text = projection_file.read_text()
+tests = '''
+
+#[cfg(test)]
 mod tests {
     use super::normalize_tunnel_observability;
 
@@ -118,9 +119,10 @@ mod tests {
         assert_eq!(stale.2.as_deref(), Some("session_closed"));
     }
 }
-
-pub fn now_unix_secs() -> String {''',
-)
+'''
+if "tunnel_observability_is_allowlisted_and_consistent" in projection_text:
+    raise RuntimeError("projection tests already present")
+projection_file.write_text(projection_text.rstrip() + tests)
 workflow = subprocess.check_output(
     ["git", "show", "origin/main:.github/workflows/rust-quality.yml"],
     text=True,
