@@ -24,6 +24,7 @@ pub async fn spawn_reverse_tunnel(
     {
         let mut runtime = runtime_arc.lock().await;
         runtime.reverse_tunnel_counters = initial_counters;
+        runtime.reverse_tunnel_counter_persistence_healthy = true;
     }
     let counter_store = Arc::new(Mutex::new(counter_store));
     let (restart_tx, mut restart_rx) = watch::channel(0_u64);
@@ -98,13 +99,17 @@ async fn project_snapshot(
     counter_store: SharedCounterStore,
     snapshot: ClientSnapshot,
 ) {
-    if let Err(error) = counter_store
+    let persistence_healthy = match counter_store
         .lock()
         .await
         .persist_if_changed(&snapshot.event_counters)
     {
-        warn!(error = %error, "failed to persist reverse tunnel counters");
-    }
+        Ok(_) => true,
+        Err(error) => {
+            warn!(error = %error, "failed to persist reverse tunnel counters");
+            false
+        }
+    };
     {
         let mut runtime = runtime_arc.lock().await;
         runtime.health.reverse_tunnel_connected = Some(snapshot.connected);
@@ -117,6 +122,7 @@ async fn project_snapshot(
             .last_failover_reason
             .map(|reason| reason.as_str().to_string());
         runtime.reverse_tunnel_counters = snapshot.event_counters.clone();
+        runtime.reverse_tunnel_counter_persistence_healthy = persistence_healthy;
         runtime.reverse_tunnel = Some(snapshot.clone());
     }
     if snapshot.connected {
