@@ -1,13 +1,79 @@
 name: Agent Command Issue Builder
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - agent/command-issue-application-port-builder
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: agent-command-issue-builder-safety
+  cancel-in-progress: true
 
 jobs:
-  disabled:
+  build:
+    name: Validate command rollback and capacity safety
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - run: echo "builder disabled between isolated revisions"
+      - name: Fetch isolated patch input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --no-tags --depth=1 origin agent/command-issue-application-port-builder
+          git checkout -q FETCH_HEAD
+          cp .agent/apply_command_safety_followup.py /tmp/apply_command_safety_followup.py
+
+      - name: Check out exact production head
+        run: |
+          git fetch -q --no-tags origin agent/command-issue-application-port
+          git checkout -q -B agent/command-issue-application-port origin/agent/command-issue-application-port
+          test "$(git rev-parse HEAD)" = "0e4abd65f26975f6809211875e87b06137fc2117"
+
+      - name: Apply bounded safety follow-up
+        run: python3 /tmp/apply_command_safety_followup.py
+
+      - name: Validate governance and Python regressions
+        run: |
+          git diff --check
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format and validate Rust workspace
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Verify clean production diff
+        run: |
+          git diff --check
+          test ! -e .agent
+          test ! -e .github/workflows/agent-command-issue-builder.yml
+          git status --short
+
+      - name: Commit exact safety follow-up
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            crates/application/src/command_issue.rs \
+            crates/application/src/lib.rs \
+            services/control-plane/src/state.rs \
+            services/control-plane/src/routes.rs \
+            docs/architecture/command-issuance-application-port.md
+          test -z "$(git status --short | grep '^??' || true)"
+          git commit -m "Preserve command claims across rollback"
+
+      - name: Push clean production branch
+        run: git push origin HEAD:agent/command-issue-application-port
