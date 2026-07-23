@@ -50,6 +50,8 @@ jobs:
           body = body.replace("    evidence=[", "    enforcement=[")
           body = body.replace("    ci_controls=[", "    ci=[")
           exec(compile(body, str(path), "exec"), {"__name__": "__main__"})
+          doc = Path("docs/architecture/command-issuance-application-port.md")
+          doc.write_text("\n".join(line.rstrip() for line in doc.read_text(encoding="utf-8").splitlines()) + "\n", encoding="utf-8")
           PY
 
       - name: Write exact architecture regression fixture
