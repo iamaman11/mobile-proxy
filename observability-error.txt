@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/runner/work/mobile-proxy/mobile-proxy/.github/agent_observability.py", line 644, in <module>
+    replace_once(
+  File "/home/runner/work/mobile-proxy/mobile-proxy/.github/agent_observability.py", line 10, in replace_once
+    raise RuntimeError(f"{path}: expected exactly one match, found {count}")
+RuntimeError: services/host-daemon/src/health.rs: expected exactly one match, found 0
