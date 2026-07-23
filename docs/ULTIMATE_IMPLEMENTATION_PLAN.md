@@ -60,7 +60,7 @@ No migration may silently remove an existing proxy protocol, public port, operat
 
 ### 2.6 Cryptographic primitive policy
 
-Cryptographic primitives are selected by purpose, not by crate preference. New internal content and deterministic digests use full BLAKE3-256 values with algorithm prefixes, versioned domain separation, canonical input bytes and length framing. SHA-256 remains for TLS certificate pinning, standardized artifact/signature formats, FIPS profiles and existing external or persisted compatibility contracts. Passwords use Argon2id; standard protocols retain their specified HMAC, HKDF, signature and AEAD algorithms. Algorithm migration is a versioned data-contract migration and never a blind search-and-replace. The normative rules are in [ADR-002](architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md).
+Cryptographic primitives are selected by purpose, not by crate preference. All first-party internal persisted digests migrate to full BLAKE3-256 values with algorithm prefixes, versioned domain separation, canonical input bytes and length framing; legacy internal SHA-256 is transitional only and must not be newly produced. SHA-256 remains for TLS certificate pinning, standardized artifact/signature formats, FIPS profiles and external compatibility contracts. Passwords use Argon2id; standard protocols retain their specified HMAC, HKDF, signature and AEAD algorithms. Algorithm migration is a versioned data-contract migration and never a blind search-and-replace. The normative rules are in [ADR-002](architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md) and the [Digest Inventory and Migration Matrix](architecture/digest-inventory-and-migration.md).
 
 ## 3. Target bounded contexts
 
