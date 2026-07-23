@@ -56,6 +56,17 @@ pub async fn wait_for_rotation(
     }
 }
 
+pub async fn fetch_metrics(client: &reqwest::Client, api: &str, token: &str) -> Result<String> {
+    Ok(client
+        .get(format!("{}/v1/metrics", api))
+        .headers(auth_headers(token)?)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?)
+}
+
 pub async fn fetch_health(
     client: &reqwest::Client,
     api: &str,
