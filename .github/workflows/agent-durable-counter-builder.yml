@@ -22,7 +22,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply production slice
+        id: apply
+        continue-on-error: true
         run: |
+          set -o pipefail
           python3 - <<'PY'
           from pathlib import Path
           path = Path('.agent/apply_durable_counters.py')
@@ -33,8 +36,9 @@ jobs:
               raise SystemExit('failed to instrument builder')
           path.write_text(body.replace(needle, replacement, 1))
           PY
-          python3 .agent/apply_durable_counters.py
-          python3 - <<'PY'
+          {
+            python3 .agent/apply_durable_counters.py
+            python3 - <<'PY'
           from pathlib import Path
           path = Path('crates/reverse-tunnel/src/model.rs')
           body = path.read_text()
@@ -43,6 +47,20 @@ jobs:
               raise SystemExit('expected exactly one same-transport match arm')
           path.write_text(body.replace(old, '            _ => None,\n', 1))
           PY
+          } 2>&1 | tee .agent/apply.log
+
+      - name: Upload builder diagnostics
+        if: steps.apply.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: durable-counter-builder-diagnostics
+          path: .agent/apply.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Enforce successful application
+        if: steps.apply.outcome == 'failure'
+        run: exit 1
 
       - name: Install stable Rust toolchain
         run: |
