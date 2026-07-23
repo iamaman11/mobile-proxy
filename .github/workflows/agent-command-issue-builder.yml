@@ -60,10 +60,18 @@ jobs:
           cargo fmt --all -- --check
 
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: |
+          if ! cargo clippy --workspace --all-targets -- -D warnings > /tmp/clippy.log 2>&1; then
+            tail -n 200 /tmp/clippy.log
+            exit 1
+          fi
 
       - name: Run workspace tests
-        run: cargo test --workspace
+        run: |
+          if ! cargo test --workspace > /tmp/tests.log 2>&1; then
+            tail -n 200 /tmp/tests.log
+            exit 1
+          fi
 
       - name: Verify clean production diff
         run: |
