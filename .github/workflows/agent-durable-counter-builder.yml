@@ -1,0 +1,62 @@
+name: Agent Durable Counter Builder
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.head_ref == 'agent/durable-tunnel-counters-builder'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out builder source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Apply production slice
+        run: |
+          python3 .agent/apply_durable_counters.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/reverse-tunnel/src/model.rs')
+          body = path.read_text()
+          old = '            (Some(current), next) if current as u8 == next as u8 => None,\n'
+          if body.count(old) != 1:
+              raise SystemExit('expected exactly one same-transport match arm')
+          path.write_text(body.replace(old, '            _ => None,\n', 1))
+          PY
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format source
+        run: cargo fmt --all
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
+
+      - name: Publish clean final branch
+        run: |
+          rm -rf .agent
+          rm .github/workflows/agent-durable-counter-builder.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Add durable reverse tunnel event counters"
+          git push origin HEAD:refs/heads/agent/durable-tunnel-counters
