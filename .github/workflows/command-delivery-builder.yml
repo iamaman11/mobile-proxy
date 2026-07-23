@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - agent/command-delivery-application-ports
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -24,103 +21,215 @@ jobs:
           fetch-depth: 0
           ref: agent/command-delivery-application-ports
 
-      - name: Apply production slice
-        id: apply
-        continue-on-error: true
+      - name: Finalize production slice
         run: |
-          python3 - <<'PY' > command-delivery-builder.log 2>&1
+          python3 - <<'PY'
           from pathlib import Path
-          from textwrap import dedent
 
-          builder = Path(".agent/build.py")
-          builder_body = builder.read_text(encoding="utf-8")
-          old_diagnostic = 'raise SystemExit(f"{path}: expected exactly one replacement anchor, found {count}")'
-          new_diagnostic = 'raise SystemExit(f"{path}: expected exactly one replacement anchor, found {count}: {old!r}")'
-          if builder_body.count(old_diagnostic) != 1:
-              raise SystemExit("builder diagnostic anchor drifted")
-          builder_body = builder_body.replace(old_diagnostic, new_diagnostic, 1)
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              body = target.read_text(encoding="utf-8")
+              count = body.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{path}: expected exactly one replacement anchor, found {count}: {old!r}"
+                  )
+              target.write_text(body.replace(old, new, 1), encoding="utf-8")
 
-          generic_route_call = dedent("""\
+          replace_once(
+              "services/control-plane/src/state.rs",
+              'state_path: Arc::new(PathBuf::from("unused")),',
+              'state_path: Arc::new(std::path::PathBuf::from("unused")),',
+          )
+
           replace_once(
               "contracts/governance/invariant-enforcement.json",
-              '''        "crates/application/src/command_issue.rs",
-              "services/control-plane/src/routes.rs"
+              '  "baseline_main_sha": "3f6a2bb98807d289b5e436911b9dd92c102543d4",',
+              '  "baseline_main_sha": "960745007e543c9245a69e57a4856b4f39ab3730",',
+          )
+          replace_once(
+              "contracts/governance/invariant-enforcement.json",
+              '''      "ARCH-004",
+              "U",
+              "§2.2",
+              "Other contexts mutate aggregate state only through typed application ports",
+              "partially_enforced",
+              "application",
+              [
+                "crates/application/src/command_issue.rs",
+                "services/control-plane/src/state.rs"
+              ],
+              [
+                "RQ-A",
+                "RQ-T"
+              ],
+              "remaining-control-plane-application-ports",
+              "",
+              "Command issuance mutates through a typed application port; registration, heartbeat, probe and acknowledgement are still direct handlers.",
+              ""
           ''',
-              '''        "crates/application/src/command_issue.rs",
-              "crates/application/src/command_delivery.rs",
-              "services/control-plane/src/routes.rs"
+              '''      "ARCH-004",
+              "U",
+              "§2.2",
+              "Other contexts mutate aggregate state only through typed application ports",
+              "partially_enforced",
+              "application",
+              [
+                "crates/application/src/command_issue.rs",
+                "crates/application/src/command_delivery.rs",
+                "services/control-plane/src/state.rs"
+              ],
+              [
+                "RQ-A",
+                "RQ-T"
+              ],
+              "remaining-control-plane-application-ports",
+              "",
+              "Command issuance and successful acknowledgement mutate through typed application ports; registration, heartbeat and probe are still direct handlers.",
+              ""
           ''',
           )
-          """)
-          if builder_body.count(generic_route_call) != 1:
-              raise SystemExit("generic governance route evidence builder anchor drifted")
-          builder.write_text(
-              builder_body.replace(generic_route_call, "", 1),
+          replace_once(
+              "contracts/governance/invariant-enforcement.json",
+              '''      "ARCH-005",
+              "A1",
+              "Decision 8",
+              "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
+              "partially_enforced",
+              "application",
+              [
+                "crates/application/src/command_issue.rs",
+                "services/control-plane/src/routes.rs"
+              ],
+              [
+                "RQ-A",
+                "RQ-T"
+              ],
+              "remaining-control-plane-application-ports",
+              "",
+              "issue_command authenticates at the router, accepts typed input, calls one use case and maps typed outcomes; other handlers remain transitional.",
+              ""
+          ''',
+              '''      "ARCH-005",
+              "A1",
+              "Decision 8",
+              "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
+              "partially_enforced",
+              "application",
+              [
+                "crates/application/src/command_issue.rs",
+                "crates/application/src/command_delivery.rs",
+                "services/control-plane/src/routes.rs"
+              ],
+              [
+                "RQ-A",
+                "RQ-T"
+              ],
+              "remaining-control-plane-application-ports",
+              "",
+              "Command issue, poll and acknowledgement handlers authenticate at the router, call one typed use case and map typed outcomes; registration, heartbeat and probe remain transitional.",
+              ""
+          ''',
+          )
+          replace_once(
+              "contracts/governance/invariant-enforcement.json",
+              '''      "PERSIST-003",
+              "U",
+              "§7",
+              "Business state, idempotency result, domain events, audit and outbox commit atomically",
+              "partially_enforced",
+              "persistence",
+              [
+                "crates/application/src/command_issue.rs",
+                "services/control-plane/src/state.rs"
+              ],
+              [
+                "RQ-T"
+              ],
+              "atomic-command-audit-outbox",
+              "",
+              "Command queue, durable idempotency result and device projection are written as one fsynced candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
+              ""
+          ''',
+              '''      "PERSIST-003",
+              "U",
+              "§7",
+              "Business state, idempotency result, domain events, audit and outbox commit atomically",
+              "partially_enforced",
+              "persistence",
+              [
+                "crates/application/src/command_issue.rs",
+                "crates/application/src/command_delivery.rs",
+                "services/control-plane/src/state.rs"
+              ],
+              [
+                "RQ-T"
+              ],
+              "atomic-command-audit-outbox",
+              "",
+              "Command issuance and successful acknowledgement write queue, durable idempotency result and device projection as one fsynced candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
+              ""
+          ''',
+          )
+
+          replace_once(
+              "docs/architecture/invariant-enforcement.md",
+              "Baseline `main`: `3f6a2bb98807d289b5e436911b9dd92c102543d4`",
+              "Baseline `main`: `960745007e543c9245a69e57a4856b4f39ab3730`",
+          )
+          replace_once(
+              "docs/architecture/invariant-enforcement.md",
+              "- thin transport handlers beyond the extracted command-issuance route and prohibition of SQL or business transitions in all HTTP routes;\n- durable SQLite canonical state, transactional audit/outbox semantics and JSON migration;",
+              "- thin transport handlers beyond the extracted command lifecycle routes and prohibition of SQL or business transitions in all HTTP routes;\n- durable SQLite canonical state, durable acknowledgement history, transactional audit/outbox semantics and JSON migration;",
+          )
+          replace_once(
+              "docs/architecture/invariant-enforcement.md",
+              "## Command issuance application-port enforcement\n\nThe existing admin `issue_command` capability now has one bounded clean-dependency slice:",
+              "## Command lifecycle application-port enforcement\n\nThe existing command issue, poll and acknowledgement capabilities now have bounded clean-dependency slices:",
+          )
+          replace_once(
+              "docs/architecture/invariant-enforcement.md",
+              '''- a failed write returns `state_persistence_failed` and leaves the in-memory state unchanged.
+
+          This evidence applies only to command issuance. Registration, heartbeat, public probe, command polling and acknowledgement remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.''',
+              '''- a failed write returns `state_persistence_failed` and leaves the in-memory state unchanged.
+          - command polling validates queue ownership and returns a typed pending-or-empty outcome without transport logic reaching into the queue;
+          - successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory;
+          - negative acknowledgement preserves the pending command and the existing `{ "accepted": true }` compatibility shape.
+
+          Registration, heartbeat and public probe remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.''',
+          )
+
+          Path("docs/architecture/command-delivery-application-port.md").write_text(
+              '''# Command delivery application ports
+
+          Status: production migration slice  
+          Scope: existing device command polling and acknowledgement routes
+
+          ## Contract
+
+          `mobile-proxy-application` owns transport-independent ports for polling the oldest pending command for one device, acknowledging successful execution, and reporting a retryable negative acknowledgement without deleting the command. Axum authenticates the request, converts path and JSON values to typed inputs, invokes one port and maps typed outcomes. The application crate has no runtime, filesystem, process, network or framework dependency.
+
+          ## Compatibility
+
+          The existing HTTP surface is unchanged:
+
+          - `GET /api/v1/devices/{id}/commands/next` returns either the command object or JSON `null`;
+          - successful and negative acknowledgements return `{ "accepted": true }`;
+          - a repeated successful acknowledgement for a command that is no longer pending returns `{ "accepted": false }`;
+          - device and admin bearer-token separation remains unchanged.
+
+          ## Persistence ordering
+
+          Successful acknowledgement clones the bounded command and device state, validates the queue key and command identity, removes the pending command, clears the device recovery intent, fsyncs and atomically renames the complete JSON candidate, and only then publishes the candidate in memory. A failed write returns `state_persistence_failed` and leaves the in-memory command pending. Negative acknowledgement does not mutate durable state and remains safe for repeated delivery.
+
+          ## Explicitly deferred
+
+          SQLite transactions, durable acknowledgement history, claim leases, attempt counters, domain events, audit, outbox, per-device cryptographic identity and deadline expiry remain later bounded slices. Registration, heartbeat and public-probe handlers remain transitional.
+          ''',
               encoding="utf-8",
           )
-
-          path = Path("contracts/governance/invariant-enforcement.json")
-          body = path.read_text(encoding="utf-8")
-          state_old = dedent("""\
-                  "crates/application/src/command_issue.rs",
-                  "services/control-plane/src/state.rs"
-          """)
-          state_new = dedent("""\
-                  "crates/application/src/command_issue.rs",
-                  "crates/application/src/command_delivery.rs",
-                  "services/control-plane/src/state.rs"
-          """)
-          if body.count(state_old) != 2:
-              raise SystemExit(
-                  f"governance state evidence: expected exactly two anchors, found {body.count(state_old)}"
-              )
-          body = body.replace(state_old, state_new, 1)
-
-          arch_route_old = dedent("""\
-                "ARCH-005",
-                "A1",
-                "Decision 8",
-                "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
-                "partially_enforced",
-                "application",
-                [
-                  "crates/application/src/command_issue.rs",
-                  "services/control-plane/src/routes.rs"
-                ],
-          """)
-          arch_route_new = dedent("""\
-                "ARCH-005",
-                "A1",
-                "Decision 8",
-                "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
-                "partially_enforced",
-                "application",
-                [
-                  "crates/application/src/command_issue.rs",
-                  "crates/application/src/command_delivery.rs",
-                  "services/control-plane/src/routes.rs"
-                ],
-          """)
-          if body.count(arch_route_old) != 1:
-              raise SystemExit(
-                  f"ARCH-005 evidence: expected exactly one anchor, found {body.count(arch_route_old)}"
-              )
-          path.write_text(body.replace(arch_route_old, arch_route_new, 1), encoding="utf-8")
           PY
-          python3 .agent/build.py >> command-delivery-builder.log 2>&1
-
-      - name: Upload builder diagnosis
-        if: steps.apply.outcome == 'failure'
-        uses: actions/upload-artifact@v7
-        with:
-          name: command-delivery-builder-diagnosis
-          path: command-delivery-builder.log
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Enforce builder result
-        if: steps.apply.outcome == 'failure'
-        run: exit 1
 
       - name: Enforce architecture boundaries
         run: |
@@ -143,7 +252,6 @@ jobs:
         run: |
           rm -rf .agent
           rm .github/workflows/command-delivery-builder.yml
-          rm -f command-delivery-builder.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
