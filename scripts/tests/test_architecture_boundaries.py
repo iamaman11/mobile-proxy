@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "check_architecture_boundaries.py"
 SPEC = importlib.util.spec_from_file_location("architecture_boundaries", SCRIPT)
@@ -32,28 +33,32 @@ class ArchitectureBoundaryTests(unittest.TestCase):
             (crate / "src/lib.rs").write_text(source, encoding="utf-8")
         return root
 
+    def check_fixture(self, root: Path):
+        with patch.object(MODULE, "check_invariant_enforcement", return_value=[]):
+            return MODULE.check_repository(root)
+
     def test_accepts_pure_crates(self):
-        self.assertEqual(MODULE.check_repository(self.create_repository()), [])
+        self.assertEqual(self.check_fixture(self.create_repository()), [])
 
     def test_rejects_infrastructure_dependency_in_foundation(self):
         root = self.create_repository(
             foundation_manifest="""[package]\nname = \"mobile-proxy-foundation\"\nversion = \"0.1.0\"\n\n[dependencies]\nserde = \"1\"\ntokio = \"1\"\n"""
         )
-        errors = MODULE.check_repository(root)
+        errors = self.check_fixture(root)
         self.assertTrue(any("forbidden dependency 'tokio'" in error for error in errors))
 
     def test_rejects_adapter_specific_domain_vocabulary(self):
         root = self.create_repository(
             runtime_source='pub const OWNER: &str = "wireguard";\n'
         )
-        errors = MODULE.check_repository(root)
+        errors = self.check_fixture(root)
         self.assertTrue(any("forbidden pure-crate token 'wireguard'" in error for error in errors))
 
     def test_rejects_identity_generation_inside_foundation(self):
         root = self.create_repository(
             foundation_source="pub fn generate() { let _ = Uuid::new_v4(); }\n"
         )
-        errors = MODULE.check_repository(root)
+        errors = self.check_fixture(root)
         self.assertTrue(any("forbidden pure-crate token 'new_v4'" in error for error in errors))
 
 
