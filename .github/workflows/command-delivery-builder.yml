@@ -30,6 +30,18 @@ jobs:
         run: |
           python3 - <<'PY' > command-delivery-builder.log 2>&1
           from pathlib import Path
+
+          builder = Path(".agent/build.py")
+          builder_body = builder.read_text(encoding="utf-8")
+          old_diagnostic = 'raise SystemExit(f"{path}: expected exactly one replacement anchor, found {count}")'
+          new_diagnostic = 'raise SystemExit(f"{path}: expected exactly one replacement anchor, found {count}: {old!r}")'
+          if builder_body.count(old_diagnostic) != 1:
+              raise SystemExit("builder diagnostic anchor drifted")
+          builder.write_text(
+              builder_body.replace(old_diagnostic, new_diagnostic, 1),
+              encoding="utf-8",
+          )
+
           path = Path("contracts/governance/invariant-enforcement.json")
           body = path.read_text(encoding="utf-8")
           old = '''        "crates/application/src/command_issue.rs",
