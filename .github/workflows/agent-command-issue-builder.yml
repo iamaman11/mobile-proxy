@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - name: Fetch isolated patch input
+      - name: Fetch isolated patch inputs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -30,6 +30,7 @@ jobs:
           git fetch -q --no-tags --depth=1 origin agent/command-issue-application-port-builder
           git checkout -q FETCH_HEAD
           cp .agent/apply_command_safety_followup.py /tmp/apply_command_safety_followup.py
+          cp .agent/apply_command_safety_fixup.py /tmp/apply_command_safety_fixup.py
 
       - name: Check out exact production head
         run: |
@@ -38,7 +39,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "0e4abd65f26975f6809211875e87b06137fc2117"
 
       - name: Apply bounded safety follow-up
-        run: python3 /tmp/apply_command_safety_followup.py
+        run: |
+          python3 /tmp/apply_command_safety_followup.py
+          python3 /tmp/apply_command_safety_fixup.py
 
       - name: Validate governance and Python regressions
         run: |
@@ -51,12 +54,16 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Format and validate Rust workspace
+      - name: Format Rust workspace
         run: |
           cargo fmt --all
           cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
 
       - name: Verify clean production diff
         run: |
