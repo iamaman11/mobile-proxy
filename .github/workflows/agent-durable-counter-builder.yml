@@ -30,11 +30,33 @@ jobs:
           from pathlib import Path
           path = Path('.agent/apply_durable_counters.py')
           body = path.read_text()
-          needle = 'def replace_once(path: str, old: str, new: str) -> None:\n    target = Path(path)\n'
-          replacement = 'def replace_once(path: str, old: str, new: str) -> None:\n    print(f"applying {path}: {old[:100]!r}", flush=True)\n    target = Path(path)\n'
-          if body.count(needle) != 1:
-              raise SystemExit('failed to instrument builder')
-          path.write_text(body.replace(needle, replacement, 1))
+          old = '''def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              body = target.read_text()
+              count = body.count(old)
+              if count != 1:
+                  raise RuntimeError(f"expected one match in {path}, found {count}: {old[:120]!r}")
+              target.write_text(body.replace(old, new, 1))
+          '''
+          new = '''def replace_once(path: str, old: str, new: str) -> None:
+              print(f"applying {path}: {old[:100]!r}", flush=True)
+              target = Path(path)
+              body = target.read_text()
+              count = body.count(old)
+              paired_test_anchor = (
+                  path == "crates/reverse-tunnel/src/tunnel.rs"
+                  and old.startswith("        assert_eq!(client_snapshot.last_failover_reason, None);")
+              )
+              if paired_test_anchor and count in (1, 2):
+                  target.write_text(body.replace(old, new, 1))
+                  return
+              if count != 1:
+                  raise RuntimeError(f"expected one match in {path}, found {count}: {old[:120]!r}")
+              target.write_text(body.replace(old, new, 1))
+          '''
+          if body.count(old) != 1:
+              raise SystemExit('failed to patch builder replacement helper')
+          path.write_text(body.replace(old, new, 1))
           PY
           {
             python3 .agent/apply_durable_counters.py
