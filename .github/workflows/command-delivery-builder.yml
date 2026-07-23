@@ -25,12 +25,7 @@ jobs:
           ref: agent/command-delivery-application-ports
 
       - name: Apply production slice
-        run: |
-          set -euo pipefail
-          for patch in .agent/*.patch; do
-            git apply --recount --check "$patch"
-            git apply --recount "$patch"
-          done
+        run: python3 .agent/build.py
 
       - name: Enforce architecture boundaries
         run: |
