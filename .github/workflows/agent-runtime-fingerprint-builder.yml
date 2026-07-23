@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - agent/runtime-fingerprint-migration-builder
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: agent-runtime-fingerprint-builder
+  group: agent-runtime-fingerprint-builder-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
