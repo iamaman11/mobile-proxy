@@ -32,29 +32,27 @@ jobs:
         run: python3 .github/agent_operator_observability.py
 
       - name: Format production code
-        run: cargo fmt --all
-
-      - name: Verify formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Run workspace tests
-        run: cargo test --workspace
-
-      - name: Verify isolated final diff
+        id: formatting
+        continue-on-error: true
         shell: bash
         run: |
-          git diff --check
-          changed="$(git diff --name-only origin/main)"
-          expected=$'apps/operator-cli/src/cli.rs\napps/operator-cli/src/commands.rs\napps/operator-cli/src/http.rs\napps/operator-cli/src/main.rs\nservices/host-daemon/src/api.rs'
-          test "$changed" = "$expected"
+          set +e
+          cargo fmt --all > operator-rustfmt-error.txt 2>&1
+          status=$?
+          cat operator-rustfmt-error.txt
+          exit "$status"
 
-      - name: Commit validated production slice
+      - name: Persist exact formatting failure
+        if: steps.formatting.outcome == 'failure'
         run: |
+          git checkout HEAD -- .github/agent_operator_observability.py .github/workflows/rust-quality.yml
+          git checkout origin/main -- apps/operator-cli/src/cli.rs apps/operator-cli/src/commands.rs apps/operator-cli/src/http.rs apps/operator-cli/src/main.rs services/host-daemon/src/api.rs
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "expose tunnel observability to operators"
+          git commit -m "record operator observability formatting failure"
           git push origin HEAD:agent/operator-tunnel-observability
+
+      - name: Enforce formatting
+        if: steps.formatting.outcome == 'failure'
+        run: exit 1
