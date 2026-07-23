@@ -49,6 +49,7 @@ async fn get_metrics(
         runtime.health.reverse_tunnel_active_transport.as_deref(),
         runtime.health.reverse_tunnel_freshness.as_deref(),
         runtime.health.reverse_tunnel_failover_reason.as_deref(),
+        runtime.reverse_tunnel_counter_persistence_healthy,
         &runtime.reverse_tunnel_counters,
     );
     Ok((
@@ -62,6 +63,7 @@ fn render_reverse_tunnel_metrics(
     active_transport: Option<&str>,
     freshness: Option<&str>,
     failover_reason: Option<&str>,
+    counter_persistence_healthy: bool,
     counters: &TunnelEventCounters,
 ) -> String {
     const FRESHNESS: &[&str] = &["unknown", "fresh", "stale"];
@@ -191,6 +193,17 @@ fn render_reverse_tunnel_metrics(
         counters.reconnect_successes()
     )
     .unwrap();
+    writeln!(
+        output,
+        "# TYPE mobile_proxy_reverse_tunnel_counter_persistence_healthy gauge"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "mobile_proxy_reverse_tunnel_counter_persistence_healthy {}",
+        u8::from(counter_persistence_healthy)
+    )
+    .unwrap();
     output
 }
 
@@ -275,6 +288,7 @@ mod tests {
             Some("tls_tcp"),
             Some("fresh"),
             Some("connect_timeout"),
+            true,
             &counters,
         );
         assert!(
@@ -296,6 +310,7 @@ mod tests {
         assert!(metrics.contains(
             r#"mobile_proxy_reverse_tunnel_failovers_total{reason="connect_timeout"} 1"#
         ));
+        assert!(metrics.contains("mobile_proxy_reverse_tunnel_counter_persistence_healthy 1"));
         assert_eq!(
             metrics
                 .lines()
@@ -331,6 +346,7 @@ mod tests {
             Some("credential=secret"),
             Some("arbitrary"),
             Some("raw-provider-error"),
+            true,
             &counters,
         );
         assert!(!untrusted.contains("credential=secret"));
@@ -345,12 +361,31 @@ mod tests {
     }
 
     #[test]
+    fn counter_persistence_health_is_bounded_and_label_free() {
+        let counters = TunnelEventCounters::default();
+        let metrics = render_reverse_tunnel_metrics(None, None, None, None, false, &counters);
+        assert!(metrics.contains("mobile_proxy_reverse_tunnel_counter_persistence_healthy 0"));
+        assert_eq!(
+            metrics
+                .lines()
+                .filter(|line| {
+                    line.starts_with("mobile_proxy_reverse_tunnel_counter_persistence_healthy ")
+                })
+                .count(),
+            1
+        );
+        assert!(!metrics.lines().any(|line| {
+            line.starts_with("mobile_proxy_reverse_tunnel_counter_persistence_healthy{")
+        }));
+    }
+
+    #[test]
     fn stale_current_state_does_not_decrease_counters() {
         let mut counters = TunnelEventCounters::default();
         counters.begin_attempt();
         counters.record_connection(TunnelActiveTransport::Quic);
         let metrics =
-            render_reverse_tunnel_metrics(Some(false), None, Some("stale"), None, &counters);
+            render_reverse_tunnel_metrics(Some(false), None, Some("stale"), None, true, &counters);
         assert!(metrics.contains("mobile_proxy_reverse_tunnel_connected 0"));
         assert!(
             metrics.contains(r#"mobile_proxy_reverse_tunnel_active_transport{transport="quic"} 0"#)

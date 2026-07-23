@@ -1,1 +1,0 @@
-Do not merge the builder branch. The workflow validates and publishes a clean branch without temporary files.

@@ -37,4 +37,4 @@ The exposition has a compile-time upper bound:
 - 3 disconnect series;
 - 2 label-free reconnect counters.
 
-Current-state gauges remain unchanged. No supplied health string is interpolated into a metric label, and diagnostic failover history does not change readiness.
+Current-state gauges remain unchanged. No supplied health string is interpolated into a metric label, and diagnostic failover history does not change readiness. Persistence health and operator response are documented in [Reverse tunnel counter alerts and recovery](reverse-tunnel-counter-alerts.md).

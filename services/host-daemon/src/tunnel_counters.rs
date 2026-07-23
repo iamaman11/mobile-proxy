@@ -139,6 +139,32 @@ mod tests {
     }
 
     #[test]
+    fn failed_write_does_not_advance_state_and_is_retryable() {
+        let directory = std::env::temp_dir().join(format!(
+            "mobile-proxy-tunnel-counter-retry-test-{}",
+            Uuid::new_v4()
+        ));
+        let blocking_parent = directory.join("state");
+        let path = blocking_parent.join("counters.json");
+        let mut store = TunnelCounterStore::load(path.clone()).unwrap();
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&blocking_parent, b"not-a-directory").unwrap();
+
+        let mut counters = TunnelEventCounters::default();
+        counters.begin_attempt();
+        counters.record_connection(TunnelActiveTransport::Quic);
+        assert!(store.persist_if_changed(&counters).is_err());
+        assert!(!store.counters().same_persisted_state(&counters));
+
+        fs::remove_file(&blocking_parent).unwrap();
+        fs::create_dir_all(&blocking_parent).unwrap();
+        assert!(store.persist_if_changed(&counters).unwrap());
+        let reloaded = TunnelCounterStore::load(path).unwrap();
+        assert!(reloaded.counters().same_persisted_state(&counters));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn invalid_schema_fails_closed() {
         let directory = std::env::temp_dir().join(format!(
             "mobile-proxy-tunnel-counter-schema-test-{}",
