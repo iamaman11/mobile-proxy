@@ -37,8 +37,30 @@ replace_once(
 )
 replace_once(
     "services/control-plane/src/state.rs",
+    "            commands\n"
+    "                .idempotency\n"
+    "                .insert(legacy, command.command_id);\n"
+    "            migration.recovered_results += 1;\n"
+    "        }\n"
+    "        if canonical != legacy\n",
+    "            commands\n"
+    "                .idempotency\n"
+    "                .insert(legacy.clone(), command.command_id);\n"
+    "            migration.recovered_results += 1;\n"
+    "        }\n"
+    "        if canonical != legacy\n",
+)
+replace_once(
+    "services/control-plane/src/state.rs",
     "    use std::collections::HashMap;\n",
     "    use std::collections::{HashMap, VecDeque};\n",
+)
+replace_once(
+    "services/control-plane/src/state.rs",
+    "        IssueCommandError, IssueCommandInput, IssueCommandOutcome, IssueCommandPort,\n"
+    "        MAX_PENDING_COMMANDS, idempotency_scope_key,\n",
+    "        IssueCommandError, IssueCommandInput, IssueCommandOutcome, IssueCommandPort,\n"
+    "        MAX_COMMAND_QUEUE_PER_DEVICE, MAX_PENDING_COMMANDS, idempotency_scope_key,\n",
 )
 replace_once(
     "services/control-plane/src/state.rs",
