@@ -26,7 +26,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply production slice
-        run: python3 .agent/apply_foundation_primitives.py
+        run: |
+          python3 .agent/fix_foundation_builder.py
+          python3 .agent/apply_foundation_primitives.py
 
       - name: Enforce architecture boundaries
         run: |
