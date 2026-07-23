@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "status": "normative",
+  "audit_revision": "2026-07-23",
+  "baseline_main_sha": "e154f8cbd7bfef4040c1b92743eefb89b5edcb82",
+  "allowed_statuses": [
+    "enforced",
+    "partially_enforced",
+    "review_only",
+    "planned",
+    "not_applicable_yet"
+  ],
+  "sources": {
+    "U": {
+      "path": "docs/ULTIMATE_IMPLEMENTATION_PLAN.md",
+      "blob_sha": "b15fc7e2deadb0f2dd9b96aea063cca85cd6a612"
+    },
+    "A1": {
+      "path": "docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md",
+      "blob_sha": "ed916f81dc6d60ca94ee3415b1f5bafd8dc52158"
+    },
+    "A2": {
+      "path": "docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md",
+      "blob_sha": "3746b424d28edc1ba381f02dc0b69a50d533f8cc"
+    },
+    "F": {
+      "path": "docs/architecture/foundation-primitives.md",
+      "blob_sha": "aaae5c4247c45e51663e6e752cfd0b5c841e243b"
+    },
+    "D": {
+      "path": "docs/architecture/digest-inventory-and-migration.md",
+      "blob_sha": "581bd2cceec6edc915d391e931f1b3027f24490c"
+    },
+    "C": {
+      "path": "contracts/compatibility/proxy-surface-v1.json",
+      "blob_sha": "bb0753264aa725e7e5a210adf16da514fbc1b12f"
+    }
+  },
+  "workflows": {
+    "RQ-A": {
+      "path": ".github/workflows/rust-quality.yml",
+      "job": "rust-quality",
+      "step": "Enforce architecture boundaries"
+    },
+    "RQ-T": {
+      "path": ".github/workflows/rust-quality.yml",
+      "job": "rust-quality",
+      "step": "Run workspace tests"
+    }
+  },
+  "columns": [
+    "id",
+    "source",
+    "anchor",
+    "scope",
+    "status",
+    "owner",
+    "enforcement",
+    "ci",
+    "planned_slice",
+    "activation_condition",
+    "evidence_note",
+    "expires_on"
+  ],
+  "required_invariant_ids": [
+    "PLATFORM-001",
+    "COMPAT-001",
+    "COMPAT-002",
+    "COMPAT-003",
+    "COMPAT-004",
+    "COMPAT-005",
+    "COMPAT-006",
+    "COMPAT-007",
+    "ARCH-001",
+    "ARCH-002",
+    "ARCH-003",
+    "ARCH-004",
+    "ARCH-005",
+    "ARCH-006",
+    "ARCH-007",
+    "ARCH-008",
+    "PERSIST-001",
+    "PERSIST-002",
+    "PERSIST-003",
+    "PERSIST-004",
+    "CONTRACT-001",
+    "CONTRACT-002",
+    "CONTRACT-003",
+    "CONTRACT-004",
+    "DIGEST-001",
+    "DIGEST-002",
+    "DIGEST-003",
+    "DIGEST-004",
+    "DIGEST-005",
+    "DIGEST-006",
+    "DIGEST-007",
+    "DIGEST-008",
+    "DIGEST-009",
+    "DIGEST-010",
+    "FOUND-001",
+    "FOUND-002",
+    "FOUND-003",
+    "FOUND-004",
+    "FOUND-005",
+    "FOUND-006",
+    "FOUND-007",
+    "TUNNEL-001",
+    "TUNNEL-002",
+    "TUNNEL-003",
+    "TUNNEL-004",
+    "TUNNEL-005",
+    "TUNNEL-006",
+    "TUNNEL-007",
+    "TUNNEL-008",
+    "TUNNEL-009",
+    "SEC-001",
+    "SEC-002",
+    "SEC-003",
+    "SEC-004",
+    "SEC-005",
+    "OPS-001",
+    "OPS-002",
+    "OPS-003",
+    "OPS-004",
+    "UPGRADE-001",
+    "UPGRADE-002",
+    "UPGRADE-003",
+    "UPGRADE-004",
+    "DELIVERY-001",
+    "DELIVERY-002",
+    "DELIVERY-003",
+    "DELIVERY-004"
+  ],
+  "external_controls": [
+    {
+      "id": "GITHUB-001",
+      "scope": "main branch protection or ruleset requires Rust Quality before merge",
+      "status": "planned",
+      "owner": "repository-admin",
+      "planned_slice": "configure-and-export-main-ruleset",
+      "evidence_note": "The available GitHub connector exposes repository, PR, review and workflow data but not branch protection or rulesets. This control is not claimed as verified."
+    }
+  ],
+  "invariants": [
+    ["PLATFORM-001", "U", "§1, §4, §19", "Canonical platform remains generic multi-consumer and contains no site-analize-by-pl-specific mandatory concept", "partially_enforced", "architecture", ["scripts/check_architecture_boundaries.py"], ["RQ-A"], "canonical-model-vocabulary-gate", "", "Pure crates reject adapter vocabulary; a repository-wide canonical-field scanner does not yet exist.", ""],
+
+    ["COMPAT-001", "U", "§1, §2.5, §19", "Mixed proxy remains public on port 1080", "enforced", "proxy-access", ["contracts/compatibility/proxy-surface-v1.json", "crates/proxy-core/tests/proxy_compatibility_contract.rs"], ["RQ-T"], "", "", "", ""],
+    ["COMPAT-002", "U", "§1, §2.5, §19", "SOCKS5 remains public on port 1081", "enforced", "proxy-access", ["contracts/compatibility/proxy-surface-v1.json", "crates/proxy-core/tests/proxy_compatibility_contract.rs"], ["RQ-T"], "", "", "", ""],
+    ["COMPAT-003", "U", "§1, §2.5, §19", "HTTP including CONNECT remains public on port 3128", "enforced", "proxy-access", ["contracts/compatibility/proxy-surface-v1.json", "crates/proxy-core/tests/proxy_compatibility_contract.rs"], ["RQ-T"], "", "", "", ""],
+    ["COMPAT-004", "U", "§1, §9, §17", "Reverse tunnel remains QUIC-first", "enforced", "tunnel-session", ["contracts/compatibility/proxy-surface-v1.json", "crates/reverse-tunnel/tests/hybrid_tls_fallback.rs"], ["RQ-T"], "", "", "", ""],
+    ["COMPAT-005", "U", "§1, §9, §17", "Certificate-pinned TLS/TCP reserve on port 443 remains available", "enforced", "tunnel-session", ["contracts/compatibility/proxy-surface-v1.json", "crates/reverse-tunnel/tests/hybrid_tls_fallback.rs"], ["RQ-T"], "", "", "", ""],
+    ["COMPAT-006", "U", "§1, §9, §17", "WireGuard remains controlled compatibility and rollback until explicit accepted deprecation", "enforced", "tunnel-session", ["contracts/compatibility/proxy-surface-v1.json", "crates/proxy-core/tests/proxy_compatibility_contract.rs"], ["RQ-T"], "", "", "", ""],
+    ["COMPAT-007", "U", "§1, §2.5, §19", "Operator CLI and operator/admin APIs remain preserved", "partially_enforced", "operations", ["contracts/compatibility/proxy-surface-v1.json"], ["RQ-T"], "operator-surface-contract-parity", "", "Contract states preservation, but a complete route and CLI inventory parity gate is absent.", ""],
+
+    ["ARCH-001", "U", "§2.1", "Dependencies point inward from foundation through composition roots", "partially_enforced", "architecture", ["scripts/check_architecture_boundaries.py", "scripts/tests/test_architecture_boundaries.py"], ["RQ-A"], "workspace-layer-dependency-graph", "", "Current pure crates are checked; the complete target layer graph does not yet exist.", ""],
+    ["ARCH-002", "A1", "Decision 2", "Domain crates reject transport, persistence, Android, filesystem, process, environment and generated-protobuf dependencies", "enforced", "architecture", ["scripts/check_architecture_boundaries.py", "scripts/tests/test_architecture_boundaries.py"], ["RQ-A"], "", "", "Applies to the currently declared pure crates.", ""],
+    ["ARCH-003", "U", "§2.2", "Every mutable aggregate has one owning bounded context", "planned", "architecture", [], [], "aggregate-owner-registry-and-import-gate", "", "No aggregate owner registry or cross-context mutation scanner exists.", ""],
+    ["ARCH-004", "U", "§2.2", "Other contexts mutate aggregate state only through typed application ports", "planned", "application", [], [], "application-ports-and-thin-routes", "", "", ""],
+    ["ARCH-005", "A1", "Decision 8", "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result", "planned", "application", [], [], "application-ports-and-thin-routes", "", "Current control-plane handlers still contain orchestration and persistence calls.", ""],
+    ["ARCH-006", "U", "§19", "SQL and business transitions are absent from HTTP handlers", "planned", "architecture", [], [], "thin-handler-ast-gate", "", "", ""],
+    ["ARCH-007", "A1", "Decision 9", "Responsibilities move only through small independently testable slices and no big-bang rewrite", "planned", "architecture", [], [], "change-scope-governance", "", "Process rule is documented but not machine-enforced.", ""],
+    ["ARCH-008", "A1", "Review trigger", "ADR-001 is superseded only with explicit compatibility migration and equal or stronger controls", "planned", "architecture", [], [], "adr-supersession-validator", "", "", ""],
+
+    ["PERSIST-001", "U", "§2.3, §7, §19", "Canonical mutable state is durable and not only memory, JSON, YAML, SharedPreferences, process tables or queues", "planned", "persistence", [], [], "sqlite-canonical-state-foundation", "", "Control-plane state is still JSON backed with in-memory maps.", ""],
+    ["PERSIST-002", "U", "§7", "SQLite uses WAL, foreign keys, busy timeout, single-writer discipline, short transactions, backup and integrity checks", "not_applicable_yet", "persistence", [], [], "sqlite-canonical-state-foundation", "Canonical SQLite storage is introduced.", "", ""],
+    ["PERSIST-003", "U", "§7", "Business state, idempotency result, domain events, audit and outbox commit atomically", "not_applicable_yet", "persistence", [], [], "atomic-business-audit-outbox", "Transactional repositories are introduced.", "", ""],
+    ["PERSIST-004", "U", "§7", "JSON migration performs import, parity validation, write switch, diagnostic export, compatibility window and retirement", "planned", "persistence", [], [], "json-to-sqlite-migration", "", "", ""],
+
+    ["CONTRACT-001", "U", "§2.4", "Statuses, IDs, error codes, proxy protocols, tunnel transports, strategies, principals, permissions and release reasons are typed", "partially_enforced", "architecture", ["crates/foundation", "crates/runtime-domain"], ["RQ-T"], "typed-taxonomy-expansion", "", "Foundation IDs and runtime lifecycle are typed; proxy-core still has raw string taxonomies.", ""],
+    ["CONTRACT-002", "U", "§2.4", "Raw strings are accepted only at transport boundaries and converted immediately", "planned", "architecture", [], [], "raw-string-taxonomy-gate", "", "", ""],
+    ["CONTRACT-003", "U", "§8, §19", "Generated protobuf models do not enter domain crates", "not_applicable_yet", "architecture", [], [], "generated-protobuf-isolation-gate", "Canonical protobuf consumer contracts are introduced.", "", ""],
+    ["CONTRACT-004", "U", "§8", "Every external request has protocol version, request ID, correlation ID and deadline; mutations add idempotency", "partially_enforced", "application", ["docs/architecture/foundation-primitives.md", "services/control-plane/src/request_context.rs", "services/control-plane/src/routes.rs"], ["RQ-T"], "protocol-version-and-mutation-envelope", "", "Request lineage, deadlines and command idempotency are enforced; protocol version is absent.", ""],
+
+    ["DIGEST-001", "A2", "Decision summary, §1", "New internal content, config and binary fingerprints default to full BLAKE3-256 through typed shared wrappers", "partially_enforced", "security", ["crates/foundation/src/lib.rs", "scripts/check_digest_policy.py"], ["RQ-A", "RQ-T"], "typed-config-and-binary-fingerprints", "", "Primitive policy is enforced; existing fingerprint fields remain strings.", ""],
+    ["DIGEST-002", "A2", "§2", "New internal persisted/public digest text is b3-prefixed full lowercase 64-hex and never bare hex", "enforced", "foundation", ["crates/foundation/src/lib.rs"], ["RQ-T"], "", "", "", ""],
+    ["DIGEST-003", "A2", "§3", "Every deterministic internal digest uses a static versioned non-user-controlled context and semantic changes bump its version", "enforced", "foundation", ["crates/foundation/src/lib.rs"], ["RQ-T"], "", "", "", ""],
+    ["DIGEST-004", "A2", "§4", "Raw concatenation is forbidden and each input part uses unsigned u64 big-endian length framing", "enforced", "foundation", ["crates/foundation/src/lib.rs"], ["RQ-T"], "", "", "", ""],
+    ["DIGEST-005", "A2", "§4", "Structured digest inputs use deterministic versioned canonical bytes and never pretty JSON or Debug output", "partially_enforced", "security", ["apps/operator-cli/src/release_integrity.rs"], ["RQ-T"], "canonical-structured-digest-codec", "", "Release files are canonical raw bytes; no generic structured codec exists.", ""],
+    ["DIGEST-006", "A2", "§8, §9, §14", "Legacy SHA-256 is classified before migration; migration defines reads, writes, conflicts, replay, rollback, retention and persisted fixtures", "partially_enforced", "security", ["docs/architecture/digest-inventory-and-migration.md", "scripts/check_digest_policy.py"], ["RQ-A"], "digest-migration-contract-schema", "", "Release migration is complete; runtime fingerprint migration is pending.", ""],
+    ["DIGEST-007", "D", "Migration rules", "Migration recomputes from canonical source bytes and never computes BLAKE3 over a legacy SHA-256 digest", "planned", "runtime", [], [], "typed-config-and-binary-fingerprints", "", "", ""],
+    ["DIGEST-008", "D", "Migration rules", "New writes create only target BLAKE3; any legacy reader is isolated/versioned and unknown algorithm/domain/version fails closed", "planned", "runtime", [], [], "typed-config-and-binary-fingerprints", "", "", ""],
+    ["DIGEST-009", "D", "Migration rules", "Digest backfill is restart-safe, observable and reversible until acceptance", "planned", "runtime", [], [], "typed-config-and-binary-fingerprints", "", "", ""],
+    ["DIGEST-010", "D", "Release integrity v1", "Device and VM packages write path-sorted typed integrity manifests with exact sizes and immediately verify all files fail closed", "enforced", "release", ["apps/operator-cli/src/device.rs", "apps/operator-cli/src/vm.rs", "apps/operator-cli/src/release_integrity.rs"], ["RQ-T"], "", "", "Manifest is consistency evidence, not a signature or trust root.", ""],
+
+    ["FOUND-001", "F", "Decision, Enforcement", "Foundation validates and formats but never generates randomness, reads clocks, resolves secrets or accesses infrastructure", "enforced", "foundation", ["scripts/check_architecture_boundaries.py", "scripts/tests/test_architecture_boundaries.py"], ["RQ-A"], "", "", "", ""],
+    ["FOUND-002", "F", "UUID identifiers", "UUID-backed IDs accept canonical UUIDs and do not implicitly convert between unrelated IDs", "enforced", "foundation", ["crates/foundation/src/lib.rs"], ["RQ-T"], "", "", "", ""],
+    ["FOUND-003", "F", "Consumer/application/actor identifiers", "Consumer, application and actor IDs are 1-64 allowed ASCII bytes and reject whitespace, controls and credential material", "enforced", "foundation", ["crates/foundation/src/lib.rs"], ["RQ-T"], "", "", "", ""],
+    ["FOUND-004", "F", "Idempotency keys", "Idempotency keys are 1-128 printable non-whitespace ASCII, opaque, case-sensitive and not logged raw", "partially_enforced", "foundation", ["crates/foundation/src/lib.rs", "services/control-plane/src/routes.rs"], ["RQ-T"], "secret-log-static-and-runtime-gate", "", "Validation is enforced; repository-wide secret logging detection is absent.", ""],
+    ["FOUND-005", "F", "Deadlines", "Deadline windows are 1 second to 24 hours and foundation never reads system time", "enforced", "foundation", ["crates/foundation/src/lib.rs", "scripts/check_architecture_boundaries.py"], ["RQ-A", "RQ-T"], "", "", "", ""],
+    ["FOUND-006", "F", "HTTP request context", "Authenticated edge generates missing request identity, inherits missing correlation, returns both IDs and fails malformed or expired values closed", "enforced", "control-plane", ["services/control-plane/src/request_context.rs", "services/control-plane/src/routes.rs"], ["RQ-T"], "", "", "", ""],
+    ["FOUND-007", "F", "HTTP request context, Command boundary", "Authentication precedes lineage parsing and invalid idempotency/deadline values are rejected before command creation", "enforced", "control-plane", ["services/control-plane/src/routes.rs", "crates/proxy-core/src/commands.rs"], ["RQ-T"], "", "", "", ""],
+
+    ["TUNNEL-001", "U", "§9", "Pending TCP stream entries are removed on success, cancellation and timeout", "enforced", "tunnel-session", ["crates/reverse-tunnel/src/state.rs", "crates/reverse-tunnel/tests/hybrid_tls_fallback.rs"], ["RQ-T"], "", "", "", ""],
+    ["TUNNEL-002", "U", "§9, §19", "Global and per-device pending stream counts are bounded and registrations expire", "enforced", "tunnel-session", ["crates/reverse-tunnel/src/state.rs", "crates/reverse-tunnel/tests/hybrid_tls_fallback.rs"], ["RQ-T"], "", "", "", ""],
+    ["TUNNEL-003", "U", "§9", "Routing never chooses an arbitrary device and binds accepted streams to expected device and session", "enforced", "tunnel-session", ["crates/reverse-tunnel/src/state.rs", "crates/reverse-tunnel/tests/hybrid_tls_fallback.rs"], ["RQ-T"], "", "", "", ""],
+    ["TUNNEL-004", "U", "§9", "Stream authority also binds runtime generation and lease generation", "not_applicable_yet", "tunnel-session", [], [], "runtime-and-lease-generation-stream-binding", "Runtime and lease generations enter production.", "Device and session binding is already enforced.", ""],
+    ["TUNNEL-005", "U", "§9, §19", "Global tunnel token is replaced by per-device credentials", "planned", "security", [], [], "per-device-tunnel-identity", "", "", ""],
+    ["TUNNEL-006", "U", "§9", "Primary/reserve transport state and bounded failover reason are tracked", "enforced", "tunnel-session", ["crates/reverse-tunnel/src/state.rs", "services/host-daemon/src/tunnel_counters.rs"], ["RQ-T"], "", "", "", ""],
+    ["TUNNEL-007", "U", "§9, §19", "Routing requires heartbeat freshness rather than a stored connected flag", "enforced", "tunnel-session", ["crates/reverse-tunnel/src/state.rs"], ["RQ-T"], "", "", "", ""],
+    ["TUNNEL-008", "U", "§9", "Transport failover and recovery produce durable audit evidence and repeated failures trigger quarantine", "partially_enforced", "audit-ledger", ["crates/reverse-tunnel/src/state.rs", "services/host-daemon/src/tunnel_counters.rs"], ["RQ-T"], "durable-audit-ledger-and-quarantine", "", "Bounded logs and durable counters exist; immutable audit and quarantine do not.", ""],
+    ["TUNNEL-009", "U", "§9, §17", "Reserve acceptance proves all proxy protocols, UDP block fallback to TLS/TCP 443, heartbeat, mobile IP and return to QUIC", "partially_enforced", "tunnel-session", ["crates/reverse-tunnel/tests/hybrid_tls_fallback.rs"], ["RQ-T"], "physical-reserve-tunnel-acceptance", "", "Permanent software fault injection exists; physical proof remains.", ""],
+
+    ["SEC-001", "U", "§12", "Principal types use separate tokens and consumer scopes cannot invoke provisioning or raw commands", "partially_enforced", "identity-access", ["contracts/compatibility/proxy-surface-v1.json", "services/control-plane/src/routes.rs"], ["RQ-T"], "typed-principals-and-scope-policy", "", "Current admin/device routes are separated; canonical consumer principals are future work.", ""],
+    ["SEC-002", "A2", "§5", "Persisted bearer-token verifiers use keyed BLAKE3 behind a security port with key ID, rotation and constant-time comparison", "not_applicable_yet", "security", [], [], "security-ports-and-token-verifier", "A persisted bearer-token verifier is introduced.", "", ""],
+    ["SEC-003", "A2", "§6", "Human passwords use Argon2id with random salts and upgradable parameters; fast or unsalted password hashes are forbidden", "not_applicable_yet", "security", [], [], "argon2id-password-verifier", "Password authentication is introduced.", "", ""],
+    ["SEC-004", "A2", "§7, §8", "Protocol-mandated HKDF, HMAC, TLS, signature, AEAD, TLS pin and standardized digest algorithms are preserved exactly", "partially_enforced", "security", ["crates/reverse-tunnel", "scripts/check_digest_policy.py"], ["RQ-A", "RQ-T"], "cryptographic-purpose-dependency-registry", "", "Current TLS and external checksum boundaries are preserved; no complete purpose registry exists.", ""],
+    ["SEC-005", "A2", "§10, §11", "MD5, SHA-1, implementation-defined hashes, security CRC, unkeyed token hashes, raw concatenation and undocumented crypto dependencies are rejected", "partially_enforced", "security", ["scripts/check_digest_policy.py", "scripts/tests/test_digest_policy.py"], ["RQ-A"], "cryptographic-purpose-dependency-registry", "", "Direct SHA-256 producers are rejected; the broader prohibited-primitive inventory is not fully scanned.", ""],
+
+    ["OPS-001", "U", "§13", "Structured logs carry operational lineage and never contain secrets", "partially_enforced", "operations", ["services/control-plane/src/routes.rs", "crates/reverse-tunnel/src/state.rs"], ["RQ-T"], "secret-log-static-and-runtime-gate", "", "Selected paths are tested; repository-wide log and Debug enforcement is absent.", ""],
+    ["OPS-002", "U", "§13", "Metrics cover bounded operational state and high-cardinality IDs are not permanent labels", "partially_enforced", "operations", ["services/host-daemon/src/tunnel_counters.rs"], ["RQ-T"], "metrics-schema-cardinality-gate", "", "Tunnel metrics are bounded; no repository-wide metric schema gate exists.", ""],
+    ["OPS-003", "U", "§13", "Liveness, readiness, dependencies, fleet, device and lease health are separated; liveness does not depend on a phone", "planned", "operations", [], [], "health-surface-split", "", "", ""],
+    ["OPS-004", "U", "§19", "Queues, maps and task spawning are bounded", "partially_enforced", "reliability", ["services/control-plane/src/routes.rs", "crates/reverse-tunnel/src/state.rs"], ["RQ-T"], "repository-wide-bounded-concurrency-gate", "", "Command and tunnel pending queues are bounded; no repository-wide scanner exists.", ""],
+
+    ["UPGRADE-001", "U", "§14", "Protobuf field numbers are never reused, removed fields are reserved, and buf lint and breaking are mandatory", "not_applicable_yet", "contracts", [], [], "protobuf-contract-ci", "Canonical protobuf consumer API is introduced.", "", ""],
+    ["UPGRADE-002", "U", "§14", "Database changes use expand-migrate-contract and rollback remains possible after expansion", "not_applicable_yet", "persistence", [], [], "migration-validation-and-rollback", "Canonical database migrations are introduced.", "", ""],
+    ["UPGRADE-003", "U", "§14", "Every process publishes release ID, Git SHA, protocol range, schema version and capabilities", "planned", "operations", [], [], "release-capability-metadata", "", "", ""],
+    ["UPGRADE-004", "U", "§14", "Rollout follows package, integrity, signature, staging, canary, fleet rollout and post-deploy verification", "partially_enforced", "release", ["apps/operator-cli/src/release_integrity.rs"], ["RQ-T"], "signed-staged-canary-rollout", "", "Package integrity exists; signing, canary and fleet verification remain.", ""],
+
+    ["DELIVERY-001", "U", "§17", "Permanent CI runs architecture and Python regressions, formatting, strict Clippy and workspace tests", "enforced", "developer-experience", [".github/workflows/rust-quality.yml"], ["RQ-A", "RQ-T"], "", "", "", ""],
+    ["DELIVERY-002", "U", "§17", "Permanent CI eventually includes audit, deny, machete, semver, buf, gitleaks, migration and Android gates", "planned", "developer-experience", [], [], "ci-baseline-expansion", "", "Only the currently implemented permanent checks are claimed.", ""],
+    ["DELIVERY-003", "U", "§18", "A completed production slice has invariant, use case, typed port, adapter, composition, auth, idempotency, audit, typed errors, metrics, tests, docs and compatibility proof", "planned", "architecture", [], [], "production-slice-evidence-contract", "", "", ""],
+    ["DELIVERY-004", "U", "§18", "Domain code without production composition is not complete", "planned", "architecture", [], [], "production-slice-evidence-contract", "", "", ""]
+  ]
+}
