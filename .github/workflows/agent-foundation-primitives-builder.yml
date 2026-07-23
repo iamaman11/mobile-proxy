@@ -1,0 +1,64 @@
+name: Agent Foundation Primitives Builder
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-foundation-primitives-builder-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.pull_request.head.ref == 'agent/foundation-primitives-builder'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out builder source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Apply production slice
+        run: python3 .agent/apply_foundation_primitives.py
+
+      - name: Enforce architecture boundaries
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format source
+        run: cargo fmt --all
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
+
+      - name: Publish clean final branch
+        env:
+          TARGET_BRANCH: agent/foundation-primitives
+        run: |
+          rm -rf .agent scripts/__pycache__ scripts/tests/__pycache__
+          rm -f .github/workflows/agent-foundation-primitives-builder.yml
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Add typed foundation primitives and hashing policy"
+          git push --force origin HEAD:refs/heads/$TARGET_BRANCH
