@@ -87,7 +87,7 @@ The existing command issue, poll and acknowledgement capabilities now have bound
 - command queue, idempotency claim/result and device projection are fsynced and atomically renamed before in-memory publication;
 - a failed write returns `state_persistence_failed` and leaves the in-memory state unchanged.
 
-Command polling validates queue ownership and returns a typed pending-or-empty outcome without transport logic reaching into the queue. Successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory. Negative acknowledgement preserves the pending command and the existing `{ \"accepted\": true }` compatibility shape.
+Command polling validates queue ownership and returns a typed pending-or-empty outcome without transport logic reaching into the queue. Successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory. Negative acknowledgement preserves the pending command and the existing `{ "accepted": true }` compatibility shape.
 
 Registration, heartbeat and public probe remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
 
