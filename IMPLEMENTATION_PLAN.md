@@ -17,6 +17,7 @@ Related bounded normative artifacts:
 - [ADR-001: Bounded Contexts and Clean Dependency Rules](docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md)
 - [ADR-002: Cryptographic Hashing, Password Hashing and KDF Policy](docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md)
 - [Digest Inventory and Migration Matrix](docs/architecture/digest-inventory-and-migration.md)
+- [Engineering Guardrails](docs/architecture/engineering-guardrails.md)
 - [Foundation Identifiers, Request Lineage and Deadlines](docs/architecture/foundation-primitives.md)
 - [Invariant Enforcement Audit](docs/architecture/invariant-enforcement.md)
 - [Machine-readable Invariant Enforcement Matrix](contracts/governance/invariant-enforcement.json)
