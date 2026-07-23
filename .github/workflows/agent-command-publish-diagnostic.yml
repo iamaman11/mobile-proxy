@@ -1,0 +1,60 @@
+name: Agent Command Publish Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/command-issue-application-port-builder
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Diagnose clean publication guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch builder inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --no-tags --depth=1 origin agent/command-issue-application-port-builder
+          git checkout -q FETCH_HEAD
+          cp .agent/apply_command_issue_followup.py /tmp/apply_command_issue_followup.py
+
+      - name: Check out production branch
+        run: |
+          git fetch -q --no-tags origin agent/command-issue-application-port
+          git checkout -q -B agent/command-issue-application-port origin/agent/command-issue-application-port
+
+      - name: Apply production diff
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("/tmp/apply_command_issue_followup.py")
+          body = path.read_text(encoding="utf-8").replace("ROOT = Path(__file__).resolve().parents[1]", "ROOT = Path.cwd()")
+          original = "    count = body.count(old)\n    if count != 1:\n        raise SystemExit(f\"{relative}: expected one anchor, found {count}\")\n    path.write_text(body.replace(old, new), encoding=\"utf-8\")\n"
+          replacement = "    count = body.count(old)\n    first_only = relative == \"services/control-plane/src/routes.rs\" and old.startswith(\"use uuid::Uuid;\")\n    expected = 2 if first_only else 1\n    if count != expected:\n        raise SystemExit(f\"{relative}: expected {expected} anchors, found {count}\")\n    path.write_text(body.replace(old, new, 1 if first_only else -1), encoding=\"utf-8\")\n"
+          body = body.replace(original, replacement)
+          body = body.replace("    evidence=[", "    enforcement=[")
+          body = body.replace("    ci_controls=[", "    ci=[")
+          exec(compile(body, str(path), "exec"), {"__name__": "__main__"})
+          doc = Path("docs/architecture/command-issuance-application-port.md")
+          doc.write_text("\n".join(line.rstrip() for line in doc.read_text(encoding="utf-8").splitlines()) + "\n", encoding="utf-8")
+          PY
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Check agent inputs removed
+        run: test ! -e .agent
+
+      - name: Check temporary workflows removed
+        run: |
+          test ! -e .github/workflows/agent-command-issue-builder.yml
+          test ! -e .github/workflows/agent-command-publish-diagnostic.yml
+
+      - name: Show exact diff inventory
+        run: git status --short
