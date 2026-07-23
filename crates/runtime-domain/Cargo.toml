@@ -5,5 +5,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-proxy-core = { path = "../proxy-core" }
 serde.workspace = true

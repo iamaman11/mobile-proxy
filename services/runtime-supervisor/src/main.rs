@@ -4,6 +4,7 @@ mod config;
 mod dns;
 mod health;
 mod process;
+mod runtime_adapter;
 
 use std::time::Duration;
 

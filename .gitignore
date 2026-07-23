@@ -2,6 +2,8 @@
 /.run/
 /.secrets/
 /mobile-target-check/
+__pycache__/
+*.py[cod]
 /apps/android-app/.gradle/
 /apps/android-app/.kotlin/
 /apps/android-app/app/build/
