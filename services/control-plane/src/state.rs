@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use mobile_proxy_application::{
-    IssueCommandError, IssueCommandFuture, IssueCommandInput, IssueCommandOutcome,
-    IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS,
-    classify_existing, idempotency_scope_key,
+    AcknowledgeCommandError, AcknowledgeCommandFuture, AcknowledgeCommandInput,
+    AcknowledgeCommandOutcome, AcknowledgeCommandPort, IssueCommandError, IssueCommandFuture,
+    IssueCommandInput, IssueCommandOutcome, IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE,
+    MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS, PollCommandError, PollCommandFuture,
+    PollCommandInput, PollCommandOutcome, PollCommandPort, classify_existing, idempotency_scope_key,
 };
 use mobile_proxy_foundation::CommandId;
 use proxy_core::{DeviceCommand, DeviceRecord};
@@ -187,11 +189,97 @@ impl AppState {
         *commands_guard = commands;
         Ok(IssueCommandOutcome::Created(command))
     }
+
+    async fn poll_command_query(
+        &self,
+        input: PollCommandInput,
+    ) -> Result<PollCommandOutcome, PollCommandError> {
+        let commands = self.commands.lock().await;
+        let Some(command) = commands
+            .queues
+            .get(&input.device_id)
+            .and_then(|queue| queue.front())
+        else {
+            return Ok(PollCommandOutcome::Empty);
+        };
+        if command.device_id != input.device_id {
+            return Err(PollCommandError::StateConflict);
+        }
+        Ok(PollCommandOutcome::Pending(command.clone()))
+    }
+
+    async fn acknowledge_command_transaction(
+        &self,
+        input: AcknowledgeCommandInput,
+    ) -> Result<AcknowledgeCommandOutcome, AcknowledgeCommandError> {
+        if !input.request.ok {
+            return Ok(AcknowledgeCommandOutcome::RetryRequested);
+        }
+
+        let mut devices_guard = self.devices.lock().await;
+        let mut commands_guard = self.commands.lock().await;
+        let mut devices = devices_guard.clone();
+        let mut commands = commands_guard.clone();
+
+        let (command, queue_empty) = {
+            let Some(queue) = commands.queues.get_mut(&input.device_id) else {
+                return Ok(AcknowledgeCommandOutcome::NotFound);
+            };
+            let Some(index) = queue
+                .iter()
+                .position(|command| command.command_id == input.command_id)
+            else {
+                return Ok(AcknowledgeCommandOutcome::NotFound);
+            };
+            if queue[index].device_id != input.device_id {
+                return Err(AcknowledgeCommandError::StateConflict);
+            }
+            let command = queue
+                .remove(index)
+                .ok_or(AcknowledgeCommandError::StateConflict)?;
+            (command, queue.is_empty())
+        };
+        if queue_empty {
+            commands.queues.remove(&input.device_id);
+        }
+
+        if let Some(device) = devices.get_mut(&input.device_id) {
+            device.recovery_intent = Some(proxy_core::RecoveryIntent::None.to_string());
+            device.last_event_at = Some(now_unix_secs());
+        }
+
+        let stored = StoredState {
+            devices: devices.clone(),
+            commands: commands.clone(),
+        };
+        write_stored_state(self.state_path.as_ref(), &stored)
+            .map_err(|_| AcknowledgeCommandError::Persistence)?;
+        *devices_guard = devices;
+        *commands_guard = commands;
+
+        debug_assert_eq!(command.command_id, input.command_id);
+        Ok(AcknowledgeCommandOutcome::Completed)
+    }
 }
 
 impl IssueCommandPort for AppState {
     fn issue_command(&self, input: IssueCommandInput) -> IssueCommandFuture<'_> {
         Box::pin(async move { self.issue_command_transaction(input).await })
+    }
+}
+
+impl PollCommandPort for AppState {
+    fn poll_command(&self, input: PollCommandInput) -> PollCommandFuture<'_> {
+        Box::pin(async move { self.poll_command_query(input).await })
+    }
+}
+
+impl AcknowledgeCommandPort for AppState {
+    fn acknowledge_command(
+        &self,
+        input: AcknowledgeCommandInput,
+    ) -> AcknowledgeCommandFuture<'_> {
+        Box::pin(async move { self.acknowledge_command_transaction(input).await })
     }
 }
 
@@ -384,11 +472,15 @@ mod tests {
     use std::sync::Arc;
 
     use mobile_proxy_application::{
-        IssueCommandError, IssueCommandInput, IssueCommandOutcome, IssueCommandPort,
-        MAX_COMMAND_QUEUE_PER_DEVICE, MAX_PENDING_COMMANDS, idempotency_scope_key,
+        AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandOutcome,
+        AcknowledgeCommandPort, IssueCommandError, IssueCommandInput, IssueCommandOutcome,
+        IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_PENDING_COMMANDS, PollCommandError,
+        PollCommandInput, PollCommandOutcome, PollCommandPort, idempotency_scope_key,
     };
     use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey};
-    use proxy_core::{DesiredState, DeviceCommand, IssueCommandRequest, RecoveryIntent};
+    use proxy_core::{
+        CommandAckRequest, DesiredState, DeviceCommand, IssueCommandRequest, RecoveryIntent,
+    };
     use serde_json::json;
     use tokio::sync::Mutex;
     use uuid::Uuid;
@@ -404,6 +496,14 @@ mod tests {
                 deadline_secs: DeadlineWindow::new(30).unwrap(),
                 idempotency_key: IdempotencyKey::parse("command-123").unwrap(),
             },
+        }
+    }
+
+    fn acknowledgement(command_id: CommandId, ok: bool) -> AcknowledgeCommandInput {
+        AcknowledgeCommandInput {
+            device_id: "device-1".into(),
+            command_id,
+            request: CommandAckRequest { ok, message: None },
         }
     }
 
@@ -685,5 +785,204 @@ mod tests {
         assert_eq!(result, Err(IssueCommandError::Persistence));
         assert!(state.commands.lock().await.queues.is_empty());
         let _ = fs::remove_file(blocking_parent);
+    }
+
+    #[tokio::test]
+    async fn polling_and_negative_acknowledgement_keep_the_command_pending() {
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-command-retry-{}.json",
+            Uuid::new_v4()
+        ));
+        let state = AppState::load(path.clone()).await.unwrap();
+        let (_, original) = state
+            .issue_command(command_input(DesiredState::HealthyServing))
+            .await
+            .unwrap()
+            .into_parts();
+
+        let polled = state
+            .poll_command(PollCommandInput {
+                device_id: "device-1".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(polled, PollCommandOutcome::Pending(original.clone()));
+
+        let outcome = state
+            .acknowledge_command(acknowledgement(original.command_id, false))
+            .await
+            .unwrap();
+        assert_eq!(outcome, AcknowledgeCommandOutcome::RetryRequested);
+        assert_eq!(
+            state
+                .poll_command(PollCommandInput {
+                    device_id: "device-1".into(),
+                })
+                .await
+                .unwrap(),
+            PollCommandOutcome::Pending(original)
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn positive_acknowledgement_is_durable_and_preserves_exact_replay() {
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-command-ack-{}.json",
+            Uuid::new_v4()
+        ));
+        let state = AppState::load(path.clone()).await.unwrap();
+        let (_, original) = state
+            .issue_command(command_input(DesiredState::HealthyServing))
+            .await
+            .unwrap()
+            .into_parts();
+        assert_eq!(
+            state
+                .acknowledge_command(acknowledgement(original.command_id, true))
+                .await
+                .unwrap(),
+            AcknowledgeCommandOutcome::Completed
+        );
+        assert_eq!(
+            state
+                .poll_command(PollCommandInput {
+                    device_id: "device-1".into(),
+                })
+                .await
+                .unwrap(),
+            PollCommandOutcome::Empty
+        );
+        drop(state);
+
+        let restarted = AppState::load(path.clone()).await.unwrap();
+        assert_eq!(
+            restarted
+                .poll_command(PollCommandInput {
+                    device_id: "device-1".into(),
+                })
+                .await
+                .unwrap(),
+            PollCommandOutcome::Empty
+        );
+        assert_eq!(
+            restarted
+                .issue_command(command_input(DesiredState::HealthyServing))
+                .await
+                .unwrap(),
+            IssueCommandOutcome::ExactDuplicate(original)
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn unknown_positive_acknowledgement_does_not_remove_a_command() {
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-command-unknown-ack-{}.json",
+            Uuid::new_v4()
+        ));
+        let state = AppState::load(path.clone()).await.unwrap();
+        let (_, original) = state
+            .issue_command(command_input(DesiredState::HealthyServing))
+            .await
+            .unwrap()
+            .into_parts();
+        let unknown = CommandId::from_uuid(Uuid::new_v4());
+        assert_eq!(
+            state
+                .acknowledge_command(acknowledgement(unknown, true))
+                .await
+                .unwrap(),
+            AcknowledgeCommandOutcome::NotFound
+        );
+        assert_eq!(
+            state
+                .poll_command(PollCommandInput {
+                    device_id: "device-1".into(),
+                })
+                .await
+                .unwrap(),
+            PollCommandOutcome::Pending(original)
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn failed_acknowledgement_persistence_does_not_publish_queue_removal() {
+        let blocking_parent = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-command-ack-persistence-{}",
+            Uuid::new_v4()
+        ));
+        fs::write(&blocking_parent, b"not a directory").unwrap();
+        let command = DeviceCommand {
+            command_id: CommandId::from_uuid(Uuid::new_v4()),
+            device_id: "device-1".into(),
+            desired_state: DesiredState::HealthyServing,
+            recovery_intent: RecoveryIntent::None,
+            deadline_secs: DeadlineWindow::new(30).unwrap(),
+            idempotency_key: IdempotencyKey::parse("ack-persistence").unwrap(),
+            issued_at: "1".into(),
+        };
+        let mut commands = CommandState::default();
+        commands
+            .queues
+            .entry("device-1".into())
+            .or_default()
+            .push_back(command.clone());
+        let state = AppState {
+            devices: Arc::new(Mutex::new(HashMap::new())),
+            commands: Arc::new(Mutex::new(commands)),
+            state_path: Arc::new(blocking_parent.join("state.json")),
+        };
+
+        assert_eq!(
+            state
+                .acknowledge_command(acknowledgement(command.command_id, true))
+                .await,
+            Err(AcknowledgeCommandError::Persistence)
+        );
+        assert_eq!(
+            state
+                .poll_command(PollCommandInput {
+                    device_id: "device-1".into(),
+                })
+                .await
+                .unwrap(),
+            PollCommandOutcome::Pending(command)
+        );
+        let _ = fs::remove_file(blocking_parent);
+    }
+
+    #[tokio::test]
+    async fn polling_fails_closed_on_a_mismatched_stored_device() {
+        let command = DeviceCommand {
+            command_id: CommandId::from_uuid(Uuid::new_v4()),
+            device_id: "device-2".into(),
+            desired_state: DesiredState::HealthyServing,
+            recovery_intent: RecoveryIntent::None,
+            deadline_secs: DeadlineWindow::new(30).unwrap(),
+            idempotency_key: IdempotencyKey::parse("mismatched-device").unwrap(),
+            issued_at: "1".into(),
+        };
+        let mut commands = CommandState::default();
+        commands
+            .queues
+            .entry("device-1".into())
+            .or_default()
+            .push_back(command);
+        let state = AppState {
+            devices: Arc::new(Mutex::new(HashMap::new())),
+            commands: Arc::new(Mutex::new(commands)),
+            state_path: Arc::new(PathBuf::from("unused")),
+        };
+
+        assert_eq!(
+            state
+                .poll_command(PollCommandInput {
+                    device_id: "device-1".into(),
+                })
+                .await,
+            Err(PollCommandError::StateConflict)
+        );
     }
 }
