@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed when first-party code introduces unapproved SHA-256 contracts."""
+"""Fail closed when first-party code introduces unapproved digest contracts."""
 
 from __future__ import annotations
 
@@ -14,6 +14,31 @@ FORBIDDEN_SOURCE_PATTERNS = (
     re.compile(r"\bsha[-_]?256\b", re.IGNORECASE),
     re.compile(r"\bSHA256SUMS\b"),
 )
+LEGACY_RUNTIME_FINGERPRINT_ENV = "HOST_DAEMON_BINARY_FINGERPRINT"
+UNTYPED_RUNTIME_FINGERPRINT = re.compile(
+    r"\b(?:config_fingerprint|binary_fingerprint)\s*:\s*(?:Option\s*<\s*)?String\s*>?"
+)
+REQUIRED_RUNTIME_FINGERPRINT_FRAGMENTS = {
+    "crates/proxy-core/src/fingerprints.rs": (
+        'DigestDomain::new("mobile-proxy/host-daemon-nonsecret-config/v1")',
+        'DigestDomain::new("mobile-proxy/host-daemon-binary/v1")',
+        "ConfigFingerprintInput",
+        "BinaryFingerprintInput",
+    ),
+    "crates/proxy-core/src/records.rs": (
+        "pub config_fingerprint: Option<ConfigFingerprint>",
+        "pub binary_fingerprint: Option<BinaryFingerprint>",
+    ),
+    "services/host-daemon/src/fingerprints.rs": (
+        "config_source_fingerprint",
+        "current_binary_fingerprint",
+        'Path::new("/proc/self/exe")',
+    ),
+    "services/control-plane/src/fingerprint_migration.rs": (
+        "normalize_persisted_fingerprints",
+        "FingerprintMigrationStats",
+    ),
+}
 
 
 def dependency_tables(node: object, path: tuple[str, ...] = ()):
@@ -67,4 +92,34 @@ def check_repository(root: Path) -> list[str]:
                         f"{source.relative_to(root)}: unapproved internal SHA-256 usage "
                         f"{pattern.pattern!r}"
                     )
+            if UNTYPED_RUNTIME_FINGERPRINT.search(body):
+                errors.append(
+                    f"{source.relative_to(root)}: runtime fingerprints must use typed contracts"
+                )
+            if LEGACY_RUNTIME_FINGERPRINT_ENV in body:
+                errors.append(
+                    f"{source.relative_to(root)}: legacy environment-provided binary fingerprint is forbidden"
+                )
+
+    config_root = root / "config"
+    if config_root.is_dir():
+        for path in sorted(config_root.rglob("*")):
+            if path.is_file() and LEGACY_RUNTIME_FINGERPRINT_ENV in path.read_text(
+                encoding="utf-8", errors="ignore"
+            ):
+                errors.append(
+                    f"{path.relative_to(root)}: legacy environment-provided binary fingerprint is forbidden"
+                )
+
+    for relative, fragments in REQUIRED_RUNTIME_FINGERPRINT_FRAGMENTS.items():
+        path = root / relative
+        if not path.is_file():
+            errors.append(f"{relative}: missing runtime fingerprint enforcement file")
+            continue
+        body = path.read_text(encoding="utf-8")
+        for fragment in fragments:
+            if fragment not in body:
+                errors.append(
+                    f"{relative}: missing runtime fingerprint enforcement fragment {fragment!r}"
+                )
     return errors

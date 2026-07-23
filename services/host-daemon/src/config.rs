@@ -1,12 +1,16 @@
 use std::{env, fs, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Result, bail};
-use proxy_core::{HealthRecord, RuntimeReadiness};
+use proxy_core::{
+    BinaryFingerprintInput, ConfigFingerprint, ConfigFingerprintInput, HealthRecord,
+    RuntimeReadiness,
+};
 use reverse_tunnel::{ReverseTunnelClientConfig, TunnelTransport, decode_der_base64};
 use serde::Deserialize;
 
 use crate::cli::Cli;
 use crate::control_plane::ControlPlaneSyncConfig;
+use crate::fingerprints::{config_source_fingerprint, current_binary_fingerprint};
 use crate::state::{RotationCommands, RuntimeState};
 
 #[derive(Debug, Deserialize, Clone)]
@@ -104,7 +108,7 @@ pub struct ProbeConfig {
 }
 
 pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
-    let file_config = load_file_config(cli.config.as_deref())?;
+    let (file_config, config_fingerprint) = load_file_config(cli.config.as_deref())?;
     let listen = cli
         .listen
         .clone()
@@ -236,8 +240,8 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     let health = HealthRecord {
         node_id,
         node_name,
-        binary_fingerprint: env::var("HOST_DAEMON_BINARY_FINGERPRINT")
-            .unwrap_or_else(|_| "reconstructed".into()),
+        config_fingerprint: config_fingerprint.map(ConfigFingerprintInput::current),
+        binary_fingerprint: BinaryFingerprintInput::current(current_binary_fingerprint()?),
         readiness_state: RuntimeReadiness::Booting.to_string(),
         serving: false,
         proxy_status: "starting".into(),
@@ -365,12 +369,52 @@ fn rotation_command(
         .and_then(|s| s.command.clone())
 }
 
-fn load_file_config(path: Option<&str>) -> Result<Option<FileConfig>> {
+fn load_file_config(path: Option<&str>) -> Result<(Option<FileConfig>, Option<ConfigFingerprint>)> {
     if let Some(path) = path {
-        let body = fs::read_to_string(path)?;
-        let config = serde_json::from_str::<FileConfig>(&body)?;
-        Ok(Some(config))
+        let body = fs::read(path)?;
+        let fingerprint = config_source_fingerprint(&body)?;
+        let config = serde_json::from_slice::<FileConfig>(&body)?;
+        Ok((Some(config), Some(fingerprint)))
     } else {
-        Ok(None)
+        Ok((None, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use uuid::Uuid;
+
+    use super::load_runtime_config;
+    use crate::cli::Cli;
+
+    #[test]
+    fn runtime_config_produces_typed_source_and_binary_fingerprints() {
+        let root = std::env::temp_dir().join(format!(
+            "mobile-proxy-host-config-fingerprint-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("host-daemon.json");
+        fs::write(&path, r#"{"admin_token":"secret","node_name":"phone"}"#).unwrap();
+        let loaded = load_runtime_config(&Cli {
+            listen: None,
+            admin_token: None,
+            config: Some(path.to_string_lossy().into_owned()),
+        })
+        .unwrap();
+        assert!(loaded.runtime_state.health.config_fingerprint.is_some());
+        assert!(
+            loaded
+                .runtime_state
+                .health
+                .binary_fingerprint
+                .current_value()
+                .unwrap()
+                .to_string()
+                .starts_with("b3:")
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

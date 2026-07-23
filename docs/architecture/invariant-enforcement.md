@@ -1,7 +1,7 @@
 # Invariant enforcement audit
 
 Status: normative governance companion  
-Baseline `main`: `e154f8cbd7bfef4040c1b92743eefb89b5edcb82`  
+Baseline `main`: `a6d289b9c8bc93a2bc961d6630dc124f71436746`  
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -33,9 +33,9 @@ The audit contains 67 grouped invariant IDs:
 
 | Status | Count |
 | --- | ---: |
-| `enforced` | 23 |
+| `enforced` | 26 |
 | `partially_enforced` | 18 |
-| `planned` | 18 |
+| `planned` | 15 |
 | `not_applicable_yet` | 8 |
 | `review_only` | 0 |
 
@@ -43,15 +43,17 @@ Grouping is deliberate: one ID may cover a coherent normative rule repeated in s
 
 ## What is currently machine-enforced
 
-The current permanent `Rust Quality` workflow proves only the controls referenced by matrix rows, including:
+The permanent `Rust Quality` workflow proves only the controls referenced by matrix rows, including:
 
 - protected mixed `1080`, SOCKS5 `1081` and HTTP/CONNECT `3128` compatibility;
 - QUIC-first behavior, certificate-pinned TLS/TCP reserve and WireGuard compatibility inventory;
 - current pure-crate dependency and vocabulary restrictions;
 - typed foundation validation, request lineage, deadline and command-boundary behavior;
-- typed BLAKE3 digest formatting, static domain separation and length framing;
-- rejection of new first-party SHA-256 producers and legacy release checksum contracts;
+- typed BLAKE3 formatting, static domain separation and length framing;
 - fail-closed device and VM release integrity manifests;
+- typed runtime config and binary fingerprints with real canonical producers;
+- rejection of the legacy binary-fingerprint environment producer and raw `String` fingerprint fields;
+- isolated rolling legacy readers, fail-closed unknown-prefix handling and restart-safe persisted-state cleanup;
 - bounded and expiring reverse-tunnel pending streams, device/session binding and heartbeat freshness;
 - the currently implemented formatting, strict Clippy and workspace test suite.
 
@@ -69,22 +71,25 @@ The highest-impact active gaps remain explicit in the matrix:
 - repository-wide bounded queue/map/task enforcement;
 - secret-bearing `Debug` and log detection;
 - generated protobuf isolation and future `buf` gates;
-- migration/rollback guarantees and production-slice evidence contracts;
+- generic migration/rollback governance for future digest contracts;
+- removal of runtime fingerprint legacy readers after the accepted compatibility window;
 - physical reserve-tunnel acceptance on one immutable SHA.
 
-## Fingerprint migration finding
+## Runtime fingerprint enforcement
 
-`config_fingerprint` and `binary_fingerprint` are not yet compliant typed digest contracts:
+`config_fingerprint` and `binary_fingerprint` now have field-specific typed contracts:
 
-- `HeartbeatRequest` and `DeviceRecord` serialize both fields as `Option<String>`;
-- the host daemon sends no `config_fingerprint` producer value;
-- `binary_fingerprint` is read from `HOST_DAEMON_BINARY_FINGERPRINT` with a fallback value of `reconstructed`;
-- the control plane persists the raw JSON scalar values in the current JSON state file;
-- no algorithm/domain/version reader, legacy migration adapter, restart-safe backfill, index migration or rollback process exists.
+- `ConfigFingerprint` uses `mobile-proxy/host-daemon-nonsecret-config/v1` over duplicate-safe, key-sorted, compact canonical JSON after credential redaction;
+- `BinaryFingerprint` uses `mobile-proxy/host-daemon-binary/v1` over exact running executable bytes;
+- canonical `DeviceRecord` fields are typed and preserve the existing optional JSON string representation;
+- host health and heartbeat boundaries accept bounded legacy strings only through isolated migration-input wrappers;
+- new producers can create only typed BLAKE3 values;
+- persisted legacy values are counted, replaced with `null` atomically and backfilled by typed heartbeats;
+- malformed `b3:` and unknown-prefixed values fail closed;
+- previous binaries can still deserialize new `b3:` strings or `null`, preserving software rollback;
+- no indexes, identifiers, dedupe comparisons, signatures or TLS pins depend on these fields.
 
-Accordingly the audit marks the migration as `planned` or `partially_enforced`; it does not treat the presence of `ContentDigest` elsewhere as proof that these fields are migrated.
-
-The next bounded migration must inventory exact canonical source bytes and preserve the existing JSON scalar representation unless a separate versioned API migration is approved. It must never compute `BLAKE3(SHA256(data))`.
+The compatibility reader remains intentionally `partially_enforced` work until the migration window has production acceptance evidence and a separate removal slice lands. The complete contract is in `docs/architecture/runtime-fingerprint-migration.md`.
 
 ## External GitHub control
 

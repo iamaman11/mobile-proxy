@@ -83,6 +83,22 @@ async fn heartbeat(
     State(state): State<AppState>,
     Json(req): Json<HeartbeatRequest>,
 ) -> Json<serde_json::Value> {
+    let legacy_config_fingerprint = req
+        .config_fingerprint
+        .as_ref()
+        .is_some_and(proxy_core::ConfigFingerprintInput::is_legacy);
+    let legacy_binary_fingerprint = req
+        .binary_fingerprint
+        .as_ref()
+        .is_some_and(proxy_core::BinaryFingerprintInput::is_legacy);
+    if legacy_config_fingerprint || legacy_binary_fingerprint {
+        tracing::warn!(
+            node_id = %req.node_id,
+            legacy_config_fingerprint,
+            legacy_binary_fingerprint,
+            "legacy runtime fingerprint accepted for rolling migration and not persisted"
+        );
+    }
     let mut devices = state.devices.lock().await;
     let previous_probe = devices.get(&req.node_id).map(|device| {
         (
@@ -256,8 +272,8 @@ mod tests {
         http::{Request, StatusCode},
     };
     use proxy_core::{
-        Availability, DeviceCommand, DeviceRecord, RuntimeProjectionInput, RuntimeReadiness,
-        project_runtime,
+        Availability, BinaryFingerprint, DeviceCommand, DeviceRecord, RuntimeProjectionInput,
+        RuntimeReadiness, project_runtime,
     };
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -448,6 +464,118 @@ mod tests {
             .unwrap();
         let second_command: DeviceCommand = serde_json::from_slice(&second_body).unwrap();
         assert_eq!(second_command.command_id, first_command.command_id);
+    }
+
+    #[tokio::test]
+    async fn legacy_heartbeat_fingerprints_are_accepted_but_not_persisted() {
+        let app = test_app().await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/devices/heartbeat")
+                    .header("authorization", "Bearer device-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "node_id":"device-1",
+                            "node_name":"device",
+                            "readiness_state":"booting",
+                            "serving":false,
+                            "proxy_status":"starting",
+                            "config_fingerprint":"legacy-config",
+                            "binary_fingerprint":"legacy-binary"
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let devices: Vec<DeviceRecord> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert!(devices[0].config_fingerprint.is_none());
+        assert!(devices[0].binary_fingerprint.is_none());
+    }
+
+    #[tokio::test]
+    async fn typed_heartbeat_fingerprint_round_trips_as_the_existing_json_string_shape() {
+        let binary = BinaryFingerprint::derive([b"binary"]);
+        let payload = format!(
+            r#"{{
+                "node_id":"device-1",
+                "node_name":"device",
+                "readiness_state":"booting",
+                "serving":false,
+                "proxy_status":"starting",
+                "binary_fingerprint":"{binary}"
+            }}"#
+        );
+        let app = test_app().await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/devices/heartbeat")
+                    .header("authorization", "Bearer device-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json[0]["binary_fingerprint"], binary.to_string());
+    }
+
+    #[tokio::test]
+    async fn unknown_prefixed_heartbeat_fingerprint_fails_closed() {
+        let response = test_app()
+            .await
+            .oneshot(
+                Request::post("/api/v1/devices/heartbeat")
+                    .header("authorization", "Bearer device-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "node_id":"device-1",
+                            "node_name":"device",
+                            "readiness_state":"booting",
+                            "serving":false,
+                            "proxy_status":"starting",
+                            "binary_fingerprint":"unknown:abcd"
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]

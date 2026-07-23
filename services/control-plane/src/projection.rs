@@ -121,8 +121,12 @@ pub fn build_heartbeat_device(
         current_job: req.current_job,
         last_proxy_error: req.last_proxy_error,
         version: req.version,
-        config_fingerprint: req.config_fingerprint,
-        binary_fingerprint: req.binary_fingerprint,
+        config_fingerprint: req
+            .config_fingerprint
+            .and_then(|value| value.current_value()),
+        binary_fingerprint: req
+            .binary_fingerprint
+            .and_then(|value| value.current_value()),
         active_operator_profile: req.active_operator_profile,
         active_operator_plmn: req.active_operator_plmn,
         publicly_serving,

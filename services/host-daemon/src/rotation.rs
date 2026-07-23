@@ -315,7 +315,9 @@ async fn observe_public_ip_inner(urls: &[String]) -> Option<String> {
 mod tests {
     use std::collections::HashMap;
 
-    use proxy_core::{HealthRecord, JobRecord, RuntimeReadiness};
+    use proxy_core::{
+        BinaryFingerprint, BinaryFingerprintInput, HealthRecord, JobRecord, RuntimeReadiness,
+    };
     use uuid::Uuid;
 
     use crate::rotation::{apply_rotation_result, fallback_airplane_command};
@@ -340,7 +342,10 @@ mod tests {
             HealthRecord {
                 node_id: "node".into(),
                 node_name: "node".into(),
-                binary_fingerprint: "fp".into(),
+                config_fingerprint: None,
+                binary_fingerprint: BinaryFingerprintInput::current(BinaryFingerprint::derive([
+                    b"fp",
+                ])),
                 readiness_state: RuntimeReadiness::WaitingCellular.to_string(),
                 serving: false,
                 proxy_status: "draining".into(),
