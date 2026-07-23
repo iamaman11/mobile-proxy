@@ -28,10 +28,12 @@ jobs:
 
           routes = Path('services/control-plane/src/routes.rs')
           body = routes.read_text(encoding='utf-8')
+
           anchor = '    let node_id = req.node_id.clone();\n'
           if body.count(anchor) != 1:
               raise SystemExit(f'registration node-id clone anchor count: {body.count(anchor)}')
           body = body.replace(anchor, '', 1)
+
           raw_log = '                node_id = %node_id,\n'
           if body.count(raw_log) != 3:
               raise SystemExit(f'raw registration node-id log count: {body.count(raw_log)}')
@@ -40,68 +42,64 @@ jobs:
           test_import = '''#[cfg(test)]
           mod tests {
               use crate::{auth::AuthConfig, projection::now_unix_secs, routes::router, state::AppState};
-          '''
-          test_import = test_import.replace('          ', '')
+          '''.replace('          ', '')
           test_import_new = '''#[cfg(test)]
           mod tests {
               use std::fs;
 
               use crate::{auth::AuthConfig, projection::now_unix_secs, routes::router, state::AppState};
-          '''
-          test_import_new = test_import_new.replace('          ', '')
+          '''.replace('          ', '')
           if body.count(test_import) != 1:
               raise SystemExit(f'routes test import anchor count: {body.count(test_import)}')
           body = body.replace(test_import, test_import_new, 1)
 
-          test_anchor = '''    #[tokio::test]
-              async fn typed_command_boundary_preserves_json_and_deduplicates() {
-          '''.replace('              ', '')
-          test_body = '''    #[tokio::test]
-              async fn registration_persistence_failure_returns_service_unavailable() {
-                  let blocking_parent = std::env::temp_dir().join(format!(
-                      "mobile-proxy-control-plane-registration-route-persistence-{}",
-                      Uuid::new_v4()
-                  ));
-                  fs::create_dir(&blocking_parent).unwrap();
-                  let state = AppState::load(blocking_parent.join("state.json"))
-                      .await
-                      .unwrap();
-                  fs::remove_dir(&blocking_parent).unwrap();
-                  fs::write(&blocking_parent, b"not a directory").unwrap();
-                  let app = router(
-                      state,
-                      AuthConfig::new("admin-token".into(), "device-token".into()).unwrap(),
-                  );
+          test_anchor = '    #[tokio::test]\n    async fn typed_command_boundary_preserves_json_and_deduplicates() {\n'
+          test_body = r'''    #[tokio::test]
+          async fn registration_persistence_failure_returns_service_unavailable() {
+              let blocking_parent = std::env::temp_dir().join(format!(
+                  "mobile-proxy-control-plane-registration-route-persistence-{}",
+                  Uuid::new_v4()
+              ));
+              fs::create_dir(&blocking_parent).unwrap();
+              let state = AppState::load(blocking_parent.join("state.json"))
+                  .await
+                  .unwrap();
+              fs::remove_dir(&blocking_parent).unwrap();
+              fs::write(&blocking_parent, b"not a directory").unwrap();
+              let app = router(
+                  state,
+                  AuthConfig::new("admin-token".into(), "device-token".into()).unwrap(),
+              );
 
-                  let response = app
-                      .oneshot(
-                          Request::post("/api/v1/devices/register")
-                              .header("authorization", "Bearer device-token")
-                              .header("content-type", "application/json")
-                              .body(Body::from(
-                                  r#"{
-                                      "node_id":"device-1",
-                                      "node_name":"node",
-                                      "proxy_status":"starting",
-                                      "tunnel_owner":null
-                                  }"#,
-                              ))
-                              .unwrap(),
-                      )
-                      .await
-                      .unwrap();
-                  assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-                  let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
-                      .await
-                      .unwrap();
-                  let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                  assert_eq!(error["error"], "state_persistence_failed");
-                  let _ = fs::remove_file(blocking_parent);
-              }
+              let response = app
+                  .oneshot(
+                      Request::post("/api/v1/devices/register")
+                          .header("authorization", "Bearer device-token")
+                          .header("content-type", "application/json")
+                          .body(Body::from(
+                              r#"{
+                                  "node_id":"device-1",
+                                  "node_name":"node",
+                                  "proxy_status":"starting",
+                                  "tunnel_owner":null
+                              }"#,
+                          ))
+                          .unwrap(),
+                  )
+                  .await
+                  .unwrap();
+              assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+              let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+                  .await
+                  .unwrap();
+              let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+              assert_eq!(error["error"], "state_persistence_failed");
+              let _ = fs::remove_file(blocking_parent);
+          }
 
-              #[tokio::test]
-              async fn typed_command_boundary_preserves_json_and_deduplicates() {
-          '''.replace('              ', '')
+          #[tokio::test]
+          async fn typed_command_boundary_preserves_json_and_deduplicates() {
+          '''.replace('          ', '')
           if body.count(test_anchor) != 1:
               raise SystemExit(f'route regression anchor count: {body.count(test_anchor)}')
           routes.write_text(body.replace(test_anchor, test_body, 1), encoding='utf-8')
