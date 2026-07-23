@@ -1,0 +1,56 @@
+diff --git a/docs/architecture/command-delivery-application-port.md b/docs/architecture/command-delivery-application-port.md
+new file mode 100644
+index 0000000..6666666
+--- /dev/null
++++ b/docs/architecture/command-delivery-application-port.md
+@@ -0,0 +1,46 @@
++# Command delivery application ports
++
++Status: production migration slice  
++Scope: existing device command polling and acknowledgement routes
++
++## Contract
++
++`mobile-proxy-application` owns transport-independent ports for:
++
++- polling the oldest pending command for one device;
++- acknowledging successful execution;
++- reporting a retryable negative acknowledgement without deleting the command.
++
++Axum authenticates the device request, converts path and JSON values to typed inputs, invokes one port and maps typed outcomes. The application crate has no runtime, filesystem, process, network or framework dependency.
++
++## Compatibility
++
++The existing HTTP surface is unchanged:
++
++- `GET /api/v1/devices/{id}/commands/next` still returns either the command object or JSON `null`;
++- `POST /api/v1/devices/{id}/commands/{command_id}/ack` still returns `{ "accepted": true }` for a removed successful command and for a negative acknowledgement;
++- a repeated successful acknowledgement for a command that is no longer pending still returns `{ "accepted": false }`;
++- device and admin bearer-token separation remains unchanged.
++
++## Persistence ordering
++
++Successful acknowledgement is a candidate transaction over the command queue and device projection:
++
++1. clone the current bounded state;
++2. validate the queue key, command device and command identifier;
++3. remove the matching pending command and clear the device recovery intent;
++4. serialize the complete candidate;
++5. fsync the temporary file and atomically rename it;
++6. publish the candidate in memory only after the durable write succeeds.
++
++A failed write returns `state_persistence_failed` and leaves the in-memory command pending. Negative acknowledgement does not mutate durable state and therefore remains safe for repeated delivery.
++
++## Bounded outcomes
++
++Polling returns `available` or `empty`. Acknowledgement returns one of:
++
++- `acknowledged`;
++- `retry_requested`;
++- `not_pending`.
++
++Internal queue mismatches fail closed as `command_state_conflict`. Raw acknowledgement messages are neither persisted nor logged in this slice.
++
++## Explicitly deferred
++
++SQLite transactions, durable acknowledgement history, claim leases, attempt counters, domain events, audit, outbox, per-device cryptographic identity and deadline expiry remain later bounded slices. Registration, heartbeat and public-probe handlers are still transitional.
