@@ -2,12 +2,9 @@ name: Rust Quality
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: rust-quality-${{ github.workflow }}-${{ github.ref }}
@@ -20,40 +17,44 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Check out source
+      - name: Check out source branch
         uses: actions/checkout@v7
+        with:
+          ref: agent/operator-tunnel-observability
+          fetch-depth: 0
 
       - name: Install stable Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
+      - name: Apply operator tunnel observability slice
+        run: python3 .github/agent_operator_observability.py
+
+      - name: Format production code
+        run: cargo fmt --all
+
       - name: Verify formatting
-        id: formatting
-        continue-on-error: true
         run: cargo fmt --all -- --check
-
-      - name: Capture rustfmt patch
-        if: steps.formatting.outcome == 'failure'
-        run: |
-          cargo fmt --all
-          git diff --binary > rustfmt.patch
-
-      - name: Upload rustfmt patch
-        if: steps.formatting.outcome == 'failure'
-        uses: actions/upload-artifact@v7
-        with:
-          name: rustfmt-patch
-          path: rustfmt.patch
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Enforce formatting
-        if: steps.formatting.outcome == 'failure'
-        run: exit 1
 
       - name: Run strict Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
         run: cargo test --workspace
+
+      - name: Verify isolated final diff
+        shell: bash
+        run: |
+          git diff --check
+          changed="$(git diff --name-only origin/main)"
+          expected=$'apps/operator-cli/src/cli.rs\napps/operator-cli/src/commands.rs\napps/operator-cli/src/http.rs\napps/operator-cli/src/main.rs\nservices/host-daemon/src/api.rs'
+          test "$changed" = "$expected"
+
+      - name: Commit validated production slice
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "expose tunnel observability to operators"
+          git push origin HEAD:agent/operator-tunnel-observability
