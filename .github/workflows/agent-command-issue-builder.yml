@@ -56,6 +56,9 @@ jobs:
           PY
           cp /tmp/test_architecture_boundaries.py scripts/tests/test_architecture_boundaries.py
 
+      - name: Diagnose production diff whitespace
+        run: git diff --check
+
       - name: Validate governance and Python regressions
         run: |
           python3 scripts/check_architecture_boundaries.py
@@ -72,9 +75,6 @@ jobs:
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
-
-      - name: Check production diff whitespace
-        run: git diff --check
 
       - name: Check builder inputs are absent
         run: test ! -e .agent
