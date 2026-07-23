@@ -1,0 +1,40 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "public_proxy_endpoints": [
+    {
+      "protocol": "mixed",
+      "port": 1080,
+      "supports_connect": true,
+      "legacy_compatible": true
+    },
+    {
+      "protocol": "socks5",
+      "port": 1081,
+      "supports_connect": true,
+      "legacy_compatible": true
+    },
+    {
+      "protocol": "http",
+      "port": 3128,
+      "supports_connect": true,
+      "legacy_compatible": true
+    }
+  ],
+  "tunnel_policy": {
+    "primary": "quic",
+    "reserve": "tls_tcp",
+    "reserve_public_port": 443,
+    "compatibility_transports": [
+      "wireguard"
+    ],
+    "plaintext_fallback_allowed": false
+  },
+  "compatibility_requirements": {
+    "preserve_existing_consumers": true,
+    "silent_protocol_fallback_allowed": false,
+    "silent_transport_downgrade_allowed": false,
+    "operator_admin_api_preserved": true,
+    "consumer_raw_device_commands_allowed": false
+  }
+}

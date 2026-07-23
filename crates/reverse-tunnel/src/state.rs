@@ -10,6 +10,9 @@ use uuid::Uuid;
 
 use crate::model::{ServerFrame, ServerSessionSnapshot};
 
+const TCP_PROXY_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_PENDING_TCP_STREAMS: usize = 256;
+
 #[derive(Debug, Clone, Default)]
 pub struct ReverseTunnelServerState {
     pub(crate) sessions: Arc<Mutex<HashMap<String, ServerSessionSnapshot>>>,
@@ -35,6 +38,15 @@ impl ReverseTunnelServerState {
     }
 
     pub(crate) async fn open_tcp_proxy(&self, node_id: Option<&str>) -> Result<TcpStream> {
+        self.open_tcp_proxy_with_timeout(node_id, TCP_PROXY_STREAM_TIMEOUT)
+            .await
+    }
+
+    async fn open_tcp_proxy_with_timeout(
+        &self,
+        node_id: Option<&str>,
+        wait: Duration,
+    ) -> Result<TcpStream> {
         let controls = self.tcp_controls.lock().await;
         let control = if let Some(node_id) = node_id {
             controls.get(node_id).cloned()
@@ -46,7 +58,14 @@ impl ReverseTunnelServerState {
 
         let stream_id = Uuid::new_v4();
         let (tx, rx) = oneshot::channel();
-        self.pending_tcp.lock().await.insert(stream_id, tx);
+        {
+            let mut pending = self.pending_tcp.lock().await;
+            if pending.len() >= MAX_PENDING_TCP_STREAMS {
+                bail!("TCP reverse tunnel pending stream capacity reached");
+            }
+            pending.insert(stream_id, tx);
+        }
+
         if control
             .send(ServerFrame::OpenProxy { stream_id })
             .await
@@ -55,8 +74,10 @@ impl ReverseTunnelServerState {
             self.pending_tcp.lock().await.remove(&stream_id);
             bail!("TCP reverse tunnel control channel closed");
         }
-        timeout(Duration::from_secs(5), rx)
-            .await
+
+        let result = timeout(wait, rx).await;
+        self.pending_tcp.lock().await.remove(&stream_id);
+        result
             .context("TCP reverse tunnel proxy stream timed out")?
             .context("TCP reverse tunnel proxy stream was cancelled")
     }
@@ -91,5 +112,66 @@ impl ReverseTunnelServerState {
             session.connected = false;
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn timed_out_tcp_proxy_request_is_removed() {
+        let state = ReverseTunnelServerState::default();
+        let (control_tx, mut control_rx) = mpsc::channel(1);
+        state
+            .tcp_controls
+            .lock()
+            .await
+            .insert("test-phone".into(), control_tx);
+
+        let request_state = state.clone();
+        let request = tokio::spawn(async move {
+            request_state
+                .open_tcp_proxy_with_timeout(Some("test-phone"), Duration::from_millis(20))
+                .await
+        });
+
+        let frame = control_rx.recv().await.expect("open request must be sent");
+        assert!(matches!(frame, ServerFrame::OpenProxy { .. }));
+
+        let error = request
+            .await
+            .expect("request task must finish")
+            .expect_err("request must time out without a proxy stream");
+        assert!(error.to_string().contains("timed out"));
+        assert!(state.pending_tcp.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn pending_tcp_proxy_requests_are_bounded() {
+        let state = ReverseTunnelServerState::default();
+        let (control_tx, _control_rx) = mpsc::channel(1);
+        state
+            .tcp_controls
+            .lock()
+            .await
+            .insert("test-phone".into(), control_tx);
+
+        let mut pending = state.pending_tcp.lock().await;
+        for _ in 0..MAX_PENDING_TCP_STREAMS {
+            let (tx, _rx) = oneshot::channel();
+            pending.insert(Uuid::new_v4(), tx);
+        }
+        drop(pending);
+
+        let error = state
+            .open_tcp_proxy_with_timeout(Some("test-phone"), Duration::from_millis(1))
+            .await
+            .expect_err("capacity must reject new pending streams");
+        assert!(error.to_string().contains("capacity"));
+        assert_eq!(
+            state.pending_tcp.lock().await.len(),
+            MAX_PENDING_TCP_STREAMS
+        );
     }
 }
