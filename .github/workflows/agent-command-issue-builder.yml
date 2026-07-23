@@ -61,15 +61,16 @@ jobs:
 
       - name: Run strict Clippy
         run: |
-          if ! cargo clippy --workspace --all-targets -- -D warnings > /tmp/clippy.log 2>&1; then
-            tail -n 200 /tmp/clippy.log
+          if ! cargo clippy --quiet --workspace --all-targets --message-format=short -- -D warnings > /tmp/clippy.log 2>&1; then
+            grep -E 'error(\[|:)|warning:' /tmp/clippy.log | tail -n 100 || true
+            tail -n 40 /tmp/clippy.log
             exit 1
           fi
 
       - name: Run workspace tests
         run: |
-          if ! cargo test --workspace > /tmp/tests.log 2>&1; then
-            tail -n 200 /tmp/tests.log
+          if ! cargo test --quiet --workspace > /tmp/tests.log 2>&1; then
+            tail -n 120 /tmp/tests.log
             exit 1
           fi
 
