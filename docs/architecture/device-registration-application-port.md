@@ -7,6 +7,8 @@ Scope: existing `POST /api/v1/devices/register` route
 
 `mobile-proxy-application` owns the transport-independent device-registration port. Axum authenticates the device request, decodes the existing JSON request, invokes one use case and maps typed outcomes. The application crate has no runtime, filesystem, process, network or framework dependency.
 
+Raw registration fields are not logged. Structured logs contain only authenticated request lineage, bounded classification and bounded error codes until device identity is represented by a validated type.
+
 ## Replay and compatibility semantics
 
 The HTTP request and response shapes are unchanged. Successful first registration and a repeated registration both return `{ "accepted": true }`.

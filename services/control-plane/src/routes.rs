@@ -72,7 +72,6 @@ async fn register_device(
     Extension(context): Extension<RequestContext>,
     Json(req): Json<RegisterDeviceRequest>,
 ) -> Result<Json<serde_json::Value>, ControlPlaneRouteError> {
-    let node_id = req.node_id.clone();
     match state
         .register_device(RegisterDeviceInput { request: req })
         .await
@@ -81,7 +80,6 @@ async fn register_device(
             tracing::info!(
                 request_id = %context.request_id(),
                 correlation_id = %context.correlation_id(),
-                node_id = %node_id,
                 classification = outcome.classification(),
                 "device registration processed"
             );
@@ -91,7 +89,6 @@ async fn register_device(
             tracing::error!(
                 request_id = %context.request_id(),
                 correlation_id = %context.correlation_id(),
-                node_id = %node_id,
                 error_code = "device_state_conflict",
                 "device registration failed"
             );
@@ -104,7 +101,6 @@ async fn register_device(
             tracing::warn!(
                 request_id = %context.request_id(),
                 correlation_id = %context.correlation_id(),
-                node_id = %node_id,
                 error_code = "device_capacity_exceeded",
                 "device registration rejected"
             );
@@ -117,7 +113,6 @@ async fn register_device(
             tracing::error!(
                 request_id = %context.request_id(),
                 correlation_id = %context.correlation_id(),
-                node_id = %node_id,
                 error_code = "state_persistence_failed",
                 "device registration failed"
             );
