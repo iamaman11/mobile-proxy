@@ -89,7 +89,7 @@ fn tunnel_policy_remains_quic_first_with_secure_tcp_reserve() {
     assert_eq!(contract.tunnel_policy.reserve_public_port, 443);
     assert_eq!(
         contract.tunnel_policy.compatibility_transports,
-        ["wireguard"]
+        vec![String::from("wireguard")]
     );
     assert!(!contract.tunnel_policy.plaintext_fallback_allowed);
 }
