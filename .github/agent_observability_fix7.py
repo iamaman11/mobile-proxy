@@ -1,16 +1,21 @@
 from pathlib import Path
+import subprocess
 
-path = Path('.github/agent_observability.py')
-text = path.read_text()
-marker = '''workflow = subprocess.check_output(
-    ["git", "show", "origin/main:.github/workflows/rust-quality.yml"],
-    text=True,
-)
-'''
-addition = '''replace_once(
-    "services/control-plane/src/projection.rs",
+
+def replace_once(path: str, old: str, new: str) -> None:
+    file = Path(path)
+    text = file.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"{path}: expected exactly one match, found {count}")
+    file.write_text(text.replace(old, new, 1))
+
+
+projection = "services/control-plane/src/projection.rs"
+replace_once(
+    projection,
     "pub fn build_registered_device(req: RegisterDeviceRequest) -> DeviceRecord {",
-    ''' + "'''" + '''const TUNNEL_ACTIVE_TRANSPORTS: &[&str] = &["tcp", "quic", "tls_tcp"];
+    '''const TUNNEL_ACTIVE_TRANSPORTS: &[&str] = &["tcp", "quic", "tls_tcp"];
 const TUNNEL_FRESHNESS_VALUES: &[&str] = &["unknown", "fresh", "stale"];
 const TUNNEL_FAILOVER_REASONS: &[&str] = &[
     "connect_timeout",
@@ -41,15 +46,15 @@ fn bounded_tunnel_value(value: Option<String>, allowed: &[&str]) -> Option<Strin
     value.filter(|candidate| allowed.contains(&candidate.as_str()))
 }
 
-pub fn build_registered_device(req: RegisterDeviceRequest) -> DeviceRecord {''' + "'''" + '''
+pub fn build_registered_device(req: RegisterDeviceRequest) -> DeviceRecord {''',
 )
 replace_once(
-    "services/control-plane/src/projection.rs",
-    ''' + "'''" + '''    let now = now_unix_secs();
+    projection,
+    '''    let now = now_unix_secs();
 
     DeviceRecord {
-''' + "'''" + ''',
-    ''' + "'''" + '''    let now = now_unix_secs();
+''',
+    '''    let now = now_unix_secs();
     let (
         reverse_tunnel_active_transport,
         reverse_tunnel_freshness,
@@ -62,23 +67,23 @@ replace_once(
     );
 
     DeviceRecord {
-''' + "'''" + '''
+''',
 )
 replace_once(
-    "services/control-plane/src/projection.rs",
-    ''' + "'''" + '''        reverse_tunnel_active_transport: req.reverse_tunnel_active_transport,
+    projection,
+    '''        reverse_tunnel_active_transport: req.reverse_tunnel_active_transport,
         reverse_tunnel_freshness: req.reverse_tunnel_freshness,
         reverse_tunnel_failover_reason: req.reverse_tunnel_failover_reason,
-''' + "'''" + ''',
-    ''' + "'''" + '''        reverse_tunnel_active_transport,
+''',
+    '''        reverse_tunnel_active_transport,
         reverse_tunnel_freshness,
         reverse_tunnel_failover_reason,
-''' + "'''" + '''
+''',
 )
 replace_once(
-    "services/control-plane/src/projection.rs",
+    projection,
     "pub fn now_unix_secs() -> String {",
-    ''' + "'''" + '''#[cfg(test)]
+    '''#[cfg(test)]
 mod tests {
     use super::normalize_tunnel_observability;
 
@@ -114,10 +119,11 @@ mod tests {
     }
 }
 
-pub fn now_unix_secs() -> String {''' + "'''" + '''
+pub fn now_unix_secs() -> String {''',
 )
-'''
-if text.count(marker) != 1:
-    raise RuntimeError('expected one workflow restoration marker')
-path.write_text(text.replace(marker, addition + marker, 1))
+workflow = subprocess.check_output(
+    ["git", "show", "origin/main:.github/workflows/rust-quality.yml"],
+    text=True,
+)
+Path(".github/workflows/rust-quality.yml").write_text(workflow)
 Path(__file__).unlink()
