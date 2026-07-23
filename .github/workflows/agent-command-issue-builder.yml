@@ -37,7 +37,17 @@ jobs:
           git checkout -q -B agent/command-issue-application-port origin/agent/command-issue-application-port
 
       - name: Apply bounded follow-up
-        run: python3 /tmp/apply_command_issue_followup.py
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("/tmp/apply_command_issue_followup.py")
+          body = path.read_text(encoding="utf-8").replace(
+              "ROOT = Path(__file__).resolve().parents[1]",
+              "ROOT = Path.cwd()",
+          )
+          exec(compile(body, str(path), "exec"), {"__name__": "__main__"})
+          PY
 
       - name: Validate governance and Python regressions
         run: |
