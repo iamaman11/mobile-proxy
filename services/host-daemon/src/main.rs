@@ -7,6 +7,7 @@ mod health;
 mod reverse_tunnel;
 mod rotation;
 mod state;
+mod tunnel_counters;
 
 use std::sync::Arc;
 
@@ -41,7 +42,10 @@ async fn main() -> anyhow::Result<()> {
         });
     }
     if let Some(reverse_tunnel) = loaded.reverse_tunnel {
-        spawn_reverse_tunnel(state.runtime.clone(), reverse_tunnel).await;
+        let counter_state_path = loaded
+            .reverse_tunnel_counter_state_path
+            .expect("enabled reverse tunnel must have a counter state path");
+        spawn_reverse_tunnel(state.runtime.clone(), reverse_tunnel, counter_state_path).await?;
     }
     {
         let runtime_arc = state.runtime.clone();

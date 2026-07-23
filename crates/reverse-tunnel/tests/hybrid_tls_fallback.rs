@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use reverse_tunnel::{
     ClientSnapshot, ProxyProtocol, ReverseTunnelClientConfig, ReverseTunnelServerConfig,
     ReverseTunnelServerState, TunnelActiveTransport, TunnelFailoverReason, TunnelFreshness,
-    TunnelTransport, run_client, run_quic_tcp_forward_listener, run_server,
+    TunnelTransport, TunnelTransportTransition, run_client, run_quic_tcp_forward_listener,
+    run_server,
 };
 use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -86,6 +87,7 @@ async fn hybrid_client_falls_back_to_tls_tcp_and_forwards_proxy_bytes() {
         active_transport: None,
         freshness: TunnelFreshness::Unknown,
         last_failover_reason: None,
+        event_counters: reverse_tunnel::TunnelEventCounters::default(),
     };
     let (status_tx, status_rx) = watch::channel(initial_snapshot);
     let client = tokio::spawn(run_client(client_config, client_shutdown_rx, status_tx));
@@ -101,6 +103,30 @@ async fn hybrid_client_falls_back_to_tls_tcp_and_forwards_proxy_bytes() {
     assert_eq!(
         snapshot.last_failover_reason,
         Some(TunnelFailoverReason::ConnectTimeout)
+    );
+    assert_eq!(
+        snapshot
+            .event_counters
+            .connection_count(TunnelActiveTransport::TlsTcp),
+        1
+    );
+    assert_eq!(
+        snapshot
+            .event_counters
+            .connection_count(TunnelActiveTransport::Quic),
+        0
+    );
+    assert_eq!(
+        snapshot
+            .event_counters
+            .failover_count(TunnelFailoverReason::ConnectTimeout),
+        1
+    );
+    assert_eq!(
+        snapshot
+            .event_counters
+            .transition_count(TunnelTransportTransition::NoneToTlsTcp),
+        1
     );
     assert!(state.active_connection(Some("test-phone")).await.is_none());
 
