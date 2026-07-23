@@ -12,13 +12,20 @@ use crate::model::{ServerFrame, ServerSessionSnapshot};
 
 const TCP_PROXY_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PENDING_TCP_STREAMS: usize = 256;
+const MAX_PENDING_TCP_STREAMS_PER_NODE: usize = 64;
+
+#[derive(Debug)]
+pub(crate) struct PendingTcpProxy {
+    pub(crate) node_id: String,
+    pub(crate) sender: oneshot::Sender<TcpStream>,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ReverseTunnelServerState {
     pub(crate) sessions: Arc<Mutex<HashMap<String, ServerSessionSnapshot>>>,
     pub(crate) connections: Arc<Mutex<HashMap<String, quinn::Connection>>>,
     pub(crate) tcp_controls: Arc<Mutex<HashMap<String, mpsc::Sender<ServerFrame>>>>,
-    pub(crate) pending_tcp: Arc<Mutex<HashMap<Uuid, oneshot::Sender<TcpStream>>>>,
+    pub(crate) pending_tcp: Arc<Mutex<HashMap<Uuid, PendingTcpProxy>>>,
 }
 
 impl ReverseTunnelServerState {
@@ -48,10 +55,16 @@ impl ReverseTunnelServerState {
         wait: Duration,
     ) -> Result<TcpStream> {
         let controls = self.tcp_controls.lock().await;
-        let control = if let Some(node_id) = node_id {
-            controls.get(node_id).cloned()
+        let (selected_node_id, control) = if let Some(node_id) = node_id {
+            controls
+                .get(node_id)
+                .cloned()
+                .map(|control| (node_id.to_owned(), control))
         } else {
-            controls.values().next().cloned()
+            controls
+                .iter()
+                .next()
+                .map(|(node_id, control)| (node_id.clone(), control.clone()))
         }
         .context("no authenticated TCP reverse tunnel is active")?;
         drop(controls);
@@ -63,7 +76,20 @@ impl ReverseTunnelServerState {
             if pending.len() >= MAX_PENDING_TCP_STREAMS {
                 bail!("TCP reverse tunnel pending stream capacity reached");
             }
-            pending.insert(stream_id, tx);
+            let node_pending = pending
+                .values()
+                .filter(|request| request.node_id == selected_node_id)
+                .count();
+            if node_pending >= MAX_PENDING_TCP_STREAMS_PER_NODE {
+                bail!("TCP reverse tunnel per-device pending stream capacity reached");
+            }
+            pending.insert(
+                stream_id,
+                PendingTcpProxy {
+                    node_id: selected_node_id,
+                    sender: tx,
+                },
+            );
         }
 
         if control
@@ -151,7 +177,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pending_tcp_proxy_requests_are_bounded() {
+    async fn pending_tcp_proxy_requests_are_bounded_per_device() {
         let state = ReverseTunnelServerState::default();
         let (control_tx, _control_rx) = mpsc::channel(1);
         state
@@ -161,16 +187,56 @@ mod tests {
             .insert("test-phone".into(), control_tx);
 
         let mut pending = state.pending_tcp.lock().await;
-        for _ in 0..MAX_PENDING_TCP_STREAMS {
+        for _ in 0..MAX_PENDING_TCP_STREAMS_PER_NODE {
             let (tx, _rx) = oneshot::channel();
-            pending.insert(Uuid::new_v4(), tx);
+            pending.insert(
+                Uuid::new_v4(),
+                PendingTcpProxy {
+                    node_id: "test-phone".into(),
+                    sender: tx,
+                },
+            );
         }
         drop(pending);
 
         let error = state
             .open_tcp_proxy_with_timeout(Some("test-phone"), Duration::from_millis(1))
             .await
-            .expect_err("capacity must reject new pending streams");
+            .expect_err("per-device capacity must reject new pending streams");
+        assert!(error.to_string().contains("per-device"));
+        assert_eq!(
+            state.pending_tcp.lock().await.len(),
+            MAX_PENDING_TCP_STREAMS_PER_NODE
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_tcp_proxy_requests_have_a_global_bound() {
+        let state = ReverseTunnelServerState::default();
+        let (control_tx, _control_rx) = mpsc::channel(1);
+        state
+            .tcp_controls
+            .lock()
+            .await
+            .insert("test-phone".into(), control_tx);
+
+        let mut pending = state.pending_tcp.lock().await;
+        for index in 0..MAX_PENDING_TCP_STREAMS {
+            let (tx, _rx) = oneshot::channel();
+            pending.insert(
+                Uuid::new_v4(),
+                PendingTcpProxy {
+                    node_id: format!("other-phone-{index}"),
+                    sender: tx,
+                },
+            );
+        }
+        drop(pending);
+
+        let error = state
+            .open_tcp_proxy_with_timeout(Some("test-phone"), Duration::from_millis(1))
+            .await
+            .expect_err("global capacity must reject new pending streams");
         assert!(error.to_string().contains("capacity"));
         assert_eq!(state.pending_tcp.lock().await.len(), MAX_PENDING_TCP_STREAMS);
     }
