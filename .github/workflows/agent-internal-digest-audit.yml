@@ -19,5 +19,12 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-      - name: Print internal digest inventory
-        run: python3 .agent/audit_internal_digests.py
+      - name: Build internal digest inventory
+        run: python3 .agent/audit_internal_digests.py > internal-digest-inventory.txt
+      - name: Upload immutable inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: internal-digest-inventory
+          path: internal-digest-inventory.txt
+          if-no-files-found: error
+          retention-days: 1
