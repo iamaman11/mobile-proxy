@@ -1,59 +1,13 @@
 name: Agent Command Issue Builder
 
 on:
-  push:
-    branches:
-      - agent/command-issue-application-port-builder
+  workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: agent-command-issue-builder-normalize
-  cancel-in-progress: true
+  contents: read
 
 jobs:
-  normalize:
-    name: Normalize governance JSON
+  disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - name: Fetch exact production head
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git init -q
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch -q --no-tags origin agent/command-issue-application-port
-          git checkout -q -B agent/command-issue-application-port origin/agent/command-issue-application-port
-          test "$(git rev-parse HEAD)" = "b16f0c21d017eb35c8ebdf18355a8175901d134a"
-
-      - name: Restore readable section anchors
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("contracts/governance/invariant-enforcement.json")
-          body = path.read_text(encoding="utf-8")
-          normalized = body.replace("\\u00a7", "§")
-          if normalized == body:
-              raise SystemExit("no escaped section anchors found")
-          path.write_text(normalized, encoding="utf-8")
-          PY
-          git diff --check
-
-      - name: Validate normative matrix and regressions
-        run: |
-          python3 scripts/check_invariant_enforcement.py
-          python3 scripts/check_architecture_boundaries.py
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-
-      - name: Commit readable governance JSON
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add contracts/governance/invariant-enforcement.json
-          test "$(git diff --cached --name-only)" = "contracts/governance/invariant-enforcement.json"
-          git commit -m "Preserve readable invariant anchors"
-
-      - name: Push normalized production branch
-        run: git push origin HEAD:agent/command-issue-application-port
+      - run: echo "builder disabled between isolated revisions"
