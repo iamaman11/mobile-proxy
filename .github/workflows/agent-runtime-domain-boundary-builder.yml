@@ -26,7 +26,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply production slice
-        run: python3 .agent/apply_runtime_domain_boundary.py
+        run: |
+          python3 .agent/apply_runtime_domain_boundary.py
+          python3 .agent/fix_runtime_domain_boundary.py
 
       - name: Enforce architecture boundaries
         run: |
