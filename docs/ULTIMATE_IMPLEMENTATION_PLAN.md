@@ -58,6 +58,10 @@ Statuses, identifiers, error codes, proxy protocols, tunnel transports, rotation
 
 No migration may silently remove an existing proxy protocol, public port, operator endpoint or tunnel fallback. Replacement requires an explicit compatibility contract, parity tests, a deprecation window and physical acceptance evidence.
 
+### 2.6 Cryptographic primitive policy
+
+Cryptographic primitives are selected by purpose, not by crate preference. New internal content and deterministic digests use full BLAKE3-256 values with algorithm prefixes, versioned domain separation, canonical input bytes and length framing. SHA-256 remains for TLS certificate pinning, standardized artifact/signature formats, FIPS profiles and existing external or persisted compatibility contracts. Passwords use Argon2id; standard protocols retain their specified HMAC, HKDF, signature and AEAD algorithms. Algorithm migration is a versioned data-contract migration and never a blind search-and-replace. The normative rules are in [ADR-002](architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md).
+
 ## 3. Target bounded contexts
 
 The workspace will evolve incrementally toward the following modules without a big-bang rewrite:
@@ -86,7 +90,7 @@ Existing crates remain operational while responsibilities are extracted one prod
 
 ### 3.1 Foundation
 
-Typed IDs, clocks, deadlines, protocol versions, request IDs, correlation IDs and idempotency keys. No business behavior.
+Typed IDs, injected clocks, deadlines, protocol versions, request IDs, correlation IDs, actor/consumer/application identities, idempotency keys and typed algorithm-versioned digests. Foundation validates values but does not generate randomness, read system time, resolve secrets or contain business behavior.
 
 ### 3.2 Device domain
 

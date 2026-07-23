@@ -1,3 +1,4 @@
+use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
@@ -42,22 +43,22 @@ impl Display for RecoveryIntent {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IssueCommandRequest {
     pub desired_state: DesiredState,
     pub recovery_intent: RecoveryIntent,
-    pub deadline_secs: u32,
-    pub idempotency_key: String,
+    pub deadline_secs: DeadlineWindow,
+    pub idempotency_key: IdempotencyKey,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeviceCommand {
-    pub command_id: Uuid,
+    pub command_id: CommandId,
     pub device_id: String,
     pub desired_state: DesiredState,
     pub recovery_intent: RecoveryIntent,
-    pub deadline_secs: u32,
-    pub idempotency_key: String,
+    pub deadline_secs: DeadlineWindow,
+    pub idempotency_key: IdempotencyKey,
     pub issued_at: String,
 }
 

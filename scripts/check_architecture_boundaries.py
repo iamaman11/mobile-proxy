@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed when a domain crate gains infrastructure dependencies or vocabulary."""
+"""Fail closed when pure crates gain infrastructure dependencies or vocabulary."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path
 import sys
 import tomllib
 
-DOMAIN_CRATES: dict[str, frozenset[str]] = {
+PURE_CRATES: dict[str, frozenset[str]] = {
+    "crates/foundation": frozenset({"blake3", "serde", "uuid"}),
     "crates/runtime-domain": frozenset({"serde"}),
 }
 
@@ -25,6 +26,10 @@ FORBIDDEN_SOURCE_TOKENS = (
     "std::net",
     "std::process",
     "std::env",
+    "systemtime",
+    "instant::now",
+    "new_v4",
+    "getrandom",
     "android",
 )
 
@@ -44,7 +49,7 @@ def dependency_tables(node: object, path: tuple[str, ...] = ()):
 
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
-    for relative, allowed_dependencies in DOMAIN_CRATES.items():
+    for relative, allowed_dependencies in PURE_CRATES.items():
         crate = root / relative
         manifest_path = crate / "Cargo.toml"
         if not manifest_path.is_file():
@@ -70,7 +75,7 @@ def check_repository(root: Path) -> list[str]:
             for token in FORBIDDEN_SOURCE_TOKENS:
                 if token in body:
                     errors.append(
-                        f"{source.relative_to(root)}: forbidden domain token {token!r}"
+                        f"{source.relative_to(root)}: forbidden pure-crate token {token!r}"
                     )
     return errors
 
@@ -89,7 +94,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("architecture boundary validation passed for runtime-domain")
+    print("architecture boundary validation passed for foundation and runtime-domain")
     return 0
 
 

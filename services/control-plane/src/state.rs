@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use mobile_proxy_foundation::CommandId;
 use proxy_core::{DeviceCommand, DeviceRecord};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -19,7 +19,7 @@ pub struct AppState {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct CommandState {
     pub queues: HashMap<String, VecDeque<DeviceCommand>>,
-    pub idempotency: HashMap<String, Uuid>,
+    pub idempotency: HashMap<String, CommandId>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
