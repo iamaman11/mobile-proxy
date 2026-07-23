@@ -88,6 +88,29 @@ jobs:
               raise SystemExit('failed to locate manual TunnelEventCounters Default')
           body = body[:default_start] + body[default_end + 2:]
 
+          durable_anchor = '''    pub const fn reconnect_attempts(&self) -> u64 {
+              self.reconnect_attempts
+          }
+          '''
+          durable_method = '''    pub fn same_persisted_state(&self, other: &Self) -> bool {
+              self.connection_counts == other.connection_counts
+                  && self.transition_counts == other.transition_counts
+                  && self.failover_counts == other.failover_counts
+                  && self.disconnect_counts == other.disconnect_counts
+                  && self.reconnect_attempts == other.reconnect_attempts
+                  && self.reconnect_successes == other.reconnect_successes
+                  && self.ever_connected == other.ever_connected
+                  && self.last_successful_transport == other.last_successful_transport
+          }
+
+              pub const fn reconnect_attempts(&self) -> u64 {
+              self.reconnect_attempts
+          }
+          '''
+          if body.count(durable_anchor) != 1:
+              raise SystemExit('expected reconnect attempts anchor')
+          body = body.replace(durable_anchor, durable_method, 1)
+
           constructor_old = '''impl ClientSnapshot {
               pub(crate) fn new(session_id: Uuid) -> Self {
           '''
@@ -107,6 +130,19 @@ jobs:
           if host_body.count(import_old) != 1:
               raise SystemExit('expected one unused TunnelEventCounters import')
           host_path.write_text(host_body.replace(import_old, import_new, 1))
+
+          store_path = Path('services/host-daemon/src/tunnel_counters.rs')
+          store_body = store_path.read_text()
+          equality_old = '        if self.current == *counters {\n'
+          equality_new = '        if self.current.same_persisted_state(counters) {\n'
+          if store_body.count(equality_old) != 1:
+              raise SystemExit('expected one persistence equality check')
+          store_body = store_body.replace(equality_old, equality_new, 1)
+          assertion_old = '        assert_eq!(reloaded.counters(), &counters);\n'
+          assertion_new = '        assert!(reloaded.counters().same_persisted_state(&counters));\n'
+          if store_body.count(assertion_old) != 1:
+              raise SystemExit('expected one round-trip equality assertion')
+          store_path.write_text(store_body.replace(assertion_old, assertion_new, 1))
           PY
           } 2>&1 | tee .agent/apply.log
 
