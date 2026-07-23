@@ -805,6 +805,9 @@ async fn mark_connected(
     hello: &TunnelHello,
     connection: Option<quinn::Connection>,
 ) {
+    state
+        .register_session_liveness(hello.node_id.clone(), hello.session_id)
+        .await;
     let mut sessions = state.sessions.lock().await;
     let previous_session = sessions
         .get(&hello.node_id)
@@ -840,6 +843,12 @@ async fn mark_connected(
 }
 
 async fn mark_heartbeat(state: &ReverseTunnelServerState, heartbeat: &TunnelHeartbeat) {
+    if !state
+        .refresh_session_heartbeat(&heartbeat.node_id, heartbeat.session_id)
+        .await
+    {
+        return;
+    }
     let mut sessions = state.sessions.lock().await;
     if let Some(session) = sessions.get_mut(&heartbeat.node_id)
         && session.session_id == heartbeat.session_id
@@ -863,6 +872,9 @@ async fn mark_disconnected(state: &ReverseTunnelServerState, hello: &TunnelHello
         state.connections.lock().await.remove(&hello.node_id);
         state
             .remove_tcp_control_for_session(&hello.node_id, hello.session_id)
+            .await;
+        state
+            .remove_session_liveness(&hello.node_id, hello.session_id)
             .await;
         state.cancel_pending_for_session(&hello.node_id, hello.session_id);
     }
