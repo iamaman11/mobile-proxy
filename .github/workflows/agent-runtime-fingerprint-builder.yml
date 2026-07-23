@@ -24,7 +24,8 @@ jobs:
       - name: Check out builder inputs
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+          show-progress: false
 
       - name: Reassemble isolated migration payload
         run: |
@@ -52,11 +53,14 @@ jobs:
 
       - name: Reset production branch to exact main
         run: |
-          git fetch origin main agent/runtime-fingerprint-migration
+          git fetch --no-tags --depth=1 origin a6d289b9c8bc93a2bc961d6630dc124f71436746
           git checkout -B agent/runtime-fingerprint-migration a6d289b9c8bc93a2bc961d6630dc124f71436746
 
       - name: Apply bounded migration
         run: tar -xf /tmp/runtime-fingerprint.tar
+
+      - name: Validate invariant matrix
+        run: python3 scripts/check_invariant_enforcement.py
 
       - name: Validate architecture and Python regressions
         run: |
@@ -103,4 +107,5 @@ jobs:
             docs/architecture/invariant-enforcement.md
           test -z "$(git status --short | grep '^??' || true)"
           git commit -m "Migrate runtime fingerprints to typed BLAKE3"
+          git fetch --no-tags origin agent/runtime-fingerprint-migration
           git push --force-with-lease origin agent/runtime-fingerprint-migration
