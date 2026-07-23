@@ -47,6 +47,8 @@ jobs:
           if original not in body:
               raise SystemExit("builder helper anchor missing")
           body = body.replace(original, replacement)
+          body = body.replace("    evidence=[", "    enforcement=[")
+          body = body.replace("    ci_controls=[", "    ci=[")
           exec(compile(body, str(path), "exec"), {"__name__": "__main__"})
           PY
 
