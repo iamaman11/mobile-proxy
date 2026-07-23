@@ -21,7 +21,7 @@ Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first wor
 Current primary entrypoints:
 
 - `crates/proxy-core` - shared Rust models, runtime defaults, and proxy metadata
-- `crates/runtime-domain` - pure runtime state machine baseline
+- `crates/runtime-domain` - transport-neutral pure runtime lifecycle domain with enforced dependency boundaries
 - `apps/operator-cli` - Rust CLI for status, rotation, airplane timing study, device packaging/install/verify/rollback, and future VM provisioning
 - `services/host-daemon` - phone-local API, rotation executor, health probe, and control-plane sync
 - `services/control-plane` - registry and readiness service baseline

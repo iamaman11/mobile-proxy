@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use proxy_core::HealthRecord;
+use runtime_domain::RuntimeState;
 use tracing::{info, warn};
 
 use crate::android::{
@@ -9,19 +10,41 @@ use crate::android::{
     kick_first_party_vpn_service, kick_stock_wireguard_bridge, tun0_ready,
 };
 use crate::config::{SupervisorConfig, TunnelOwner};
+use crate::runtime_adapter::{legacy_readiness_from_state, state_from_legacy_readiness};
 
 #[derive(Debug)]
 pub struct SupervisorState {
+    lifecycle_state: RuntimeState,
     last_route_repair: Option<Instant>,
     last_proxy_restart: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObservedRuntimeTransition {
+    pub from: RuntimeState,
+    pub to: RuntimeState,
 }
 
 impl SupervisorState {
     pub fn new() -> Self {
         Self {
+            lifecycle_state: RuntimeState::Booting,
             last_route_repair: None,
             last_proxy_restart: None,
         }
+    }
+
+    pub fn observe_readiness(&mut self, raw: &str) -> Option<ObservedRuntimeTransition> {
+        let next = state_from_legacy_readiness(raw);
+        if next == self.lifecycle_state {
+            return None;
+        }
+        let transition = ObservedRuntimeTransition {
+            from: self.lifecycle_state,
+            to: next,
+        };
+        self.lifecycle_state = next;
+        Some(transition)
     }
 
     pub fn claim_proxy_restart(&mut self, cooldown_secs: u64) -> bool {
@@ -70,6 +93,14 @@ pub async fn reconcile_health(
     state: &mut SupervisorState,
     health: &HealthRecord,
 ) -> Result<()> {
+    if let Some(transition) = state.observe_readiness(&health.readiness_state) {
+        info!(
+            from = ?transition.from,
+            to = ?transition.to,
+            compatible_readiness = %legacy_readiness_from_state(transition.to),
+            "runtime lifecycle projection changed"
+        );
+    }
     if config.wireguard_enabled && health.wg_handshake_recent == Some(false) {
         warn!(
             tunnel_owner = config.tunnel_owner.as_str(),
@@ -164,4 +195,35 @@ fn route_repair_allowed(config: &SupervisorConfig, state: &SupervisorState) -> b
     state.last_route_repair.is_none_or(|last| {
         last.elapsed() >= Duration::from_secs(config.repair_cooldown_secs.max(1))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use runtime_domain::RuntimeState;
+
+    use super::SupervisorState;
+
+    #[test]
+    fn supervisor_tracks_neutral_state_without_duplicate_transitions() {
+        let mut state = SupervisorState::new();
+        assert_eq!(state.lifecycle_state, RuntimeState::Booting);
+
+        let waiting = state.observe_readiness("waiting_wireguard").unwrap();
+        assert_eq!(waiting.from, RuntimeState::Booting);
+        assert_eq!(waiting.to, RuntimeState::WaitingTunnel);
+        assert_eq!(state.lifecycle_state, RuntimeState::WaitingTunnel);
+        assert!(state.observe_readiness("waiting_wireguard").is_none());
+
+        let healthy = state.observe_readiness("healthy").unwrap();
+        assert_eq!(healthy.from, RuntimeState::WaitingTunnel);
+        assert_eq!(healthy.to, RuntimeState::Healthy);
+    }
+
+    #[test]
+    fn unknown_readiness_fails_closed_to_recovering() {
+        let mut state = SupervisorState::new();
+        let transition = state.observe_readiness("raw-provider-error").unwrap();
+        assert_eq!(transition.to, RuntimeState::Recovering);
+        assert_eq!(state.lifecycle_state, RuntimeState::Recovering);
+    }
 }
