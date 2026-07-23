@@ -77,7 +77,14 @@ async fn hybrid_client_falls_back_to_tls_tcp_and_forwards_proxy_bytes() {
         reconnect_ceiling: Duration::from_millis(50),
     };
     let (client_shutdown_tx, client_shutdown_rx) = watch::channel(false);
-    let (status_tx, status_rx) = watch::channel(ClientSnapshot::new(Uuid::nil()));
+    let initial_snapshot = ClientSnapshot {
+        session_id: Uuid::nil(),
+        connected: false,
+        attempts: 0,
+        sent_heartbeats: 0,
+        last_error: None,
+    };
+    let (status_tx, status_rx) = watch::channel(initial_snapshot);
     let client = tokio::spawn(run_client(client_config, client_shutdown_rx, status_tx));
 
     wait_for_authenticated_heartbeat(&state, status_rx).await;
