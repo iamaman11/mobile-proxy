@@ -21,11 +21,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - name: Check out builder inputs
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-          show-progress: false
+      - name: Fetch builder inputs quietly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --no-tags --depth=1 origin agent/runtime-fingerprint-migration-builder
+          git checkout -q FETCH_HEAD
 
       - name: Reassemble isolated migration payload
         run: |
@@ -46,15 +49,13 @@ jobs:
               raise SystemExit(f"unexpected migration payload chunks: {actual!r}")
           encoded = b"".join(path.read_bytes() for path in expected)
           compressed = base64.b64decode(encoded, validate=True)
-          payload = lzma.decompress(compressed)
-          Path("/tmp/runtime-fingerprint.tar").write_bytes(payload)
+          Path("/tmp/runtime-fingerprint.tar").write_bytes(lzma.decompress(compressed))
           PY
-          tar -tf /tmp/runtime-fingerprint.tar
 
       - name: Reset production branch to exact main
         run: |
-          git fetch --no-tags --depth=1 origin a6d289b9c8bc93a2bc961d6630dc124f71436746
-          git checkout -B agent/runtime-fingerprint-migration a6d289b9c8bc93a2bc961d6630dc124f71436746
+          git fetch -q --no-tags --depth=1 origin a6d289b9c8bc93a2bc961d6630dc124f71436746
+          git checkout -q -B agent/runtime-fingerprint-migration a6d289b9c8bc93a2bc961d6630dc124f71436746
 
       - name: Apply bounded migration
         run: tar -xf /tmp/runtime-fingerprint.tar
@@ -62,10 +63,11 @@ jobs:
       - name: Validate invariant matrix
         run: python3 scripts/check_invariant_enforcement.py
 
-      - name: Validate architecture and Python regressions
-        run: |
-          python3 scripts/check_architecture_boundaries.py
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+      - name: Validate architecture
+        run: python3 scripts/check_architecture_boundaries.py
+
+      - name: Validate Python regressions
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
       - name: Install stable Rust toolchain
         run: |
@@ -81,7 +83,6 @@ jobs:
       - name: Publish clean source branch
         run: |
           git diff --check
-          git status --short
           test ! -e .agent
           test ! -e .github/workflows/agent-runtime-fingerprint-builder.yml
           git config user.name "github-actions[bot]"
@@ -107,5 +108,5 @@ jobs:
             docs/architecture/invariant-enforcement.md
           test -z "$(git status --short | grep '^??' || true)"
           git commit -m "Migrate runtime fingerprints to typed BLAKE3"
-          git fetch --no-tags origin agent/runtime-fingerprint-migration
+          git fetch -q --no-tags origin agent/runtime-fingerprint-migration
           git push --force-with-lease origin agent/runtime-fingerprint-migration
