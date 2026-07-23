@@ -38,6 +38,7 @@ impl IssueCommandOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueCommandError {
     IdempotencyConflict,
+    StateConflict,
     Persistence,
 }
 
@@ -45,6 +46,7 @@ impl Display for IssueCommandError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::IdempotencyConflict => "idempotency key conflicts with the original command",
+            Self::StateConflict => "persisted command state is internally inconsistent",
             Self::Persistence => "command state could not be persisted",
         })
     }
@@ -114,10 +116,7 @@ mod tests {
         IssueCommandError, classify_existing, idempotency_scope_key, request_fingerprint,
     };
 
-    fn request(
-        desired_state: DesiredState,
-        key: &str,
-    ) -> IssueCommandRequest {
+    fn request(desired_state: DesiredState, key: &str) -> IssueCommandRequest {
         IssueCommandRequest {
             desired_state,
             recovery_intent: RecoveryIntent::None,
