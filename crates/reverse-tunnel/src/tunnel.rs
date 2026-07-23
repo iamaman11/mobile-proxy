@@ -70,22 +70,22 @@ pub async fn run_server(
 ) -> Result<()> {
     loop {
         tokio::select! {
-                  _ = shutdown.changed() => {
-            state.shutdown_tcp().await;
-            return Ok(());
-        },
-                  accepted = listener.accept() => {
-                      let (stream, peer) = accepted.context("reverse tunnel accept failed")?;
-                      debug!(%peer, "accepted TCP reverse tunnel connection");
-                      let state = state.clone();
-                      let config = config.clone();
-                      tokio::spawn(async move {
-                          if let Err(err) = handle_server_connection(stream, config, state).await {
-                              warn!(error = %err, "TCP reverse tunnel control connection ended");
-                          }
-                      });
-                  }
-              }
+            _ = shutdown.changed() => {
+                state.shutdown_tcp().await;
+                return Ok(());
+            }
+            accepted = listener.accept() => {
+                let (stream, peer) = accepted.context("reverse tunnel accept failed")?;
+                debug!(%peer, "accepted TCP reverse tunnel connection");
+                let state = state.clone();
+                let config = config.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = handle_server_connection(stream, config, state).await {
+                        warn!(error = %err, "TCP reverse tunnel control connection ended");
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -713,23 +713,25 @@ async fn handle_server_connection(
 
     let result = loop {
         tokio::select! {
-              frame = control_rx.recv() => {
-        let Some(frame) = frame else { break Ok(()); };
-        if let Err(error) = write_server_frame(&mut writer, &frame).await {
-            break Err(error);
+            frame = control_rx.recv() => {
+                let Some(frame) = frame else { break Ok(()); };
+                if let Err(error) = write_server_frame(&mut writer, &frame).await {
+                    break Err(error);
+                }
+            }
+            incoming = read_optional_frame(&mut reader) => match incoming {
+                Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
+                    mark_heartbeat(&state, &heartbeat).await;
+                }
+                Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
+                    break Err(anyhow::anyhow!(
+                        "unexpected repeated hello on reverse tunnel session"
+                    ));
+                }
+                Ok(None) => break Ok(()),
+                Err(error) => break Err(error),
+            }
         }
-              }
-              incoming = read_optional_frame(&mut reader) => match incoming {
-        Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
-            mark_heartbeat(&state, &heartbeat).await;
-        }
-        Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
-            break Err(anyhow::anyhow!("unexpected repeated hello on reverse tunnel session"));
-        }
-        Ok(None) => break Ok(()),
-        Err(error) => break Err(error),
-              }
-              }
     };
     state
         .remove_tcp_control_for_session(&hello.node_id, hello.session_id)

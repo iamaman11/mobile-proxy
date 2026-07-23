@@ -519,6 +519,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_shutdown_clears_pending_requests_and_controls() {
+        let state = ReverseTunnelServerState::default();
+        let session_id = Uuid::new_v4();
+        let mut control = register_session(&state, "test-phone", session_id).await;
+        let request = spawn_request(&state, "test-phone").await;
+        let _ = open_stream_id(&mut control).await;
+        assert_eq!(state.pending_tcp_len(), 1);
+
+        state.shutdown_tcp().await;
+
+        let error = timeout_at(Instant::now() + Duration::from_secs(1), request)
+            .await
+            .expect("shutdown must finish the pending requester")
+            .expect("request task must finish")
+            .expect_err("shutdown must cancel the request");
+        assert!(error.to_string().contains("cancelled"));
+        assert_eq!(state.pending_tcp_len(), 0);
+        assert!(state.tcp_controls.lock().await.is_empty());
+        assert!(
+            state
+                .sessions
+                .lock()
+                .await
+                .get("test-phone")
+                .is_some_and(|session| !session.connected)
+        );
+        assert!(control.recv().await.is_none());
+    }
+
+    #[tokio::test]
     async fn pending_tcp_proxy_requests_are_globally_bounded() {
         let state = ReverseTunnelServerState::default();
         let session_id = Uuid::new_v4();
