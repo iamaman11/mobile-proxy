@@ -15,10 +15,33 @@ class ArchitectureBoundaryTests(unittest.TestCase):
     def create_repository(
         self,
         *,
-        runtime_manifest: str = """[package]\nname = \"runtime-domain\"\nversion = \"0.1.0\"\n\n[dependencies]\nserde = \"1\"\n""",
+        runtime_manifest: str = """[package]
+name = "runtime-domain"
+version = "0.1.0"
+
+[dependencies]
+serde = "1"
+""",
         runtime_source: str = "pub enum RuntimeState { WaitingTunnel }\n",
-        foundation_manifest: str = """[package]\nname = \"mobile-proxy-foundation\"\nversion = \"0.1.0\"\n\n[dependencies]\nblake3 = \"1\"\nserde = \"1\"\nuuid = \"1\"\n""",
+        foundation_manifest: str = """[package]
+name = "mobile-proxy-foundation"
+version = "0.1.0"
+
+[dependencies]
+blake3 = "1"
+serde = "1"
+uuid = "1"
+""",
         foundation_source: str = "pub struct RequestId;\n",
+        application_manifest: str = """[package]
+name = "mobile-proxy-application"
+version = "0.1.0"
+
+[dependencies]
+mobile-proxy-foundation = "1"
+proxy-core = "1"
+""",
+        application_source: str = "use proxy_core::DeviceCommand;\npub trait UseCase {}\n",
     ) -> Path:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -26,6 +49,7 @@ class ArchitectureBoundaryTests(unittest.TestCase):
         for relative, manifest, source in [
             ("crates/runtime-domain", runtime_manifest, runtime_source),
             ("crates/foundation", foundation_manifest, foundation_source),
+            ("crates/application", application_manifest, application_source),
         ]:
             crate = root / relative
             (crate / "src").mkdir(parents=True)
@@ -40,12 +64,19 @@ class ArchitectureBoundaryTests(unittest.TestCase):
         ):
             return MODULE.check_repository(root)
 
-    def test_accepts_pure_crates(self):
+    def test_accepts_declared_pure_crates(self):
         self.assertEqual(self.check_fixture(self.create_repository()), [])
 
     def test_rejects_infrastructure_dependency_in_foundation(self):
         root = self.create_repository(
-            foundation_manifest="""[package]\nname = \"mobile-proxy-foundation\"\nversion = \"0.1.0\"\n\n[dependencies]\nserde = \"1\"\ntokio = \"1\"\n"""
+            foundation_manifest="""[package]
+name = "mobile-proxy-foundation"
+version = "0.1.0"
+
+[dependencies]
+serde = "1"
+tokio = "1"
+"""
         )
         errors = self.check_fixture(root)
         self.assertTrue(any("forbidden dependency 'tokio'" in error for error in errors))
@@ -63,6 +94,22 @@ class ArchitectureBoundaryTests(unittest.TestCase):
         )
         errors = self.check_fixture(root)
         self.assertTrue(any("forbidden pure-crate token 'new_v4'" in error for error in errors))
+
+    def test_allows_domain_dependency_but_rejects_transport_in_application(self):
+        accepted = self.create_repository()
+        self.assertEqual(self.check_fixture(accepted), [])
+        rejected = self.create_repository(
+            application_manifest="""[package]
+name = "mobile-proxy-application"
+version = "0.1.0"
+
+[dependencies]
+proxy-core = "1"
+axum = "1"
+"""
+        )
+        errors = self.check_fixture(rejected)
+        self.assertTrue(any("forbidden dependency 'axum'" in error for error in errors))
 
 
 if __name__ == "__main__":

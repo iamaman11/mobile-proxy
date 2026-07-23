@@ -15,14 +15,8 @@ if str(SCRIPT_DIR) not in sys.path:
 from check_digest_policy import check_repository as check_digest_policy
 from check_invariant_enforcement import validate_repository as check_invariant_enforcement
 
-PURE_CRATES: dict[str, frozenset[str]] = {
-    "crates/foundation": frozenset({"blake3", "serde", "uuid"}),
-    "crates/runtime-domain": frozenset({"serde"}),
-}
-
-FORBIDDEN_SOURCE_TOKENS = (
+INFRASTRUCTURE_SOURCE_TOKENS = (
     "wireguard",
-    "proxy_core",
     "axum",
     "tonic",
     "sqlx",
@@ -40,6 +34,21 @@ FORBIDDEN_SOURCE_TOKENS = (
     "android",
 )
 
+PURE_CRATES: dict[str, tuple[frozenset[str], tuple[str, ...]]] = {
+    "crates/foundation": (
+        frozenset({"blake3", "serde", "uuid"}),
+        (*INFRASTRUCTURE_SOURCE_TOKENS, "proxy_core"),
+    ),
+    "crates/runtime-domain": (
+        frozenset({"serde"}),
+        (*INFRASTRUCTURE_SOURCE_TOKENS, "proxy_core"),
+    ),
+    "crates/application": (
+        frozenset({"mobile-proxy-foundation", "proxy-core"}),
+        INFRASTRUCTURE_SOURCE_TOKENS,
+    ),
+}
+
 
 def dependency_tables(node: object, path: tuple[str, ...] = ()):
     if not isinstance(node, dict):
@@ -56,7 +65,7 @@ def dependency_tables(node: object, path: tuple[str, ...] = ()):
 
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
-    for relative, allowed_dependencies in PURE_CRATES.items():
+    for relative, (allowed_dependencies, forbidden_tokens) in PURE_CRATES.items():
         crate = root / relative
         manifest_path = crate / "Cargo.toml"
         if not manifest_path.is_file():
@@ -79,7 +88,7 @@ def check_repository(root: Path) -> list[str]:
             continue
         for source in sorted(source_root.rglob("*.rs")):
             body = source.read_text(encoding="utf-8").lower()
-            for token in FORBIDDEN_SOURCE_TOKENS:
+            for token in forbidden_tokens:
                 if token in body:
                     errors.append(
                         f"{source.relative_to(root)}: forbidden pure-crate token {token!r}"

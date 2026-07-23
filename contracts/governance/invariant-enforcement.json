@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-07-23",
-  "baseline_main_sha": "a6d289b9c8bc93a2bc961d6630dc124f71436746",
+  "baseline_main_sha": "3f6a2bb98807d289b5e436911b9dd92c102543d4",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -301,14 +301,15 @@
       "architecture",
       [
         "scripts/check_architecture_boundaries.py",
-        "scripts/tests/test_architecture_boundaries.py"
+        "scripts/tests/test_architecture_boundaries.py",
+        "crates/application/Cargo.toml"
       ],
       [
         "RQ-A"
       ],
       "workspace-layer-dependency-graph",
       "",
-      "Current pure crates are checked; the complete target layer graph does not yet exist.",
+      "Foundation, runtime-domain and the first application crate have layer-specific dependency and vocabulary gates; the complete target graph is not present.",
       ""
     ],
     [
@@ -349,13 +350,19 @@
       "U",
       "§2.2",
       "Other contexts mutate aggregate state only through typed application ports",
-      "planned",
+      "partially_enforced",
       "application",
-      [],
-      [],
-      "application-ports-and-thin-routes",
+      [
+        "crates/application/src/command_issue.rs",
+        "services/control-plane/src/state.rs"
+      ],
+      [
+        "RQ-A",
+        "RQ-T"
+      ],
+      "remaining-control-plane-application-ports",
       "",
-      "",
+      "Command issuance mutates through a typed application port; registration, heartbeat, probe and acknowledgement are still direct handlers.",
       ""
     ],
     [
@@ -363,13 +370,19 @@
       "A1",
       "Decision 8",
       "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
-      "planned",
+      "partially_enforced",
       "application",
-      [],
-      [],
-      "application-ports-and-thin-routes",
+      [
+        "crates/application/src/command_issue.rs",
+        "services/control-plane/src/routes.rs"
+      ],
+      [
+        "RQ-A",
+        "RQ-T"
+      ],
+      "remaining-control-plane-application-ports",
       "",
-      "Current control-plane handlers still contain orchestration and persistence calls.",
+      "issue_command authenticates at the router, accepts typed input, calls one use case and maps typed outcomes; other handlers remain transitional.",
       ""
     ],
     [
@@ -447,13 +460,18 @@
       "U",
       "§7",
       "Business state, idempotency result, domain events, audit and outbox commit atomically",
-      "not_applicable_yet",
+      "partially_enforced",
       "persistence",
-      [],
-      [],
-      "atomic-business-audit-outbox",
-      "Transactional repositories are introduced.",
+      [
+        "crates/application/src/command_issue.rs",
+        "services/control-plane/src/state.rs"
+      ],
+      [
+        "RQ-T"
+      ],
+      "atomic-command-audit-outbox",
       "",
+      "Command queue, durable idempotency result and device projection are written as one fsynced candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
       ""
     ],
     [
@@ -527,6 +545,7 @@
       [
         "docs/architecture/foundation-primitives.md",
         "services/control-plane/src/request_context.rs",
+        "crates/application/src/command_issue.rs",
         "services/control-plane/src/routes.rs"
       ],
       [
@@ -534,7 +553,7 @@
       ],
       "protocol-version-and-mutation-envelope",
       "",
-      "Request lineage, deadlines and command idempotency are enforced; protocol version is absent.",
+      "Request lineage, deadlines and exact/conflicting command idempotency are enforced; protocol version and generic consumer/application idempotency scope are absent.",
       ""
     ],
     [
@@ -589,7 +608,8 @@
       "foundation",
       [
         "crates/foundation/src/lib.rs",
-        "crates/proxy-core/src/fingerprints.rs"
+        "crates/proxy-core/src/fingerprints.rs",
+        "crates/application/src/command_issue.rs"
       ],
       [
         "RQ-T"
@@ -607,7 +627,8 @@
       "enforced",
       "foundation",
       [
-        "crates/foundation/src/lib.rs"
+        "crates/foundation/src/lib.rs",
+        "crates/application/src/command_issue.rs"
       ],
       [
         "RQ-T"
@@ -804,6 +825,7 @@
       "foundation",
       [
         "crates/foundation/src/lib.rs",
+        "crates/application/src/command_issue.rs",
         "services/control-plane/src/routes.rs"
       ],
       [
@@ -811,7 +833,7 @@
       ],
       "secret-log-static-and-runtime-gate",
       "",
-      "Validation is enforced; repository-wide secret logging detection is absent.",
+      "Validation and non-logging of raw command keys are enforced; repository-wide secret logging detection is absent.",
       ""
     ],
     [
