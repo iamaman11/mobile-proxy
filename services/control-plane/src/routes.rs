@@ -1,7 +1,5 @@
 use crate::auth::{AuthConfig, require_admin, require_device};
-use crate::projection::{
-    apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
-};
+use crate::projection::{apply_public_probe, build_heartbeat_device, now_unix_secs};
 use crate::{request_context::attach_request_context, state::AppState};
 use axum::{
     Json, Router,
@@ -13,6 +11,7 @@ use axum::{
 use mobile_proxy_application::{
     AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandPort, IssueCommandError,
     IssueCommandInput, IssueCommandPort, PollCommandError, PollCommandInput, PollCommandPort,
+    RegisterDeviceError, RegisterDeviceInput, RegisterDevicePort,
 };
 use mobile_proxy_foundation::{CommandId, RequestContext};
 use proxy_core::{
@@ -70,15 +69,59 @@ async fn list_ready_devices(State(state): State<AppState>) -> Json<Vec<DeviceRec
 
 async fn register_device(
     State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
     Json(req): Json<RegisterDeviceRequest>,
-) -> Json<serde_json::Value> {
-    let mut devices = state.devices.lock().await;
-    devices
-        .entry(req.node_id.clone())
-        .or_insert_with(|| build_registered_device(req));
-    drop(devices);
-    let _ = state.persist().await;
-    Json(serde_json::json!({ "accepted": true }))
+) -> Result<Json<serde_json::Value>, ControlPlaneRouteError> {
+    match state
+        .register_device(RegisterDeviceInput { request: req })
+        .await
+    {
+        Ok(outcome) => {
+            tracing::info!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                classification = outcome.classification(),
+                "device registration processed"
+            );
+            Ok(Json(serde_json::json!({ "accepted": outcome.accepted() })))
+        }
+        Err(RegisterDeviceError::StateConflict) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                error_code = "device_state_conflict",
+                "device registration failed"
+            );
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "device_state_conflict" })),
+            ))
+        }
+        Err(RegisterDeviceError::CapacityExceeded) => {
+            tracing::warn!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                error_code = "device_capacity_exceeded",
+                "device registration rejected"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "device_capacity_exceeded" })),
+            ))
+        }
+        Err(RegisterDeviceError::Persistence) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                error_code = "state_persistence_failed",
+                "device registration failed"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "state_persistence_failed" })),
+            ))
+        }
+    }
 }
 
 async fn heartbeat(
@@ -135,14 +178,14 @@ async fn public_probe(
     Json(serde_json::json!({ "accepted": true }))
 }
 
-type CommandRouteError = (StatusCode, Json<serde_json::Value>);
+type ControlPlaneRouteError = (StatusCode, Json<serde_json::Value>);
 
 async fn issue_command(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
     Path(id): Path<String>,
     Json(req): Json<IssueCommandRequest>,
-) -> Result<Json<DeviceCommand>, CommandRouteError> {
+) -> Result<Json<DeviceCommand>, ControlPlaneRouteError> {
     match state
         .issue_command(IssueCommandInput {
             device_id: id.clone(),
@@ -221,7 +264,7 @@ async fn next_command(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
     Path(id): Path<String>,
-) -> Result<Json<Option<DeviceCommand>>, CommandRouteError> {
+) -> Result<Json<Option<DeviceCommand>>, ControlPlaneRouteError> {
     match state
         .poll_command(PollCommandInput {
             device_id: id.clone(),
@@ -250,7 +293,7 @@ async fn ack_command(
     Extension(context): Extension<RequestContext>,
     Path((id, command_id)): Path<(String, CommandId)>,
     Json(req): Json<CommandAckRequest>,
-) -> Result<Json<serde_json::Value>, CommandRouteError> {
+) -> Result<Json<serde_json::Value>, ControlPlaneRouteError> {
     match state
         .acknowledge_command(AcknowledgeCommandInput {
             device_id: id.clone(),
@@ -483,6 +526,64 @@ mod tests {
                 .to_str()
                 .unwrap(),
             "4cd306ef-716e-4f76-aef6-679b93bb7770"
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_device_registration_preserves_json_and_first_write_semantics() {
+        const FIRST: &str = r#"{
+            "node_id":"device-1",
+            "node_name":"first-name",
+            "proxy_status":"starting",
+            "tunnel_owner":"stock_wireguard_bridge"
+        }"#;
+        const CHANGED: &str = r#"{
+            "node_id":"device-1",
+            "node_name":"changed-name",
+            "proxy_status":"running",
+            "tunnel_owner":"first_party_reverse_tunnel"
+        }"#;
+        let app = test_app().await;
+        for payload in [FIRST, CHANGED] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/api/v1/devices/register")
+                        .header("authorization", "Bearer device-token")
+                        .header("content-type", "application/json")
+                        .body(Body::from(payload))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+                .await
+                .unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(json["accepted"], true);
+        }
+
+        let response = app
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let devices: Vec<DeviceRecord> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].node_name, "first-name");
+        assert_eq!(devices[0].proxy_status, "starting");
+        assert_eq!(
+            devices[0].tunnel_owner.as_deref(),
+            Some("stock_wireguard_bridge")
         );
     }
 

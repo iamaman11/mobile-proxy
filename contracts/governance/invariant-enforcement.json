@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "status": "normative",
-  "audit_revision": "2026-07-23",
-  "baseline_main_sha": "960745007e543c9245a69e57a4856b4f39ab3730",
+  "audit_revision": "2026-07-24",
+  "baseline_main_sha": "dd49efd7d90c85ecd6f9a05ab99744b137ff6042",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -355,7 +355,8 @@
       [
         "crates/application/src/command_issue.rs",
         "crates/application/src/command_delivery.rs",
-        "services/control-plane/src/state.rs"
+        "services/control-plane/src/state.rs",
+        "crates/application/src/device_registration.rs"
       ],
       [
         "RQ-A",
@@ -363,7 +364,7 @@
       ],
       "remaining-control-plane-application-ports",
       "",
-      "Command issuance and successful acknowledgement mutate through typed application ports; registration, heartbeat and probe are still direct handlers.",
+      "Command issuance, device registration and successful acknowledgement mutate through typed application ports; heartbeat and probe are still direct handlers.",
       ""
     ],
     [
@@ -376,7 +377,8 @@
       [
         "crates/application/src/command_issue.rs",
         "crates/application/src/command_delivery.rs",
-        "services/control-plane/src/routes.rs"
+        "services/control-plane/src/routes.rs",
+        "crates/application/src/device_registration.rs"
       ],
       [
         "RQ-A",
@@ -384,7 +386,7 @@
       ],
       "remaining-control-plane-application-ports",
       "",
-      "Command issue, poll and acknowledgement handlers authenticate at the router, call one typed use case and map typed outcomes; registration, heartbeat and probe remain transitional.",
+      "Command issue, poll, acknowledgement and device registration handlers authenticate at the router, call one typed use case and map typed outcomes; heartbeat and probe remain transitional.",
       ""
     ],
     [
@@ -467,14 +469,15 @@
       [
         "crates/application/src/command_issue.rs",
         "crates/application/src/command_delivery.rs",
-        "services/control-plane/src/state.rs"
+        "services/control-plane/src/state.rs",
+        "crates/application/src/device_registration.rs"
       ],
       [
         "RQ-T"
       ],
       "atomic-command-audit-outbox",
       "",
-      "Command issuance and successful acknowledgement write queue, durable idempotency result and device projection as one fsynced candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
+      "Command issuance, successful acknowledgement and device registration write their complete JSON candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
       ""
     ],
     [
