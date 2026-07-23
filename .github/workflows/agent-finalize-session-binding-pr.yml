@@ -1,0 +1,65 @@
+name: Validate TCP Session Binding Slice
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.head_ref == 'agent/tcp-session-bound-pending-streams'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/tcp-session-bound-pending-streams
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Execute production patch
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/agent-finalize-session-binding.yml').read_text()
+          raw = workflow.split("          python3 <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+          script = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in raw.splitlines()
+          )
+          cleanup = 'Path(".github/workflows/agent-finalize-session-binding.yml").unlink()'
+          replacement = (
+              cleanup
+              + '; Path(".github/workflows/agent-finalize-session-binding-pr.yml").unlink()'
+              + '; Path(".agent-finalize-trigger").unlink(missing_ok=True)'
+          )
+          if script.count(cleanup) != 1:
+              raise SystemExit('finalizer cleanup marker was not unique')
+          script = script.replace(cleanup, replacement, 1)
+          exec(compile(script, '<tcp-session-binding>', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Workspace tests
+        run: cargo test --workspace
+
+      - name: Commit validated slice
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "bind TCP proxy streams to device sessions"
+          git push origin HEAD:agent/tcp-session-bound-pending-streams
