@@ -30,6 +30,7 @@ jobs:
         run: |
           python3 - <<'PY' > command-delivery-builder.log 2>&1
           from pathlib import Path
+          from textwrap import dedent
 
           builder = Path(".agent/build.py")
           builder_body = builder.read_text(encoding="utf-8")
@@ -39,17 +40,18 @@ jobs:
               raise SystemExit("builder diagnostic anchor drifted")
           builder_body = builder_body.replace(old_diagnostic, new_diagnostic, 1)
 
-          generic_route_call = """replace_once(
+          generic_route_call = dedent("""\
+          replace_once(
               "contracts/governance/invariant-enforcement.json",
               '''        "crates/application/src/command_issue.rs",
-                      "services/control-plane/src/routes.rs"
-              ''',
+              "services/control-plane/src/routes.rs"
+          ''',
               '''        "crates/application/src/command_issue.rs",
-                      "crates/application/src/command_delivery.rs",
-                      "services/control-plane/src/routes.rs"
-              ''',
+              "crates/application/src/command_delivery.rs",
+              "services/control-plane/src/routes.rs"
+          ''',
           )
-          """
+          """)
           if builder_body.count(generic_route_call) != 1:
               raise SystemExit("generic governance route evidence builder anchor drifted")
           builder.write_text(
@@ -59,20 +61,23 @@ jobs:
 
           path = Path("contracts/governance/invariant-enforcement.json")
           body = path.read_text(encoding="utf-8")
-          state_old = '''        "crates/application/src/command_issue.rs",
-                            "services/control-plane/src/state.rs"
-          '''
-          state_new = '''        "crates/application/src/command_issue.rs",
-                            "crates/application/src/command_delivery.rs",
-                            "services/control-plane/src/state.rs"
-          '''
+          state_old = dedent("""\
+                  "crates/application/src/command_issue.rs",
+                  "services/control-plane/src/state.rs"
+          """)
+          state_new = dedent("""\
+                  "crates/application/src/command_issue.rs",
+                  "crates/application/src/command_delivery.rs",
+                  "services/control-plane/src/state.rs"
+          """)
           if body.count(state_old) != 2:
               raise SystemExit(
                   f"governance state evidence: expected exactly two anchors, found {body.count(state_old)}"
               )
           body = body.replace(state_old, state_new, 1)
 
-          arch_route_old = '''      "ARCH-005",
+          arch_route_old = dedent("""\
+                "ARCH-005",
                 "A1",
                 "Decision 8",
                 "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
@@ -82,8 +87,9 @@ jobs:
                   "crates/application/src/command_issue.rs",
                   "services/control-plane/src/routes.rs"
                 ],
-          '''
-          arch_route_new = '''      "ARCH-005",
+          """)
+          arch_route_new = dedent("""\
+                "ARCH-005",
                 "A1",
                 "Decision 8",
                 "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
@@ -94,7 +100,7 @@ jobs:
                   "crates/application/src/command_delivery.rs",
                   "services/control-plane/src/routes.rs"
                 ],
-          '''
+          """)
           if body.count(arch_route_old) != 1:
               raise SystemExit(
                   f"ARCH-005 evidence: expected exactly one anchor, found {body.count(arch_route_old)}"
