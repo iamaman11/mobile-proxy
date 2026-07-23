@@ -1,4 +1,4 @@
-use std::{env, fs, net::SocketAddr, time::Duration};
+use std::{env, fs, net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Result, bail};
 use proxy_core::{HealthRecord, RuntimeReadiness};
@@ -56,6 +56,7 @@ struct FileReverseTunnelConfig {
     heartbeat_interval_ms: Option<u64>,
     reconnect_floor_ms: Option<u64>,
     reconnect_ceiling_ms: Option<u64>,
+    counter_state_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -87,6 +88,7 @@ pub struct LoadedConfig {
     pub admin_token: String,
     pub control_plane_sync: Option<ControlPlaneSyncConfig>,
     pub reverse_tunnel: Option<ReverseTunnelClientConfig>,
+    pub reverse_tunnel_counter_state_path: Option<PathBuf>,
     pub runtime_state: RuntimeState,
     pub probe: ProbeConfig,
 }
@@ -221,6 +223,15 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         })
         .transpose()?;
     let reverse_tunnel = reverse_tunnel_config(file_config.as_ref(), &node_id)?;
+    let reverse_tunnel_counter_state_path = reverse_tunnel.as_ref().map(|_| {
+        file_config
+            .as_ref()
+            .and_then(|config| config.reverse_tunnel.as_ref())
+            .and_then(|config| config.counter_state_path.clone())
+            .or_else(|| env::var("HOST_DAEMON_REVERSE_TUNNEL_COUNTER_STATE_PATH").ok())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("state/reverse-tunnel-counters-v1.json"))
+    });
 
     let health = HealthRecord {
         node_id,
@@ -254,6 +265,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         admin_token,
         control_plane_sync,
         reverse_tunnel,
+        reverse_tunnel_counter_state_path,
         runtime_state: RuntimeState::new(
             health,
             wireguard_enabled,

@@ -22,11 +22,20 @@ use crate::state::ReverseTunnelServerState;
 
 pub async fn run_client(
     config: ReverseTunnelClientConfig,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
     status: watch::Sender<ClientSnapshot>,
 ) {
+    run_client_with_counters(config, shutdown, status, TunnelEventCounters::default()).await;
+}
+
+pub async fn run_client_with_counters(
+    config: ReverseTunnelClientConfig,
+    mut shutdown: watch::Receiver<bool>,
+    status: watch::Sender<ClientSnapshot>,
+    initial_event_counters: TunnelEventCounters,
+) {
     let session_id = Uuid::new_v4();
-    let mut snapshot = ClientSnapshot::new(session_id);
+    let mut snapshot = ClientSnapshot::with_event_counters(session_id, initial_event_counters);
     let mut backoff = config.reconnect_floor;
 
     loop {
@@ -42,10 +51,16 @@ pub async fn run_client(
         snapshot.active_transport = None;
         snapshot.freshness = TunnelFreshness::Unknown;
         snapshot.attempts += 1;
+        snapshot.event_counters.begin_attempt();
         let _ = status.send(snapshot.clone());
 
         match connect_and_pump(&config, session_id, &mut shutdown, &mut snapshot, &status).await {
             Ok(()) => {
+                if snapshot.connected {
+                    snapshot
+                        .event_counters
+                        .record_disconnect(TunnelDisconnectReason::Shutdown);
+                }
                 snapshot.connected = false;
                 snapshot.active_transport = None;
                 snapshot.freshness = TunnelFreshness::Stale;
@@ -55,6 +70,11 @@ pub async fn run_client(
             }
             Err(err) => {
                 let had_connected_session = snapshot.connected;
+                if had_connected_session {
+                    snapshot
+                        .event_counters
+                        .record_disconnect(disconnect_reason(&err));
+                }
                 snapshot.connected = false;
                 snapshot.active_transport = None;
                 snapshot.freshness = TunnelFreshness::Stale;
@@ -316,6 +336,7 @@ fn mark_snapshot_connected(
     transport: TunnelActiveTransport,
     preserve_failover_reason: bool,
 ) {
+    snapshot.event_counters.record_connection(transport);
     snapshot.connected = true;
     snapshot.active_transport = Some(transport);
     snapshot.freshness = TunnelFreshness::Fresh;
@@ -335,6 +356,7 @@ fn record_quic_failover(
     snapshot.active_transport = None;
     snapshot.freshness = TunnelFreshness::Unknown;
     snapshot.last_failover_reason = Some(reason);
+    snapshot.event_counters.record_failover(reason);
     let _ = status.send(snapshot.clone());
     reason
 }
@@ -351,6 +373,14 @@ fn quic_failover_reason(error: &anyhow::Error) -> TunnelFailoverReason {
         TunnelFailoverReason::SessionClosed
     } else {
         TunnelFailoverReason::SessionError
+    }
+}
+
+fn disconnect_reason(error: &anyhow::Error) -> TunnelDisconnectReason {
+    if error.to_string().contains("closed") {
+        TunnelDisconnectReason::SessionClosed
+    } else {
+        TunnelDisconnectReason::SessionError
     }
 }
 
@@ -1019,6 +1049,12 @@ mod tests {
         );
         assert_eq!(reason, TunnelFailoverReason::ConnectTimeout);
         assert_eq!(
+            snapshot
+                .event_counters
+                .failover_count(TunnelFailoverReason::ConnectTimeout),
+            1
+        );
+        assert_eq!(
             status_rx.borrow().last_failover_reason,
             Some(TunnelFailoverReason::ConnectTimeout)
         );
@@ -1075,6 +1111,16 @@ mod tests {
         shutdown_tx.send(true).unwrap();
         client.await.unwrap();
         server.await.unwrap();
+
+        let final_snapshot = status_rx.borrow().clone();
+        assert_eq!(
+            final_snapshot
+                .event_counters
+                .connection_count(TunnelActiveTransport::Tcp),
+            2
+        );
+        assert_eq!(final_snapshot.event_counters.reconnect_attempts(), 1);
+        assert_eq!(final_snapshot.event_counters.reconnect_successes(), 1);
 
         let frames = received.lock().await;
         assert_eq!(frames.len(), 2);
@@ -1210,6 +1256,18 @@ mod tests {
         );
         assert_eq!(client_snapshot.freshness, TunnelFreshness::Fresh);
         assert_eq!(client_snapshot.last_failover_reason, None);
+        assert_eq!(
+            client_snapshot
+                .event_counters
+                .connection_count(TunnelActiveTransport::Tcp),
+            1
+        );
+        assert_eq!(
+            client_snapshot
+                .event_counters
+                .transition_count(TunnelTransportTransition::NoneToTcp),
+            1
+        );
         let sessions = state.snapshot().await;
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].connected);
@@ -1404,6 +1462,18 @@ mod tests {
         );
         assert_eq!(client_snapshot.freshness, TunnelFreshness::Fresh);
         assert_eq!(client_snapshot.last_failover_reason, None);
+        assert_eq!(
+            client_snapshot
+                .event_counters
+                .connection_count(TunnelActiveTransport::Quic),
+            1
+        );
+        assert_eq!(
+            client_snapshot
+                .event_counters
+                .transition_count(TunnelTransportTransition::NoneToQuic),
+            1
+        );
         let sessions = state.snapshot().await;
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].connected);
