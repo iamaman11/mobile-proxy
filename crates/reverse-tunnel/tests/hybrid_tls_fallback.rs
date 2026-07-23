@@ -5,8 +5,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use reverse_tunnel::{
     ClientSnapshot, ProxyProtocol, ReverseTunnelClientConfig, ReverseTunnelServerConfig,
-    ReverseTunnelServerState, TunnelTransport, run_client, run_quic_tcp_forward_listener,
-    run_server,
+    ReverseTunnelServerState, TunnelActiveTransport, TunnelFailoverReason, TunnelFreshness,
+    TunnelTransport, run_client, run_quic_tcp_forward_listener, run_server,
 };
 use rustls_pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -83,11 +83,25 @@ async fn hybrid_client_falls_back_to_tls_tcp_and_forwards_proxy_bytes() {
         attempts: 0,
         sent_heartbeats: 0,
         last_error: None,
+        active_transport: None,
+        freshness: TunnelFreshness::Unknown,
+        last_failover_reason: None,
     };
     let (status_tx, status_rx) = watch::channel(initial_snapshot);
     let client = tokio::spawn(run_client(client_config, client_shutdown_rx, status_tx));
 
+    let observability_rx = status_rx.clone();
     wait_for_authenticated_heartbeat(&state, status_rx).await;
+    let snapshot = observability_rx.borrow().clone();
+    assert_eq!(
+        snapshot.active_transport,
+        Some(TunnelActiveTransport::TlsTcp)
+    );
+    assert_eq!(snapshot.freshness, TunnelFreshness::Fresh);
+    assert_eq!(
+        snapshot.last_failover_reason,
+        Some(TunnelFailoverReason::ConnectTimeout)
+    );
     assert!(state.active_connection(Some("test-phone")).await.is_none());
 
     let public_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

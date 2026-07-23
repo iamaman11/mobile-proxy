@@ -3,6 +3,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use proxy_core::RuntimeReadiness;
+use reverse_tunnel::TunnelFreshness;
 use serde::Deserialize;
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::warn;
@@ -53,10 +54,9 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
         let reverse_tunnel_required =
             config.tunnel_owner.as_deref() == Some("first_party_reverse_tunnel");
         let reverse_tunnel_ready = !reverse_tunnel_required
-            || runtime
-                .reverse_tunnel
-                .as_ref()
-                .is_some_and(|snapshot| snapshot.connected);
+            || runtime.reverse_tunnel.as_ref().is_some_and(|snapshot| {
+                snapshot.connected && snapshot.freshness == TunnelFreshness::Fresh
+            });
         runtime.health.reverse_tunnel_connected = runtime
             .reverse_tunnel
             .as_ref()
@@ -65,6 +65,20 @@ pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
             .reverse_tunnel
             .as_ref()
             .and_then(|snapshot| snapshot.last_error.clone());
+        runtime.health.reverse_tunnel_active_transport = runtime
+            .reverse_tunnel
+            .as_ref()
+            .and_then(|snapshot| snapshot.active_transport)
+            .map(|transport| transport.as_str().to_string());
+        runtime.health.reverse_tunnel_freshness = runtime
+            .reverse_tunnel
+            .as_ref()
+            .map(|snapshot| snapshot.freshness.as_str().to_string());
+        runtime.health.reverse_tunnel_failover_reason = runtime
+            .reverse_tunnel
+            .as_ref()
+            .and_then(|snapshot| snapshot.last_failover_reason)
+            .map(|reason| reason.as_str().to_string());
 
         let healthy = snapshot.cellular_route_ready
             && snapshot.proxy_bind_ready

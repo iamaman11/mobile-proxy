@@ -21,6 +21,9 @@ pub async fn spawn_reverse_tunnel(runtime_arc: SharedRuntime, config: ReverseTun
                 attempts: 0,
                 sent_heartbeats: 0,
                 last_error: None,
+                active_transport: None,
+                freshness: reverse_tunnel::TunnelFreshness::Unknown,
+                last_failover_reason: None,
             });
             let mut client = tokio::spawn(run_client(config.clone(), shutdown_rx, status_tx));
             let status_forwarder = tokio::spawn(forward_status(runtime_arc.clone(), status_rx));
@@ -53,6 +56,13 @@ async fn forward_status(
             let mut runtime = runtime_arc.lock().await;
             runtime.health.reverse_tunnel_connected = Some(snapshot.connected);
             runtime.health.reverse_tunnel_last_error = snapshot.last_error.clone();
+            runtime.health.reverse_tunnel_active_transport = snapshot
+                .active_transport
+                .map(|transport| transport.as_str().to_string());
+            runtime.health.reverse_tunnel_freshness = Some(snapshot.freshness.as_str().to_string());
+            runtime.health.reverse_tunnel_failover_reason = snapshot
+                .last_failover_reason
+                .map(|reason| reason.as_str().to_string());
             runtime.reverse_tunnel = Some(snapshot.clone());
         }
         if snapshot.connected {
@@ -60,12 +70,17 @@ async fn forward_status(
                 session_id = %snapshot.session_id,
                 attempts = snapshot.attempts,
                 sent_heartbeats = snapshot.sent_heartbeats,
+                active_transport = snapshot.active_transport.map(|value| value.as_str()).unwrap_or("none"),
+                freshness = snapshot.freshness.as_str(),
+                failover_reason = snapshot.last_failover_reason.map(|value| value.as_str()).unwrap_or("none"),
                 "reverse tunnel connected"
             );
         } else if let Some(error) = snapshot.last_error {
             warn!(
                 session_id = %snapshot.session_id,
                 attempts = snapshot.attempts,
+                freshness = snapshot.freshness.as_str(),
+                failover_reason = snapshot.last_failover_reason.map(|value| value.as_str()).unwrap_or("none"),
                 error = %error,
                 "reverse tunnel disconnected"
             );
@@ -75,10 +90,20 @@ async fn forward_status(
 
 async fn mark_disconnected(runtime_arc: SharedRuntime, reason: &str) {
     let mut runtime = runtime_arc.lock().await;
+    let failover_reason = runtime
+        .reverse_tunnel
+        .as_ref()
+        .and_then(|snapshot| snapshot.last_failover_reason)
+        .map(|value| value.as_str().to_string());
     runtime.health.reverse_tunnel_connected = Some(false);
     runtime.health.reverse_tunnel_last_error = Some(reason.into());
+    runtime.health.reverse_tunnel_active_transport = None;
+    runtime.health.reverse_tunnel_freshness = Some("stale".into());
+    runtime.health.reverse_tunnel_failover_reason = failover_reason;
     if let Some(snapshot) = runtime.reverse_tunnel.as_mut() {
         snapshot.connected = false;
+        snapshot.active_transport = None;
+        snapshot.freshness = reverse_tunnel::TunnelFreshness::Stale;
         snapshot.last_error = Some(reason.into());
     }
 }

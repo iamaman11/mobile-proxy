@@ -87,6 +87,64 @@ pub fn decode_der_base64(raw: &str) -> Result<Vec<u8>> {
         .context("failed to decode base64 DER")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelActiveTransport {
+    Tcp,
+    Quic,
+    TlsTcp,
+}
+
+impl TunnelActiveTransport {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tcp => "tcp",
+            Self::Quic => "quic",
+            Self::TlsTcp => "tls_tcp",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelFreshness {
+    Unknown,
+    Fresh,
+    Stale,
+}
+
+impl TunnelFreshness {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelFailoverReason {
+    ConnectTimeout,
+    ConnectFailed,
+    AuthenticationFailed,
+    SessionClosed,
+    SessionError,
+}
+
+impl TunnelFailoverReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ConnectTimeout => "connect_timeout",
+            Self::ConnectFailed => "connect_failed",
+            Self::AuthenticationFailed => "authentication_failed",
+            Self::SessionClosed => "session_closed",
+            Self::SessionError => "session_error",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientSnapshot {
     pub session_id: Uuid,
@@ -94,6 +152,9 @@ pub struct ClientSnapshot {
     pub attempts: u64,
     pub sent_heartbeats: u64,
     pub last_error: Option<String>,
+    pub active_transport: Option<TunnelActiveTransport>,
+    pub freshness: TunnelFreshness,
+    pub last_failover_reason: Option<TunnelFailoverReason>,
 }
 impl ClientSnapshot {
     pub(crate) fn new(session_id: Uuid) -> Self {
@@ -103,6 +164,9 @@ impl ClientSnapshot {
             attempts: 0,
             sent_heartbeats: 0,
             last_error: None,
+            active_transport: None,
+            freshness: TunnelFreshness::Unknown,
+            last_failover_reason: None,
         }
     }
 }
@@ -117,7 +181,7 @@ pub struct ServerSessionSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::TunnelTransport;
+    use super::{TunnelActiveTransport, TunnelFailoverReason, TunnelFreshness, TunnelTransport};
 
     #[test]
     fn hybrid_transport_is_explicitly_quic_first() {
@@ -129,5 +193,27 @@ mod tests {
 
         assert!(transport.is_quic_first());
         assert!(!TunnelTransport::Tcp.is_quic_first());
+    }
+
+    #[test]
+    fn tunnel_observability_values_are_bounded_and_serializable() {
+        assert_eq!(
+            serde_json::to_string(&TunnelActiveTransport::TlsTcp).unwrap(),
+            r#""tls_tcp""#
+        );
+        assert_eq!(
+            serde_json::to_string(&TunnelFreshness::Fresh).unwrap(),
+            r#""fresh""#
+        );
+        assert_eq!(
+            serde_json::to_string(&TunnelFailoverReason::ConnectTimeout).unwrap(),
+            r#""connect_timeout""#
+        );
+        assert_eq!(TunnelActiveTransport::Quic.as_str(), "quic");
+        assert_eq!(TunnelFreshness::Stale.as_str(), "stale");
+        assert_eq!(
+            TunnelFailoverReason::AuthenticationFailed.as_str(),
+            "authentication_failed"
+        );
     }
 }

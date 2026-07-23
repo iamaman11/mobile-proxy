@@ -2,9 +2,12 @@ name: Rust Quality
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: rust-quality-${{ github.workflow }}-${{ github.ref }}
@@ -17,75 +20,40 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Check out source branch
+      - name: Check out source
         uses: actions/checkout@v7
-        with:
-          ref: agent/tunnel-observability
-          fetch-depth: 0
 
       - name: Install stable Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Apply tunnel observability slice
-        run: |
-          python3 .github/agent_observability_fix2.py
-          python3 .github/agent_observability_fix3.py
-          python3 .github/agent_observability_fix4.py
-          python3 .github/agent_observability_fix5.py
-          python3 .github/agent_observability_fix6.py
-          python3 .github/agent_observability.py
-
-      - name: Format production code
-        run: cargo fmt --all
-
       - name: Verify formatting
+        id: formatting
+        continue-on-error: true
         run: cargo fmt --all -- --check
 
-      - name: Run strict Clippy
-        id: clippy
-        continue-on-error: true
-        shell: bash
+      - name: Capture rustfmt patch
+        if: steps.formatting.outcome == 'failure'
         run: |
-          set +e
-          cargo clippy --workspace --all-targets -- -D warnings > clippy-error.txt 2>&1
-          status=$?
-          cat clippy-error.txt
-          exit "$status"
+          cargo fmt --all
+          git diff --binary > rustfmt.patch
 
-      - name: Persist exact Clippy failure
-        if: steps.clippy.outcome == 'failure'
-        run: |
-          git checkout HEAD -- .github/agent_observability.py .github/agent_observability_fix2.py .github/agent_observability_fix3.py .github/agent_observability_fix4.py .github/agent_observability_fix5.py .github/agent_observability_fix6.py .github/workflows/rust-quality.yml
-          git checkout origin/main -- apps/operator-cli/src/commands.rs crates/proxy-core/src/records.rs crates/reverse-tunnel/src/model.rs crates/reverse-tunnel/src/tunnel.rs crates/reverse-tunnel/tests/hybrid_tls_fallback.rs services/control-plane/src/projection.rs services/control-plane/src/routes.rs services/host-daemon/src/config.rs services/host-daemon/src/control_plane.rs services/host-daemon/src/health.rs services/host-daemon/src/reverse_tunnel.rs services/host-daemon/src/rotation.rs services/relay-gate/src/probe.rs
-          rm -f observability-error.txt rustfmt-error.txt
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "record tunnel observability Clippy failure"
-          git push origin HEAD:agent/tunnel-observability
+      - name: Upload rustfmt patch
+        if: steps.formatting.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: rustfmt-patch
+          path: rustfmt.patch
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Enforce strict Clippy
-        if: steps.clippy.outcome == 'failure'
+      - name: Enforce formatting
+        if: steps.formatting.outcome == 'failure'
         run: exit 1
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
         run: cargo test --workspace
-
-      - name: Verify isolated final diff
-        shell: bash
-        run: |
-          rm -f observability-error.txt rustfmt-error.txt clippy-error.txt
-          git diff --check
-          changed="$(git diff --name-only origin/main)"
-          expected=$'apps/operator-cli/src/commands.rs\ncrates/proxy-core/src/records.rs\ncrates/reverse-tunnel/src/model.rs\ncrates/reverse-tunnel/src/tunnel.rs\ncrates/reverse-tunnel/tests/hybrid_tls_fallback.rs\nservices/control-plane/src/projection.rs\nservices/control-plane/src/routes.rs\nservices/host-daemon/src/config.rs\nservices/host-daemon/src/control_plane.rs\nservices/host-daemon/src/health.rs\nservices/host-daemon/src/reverse_tunnel.rs\nservices/host-daemon/src/rotation.rs\nservices/relay-gate/src/probe.rs'
-          test "$changed" = "$expected"
-
-      - name: Commit validated production slice
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "expose bounded tunnel observability"
-          git push origin HEAD:agent/tunnel-observability

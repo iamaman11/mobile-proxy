@@ -31,23 +31,33 @@ pub async fn run_client(
 
     loop {
         if *shutdown.borrow() {
+            snapshot.connected = false;
+            snapshot.active_transport = None;
+            snapshot.freshness = TunnelFreshness::Stale;
             let _ = status.send(snapshot);
             return;
         }
 
         snapshot.connected = false;
+        snapshot.active_transport = None;
+        snapshot.freshness = TunnelFreshness::Unknown;
         snapshot.attempts += 1;
         let _ = status.send(snapshot.clone());
 
         match connect_and_pump(&config, session_id, &mut shutdown, &mut snapshot, &status).await {
             Ok(()) => {
                 snapshot.connected = false;
+                snapshot.active_transport = None;
+                snapshot.freshness = TunnelFreshness::Stale;
                 snapshot.last_error = None;
+                let _ = status.send(snapshot.clone());
                 backoff = config.reconnect_floor;
             }
             Err(err) => {
                 let had_connected_session = snapshot.connected;
                 snapshot.connected = false;
+                snapshot.active_transport = None;
+                snapshot.freshness = TunnelFreshness::Stale;
                 snapshot.last_error = Some(format!("{err:#}"));
                 let _ = status.send(snapshot.clone());
                 if had_connected_session {
@@ -231,11 +241,12 @@ async fn connect_and_pump(
         match connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await {
             Ok(()) => return Ok(()),
             Err(error) => {
+                let reason = record_quic_failover(snapshot, &error, status);
                 warn!(
                     node_id = %config.node_id,
                     from_transport = "quic",
                     to_transport = "tls_tcp",
-                    reason = quic_failover_reason(&error),
+                    reason = reason.as_str(),
                     "reverse tunnel transport failover"
                 );
             }
@@ -259,8 +270,7 @@ async fn connect_and_pump(
     });
     write_frame(&mut writer, &hello).await?;
 
-    snapshot.connected = true;
-    snapshot.last_error = None;
+    mark_snapshot_connected(snapshot, TunnelActiveTransport::Tcp, false);
     let _ = status.send(snapshot.clone());
     let mut sequence = snapshot.sent_heartbeats;
 
@@ -301,18 +311,46 @@ async fn connect_and_pump(
     }
 }
 
-fn quic_failover_reason(error: &anyhow::Error) -> &'static str {
+fn mark_snapshot_connected(
+    snapshot: &mut ClientSnapshot,
+    transport: TunnelActiveTransport,
+    preserve_failover_reason: bool,
+) {
+    snapshot.connected = true;
+    snapshot.active_transport = Some(transport);
+    snapshot.freshness = TunnelFreshness::Fresh;
+    snapshot.last_error = None;
+    if !preserve_failover_reason {
+        snapshot.last_failover_reason = None;
+    }
+}
+
+fn record_quic_failover(
+    snapshot: &mut ClientSnapshot,
+    error: &anyhow::Error,
+    status: &watch::Sender<ClientSnapshot>,
+) -> TunnelFailoverReason {
+    let reason = quic_failover_reason(error);
+    snapshot.connected = false;
+    snapshot.active_transport = None;
+    snapshot.freshness = TunnelFreshness::Unknown;
+    snapshot.last_failover_reason = Some(reason);
+    let _ = status.send(snapshot.clone());
+    reason
+}
+
+fn quic_failover_reason(error: &anyhow::Error) -> TunnelFailoverReason {
     let message = error.to_string();
     if message.contains("timed out") {
-        "connect_timeout"
+        TunnelFailoverReason::ConnectTimeout
     } else if message.contains("connect failed") {
-        "connect_failed"
+        TunnelFailoverReason::ConnectFailed
     } else if message.contains("authentication") {
-        "authentication_failed"
+        TunnelFailoverReason::AuthenticationFailed
     } else if message.contains("closed") {
-        "session_closed"
+        TunnelFailoverReason::SessionClosed
     } else {
-        "session_error"
+        TunnelFailoverReason::SessionError
     }
 }
 
@@ -336,8 +374,7 @@ async fn connect_and_pump_tls_tcp(
         }),
     )
     .await?;
-    snapshot.connected = true;
-    snapshot.last_error = None;
+    mark_snapshot_connected(snapshot, TunnelActiveTransport::TlsTcp, true);
     let _ = status.send(snapshot.clone());
     let mut sequence = snapshot.sent_heartbeats;
     loop {
@@ -475,8 +512,7 @@ async fn connect_and_pump_quic(
     });
     write_frame(&mut send, &hello).await?;
 
-    snapshot.connected = true;
-    snapshot.last_error = None;
+    mark_snapshot_connected(snapshot, TunnelActiveTransport::Quic, false);
     let _ = status.send(snapshot.clone());
     let mut sequence = snapshot.sent_heartbeats;
     let proxy_connection = connection.clone();
@@ -970,6 +1006,51 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn failover_observability_is_bounded_and_preserved_by_tls_fallback() {
+        let mut snapshot = ClientSnapshot::new(Uuid::new_v4());
+        mark_snapshot_connected(&mut snapshot, TunnelActiveTransport::Quic, false);
+        let (status_tx, status_rx) = watch::channel(snapshot.clone());
+
+        let reason = record_quic_failover(
+            &mut snapshot,
+            &anyhow::anyhow!("QUIC connect timed out"),
+            &status_tx,
+        );
+        assert_eq!(reason, TunnelFailoverReason::ConnectTimeout);
+        assert_eq!(
+            status_rx.borrow().last_failover_reason,
+            Some(TunnelFailoverReason::ConnectTimeout)
+        );
+        assert_eq!(status_rx.borrow().freshness, TunnelFreshness::Unknown);
+
+        mark_snapshot_connected(&mut snapshot, TunnelActiveTransport::TlsTcp, true);
+        assert_eq!(
+            snapshot.last_failover_reason,
+            Some(TunnelFailoverReason::ConnectTimeout)
+        );
+        assert_eq!(
+            snapshot.active_transport,
+            Some(TunnelActiveTransport::TlsTcp)
+        );
+        assert_eq!(snapshot.freshness, TunnelFreshness::Fresh);
+
+        mark_snapshot_connected(&mut snapshot, TunnelActiveTransport::Quic, false);
+        assert_eq!(snapshot.last_failover_reason, None);
+    }
+
+    #[test]
+    fn failover_reason_never_exposes_raw_error_text() {
+        assert_eq!(
+            quic_failover_reason(&anyhow::anyhow!("credential=secret internal detail")),
+            TunnelFailoverReason::SessionError
+        );
+        assert_eq!(
+            quic_failover_reason(&anyhow::anyhow!("authentication rejected")),
+            TunnelFailoverReason::AuthenticationFailed
+        );
+    }
+
     #[tokio::test]
     async fn client_reconnects_after_server_drops_connection() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1122,6 +1203,13 @@ mod tests {
         let client = tokio::spawn(run_client(test_config(addr), client_shutdown_rx, status_tx));
 
         wait_for_heartbeat_with_status(&state, status_rx.clone()).await;
+        let client_snapshot = status_rx.borrow().clone();
+        assert_eq!(
+            client_snapshot.active_transport,
+            Some(TunnelActiveTransport::Tcp)
+        );
+        assert_eq!(client_snapshot.freshness, TunnelFreshness::Fresh);
+        assert_eq!(client_snapshot.last_failover_reason, None);
         let sessions = state.snapshot().await;
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].connected);
@@ -1309,6 +1397,13 @@ mod tests {
         ));
 
         wait_for_heartbeat(&state).await;
+        let client_snapshot = status_rx.borrow().clone();
+        assert_eq!(
+            client_snapshot.active_transport,
+            Some(TunnelActiveTransport::Quic)
+        );
+        assert_eq!(client_snapshot.freshness, TunnelFreshness::Fresh);
+        assert_eq!(client_snapshot.last_failover_reason, None);
         let sessions = state.snapshot().await;
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].connected);
