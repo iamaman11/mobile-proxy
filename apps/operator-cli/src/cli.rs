@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use proxy_core::LOCAL_API;
 
 #[derive(Parser)]
@@ -15,7 +15,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Status,
+    Status(StatusArgs),
+    Metrics,
     Proxy,
     Rotate(RotateArgs),
     AirplaneStudy(AirplaneStudyArgs),
@@ -29,6 +30,18 @@ pub enum Command {
     VerifyDevice(VerifyDeviceArgs),
     RollbackDevice(RollbackDeviceArgs),
     GenerateReverseTunnelIdentity(GenerateReverseTunnelIdentityArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct StatusArgs {
+    #[arg(long, value_enum, default_value_t = StatusFormat::Json)]
+    pub format: StatusFormat,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusFormat {
+    Json,
+    Summary,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -229,4 +242,32 @@ pub struct RollbackDeviceArgs {
     pub device_root: String,
     #[arg(long, default_value_t = 18088)]
     pub health_port: u16,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command, StatusFormat};
+
+    #[test]
+    fn status_preserves_json_as_the_default_output() {
+        let cli = Cli::try_parse_from(["operator-cli", "status"]).unwrap();
+        let Command::Status(args) = cli.command else {
+            panic!("status command must parse");
+        };
+        assert_eq!(args.format, StatusFormat::Json);
+    }
+
+    #[test]
+    fn status_summary_and_metrics_are_explicit_operator_surfaces() {
+        let cli = Cli::try_parse_from(["operator-cli", "status", "--format", "summary"]).unwrap();
+        let Command::Status(args) = cli.command else {
+            panic!("status command must parse");
+        };
+        assert_eq!(args.format, StatusFormat::Summary);
+
+        let metrics = Cli::try_parse_from(["operator-cli", "metrics"]).unwrap();
+        assert!(matches!(metrics.command, Command::Metrics));
+    }
 }

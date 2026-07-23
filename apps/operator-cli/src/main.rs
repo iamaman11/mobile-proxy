@@ -15,7 +15,7 @@ use std::env;
 use std::time::Duration;
 
 use crate::cli::{Cli, Command};
-use crate::commands::{run_airplane_study, run_proxy, run_rotate, run_status};
+use crate::commands::{run_airplane_study, run_metrics, run_proxy, run_rotate, run_status};
 use crate::device::{install_device_release, rollback_device, verify_device};
 use crate::provision::package_device_release;
 use crate::vm::{delete_vm, provision_vm};
@@ -29,9 +29,13 @@ async fn main() -> Result<()> {
         .context("failed to build HTTP client")?;
 
     match cli.command {
-        Command::Status => {
+        Command::Status(args) => {
             let token = resolve_token(cli.token.as_deref())?;
-            run_status(&client, &cli.api, &token).await?
+            run_status(&client, &cli.api, &token, &args).await?
+        }
+        Command::Metrics => {
+            let token = resolve_token(cli.token.as_deref())?;
+            run_metrics(&client, &cli.api, &token).await?
         }
         Command::Proxy => run_proxy()?,
         Command::Rotate(args) => {

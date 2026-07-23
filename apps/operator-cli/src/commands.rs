@@ -3,8 +3,8 @@ use proxy_core::{HealthRecord, JobRecord, RotateRequest, proxy_endpoints};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::cli::{AirplaneStudyArgs, RotateArgs};
-use crate::http::{fetch_health, issue_rotation, wait_for_rotation};
+use crate::cli::{AirplaneStudyArgs, RotateArgs, StatusArgs, StatusFormat};
+use crate::http::{fetch_health, fetch_metrics, issue_rotation, wait_for_rotation};
 
 #[derive(Debug, Serialize)]
 pub struct StudyTrial {
@@ -36,10 +36,54 @@ pub struct StudyReport {
     pub trials: Vec<StudyTrial>,
 }
 
-pub async fn run_status(client: &reqwest::Client, api: &str, token: &str) -> Result<()> {
+pub async fn run_status(
+    client: &reqwest::Client,
+    api: &str,
+    token: &str,
+    args: &StatusArgs,
+) -> Result<()> {
     let health = fetch_health(client, api, token).await?;
-    println!("{}", serde_json::to_string_pretty(&health)?);
+    println!("{}", render_status(&health, args.format)?);
     Ok(())
+}
+
+pub async fn run_metrics(client: &reqwest::Client, api: &str, token: &str) -> Result<()> {
+    let metrics = fetch_metrics(client, api, token).await?;
+    print!("{metrics}");
+    Ok(())
+}
+
+fn render_status(health: &HealthRecord, format: StatusFormat) -> Result<String> {
+    match format {
+        StatusFormat::Json => Ok(serde_json::to_string_pretty(health)?),
+        StatusFormat::Summary => Ok(render_status_summary(health)),
+    }
+}
+
+fn render_status_summary(health: &HealthRecord) -> String {
+    format!(
+        "node={} readiness={} serving={} proxy={} public_ip={}
+tunnel_owner={} connected={} transport={} freshness={} failover_reason={}",
+        health.node_id,
+        health.readiness_state,
+        health.serving,
+        health.proxy_status,
+        health.last_public_ip.as_deref().unwrap_or("unknown"),
+        health.tunnel_owner.as_deref().unwrap_or("unknown"),
+        health.reverse_tunnel_connected.unwrap_or(false),
+        health
+            .reverse_tunnel_active_transport
+            .as_deref()
+            .unwrap_or("none"),
+        health
+            .reverse_tunnel_freshness
+            .as_deref()
+            .unwrap_or("unknown"),
+        health
+            .reverse_tunnel_failover_reason
+            .as_deref()
+            .unwrap_or("none"),
+    )
 }
 
 pub fn run_proxy() -> Result<()> {
@@ -183,8 +227,8 @@ pub fn is_successful_rotation(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_rotate_request, is_successful_rotation};
-    use crate::cli::RotateArgs;
+    use super::{build_rotate_request, is_successful_rotation, render_status};
+    use crate::cli::{RotateArgs, StatusFormat};
     use proxy_core::{
         DEFAULT_AIRPLANE_HOLD_SECS, HealthRecord, JobRecord, RotateRequest, default_rotate_request,
     };
@@ -245,6 +289,19 @@ mod tests {
             tunnel_owner: Some("stock_wireguard_bridge".into()),
         };
         assert!(is_successful_rotation(&job, &health, true));
+
+        let mut tunnel_health = health.clone();
+        tunnel_health.reverse_tunnel_connected = Some(true);
+        tunnel_health.reverse_tunnel_active_transport = Some("tls_tcp".into());
+        tunnel_health.reverse_tunnel_freshness = Some("fresh".into());
+        tunnel_health.reverse_tunnel_failover_reason = Some("connect_timeout".into());
+        tunnel_health.reverse_tunnel_last_error = Some("credential=secret raw error".into());
+        let summary = render_status(&tunnel_health, StatusFormat::Summary).unwrap();
+        assert!(summary.contains("connected=true transport=tls_tcp freshness=fresh"));
+        assert!(summary.contains("failover_reason=connect_timeout"));
+        assert!(!summary.contains("credential=secret"));
+        let json = render_status(&tunnel_health, StatusFormat::Json).unwrap();
+        assert!(json.contains("reverse_tunnel_active_transport"));
 
         let mut unhealthy = health.clone();
         unhealthy.readiness_state = "waiting_cellular".into();
