@@ -10,11 +10,14 @@ use axum::{
     middleware,
     routing::{get, post},
 };
-use mobile_proxy_application::{IssueCommandError, IssueCommandInput, IssueCommandPort};
+use mobile_proxy_application::{
+    AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandPort, IssueCommandError,
+    IssueCommandInput, IssueCommandPort, PollCommandError, PollCommandInput, PollCommandPort,
+};
 use mobile_proxy_foundation::{CommandId, RequestContext};
 use proxy_core::{
     CommandAckRequest, DeviceCommand, DeviceRecord, HeartbeatRequest, IssueCommandRequest,
-    PublicProbeReport, RecoveryIntent, RegisterDeviceRequest,
+    PublicProbeReport, RegisterDeviceRequest,
 };
 
 pub fn router(state: AppState, auth: AuthConfig) -> Router {
@@ -216,45 +219,86 @@ async fn issue_command(
 
 async fn next_command(
     State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
     Path(id): Path<String>,
-) -> Json<Option<DeviceCommand>> {
-    let commands = state.commands.lock().await;
-    let next = commands
-        .queues
-        .get(&id)
-        .and_then(|queue| queue.front().cloned());
-    Json(next)
+) -> Result<Json<Option<DeviceCommand>>, CommandRouteError> {
+    match state
+        .poll_command(PollCommandInput {
+            device_id: id.clone(),
+        })
+        .await
+    {
+        Ok(outcome) => Ok(Json(outcome.into_option())),
+        Err(PollCommandError::StateConflict) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                error_code = "command_state_conflict",
+                "device command polling failed"
+            );
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "command_state_conflict" })),
+            ))
+        }
+    }
 }
 
 async fn ack_command(
     State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
     Path((id, command_id)): Path<(String, CommandId)>,
     Json(req): Json<CommandAckRequest>,
-) -> Json<serde_json::Value> {
-    let mut removed = false;
-    let mut commands = state.commands.lock().await;
-    if req.ok
-        && let Some(queue) = commands.queues.get_mut(&id)
-        && let Some(index) = queue
-            .iter()
-            .position(|command| command.command_id == command_id)
+) -> Result<Json<serde_json::Value>, CommandRouteError> {
+    match state
+        .acknowledge_command(AcknowledgeCommandInput {
+            device_id: id.clone(),
+            command_id,
+            request: req,
+        })
+        .await
     {
-        queue.remove(index);
-        removed = true;
-    }
-    drop(commands);
-
-    if req.ok {
-        let mut devices = state.devices.lock().await;
-        if let Some(device) = devices.get_mut(&id) {
-            device.recovery_intent = Some(RecoveryIntent::None.to_string());
-            device.last_event_at = Some(now_unix_secs());
+        Ok(outcome) => {
+            tracing::info!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                command_id = %command_id,
+                device_id = %id,
+                classification = outcome.classification(),
+                "device command acknowledgement processed"
+            );
+            Ok(Json(serde_json::json!({ "accepted": outcome.accepted() })))
         }
-        drop(devices);
-        let _ = state.persist().await;
+        Err(AcknowledgeCommandError::StateConflict) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                command_id = %command_id,
+                device_id = %id,
+                error_code = "command_state_conflict",
+                "device command acknowledgement failed"
+            );
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "command_state_conflict" })),
+            ))
+        }
+        Err(AcknowledgeCommandError::Persistence) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                command_id = %command_id,
+                device_id = %id,
+                error_code = "state_persistence_failed",
+                "device command acknowledgement failed"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "state_persistence_failed" })),
+            ))
+        }
     }
-
-    Json(serde_json::json!({ "accepted": removed || !req.ok }))
 }
 
 fn mark_stale(mut device: DeviceRecord) -> DeviceRecord {
@@ -486,6 +530,106 @@ mod tests {
             .unwrap();
         let second_command: DeviceCommand = serde_json::from_slice(&second_body).unwrap();
         assert_eq!(second_command.command_id, first_command.command_id);
+    }
+
+    #[tokio::test]
+    async fn command_delivery_routes_preserve_success_json_and_retry_semantics() {
+        const PAYLOAD: &str = r#"{
+            "desired_state":"healthy_serving",
+            "recovery_intent":"none",
+            "deadline_secs":30,
+            "idempotency_key":"delivery-command"
+        }"#;
+        let app = test_app().await;
+        let issued = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/devices/device-1/commands")
+                    .header("authorization", "Bearer admin-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(PAYLOAD))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(issued.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let command: DeviceCommand = serde_json::from_slice(&body).unwrap();
+
+        let polled = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/devices/device-1/commands/next")
+                    .header("authorization", "Bearer device-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(polled.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(polled.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let pending: Option<DeviceCommand> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pending, Some(command.clone()));
+
+        let rejected = app
+            .clone()
+            .oneshot(
+                Request::post(format!(
+                    "/api/v1/devices/device-1/commands/{}/ack",
+                    command.command_id
+                ))
+                .header("authorization", "Bearer device-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"ok":false,"message":"retry"}"#))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(rejected.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["accepted"], true);
+
+        let completed = app
+            .clone()
+            .oneshot(
+                Request::post(format!(
+                    "/api/v1/devices/device-1/commands/{}/ack",
+                    command.command_id
+                ))
+                .header("authorization", "Bearer device-token")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"ok":true,"message":null}"#))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(completed.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(completed.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["accepted"], true);
+
+        let empty = app
+            .oneshot(
+                Request::get("/api/v1/devices/device-1/commands/next")
+                    .header("authorization", "Bearer device-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(empty.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let pending: Option<DeviceCommand> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pending, None);
     }
 
     #[tokio::test]
