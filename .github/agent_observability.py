@@ -632,14 +632,10 @@ use reverse_tunnel::TunnelFreshness;
 )
 replace_once(
     "services/host-daemon/src/health.rs",
-    '''                .as_ref()
-                .is_some_and(|snapshot| snapshot.connected);
-''',
-    '''                .as_ref()
-                .is_some_and(|snapshot| {
+    ".is_some_and(|snapshot| snapshot.connected);",
+    '''.is_some_and(|snapshot| {
                     snapshot.connected && snapshot.freshness == TunnelFreshness::Fresh
-                });
-'''
+                });'''
 )
 replace_once(
     "services/host-daemon/src/health.rs",
