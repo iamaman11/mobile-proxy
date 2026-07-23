@@ -22,14 +22,19 @@ jobs:
           ref: agent/device-registration-application-port
 
       - name: Remove raw registration fields from logs
+        id: harden
+        continue-on-error: true
         run: |
-          test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 1
-          test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 4
-          sed -i '/^    let node_id = req\.node_id\.clone();$/d' services/control-plane/src/routes.rs
-          sed -i '/^                node_id = %node_id,$/d' services/control-plane/src/routes.rs
-          ! grep -Fq '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs
-          ! grep -Fq '                node_id = %node_id,' services/control-plane/src/routes.rs
-          python3 - <<'PY'
+          set -o pipefail
+          {
+            set -x
+            test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 1
+            test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 4
+            sed -i '/^    let node_id = req\.node_id\.clone();$/d' services/control-plane/src/routes.rs
+            sed -i '/^                node_id = %node_id,$/d' services/control-plane/src/routes.rs
+            ! grep -Fq '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs
+            ! grep -Fq '                node_id = %node_id,' services/control-plane/src/routes.rs
+            python3 - <<'PY'
           from pathlib import Path
 
           path = Path('docs/architecture/device-registration-application-port.md')
@@ -40,8 +45,23 @@ jobs:
               raise SystemExit(f'documentation anchor count: {body.count(anchor)}')
           path.write_text(body.replace(anchor, replacement, 1), encoding='utf-8')
           PY
+          } 2>&1 | tee registration-hardening.log
+
+      - name: Upload hardening diagnosis
+        if: steps.harden.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: registration-hardening-diagnosis
+          path: registration-hardening.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce hardening result
+        if: steps.harden.outcome == 'failure'
+        run: exit 1
 
       - name: Validate hardened source
+        if: steps.harden.outcome == 'success'
         run: |
           python3 scripts/check_architecture_boundaries.py
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
@@ -53,8 +73,10 @@ jobs:
           git diff --check
 
       - name: Publish clean source head
+        if: steps.harden.outcome == 'success'
         run: |
           rm .github/workflows/registration-hardening-builder.yml
+          rm -f registration-hardening.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
