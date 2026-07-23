@@ -13,6 +13,7 @@ const IDEMPOTENCY_SCOPE_DOMAIN: DigestDomain =
 
 pub const MAX_COMMAND_QUEUE_PER_DEVICE: usize = 50;
 pub const MAX_IDEMPOTENCY_RESULTS: usize = 1_000;
+pub const MAX_PENDING_COMMANDS: usize = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssueCommandInput {
@@ -39,6 +40,7 @@ impl IssueCommandOutcome {
 pub enum IssueCommandError {
     IdempotencyConflict,
     StateConflict,
+    CapacityExceeded,
     Persistence,
 }
 
@@ -47,6 +49,7 @@ impl Display for IssueCommandError {
         formatter.write_str(match self {
             Self::IdempotencyConflict => "idempotency key conflicts with the original command",
             Self::StateConflict => "persisted command state is internally inconsistent",
+            Self::CapacityExceeded => "pending command capacity is exhausted",
             Self::Persistence => "command state could not be persisted",
         })
     }

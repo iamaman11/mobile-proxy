@@ -11,7 +11,7 @@ The transport handler authenticates through the existing admin middleware, recei
 
 ## Idempotency contract
 
-The canonical claim key is a full typed BLAKE3 digest using domain:
+The canonical durable-result key is a full typed BLAKE3 digest using domain:
 
 ```text
 mobile-proxy/control-plane-command-idempotency-scope/v1
@@ -29,9 +29,9 @@ An identical replay returns the original `DeviceCommand`. A reused key with chan
 
 ## Durable result and queue semantics
 
-The delivery queue remains bounded to 50 commands per device. Idempotency results have a separate deterministic bound of 1000 claims, so removal from the queue does not remove the original replay result.
+The delivery queue remains bounded to 50 commands per device and 1000 pending commands globally. A full per-device or global queue fails with `command_capacity_exceeded`; no pending command is silently evicted. Idempotency results have a deterministic bound of 1000 canonical entries, and pending results are never selected for retention eviction.
 
-The JSON schema adds optional `idempotency_results` and `idempotency_order` fields under `commands`. Serde defaults keep old state readable; previous binaries ignore the added fields, preserving software rollback. Existing concatenated claims are a legacy migration input only. Recoverable claims are rewritten to the typed scope; an unrecoverable retained claim rejects reuse rather than creating a duplicate command.
+The JSON schema adds optional `idempotency_results` and `idempotency_order` fields under `commands`. Serde defaults keep old state readable. The legacy concatenated claim remains as a compatibility alias while canonical result identity uses the typed digest. This lets a previous binary still deduplicate a pending command. If a rollback writer drops the added fields, the new binary reconstructs exact replay evidence from the queue and legacy claim; an unrecoverable retained claim rejects reuse fail closed. Legacy aliases plus canonical history remain bounded to at most 2000 claim records.
 
 For a new command, the adapter builds a candidate containing the queue, idempotency claim/result and device projection, writes and fsyncs a temporary file, atomically renames it, and only then swaps the in-memory state. A failed write publishes no command in memory.
 

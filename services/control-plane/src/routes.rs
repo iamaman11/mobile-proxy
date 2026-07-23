@@ -185,6 +185,19 @@ async fn issue_command(
                 Json(serde_json::json!({ "error": "command_state_conflict" })),
             ))
         }
+        Err(IssueCommandError::CapacityExceeded) => {
+            tracing::warn!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                error_code = "command_capacity_exceeded",
+                "device command rejected"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "command_capacity_exceeded" })),
+            ))
+        }
         Err(IssueCommandError::Persistence) => {
             tracing::error!(
                 request_id = %context.request_id(),
