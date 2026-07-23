@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+architecture_path = ROOT / "scripts/check_architecture_boundaries.py"
+architecture = architecture_path.read_text(encoding="utf-8")
+old_import = "import tomllib\n\nfrom check_digest_policy import check_repository as check_digest_policy\n"
+new_import = (
+    "import tomllib\n\n"
+    "SCRIPT_DIR = Path(__file__).resolve().parent\n"
+    "if str(SCRIPT_DIR) not in sys.path:\n"
+    "    sys.path.insert(0, str(SCRIPT_DIR))\n\n"
+    "from check_digest_policy import check_repository as check_digest_policy\n"
+)
+if architecture.count(old_import) != 1:
+    raise RuntimeError("digest policy import anchor was not found exactly once")
+architecture_path.write_text(
+    architecture.replace(old_import, new_import, 1), encoding="utf-8"
+)
+
+(ROOT / "scripts/tests/test_digest_policy.py").write_text(
+    r'''from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from check_digest_policy import check_repository
+
+
+class DigestPolicyTests(unittest.TestCase):
+    def test_blake3_first_party_source_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            crate = root / "crates/example"
+            (crate / "src").mkdir(parents=True)
+            (crate / "Cargo.toml").write_text(
+                '[package]\nname = "example"\nversion = "0.1.0"\n',
+                encoding="utf-8",
+            )
+            (crate / "src/lib.rs").write_text(
+                'const FORMAT: &str = "b3:";\n', encoding="utf-8"
+            )
+            self.assertEqual(check_repository(root), [])
+
+    def test_sha2_dependency_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            crate = root / "apps/example"
+            (crate / "src").mkdir(parents=True)
+            (crate / "Cargo.toml").write_text(
+                '[package]\nname = "example"\nversion = "0.1.0"\n\n'
+                '[dependencies]\nsha2 = "0.10"\n',
+                encoding="utf-8",
+            )
+            (crate / "src/main.rs").write_text("fn main() {}\n", encoding="utf-8")
+            errors = check_repository(root)
+            self.assertTrue(any("sha2 dependency" in error for error in errors))
+
+    def test_sha256_constructor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "crates/example/src/lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text("fn digest() { let _ = Sha256::new(); }\n", encoding="utf-8")
+            errors = check_repository(root)
+            self.assertTrue(any("SHA-256 usage" in error for error in errors))
+
+    def test_legacy_device_checksum_contract_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "services/example/src/main.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'const LEGACY: &str = "checksums.sha256";\n', encoding="utf-8"
+            )
+            errors = check_repository(root)
+            self.assertTrue(any("SHA-256 usage" in error for error in errors))
+
+    def test_legacy_vm_checksum_contract_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "apps/example/src/main.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'const LEGACY: &str = "SHA256SUMS";\n', encoding="utf-8"
+            )
+            errors = check_repository(root)
+            self.assertTrue(any("SHA-256 usage" in error for error in errors))
+
+    def test_external_lockfile_checksums_are_outside_first_party_source_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Cargo.lock").write_text(
+                'checksum = "0123456789abcdef"\n', encoding="utf-8"
+            )
+            self.assertEqual(check_repository(root), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
+''',
+    encoding="utf-8",
+)
