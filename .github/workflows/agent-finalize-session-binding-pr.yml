@@ -28,23 +28,29 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import traceback
 
-          workflow = Path('.github/workflows/agent-finalize-session-binding.yml').read_text()
-          raw = workflow.split("          python3 <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
-          script = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in raw.splitlines()
-          )
-          cleanup = 'Path(".github/workflows/agent-finalize-session-binding.yml").unlink()'
-          replacement = (
-              cleanup
-              + '; Path(".github/workflows/agent-finalize-session-binding-pr.yml").unlink()'
-              + '; Path(".agent-finalize-trigger").unlink(missing_ok=True)'
-          )
-          if script.count(cleanup) != 1:
-              raise SystemExit('finalizer cleanup marker was not unique')
-          script = script.replace(cleanup, replacement, 1)
-          exec(compile(script, '<tcp-session-binding>', 'exec'), {'__name__': '__main__'})
+          try:
+              workflow = Path('.github/workflows/agent-finalize-session-binding.yml').read_text()
+              raw = workflow.split("          python3 <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+              script = '\n'.join(
+                  line[10:] if line.startswith('          ') else line
+                  for line in raw.splitlines()
+              )
+              cleanup = 'Path(".github/workflows/agent-finalize-session-binding.yml").unlink()'
+              replacement = (
+                  cleanup
+                  + '; Path(".github/workflows/agent-finalize-session-binding-pr.yml").unlink()'
+                  + '; Path(".agent-finalize-trigger").unlink(missing_ok=True)'
+                  + '; Path("agent-finalize-error.txt").unlink(missing_ok=True)'
+              )
+              if script.count(cleanup) != 1:
+                  raise RuntimeError('finalizer cleanup marker was not unique')
+              script = script.replace(cleanup, replacement, 1)
+              exec(compile(script, '<tcp-session-binding>', 'exec'), {'__name__': '__main__'})
+          except BaseException:
+              Path('agent-finalize-error.txt').write_text(traceback.format_exc())
+              raise
           PY
 
       - name: Format
@@ -62,4 +68,16 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git commit -m "bind TCP proxy streams to device sessions"
+          git push origin HEAD:agent/tcp-session-bound-pending-streams
+
+      - name: Persist patch diagnostics
+        if: failure()
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -f .github/workflows/agent-finalize-session-binding.yml
+          rm -f .github/workflows/agent-finalize-session-binding-pr.yml
+          rm -f .agent-finalize-trigger
+          git add -A
+          git commit -m "record TCP session binding patch failure"
           git push origin HEAD:agent/tcp-session-bound-pending-streams
