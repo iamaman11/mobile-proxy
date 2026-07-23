@@ -1,0 +1,39 @@
+diff --git a/docs/architecture/invariant-enforcement.md b/docs/architecture/invariant-enforcement.md
+index eb3e7ce..7777777 100644
+--- a/docs/architecture/invariant-enforcement.md
++++ b/docs/architecture/invariant-enforcement.md
+@@ -65,8 +65,8 @@ The highest-impact active gaps remain explicit in the matrix:
+ 
+ - single owner per aggregate and application ports for the remaining mutation routes;
+- thin transport handlers beyond the extracted command-issuance route and prohibition of SQL or business transitions in all HTTP routes;
+- durable SQLite canonical state, transactional audit/outbox semantics and JSON migration;
++- thin transport handlers beyond the extracted command lifecycle routes and prohibition of SQL or business transitions in all HTTP routes;
++- durable SQLite canonical state, durable acknowledgement history, transactional audit/outbox semantics and JSON migration;
+ - repository-wide typed status/error taxonomies;
+ - application-specific canonical-field detection;
+ - repository-wide bounded queue/map/task enforcement;
+@@ -77,9 +77,9 @@ The highest-impact active gaps remain explicit in the matrix:
+ - removal of runtime fingerprint legacy readers after the accepted compatibility window;
+ - physical reserve-tunnel acceptance on one immutable SHA.
+ 
+-## Command issuance application-port enforcement
++## Command lifecycle application-port enforcement
+ 
+-The existing admin `issue_command` capability now has one bounded clean-dependency slice:
++The existing command issue, poll and acknowledgement capabilities now have bounded clean-dependency slices:
+ 
+ - `mobile-proxy-application` owns the typed port, deterministic request fingerprint, unambiguous BLAKE3 idempotency scope and exact/conflict classification;
+ - the Axum handler calls one use case and maps only typed outcomes to bounded HTTP errors;
+@@ -88,8 +88,11 @@ The existing admin `issue_command` capability now has one bounded clean-dependenc
+ - legacy concatenated idempotency claims are normalized through an isolated adapter when their original queued command is recoverable, while stale claims reject reuse fail closed;
+ - command queue, idempotency claim/result and device projection are fsynced and atomically renamed before in-memory publication;
+ - a failed write returns `state_persistence_failed` and leaves the in-memory state unchanged.
++- command polling validates queue ownership and returns a typed `available` or `empty` outcome without transport logic reaching into the queue;
++- successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory;
++- negative acknowledgement preserves the pending command and the existing `{ "accepted": true }` compatibility shape.
+ 
+-This evidence applies only to command issuance. Registration, heartbeat, public probe, command polling and acknowledgement remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
++Registration, heartbeat and public probe remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
+ 
+ ## Runtime fingerprint enforcement
+ 
