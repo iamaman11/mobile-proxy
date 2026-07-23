@@ -54,11 +54,8 @@ impl Display for IssueCommandError {
 
 impl Error for IssueCommandError {}
 
-pub type IssueCommandFuture<'a> = Pin<
-    Box<
-        dyn Future<Output = Result<IssueCommandOutcome, IssueCommandError>> + Send + 'a,
-    >,
->;
+pub type IssueCommandFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<IssueCommandOutcome, IssueCommandError>> + Send + 'a>>;
 
 pub trait IssueCommandPort {
     fn issue_command(&self, input: IssueCommandInput) -> IssueCommandFuture<'_>;
@@ -112,9 +109,7 @@ mod tests {
     use mobile_proxy_foundation::{DeadlineWindow, IdempotencyKey};
     use proxy_core::{DesiredState, DeviceCommand, IssueCommandRequest, RecoveryIntent};
 
-    use super::{
-        IssueCommandError, classify_existing, idempotency_scope_key, request_fingerprint,
-    };
+    use super::{IssueCommandError, classify_existing, idempotency_scope_key, request_fingerprint};
 
     fn request(desired_state: DesiredState, key: &str) -> IssueCommandRequest {
         IssueCommandRequest {
@@ -128,9 +123,7 @@ mod tests {
     fn existing() -> DeviceCommand {
         let request = request(DesiredState::HealthyServing, "command-123");
         DeviceCommand {
-            command_id: "00000000-0000-0000-0000-000000000001"
-                .parse()
-                .unwrap(),
+            command_id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
             device_id: "device-1".into(),
             desired_state: request.desired_state,
             recovery_intent: request.recovery_intent,

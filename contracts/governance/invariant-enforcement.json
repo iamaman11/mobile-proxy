@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-07-23",
-  "baseline_main_sha": "a6d289b9c8bc93a2bc961d6630dc124f71436746",
+  "baseline_main_sha": "3f6a2bb98807d289b5e436911b9dd92c102543d4",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -145,7 +145,7 @@
     [
       "PLATFORM-001",
       "U",
-      "§1, §4, §19",
+      "\u00a71, \u00a74, \u00a719",
       "Canonical platform remains generic multi-consumer and contains no site-analize-by-pl-specific mandatory concept",
       "partially_enforced",
       "architecture",
@@ -163,7 +163,7 @@
     [
       "COMPAT-001",
       "U",
-      "§1, §2.5, §19",
+      "\u00a71, \u00a72.5, \u00a719",
       "Mixed proxy remains public on port 1080",
       "enforced",
       "proxy-access",
@@ -182,7 +182,7 @@
     [
       "COMPAT-002",
       "U",
-      "§1, §2.5, §19",
+      "\u00a71, \u00a72.5, \u00a719",
       "SOCKS5 remains public on port 1081",
       "enforced",
       "proxy-access",
@@ -201,7 +201,7 @@
     [
       "COMPAT-003",
       "U",
-      "§1, §2.5, §19",
+      "\u00a71, \u00a72.5, \u00a719",
       "HTTP including CONNECT remains public on port 3128",
       "enforced",
       "proxy-access",
@@ -220,7 +220,7 @@
     [
       "COMPAT-004",
       "U",
-      "§1, §9, §17",
+      "\u00a71, \u00a79, \u00a717",
       "Reverse tunnel remains QUIC-first",
       "enforced",
       "tunnel-session",
@@ -239,7 +239,7 @@
     [
       "COMPAT-005",
       "U",
-      "§1, §9, §17",
+      "\u00a71, \u00a79, \u00a717",
       "Certificate-pinned TLS/TCP reserve on port 443 remains available",
       "enforced",
       "tunnel-session",
@@ -258,7 +258,7 @@
     [
       "COMPAT-006",
       "U",
-      "§1, §9, §17",
+      "\u00a71, \u00a79, \u00a717",
       "WireGuard remains controlled compatibility and rollback until explicit accepted deprecation",
       "enforced",
       "tunnel-session",
@@ -277,7 +277,7 @@
     [
       "COMPAT-007",
       "U",
-      "§1, §2.5, §19",
+      "\u00a71, \u00a72.5, \u00a719",
       "Operator CLI and operator/admin APIs remain preserved",
       "partially_enforced",
       "operations",
@@ -295,20 +295,21 @@
     [
       "ARCH-001",
       "U",
-      "§2.1",
+      "\u00a72.1",
       "Dependencies point inward from foundation through composition roots",
       "partially_enforced",
       "architecture",
       [
         "scripts/check_architecture_boundaries.py",
-        "scripts/tests/test_architecture_boundaries.py"
+        "scripts/tests/test_architecture_boundaries.py",
+        "crates/application/Cargo.toml"
       ],
       [
         "RQ-A"
       ],
       "workspace-layer-dependency-graph",
       "",
-      "Current pure crates are checked; the complete target layer graph does not yet exist.",
+      "Foundation, runtime-domain and the first application crate have layer-specific dependency and vocabulary gates; the complete target graph is not present.",
       ""
     ],
     [
@@ -333,7 +334,7 @@
     [
       "ARCH-003",
       "U",
-      "§2.2",
+      "\u00a72.2",
       "Every mutable aggregate has one owning bounded context",
       "planned",
       "architecture",
@@ -347,15 +348,21 @@
     [
       "ARCH-004",
       "U",
-      "§2.2",
+      "\u00a72.2",
       "Other contexts mutate aggregate state only through typed application ports",
-      "planned",
+      "partially_enforced",
       "application",
-      [],
-      [],
-      "application-ports-and-thin-routes",
+      [
+        "crates/application/src/command_issue.rs",
+        "services/control-plane/src/state.rs"
+      ],
+      [
+        "RQ-A",
+        "RQ-T"
+      ],
+      "remaining-control-plane-application-ports",
       "",
-      "",
+      "Command issuance mutates through a typed application port; registration, heartbeat, probe and acknowledgement are still direct handlers.",
       ""
     ],
     [
@@ -363,19 +370,25 @@
       "A1",
       "Decision 8",
       "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
-      "planned",
+      "partially_enforced",
       "application",
-      [],
-      [],
-      "application-ports-and-thin-routes",
+      [
+        "crates/application/src/command_issue.rs",
+        "services/control-plane/src/routes.rs"
+      ],
+      [
+        "RQ-A",
+        "RQ-T"
+      ],
+      "remaining-control-plane-application-ports",
       "",
-      "Current control-plane handlers still contain orchestration and persistence calls.",
+      "issue_command authenticates at the router, accepts typed input, calls one use case and maps typed outcomes; other handlers remain transitional.",
       ""
     ],
     [
       "ARCH-006",
       "U",
-      "§19",
+      "\u00a719",
       "SQL and business transitions are absent from HTTP handlers",
       "planned",
       "architecture",
@@ -417,7 +430,7 @@
     [
       "PERSIST-001",
       "U",
-      "§2.3, §7, §19",
+      "\u00a72.3, \u00a77, \u00a719",
       "Canonical mutable state is durable and not only memory, JSON, YAML, SharedPreferences, process tables or queues",
       "planned",
       "persistence",
@@ -431,7 +444,7 @@
     [
       "PERSIST-002",
       "U",
-      "§7",
+      "\u00a77",
       "SQLite uses WAL, foreign keys, busy timeout, single-writer discipline, short transactions, backup and integrity checks",
       "not_applicable_yet",
       "persistence",
@@ -445,21 +458,26 @@
     [
       "PERSIST-003",
       "U",
-      "§7",
+      "\u00a77",
       "Business state, idempotency result, domain events, audit and outbox commit atomically",
-      "not_applicable_yet",
+      "partially_enforced",
       "persistence",
-      [],
-      [],
-      "atomic-business-audit-outbox",
-      "Transactional repositories are introduced.",
+      [
+        "crates/application/src/command_issue.rs",
+        "services/control-plane/src/state.rs"
+      ],
+      [
+        "RQ-T"
+      ],
+      "atomic-command-audit-outbox",
       "",
+      "Command queue, durable idempotency result and device projection are written as one fsynced candidate before in-memory publication; domain event, audit and outbox persistence are absent.",
       ""
     ],
     [
       "PERSIST-004",
       "U",
-      "§7",
+      "\u00a77",
       "JSON migration performs import, parity validation, write switch, diagnostic export, compatibility window and retirement",
       "planned",
       "persistence",
@@ -473,7 +491,7 @@
     [
       "CONTRACT-001",
       "U",
-      "§2.4",
+      "\u00a72.4",
       "Statuses, IDs, error codes, proxy protocols, tunnel transports, strategies, principals, permissions and release reasons are typed",
       "partially_enforced",
       "architecture",
@@ -492,7 +510,7 @@
     [
       "CONTRACT-002",
       "U",
-      "§2.4",
+      "\u00a72.4",
       "Raw strings are accepted only at transport boundaries and converted immediately",
       "planned",
       "architecture",
@@ -506,7 +524,7 @@
     [
       "CONTRACT-003",
       "U",
-      "§8, §19",
+      "\u00a78, \u00a719",
       "Generated protobuf models do not enter domain crates",
       "not_applicable_yet",
       "architecture",
@@ -520,13 +538,14 @@
     [
       "CONTRACT-004",
       "U",
-      "§8",
+      "\u00a78",
       "Every external request has protocol version, request ID, correlation ID and deadline; mutations add idempotency",
       "partially_enforced",
       "application",
       [
         "docs/architecture/foundation-primitives.md",
         "services/control-plane/src/request_context.rs",
+        "crates/application/src/command_issue.rs",
         "services/control-plane/src/routes.rs"
       ],
       [
@@ -534,13 +553,13 @@
       ],
       "protocol-version-and-mutation-envelope",
       "",
-      "Request lineage, deadlines and command idempotency are enforced; protocol version is absent.",
+      "Request lineage, deadlines and exact/conflicting command idempotency are enforced; protocol version and generic consumer/application idempotency scope are absent.",
       ""
     ],
     [
       "DIGEST-001",
       "A2",
-      "Decision summary, §1",
+      "Decision summary, \u00a71",
       "New internal content, config and binary fingerprints default to full BLAKE3-256 through typed shared wrappers",
       "enforced",
       "security",
@@ -564,7 +583,7 @@
     [
       "DIGEST-002",
       "A2",
-      "§2",
+      "\u00a72",
       "New internal persisted/public digest text is b3-prefixed full lowercase 64-hex and never bare hex",
       "enforced",
       "foundation",
@@ -583,13 +602,14 @@
     [
       "DIGEST-003",
       "A2",
-      "§3",
+      "\u00a73",
       "Every deterministic internal digest uses a static versioned non-user-controlled context and semantic changes bump its version",
       "enforced",
       "foundation",
       [
         "crates/foundation/src/lib.rs",
-        "crates/proxy-core/src/fingerprints.rs"
+        "crates/proxy-core/src/fingerprints.rs",
+        "crates/application/src/command_issue.rs"
       ],
       [
         "RQ-T"
@@ -602,12 +622,13 @@
     [
       "DIGEST-004",
       "A2",
-      "§4",
+      "\u00a74",
       "Raw concatenation is forbidden and each input part uses unsigned u64 big-endian length framing",
       "enforced",
       "foundation",
       [
-        "crates/foundation/src/lib.rs"
+        "crates/foundation/src/lib.rs",
+        "crates/application/src/command_issue.rs"
       ],
       [
         "RQ-T"
@@ -620,7 +641,7 @@
     [
       "DIGEST-005",
       "A2",
-      "§4",
+      "\u00a74",
       "Structured digest inputs use deterministic versioned canonical bytes and never pretty JSON or Debug output",
       "partially_enforced",
       "security",
@@ -639,7 +660,7 @@
     [
       "DIGEST-006",
       "A2",
-      "§8, §9, §14",
+      "\u00a78, \u00a79, \u00a714",
       "Legacy SHA-256 is classified before migration; migration defines reads, writes, conflicts, replay, rollback, retention and persisted fixtures",
       "partially_enforced",
       "security",
@@ -804,6 +825,7 @@
       "foundation",
       [
         "crates/foundation/src/lib.rs",
+        "crates/application/src/command_issue.rs",
         "services/control-plane/src/routes.rs"
       ],
       [
@@ -811,7 +833,7 @@
       ],
       "secret-log-static-and-runtime-gate",
       "",
-      "Validation is enforced; repository-wide secret logging detection is absent.",
+      "Validation and non-logging of raw command keys are enforced; repository-wide secret logging detection is absent.",
       ""
     ],
     [
@@ -875,7 +897,7 @@
     [
       "TUNNEL-001",
       "U",
-      "§9",
+      "\u00a79",
       "Pending TCP stream entries are removed on success, cancellation and timeout",
       "enforced",
       "tunnel-session",
@@ -894,7 +916,7 @@
     [
       "TUNNEL-002",
       "U",
-      "§9, §19",
+      "\u00a79, \u00a719",
       "Global and per-device pending stream counts are bounded and registrations expire",
       "enforced",
       "tunnel-session",
@@ -913,7 +935,7 @@
     [
       "TUNNEL-003",
       "U",
-      "§9",
+      "\u00a79",
       "Routing never chooses an arbitrary device and binds accepted streams to expected device and session",
       "enforced",
       "tunnel-session",
@@ -932,7 +954,7 @@
     [
       "TUNNEL-004",
       "U",
-      "§9",
+      "\u00a79",
       "Stream authority also binds runtime generation and lease generation",
       "not_applicable_yet",
       "tunnel-session",
@@ -946,7 +968,7 @@
     [
       "TUNNEL-005",
       "U",
-      "§9, §19",
+      "\u00a79, \u00a719",
       "Global tunnel token is replaced by per-device credentials",
       "planned",
       "security",
@@ -960,7 +982,7 @@
     [
       "TUNNEL-006",
       "U",
-      "§9",
+      "\u00a79",
       "Primary/reserve transport state and bounded failover reason are tracked",
       "enforced",
       "tunnel-session",
@@ -979,7 +1001,7 @@
     [
       "TUNNEL-007",
       "U",
-      "§9, §19",
+      "\u00a79, \u00a719",
       "Routing requires heartbeat freshness rather than a stored connected flag",
       "enforced",
       "tunnel-session",
@@ -997,7 +1019,7 @@
     [
       "TUNNEL-008",
       "U",
-      "§9",
+      "\u00a79",
       "Transport failover and recovery produce durable audit evidence and repeated failures trigger quarantine",
       "partially_enforced",
       "audit-ledger",
@@ -1016,7 +1038,7 @@
     [
       "TUNNEL-009",
       "U",
-      "§9, §17",
+      "\u00a79, \u00a717",
       "Reserve acceptance proves all proxy protocols, UDP block fallback to TLS/TCP 443, heartbeat, mobile IP and return to QUIC",
       "partially_enforced",
       "tunnel-session",
@@ -1034,7 +1056,7 @@
     [
       "SEC-001",
       "U",
-      "§12",
+      "\u00a712",
       "Principal types use separate tokens and consumer scopes cannot invoke provisioning or raw commands",
       "partially_enforced",
       "identity-access",
@@ -1053,7 +1075,7 @@
     [
       "SEC-002",
       "A2",
-      "§5",
+      "\u00a75",
       "Persisted bearer-token verifiers use keyed BLAKE3 behind a security port with key ID, rotation and constant-time comparison",
       "not_applicable_yet",
       "security",
@@ -1067,7 +1089,7 @@
     [
       "SEC-003",
       "A2",
-      "§6",
+      "\u00a76",
       "Human passwords use Argon2id with random salts and upgradable parameters; fast or unsalted password hashes are forbidden",
       "not_applicable_yet",
       "security",
@@ -1081,7 +1103,7 @@
     [
       "SEC-004",
       "A2",
-      "§7, §8",
+      "\u00a77, \u00a78",
       "Protocol-mandated HKDF, HMAC, TLS, signature, AEAD, TLS pin and standardized digest algorithms are preserved exactly",
       "partially_enforced",
       "security",
@@ -1101,7 +1123,7 @@
     [
       "SEC-005",
       "A2",
-      "§10, §11",
+      "\u00a710, \u00a711",
       "MD5, SHA-1, implementation-defined hashes, security CRC, unkeyed token hashes, raw concatenation and undocumented crypto dependencies are rejected",
       "partially_enforced",
       "security",
@@ -1120,7 +1142,7 @@
     [
       "OPS-001",
       "U",
-      "§13",
+      "\u00a713",
       "Structured logs carry operational lineage and never contain secrets",
       "partially_enforced",
       "operations",
@@ -1139,7 +1161,7 @@
     [
       "OPS-002",
       "U",
-      "§13",
+      "\u00a713",
       "Metrics cover bounded operational state and high-cardinality IDs are not permanent labels",
       "partially_enforced",
       "operations",
@@ -1157,7 +1179,7 @@
     [
       "OPS-003",
       "U",
-      "§13",
+      "\u00a713",
       "Liveness, readiness, dependencies, fleet, device and lease health are separated; liveness does not depend on a phone",
       "planned",
       "operations",
@@ -1171,7 +1193,7 @@
     [
       "OPS-004",
       "U",
-      "§19",
+      "\u00a719",
       "Queues, maps and task spawning are bounded",
       "partially_enforced",
       "reliability",
@@ -1190,7 +1212,7 @@
     [
       "UPGRADE-001",
       "U",
-      "§14",
+      "\u00a714",
       "Protobuf field numbers are never reused, removed fields are reserved, and buf lint and breaking are mandatory",
       "not_applicable_yet",
       "contracts",
@@ -1204,7 +1226,7 @@
     [
       "UPGRADE-002",
       "U",
-      "§14",
+      "\u00a714",
       "Database changes use expand-migrate-contract and rollback remains possible after expansion",
       "not_applicable_yet",
       "persistence",
@@ -1218,7 +1240,7 @@
     [
       "UPGRADE-003",
       "U",
-      "§14",
+      "\u00a714",
       "Every process publishes release ID, Git SHA, protocol range, schema version and capabilities",
       "planned",
       "operations",
@@ -1232,7 +1254,7 @@
     [
       "UPGRADE-004",
       "U",
-      "§14",
+      "\u00a714",
       "Rollout follows package, integrity, signature, staging, canary, fleet rollout and post-deploy verification",
       "partially_enforced",
       "release",
@@ -1250,7 +1272,7 @@
     [
       "DELIVERY-001",
       "U",
-      "§17",
+      "\u00a717",
       "Permanent CI runs architecture and Python regressions, formatting, strict Clippy and workspace tests",
       "enforced",
       "developer-experience",
@@ -1269,7 +1291,7 @@
     [
       "DELIVERY-002",
       "U",
-      "§17",
+      "\u00a717",
       "Permanent CI eventually includes audit, deny, machete, semver, buf, gitleaks, migration and Android gates",
       "planned",
       "developer-experience",
@@ -1283,7 +1305,7 @@
     [
       "DELIVERY-003",
       "U",
-      "§18",
+      "\u00a718",
       "A completed production slice has invariant, use case, typed port, adapter, composition, auth, idempotency, audit, typed errors, metrics, tests, docs and compatibility proof",
       "planned",
       "architecture",
@@ -1297,7 +1319,7 @@
     [
       "DELIVERY-004",
       "U",
-      "§18",
+      "\u00a718",
       "Domain code without production composition is not complete",
       "planned",
       "architecture",

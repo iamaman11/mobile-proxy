@@ -1,7 +1,7 @@
 # Invariant enforcement audit
 
 Status: normative governance companion  
-Baseline `main`: `a6d289b9c8bc93a2bc961d6630dc124f71436746`  
+Baseline `main`: `3f6a2bb98807d289b5e436911b9dd92c102543d4`
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -34,9 +34,9 @@ The audit contains 67 grouped invariant IDs:
 | Status | Count |
 | --- | ---: |
 | `enforced` | 26 |
-| `partially_enforced` | 18 |
-| `planned` | 15 |
-| `not_applicable_yet` | 8 |
+| `partially_enforced` | 21 |
+| `planned` | 13 |
+| `not_applicable_yet` | 7 |
 | `review_only` | 0 |
 
 Grouping is deliberate: one ID may cover a coherent normative rule repeated in several sections, but its source anchor and scope must remain specific enough to review. The validator carries an independent required-ID set, so deleting a row and deleting it from the JSON catalog does not silently pass.
@@ -47,7 +47,7 @@ The permanent `Rust Quality` workflow proves only the controls referenced by mat
 
 - protected mixed `1080`, SOCKS5 `1081` and HTTP/CONNECT `3128` compatibility;
 - QUIC-first behavior, certificate-pinned TLS/TCP reserve and WireGuard compatibility inventory;
-- current pure-crate dependency and vocabulary restrictions;
+- layer-specific dependency and vocabulary restrictions for foundation, runtime-domain and the first application crate;
 - typed foundation validation, request lineage, deadline and command-boundary behavior;
 - typed BLAKE3 formatting, static domain separation and length framing;
 - fail-closed device and VM release integrity manifests;
@@ -63,8 +63,8 @@ This list is not a claim that every rule in ADR-001 or the Ultimate Plan is enfo
 
 The highest-impact active gaps remain explicit in the matrix:
 
-- single owner per aggregate and typed application-port mutation boundaries;
-- thin transport handlers and prohibition of SQL or business transitions in HTTP routes;
+- single owner per aggregate and application ports for the remaining mutation routes;
+- thin transport handlers beyond the extracted command-issuance route and prohibition of SQL or business transitions in all HTTP routes;
 - durable SQLite canonical state, transactional audit/outbox semantics and JSON migration;
 - repository-wide typed status/error taxonomies;
 - application-specific canonical-field detection;
@@ -74,6 +74,20 @@ The highest-impact active gaps remain explicit in the matrix:
 - generic migration/rollback governance for future digest contracts;
 - removal of runtime fingerprint legacy readers after the accepted compatibility window;
 - physical reserve-tunnel acceptance on one immutable SHA.
+
+## Command issuance application-port enforcement
+
+The existing admin `issue_command` capability now has one bounded clean-dependency slice:
+
+- `mobile-proxy-application` owns the typed port, deterministic request fingerprint, unambiguous BLAKE3 idempotency scope and exact/conflict classification;
+- the Axum handler calls one use case and maps only typed outcomes to bounded HTTP errors;
+- raw idempotency keys are not logged;
+- original results are persisted separately from the bounded delivery queue, so acknowledgement or queue eviction cannot turn an exact replay into a new command;
+- legacy concatenated idempotency claims are normalized through an isolated adapter when their original queued command is recoverable, while stale claims reject reuse fail closed;
+- command queue, idempotency claim/result and device projection are fsynced and atomically renamed before in-memory publication;
+- a failed write returns `state_persistence_failed` and leaves the in-memory state unchanged.
+
+This evidence applies only to command issuance. Registration, heartbeat, public probe, command polling and acknowledgement remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
 
 ## Runtime fingerprint enforcement
 

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use mobile_proxy_application::{
     IssueCommandError, IssueCommandFuture, IssueCommandInput, IssueCommandOutcome,
-    IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_IDEMPOTENCY_RESULTS,
-    classify_existing, idempotency_scope_key,
+    IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_IDEMPOTENCY_RESULTS, classify_existing,
+    idempotency_scope_key,
 };
 use mobile_proxy_foundation::CommandId;
 use proxy_core::{DeviceCommand, DeviceRecord};
@@ -63,8 +63,9 @@ impl AppState {
     pub async fn load(state_path: PathBuf) -> Result<Self> {
         let stored = match fs::read_to_string(&state_path) {
             Ok(body) => {
-                let (normalized, fingerprint_migration) = normalize_persisted_fingerprints(&body)
-                    .with_context(|| format!("failed to migrate {}", state_path.display()))?;
+                let (normalized, fingerprint_migration) =
+                    normalize_persisted_fingerprints(&body)
+                        .with_context(|| format!("failed to migrate {}", state_path.display()))?;
                 let mut stored: StoredState = serde_json::from_value(normalized)
                     .with_context(|| format!("failed to parse {}", state_path.display()))?;
                 let command_migration = normalize_command_state(&mut stored.commands)
@@ -124,10 +125,10 @@ impl AppState {
         let mut devices = devices_guard.clone();
         let mut commands = commands_guard.clone();
 
-        let migration = normalize_command_state(&mut commands)
-            .map_err(|_| IssueCommandError::StateConflict)?;
-        let scope = idempotency_scope_key(&input.device_id, &input.request.idempotency_key)
-            .to_string();
+        let migration =
+            normalize_command_state(&mut commands).map_err(|_| IssueCommandError::StateConflict)?;
+        let scope =
+            idempotency_scope_key(&input.device_id, &input.request.idempotency_key).to_string();
         let legacy_scope = legacy_idempotency_scope_key(&input);
 
         if let Some(existing) = commands.idempotency_results.get(&scope) {
@@ -155,10 +156,7 @@ impl AppState {
             idempotency_key: input.request.idempotency_key,
             issued_at: now_unix_secs(),
         };
-        let queue = commands
-            .queues
-            .entry(input.device_id.clone())
-            .or_default();
+        let queue = commands.queues.entry(input.device_id.clone()).or_default();
         queue.push_back(command.clone());
         while queue.len() > MAX_COMMAND_QUEUE_PER_DEVICE {
             queue.pop_front();
@@ -196,9 +194,7 @@ fn legacy_idempotency_scope_key(input: &IssueCommandInput) -> String {
     format!("{}:{}", input.device_id, input.request.idempotency_key)
 }
 
-fn normalize_command_state(
-    commands: &mut CommandState,
-) -> Result<CommandStateMigration, ()> {
+fn normalize_command_state(commands: &mut CommandState) -> Result<CommandStateMigration, ()> {
     let mut migration = CommandStateMigration::default();
 
     let result_entries: Vec<(String, DeviceCommand)> = commands
@@ -207,8 +203,8 @@ fn normalize_command_state(
         .map(|(key, command)| (key.clone(), command.clone()))
         .collect();
     for (stored_key, command) in result_entries {
-        let canonical = idempotency_scope_key(&command.device_id, &command.idempotency_key)
-            .to_string();
+        let canonical =
+            idempotency_scope_key(&command.device_id, &command.idempotency_key).to_string();
         if stored_key != canonical {
             commands.idempotency_results.remove(&stored_key);
             if let Some(existing) = commands.idempotency_results.get(&canonical)
@@ -244,8 +240,8 @@ fn normalize_command_state(
         let Some(command) = find_queued_command(commands, command_id).cloned() else {
             continue;
         };
-        let canonical = idempotency_scope_key(&command.device_id, &command.idempotency_key)
-            .to_string();
+        let canonical =
+            idempotency_scope_key(&command.device_id, &command.idempotency_key).to_string();
         if let Some(existing_id) = commands.idempotency.get(&canonical)
             && *existing_id != command_id
         {
@@ -261,9 +257,7 @@ fn normalize_command_state(
             commands.idempotency.insert(canonical.clone(), command_id);
             migration.canonicalized_keys += 1;
         }
-        commands
-            .idempotency_results
-            .insert(canonical, command);
+        commands.idempotency_results.insert(canonical, command);
         migration.recovered_results += 1;
     }
 
@@ -306,10 +300,7 @@ fn normalize_command_state(
     Ok(migration)
 }
 
-fn find_queued_command(
-    commands: &CommandState,
-    command_id: CommandId,
-) -> Option<&DeviceCommand> {
+fn find_queued_command(commands: &CommandState, command_id: CommandId) -> Option<&DeviceCommand> {
     commands
         .queues
         .values()

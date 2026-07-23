@@ -310,6 +310,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "mobile-proxy-application",
  "mobile-proxy-foundation",
  "proxy-core",
  "serde",
@@ -855,6 +856,14 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mobile-proxy-application"
+version = "0.1.0"
+dependencies = [
+ "mobile-proxy-foundation",
+ "proxy-core",
 ]
 
 [[package]]

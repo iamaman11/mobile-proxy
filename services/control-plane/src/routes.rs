@@ -1,3 +1,8 @@
+use crate::auth::{AuthConfig, require_admin, require_device};
+use crate::projection::{
+    apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
+};
+use crate::{request_context::attach_request_context, state::AppState};
 use axum::{
     Json, Router,
     extract::{Extension, Path, State},
@@ -5,18 +10,12 @@ use axum::{
     middleware,
     routing::{get, post},
 };
+use mobile_proxy_application::{IssueCommandError, IssueCommandInput, IssueCommandPort};
 use mobile_proxy_foundation::{CommandId, RequestContext};
 use proxy_core::{
     CommandAckRequest, DeviceCommand, DeviceRecord, HeartbeatRequest, IssueCommandRequest,
     PublicProbeReport, RecoveryIntent, RegisterDeviceRequest,
 };
-use uuid::Uuid;
-
-use crate::auth::{AuthConfig, require_admin, require_device};
-use crate::projection::{
-    apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
-};
-use crate::{request_context::attach_request_context, state::AppState};
 
 pub fn router(state: AppState, auth: AuthConfig) -> Router {
     let admin = Router::new()
@@ -133,63 +132,73 @@ async fn public_probe(
     Json(serde_json::json!({ "accepted": true }))
 }
 
+type CommandRouteError = (StatusCode, Json<serde_json::Value>);
+
 async fn issue_command(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
     Path(id): Path<String>,
     Json(req): Json<IssueCommandRequest>,
-) -> Json<DeviceCommand> {
-    let mut commands = state.commands.lock().await;
-    let dedupe_key = format!("{id}:{}", req.idempotency_key);
-    if let Some(existing_id) = commands.idempotency.get(&dedupe_key).copied()
-        && let Some(existing) = commands.queues.get(&id).and_then(|queue| {
-            queue
-                .iter()
-                .find(|command| command.command_id == existing_id)
+) -> Result<Json<DeviceCommand>, CommandRouteError> {
+    match state
+        .issue_command(IssueCommandInput {
+            device_id: id.clone(),
+            request: req,
         })
+        .await
     {
-        return Json(existing.clone());
-    }
-
-    let command = DeviceCommand {
-        command_id: CommandId::from_uuid(Uuid::new_v4()),
-        device_id: id.clone(),
-        desired_state: req.desired_state,
-        recovery_intent: req.recovery_intent,
-        deadline_secs: req.deadline_secs,
-        idempotency_key: req.idempotency_key,
-        issued_at: now_unix_secs(),
-    };
-    let queue = commands.queues.entry(id.clone()).or_default();
-    queue.push_back(command.clone());
-    if queue.len() > 50 {
-        queue.pop_front();
-    }
-    commands.idempotency.insert(dedupe_key, command.command_id);
-    if commands.idempotency.len() > 1000 {
-        let keys_to_remove: Vec<String> = commands.idempotency.keys().take(200).cloned().collect();
-        for k in keys_to_remove {
-            commands.idempotency.remove(&k);
+        Ok(outcome) => {
+            let (classification, command) = outcome.into_parts();
+            tracing::info!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                command_id = %command.command_id,
+                device_id = %id,
+                classification,
+                "device command accepted"
+            );
+            Ok(Json(command))
+        }
+        Err(IssueCommandError::IdempotencyConflict) => {
+            tracing::warn!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                error_code = "idempotency_conflict",
+                "device command rejected"
+            );
+            Err((
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "error": "idempotency_conflict" })),
+            ))
+        }
+        Err(IssueCommandError::StateConflict) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                error_code = "command_state_conflict",
+                "device command rejected"
+            );
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "command_state_conflict" })),
+            ))
+        }
+        Err(IssueCommandError::Persistence) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                error_code = "state_persistence_failed",
+                "device command rejected"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "state_persistence_failed" })),
+            ))
         }
     }
-    drop(commands);
-
-    let mut devices = state.devices.lock().await;
-    if let Some(device) = devices.get_mut(&id) {
-        device.desired_state = Some(command.desired_state.to_string());
-        device.recovery_intent = Some(command.recovery_intent.to_string());
-        device.last_event_at = Some(command.issued_at.clone());
-    }
-    drop(devices);
-    let _ = state.persist().await;
-    tracing::info!(
-        request_id = %context.request_id(),
-        correlation_id = %context.correlation_id(),
-        command_id = %command.command_id,
-        device_id = %id,
-        "device command accepted"
-    );
-    Json(command)
 }
 
 async fn next_command(
@@ -464,6 +473,52 @@ mod tests {
             .unwrap();
         let second_command: DeviceCommand = serde_json::from_slice(&second_body).unwrap();
         assert_eq!(second_command.command_id, first_command.command_id);
+    }
+
+    #[tokio::test]
+    async fn reused_command_idempotency_key_with_changed_parameters_returns_conflict() {
+        const FIRST: &str = r#"{
+            "desired_state":"healthy_serving",
+            "recovery_intent":"none",
+            "deadline_secs":30,
+            "idempotency_key":"command-conflict"
+        }"#;
+        const CHANGED: &str = r#"{
+            "desired_state":"degraded_safe",
+            "recovery_intent":"none",
+            "deadline_secs":30,
+            "idempotency_key":"command-conflict"
+        }"#;
+        let app = test_app().await;
+        let first = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/devices/device-1/commands")
+                    .header("authorization", "Bearer admin-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(FIRST))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+
+        let conflict = app
+            .oneshot(
+                Request::post("/api/v1/devices/device-1/commands")
+                    .header("authorization", "Bearer admin-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(CHANGED))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(conflict.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(conflict.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error["error"], "idempotency_conflict");
     }
 
     #[tokio::test]
