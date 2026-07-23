@@ -1,0 +1,378 @@
+name: Apply Corrected TCP Session Binding Slice
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.head_ref == 'agent/tcp-session-bound-pending-streams'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/tcp-session-bound-pending-streams
+          fetch-depth: 0
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Apply production code and tests
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+          import traceback
+
+          diagnostic = Path('agent-finalize-error.txt')
+          try:
+              legacy = subprocess.check_output(
+                  [
+                      'git',
+                      'show',
+                      '361d5bcc8e3e7d3704744e4151c5f3b0676c5b51:.github/workflows/agent-tcp-session-binding.yml',
+                  ],
+                  text=True,
+              )
+              prefix = "          state = r'''"
+              suffix = "\n          '''\n          # The raw string is indented for YAML readability"
+              start = legacy.index(prefix) + len(prefix)
+              end = legacy.index(suffix, start)
+              state = legacy[start:end]
+              state = '\n'.join(
+                  line[10:] if line.startswith('          ') else line
+                  for line in state.splitlines()
+              ) + '\n'
+
+              select_start = state.index('    async fn select_tcp_control(')
+              select_end = state.index(
+                  '    pub(crate) async fn accept_tcp_proxy_stream(', select_start
+              )
+              select = state[select_start:select_end]
+              closed_filter = (
+                  'control.session_id == session.session_id '
+                  '&& !control.sender.is_closed()'
+              )
+              if select.count(closed_filter) != 2:
+                  raise RuntimeError('unexpected TCP control selection shape')
+              select = select.replace(
+                  closed_filter,
+                  'control.session_id == session.session_id',
+                  1,
+              )
+              state = state[:select_start] + select + state[select_end:]
+
+              shutdown_start = state.index('    pub(crate) async fn shutdown_tcp(&self) {')
+              shutdown_end = state.index('    pub async fn snapshot(&self)', shutdown_start)
+              shutdown = '''    pub(crate) async fn shutdown_tcp(&self) {
+        let mut sessions = self.sessions.lock().await;
+        let controls: Vec<_> = self
+            .tcp_controls
+            .lock()
+            .await
+            .drain()
+            .map(|(node_id, control)| (node_id, control.session_id))
+            .collect();
+        lock_pending(&self.pending_tcp).clear();
+        for (node_id, session_id) in controls {
+            if let Some(session) = sessions.get_mut(&node_id)
+                && session.session_id == session_id
+            {
+                session.connected = false;
+            }
+        }
+    }
+
+'''
+              state = state[:shutdown_start] + shutdown + state[shutdown_end:]
+              Path('crates/reverse-tunnel/src/state.rs').write_text(state)
+
+              tunnel_path = Path('crates/reverse-tunnel/src/tunnel.rs')
+              tunnel = tunnel_path.read_text()
+
+              def replace_range(text: str, start_marker: str, end_marker: str, replacement: str) -> str:
+                  start_index = text.index(start_marker)
+                  end_index = text.index(end_marker, start_index)
+                  return text[:start_index] + replacement + text[end_index:]
+
+              run_server_start = tunnel.index('pub async fn run_server(')
+              run_server_end = tunnel.index('pub async fn run_quic_server(', run_server_start)
+              run_server = tunnel[run_server_start:run_server_end]
+              shutdown_old = '            _ = shutdown.changed() => return Ok(()),'
+              if run_server.count(shutdown_old) != 1:
+                  raise RuntimeError('run_server shutdown branch was not unique')
+              run_server = run_server.replace(
+                  shutdown_old,
+                  '''            _ = shutdown.changed() => {
+                state.shutdown_tcp().await;
+                return Ok(());
+            },''',
+                  1,
+              )
+              tunnel = tunnel[:run_server_start] + run_server + tunnel[run_server_end:]
+
+              hybrid_start = tunnel.index(
+                  '    if matches!(config.transport, TunnelTransport::Hybrid { .. }) {'
+              )
+              hybrid_end_marker = (
+                  '    let stream = timeout(\n'
+                  '        config.connect_timeout,\n'
+                  '        TcpStream::connect(config.server_addr),'
+              )
+              hybrid_end = tunnel.index(hybrid_end_marker, hybrid_start)
+              hybrid = '''    if matches!(config.transport, TunnelTransport::Hybrid { .. }) {
+        match connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                warn!(
+                    node_id = %config.node_id,
+                    from_transport = "quic",
+                    to_transport = "tls_tcp",
+                    reason = quic_failover_reason(&error),
+                    "reverse tunnel transport failover"
+                );
+            }
+        }
+        return connect_and_pump_tls_tcp(config, session_id, shutdown, snapshot, status).await;
+    }
+'''
+              tunnel = tunnel[:hybrid_start] + hybrid + tunnel[hybrid_end:]
+
+              handler_start = tunnel.index('async fn handle_server_connection(')
+              handler_end = tunnel.index('async fn read_first_frame(', handler_start)
+              handler = tunnel[handler_start:handler_end]
+              proxy_start = handler.index('    if let ClientFrame::ProxyStream {')
+              proxy_end = handler.index('    let ClientFrame::Hello(hello) = first else {', proxy_start)
+              proxy = '''    if let ClientFrame::ProxyStream {
+        node_id,
+        session_id,
+        stream_id,
+        auth_token,
+    } = first
+    {
+        if !bool::from(auth_token.as_bytes().ct_eq(config.auth_token.as_bytes())) {
+            bail!("reverse tunnel proxy stream authentication failed");
+        }
+        state
+            .accept_tcp_proxy_stream(&node_id, session_id, stream_id, stream)
+            .await?;
+        return Ok(());
+    }
+'''
+              handler = handler[:proxy_start] + proxy + handler[proxy_end:]
+
+              control_start = handler.index('    let (reader, mut writer) = stream.into_split();')
+              control = '''    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let (control_tx, mut control_rx) = mpsc::channel(256);
+    info!(node_id = %hello.node_id, session_id = %hello.session_id, "TCP reverse tunnel authenticated");
+    mark_connected(&state, &hello, None).await;
+    state
+        .register_tcp_control(hello.node_id.clone(), hello.session_id, control_tx)
+        .await;
+
+    let result = loop {
+        tokio::select! {
+        frame = control_rx.recv() => {
+            let Some(frame) = frame else { break Ok(()); };
+            if let Err(error) = write_server_frame(&mut writer, &frame).await {
+                break Err(error);
+            }
+        }
+        incoming = read_optional_frame(&mut reader) => match incoming {
+            Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
+                mark_heartbeat(&state, &heartbeat).await;
+            }
+            Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
+                break Err(anyhow::anyhow!("unexpected repeated hello on reverse tunnel session"));
+            }
+            Ok(None) => break Ok(()),
+            Err(error) => break Err(error),
+        }
+        }
+    };
+    state
+        .remove_tcp_control_for_session(&hello.node_id, hello.session_id)
+        .await;
+    mark_disconnected(&state, &hello).await;
+    result
+}
+
+'''
+              handler = handler[:control_start] + control
+              tunnel = tunnel[:handler_start] + handler + tunnel[handler_end:]
+
+              connected_start = tunnel.index('async fn mark_connected(')
+              connected_end = tunnel.index('async fn mark_heartbeat(', connected_start)
+              connected = '''async fn mark_connected(
+    state: &ReverseTunnelServerState,
+    hello: &TunnelHello,
+    connection: Option<quinn::Connection>,
+) {
+    let mut sessions = state.sessions.lock().await;
+    let previous_session = sessions.get(&hello.node_id).map(|session| session.session_id);
+    let accepted_connections = sessions
+        .get(&hello.node_id)
+        .map(|existing| existing.accepted_connections + 1)
+        .unwrap_or(1);
+    sessions.insert(
+        hello.node_id.clone(),
+        ServerSessionSnapshot {
+            node_id: hello.node_id.clone(),
+            session_id: hello.session_id,
+            connected: true,
+            accepted_connections,
+            last_heartbeat_sequence: None,
+        },
+    );
+    drop(sessions);
+    if let Some(previous_session) = previous_session {
+        state.cancel_pending_for_session(&hello.node_id, previous_session);
+        state
+            .remove_tcp_control_for_session(&hello.node_id, previous_session)
+            .await;
+    }
+    if let Some(connection) = connection {
+        state
+            .connections
+            .lock()
+            .await
+            .insert(hello.node_id.clone(), connection);
+    }
+}
+
+'''
+              tunnel = tunnel[:connected_start] + connected + tunnel[connected_end:]
+
+              disconnected_start = tunnel.index('async fn mark_disconnected(')
+              disconnected_end = tunnel.index('async fn read_optional_line', disconnected_start)
+              disconnected = '''async fn mark_disconnected(state: &ReverseTunnelServerState, hello: &TunnelHello) {
+    let mut sessions = state.sessions.lock().await;
+    let mut remove_session_resources = false;
+    if let Some(session) = sessions.get_mut(&hello.node_id)
+        && session.session_id == hello.session_id
+    {
+        session.connected = false;
+        remove_session_resources = true;
+    }
+    drop(sessions);
+    if remove_session_resources {
+        state.connections.lock().await.remove(&hello.node_id);
+        state
+            .remove_tcp_control_for_session(&hello.node_id, hello.session_id)
+            .await;
+        state.cancel_pending_for_session(&hello.node_id, hello.session_id);
+    }
+}
+
+'''
+              tunnel = tunnel[:disconnected_start] + disconnected + tunnel[disconnected_end:]
+
+              tls_marker = 'async fn connect_and_pump_tls_tcp('
+              if tunnel.count(tls_marker) != 1:
+                  raise RuntimeError('TLS/TCP marker was not unique')
+              failover_helper = '''fn quic_failover_reason(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string();
+    if message.contains("timed out") {
+        "connect_timeout"
+    } else if message.contains("connect failed") {
+        "connect_failed"
+    } else if message.contains("authentication") {
+        "authentication_failed"
+    } else if message.contains("closed") {
+        "session_closed"
+    } else {
+        "session_error"
+    }
+}
+
+'''
+              tunnel = tunnel.replace(tls_marker, failover_helper + tls_marker, 1)
+
+              test_marker = '    #[tokio::test]\n    async fn server_rejects_wrong_auth_token() {'
+              if tunnel.count(test_marker) != 1:
+                  raise RuntimeError('test insertion marker was not unique')
+              replacement_test = '''    #[tokio::test]
+    async fn replacing_tcp_session_cancels_pending_proxy_request() {
+        let state = ReverseTunnelServerState::default();
+        let old = TunnelHello {
+            node_id: "test-phone".into(),
+            session_id: Uuid::new_v4(),
+            protocol_version: 1,
+            auth_token: "test-token".into(),
+        };
+        mark_connected(&state, &old, None).await;
+        let (control_tx, mut control_rx) = mpsc::channel(1);
+        state
+            .register_tcp_control(old.node_id.clone(), old.session_id, control_tx)
+            .await;
+
+        let request_state = state.clone();
+        let request = tokio::spawn(async move {
+            request_state.open_tcp_proxy(Some("test-phone")).await
+        });
+        timeout(Duration::from_secs(1), control_rx.recv())
+            .await
+            .expect("pending request must reach the old control channel")
+            .expect("old control channel must remain open");
+
+        let new = TunnelHello {
+            node_id: old.node_id.clone(),
+            session_id: Uuid::new_v4(),
+            protocol_version: 1,
+            auth_token: "test-token".into(),
+        };
+        mark_connected(&state, &new, None).await;
+
+        let error = timeout(Duration::from_secs(1), request)
+            .await
+            .expect("session replacement must cancel the pending request")
+            .expect("request task must finish")
+            .expect_err("old-session request must be cancelled");
+        assert!(error.to_string().contains("cancelled"));
+    }
+
+'''
+              tunnel = tunnel.replace(test_marker, replacement_test + test_marker, 1)
+              tunnel_path.write_text(tunnel)
+
+              Path('.github/workflows/agent-apply-session-binding.yml').unlink()
+              diagnostic.unlink(missing_ok=True)
+          except BaseException:
+              diagnostic.write_text(traceback.format_exc())
+              raise
+          PY
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Workspace tests
+        run: cargo test --workspace
+
+      - name: Commit validated production slice
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "bind TCP proxy streams to device sessions"
+          git push origin HEAD:agent/tcp-session-bound-pending-streams
+
+      - name: Persist exact failure
+        if: failure()
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -f .github/workflows/agent-apply-session-binding.yml
+          git add -A
+          git commit -m "record corrected TCP session binding failure"
+          git push origin HEAD:agent/tcp-session-bound-pending-streams
