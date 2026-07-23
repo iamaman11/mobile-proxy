@@ -34,6 +34,7 @@ jobs:
           python3 .github/agent_observability_fix3.py
           python3 .github/agent_observability_fix4.py
           python3 .github/agent_observability_fix5.py
+          python3 .github/agent_observability_fix6.py
           python3 .github/agent_observability.py
 
       - name: Format production code
@@ -56,8 +57,8 @@ jobs:
       - name: Persist exact Clippy failure
         if: steps.clippy.outcome == 'failure'
         run: |
-          git checkout HEAD -- .github/agent_observability.py .github/agent_observability_fix2.py .github/agent_observability_fix3.py .github/agent_observability_fix4.py .github/agent_observability_fix5.py .github/workflows/rust-quality.yml
-          git checkout origin/main -- apps/operator-cli/src/commands.rs crates/proxy-core/src/records.rs crates/reverse-tunnel/src/model.rs crates/reverse-tunnel/src/tunnel.rs crates/reverse-tunnel/tests/hybrid_tls_fallback.rs services/control-plane/src/projection.rs services/control-plane/src/routes.rs services/host-daemon/src/config.rs services/host-daemon/src/control_plane.rs services/host-daemon/src/health.rs services/host-daemon/src/reverse_tunnel.rs services/relay-gate/src/probe.rs
+          git checkout HEAD -- .github/agent_observability.py .github/agent_observability_fix2.py .github/agent_observability_fix3.py .github/agent_observability_fix4.py .github/agent_observability_fix5.py .github/agent_observability_fix6.py .github/workflows/rust-quality.yml
+          git checkout origin/main -- apps/operator-cli/src/commands.rs crates/proxy-core/src/records.rs crates/reverse-tunnel/src/model.rs crates/reverse-tunnel/src/tunnel.rs crates/reverse-tunnel/tests/hybrid_tls_fallback.rs services/control-plane/src/projection.rs services/control-plane/src/routes.rs services/host-daemon/src/config.rs services/host-daemon/src/control_plane.rs services/host-daemon/src/health.rs services/host-daemon/src/reverse_tunnel.rs services/host-daemon/src/rotation.rs services/relay-gate/src/probe.rs
           rm -f observability-error.txt rustfmt-error.txt
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -78,7 +79,7 @@ jobs:
           rm -f observability-error.txt rustfmt-error.txt clippy-error.txt
           git diff --check
           changed="$(git diff --name-only origin/main)"
-          expected=$'apps/operator-cli/src/commands.rs\ncrates/proxy-core/src/records.rs\ncrates/reverse-tunnel/src/model.rs\ncrates/reverse-tunnel/src/tunnel.rs\ncrates/reverse-tunnel/tests/hybrid_tls_fallback.rs\nservices/control-plane/src/projection.rs\nservices/control-plane/src/routes.rs\nservices/host-daemon/src/config.rs\nservices/host-daemon/src/control_plane.rs\nservices/host-daemon/src/health.rs\nservices/host-daemon/src/reverse_tunnel.rs\nservices/relay-gate/src/probe.rs'
+          expected=$'apps/operator-cli/src/commands.rs\ncrates/proxy-core/src/records.rs\ncrates/reverse-tunnel/src/model.rs\ncrates/reverse-tunnel/src/tunnel.rs\ncrates/reverse-tunnel/tests/hybrid_tls_fallback.rs\nservices/control-plane/src/projection.rs\nservices/control-plane/src/routes.rs\nservices/host-daemon/src/config.rs\nservices/host-daemon/src/control_plane.rs\nservices/host-daemon/src/health.rs\nservices/host-daemon/src/reverse_tunnel.rs\nservices/host-daemon/src/rotation.rs\nservices/relay-gate/src/probe.rs'
           test "$changed" = "$expected"
 
       - name: Commit validated production slice
