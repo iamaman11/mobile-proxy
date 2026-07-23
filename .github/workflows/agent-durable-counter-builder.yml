@@ -64,10 +64,41 @@ jobs:
           from pathlib import Path
           path = Path('crates/reverse-tunnel/src/model.rs')
           body = path.read_text()
-          old = '            (Some(current), next) if current as u8 == next as u8 => None,\n'
-          if body.count(old) != 1:
+
+          same_transport = '            (Some(current), next) if current as u8 == next as u8 => None,\n'
+          if body.count(same_transport) != 1:
               raise SystemExit('expected exactly one same-transport match arm')
-          path.write_text(body.replace(old, '            _ => None,\n', 1))
+          body = body.replace(same_transport, '            _ => None,\n', 1)
+
+          derive_old = '''#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+          #[serde(deny_unknown_fields)]
+          pub struct TunnelEventCounters {
+          '''
+          derive_new = '''#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+          #[serde(deny_unknown_fields)]
+          pub struct TunnelEventCounters {
+          '''
+          if body.count(derive_old) != 1:
+              raise SystemExit('expected one TunnelEventCounters derive')
+          body = body.replace(derive_old, derive_new, 1)
+
+          default_start = body.find('impl Default for TunnelEventCounters {')
+          default_end = body.find('\n\nimpl TunnelEventCounters {', default_start)
+          if default_start < 0 or default_end < 0:
+              raise SystemExit('failed to locate manual TunnelEventCounters Default')
+          body = body[:default_start] + body[default_end + 2:]
+
+          constructor_old = '''impl ClientSnapshot {
+              pub(crate) fn new(session_id: Uuid) -> Self {
+          '''
+          constructor_new = '''impl ClientSnapshot {
+              #[cfg(test)]
+              pub(crate) fn new(session_id: Uuid) -> Self {
+          '''
+          if body.count(constructor_old) != 1:
+              raise SystemExit('expected one ClientSnapshot test constructor')
+          body = body.replace(constructor_old, constructor_new, 1)
+          path.write_text(body)
           PY
           } 2>&1 | tee .agent/apply.log
 
