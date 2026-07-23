@@ -39,16 +39,36 @@ jobs:
           rustup default stable
 
       - name: Format and validate
+        id: validate
+        continue-on-error: true
         run: |
-          cargo fmt --all
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-          git diff --check
+          set -o pipefail
+          {
+            cargo fmt --all
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+            git diff --check
+          } 2>&1 | tee device-registration-builder.log
+
+      - name: Upload validation diagnosis
+        if: steps.validate.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: device-registration-builder-diagnosis
+          path: device-registration-builder.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce validation result
+        if: steps.validate.outcome == 'failure'
+        run: exit 1
 
       - name: Publish clean production head
+        if: steps.validate.outcome == 'success'
         run: |
           rm -rf .agent
           rm .github/workflows/device-registration-builder.yml
+          rm -f device-registration-builder.log
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
