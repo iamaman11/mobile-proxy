@@ -24,6 +24,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          show-progress: false
 
       - name: Apply production slice
         run: |
@@ -31,9 +32,26 @@ jobs:
           python3 .agent/apply_blake3_internal_migration.py
 
       - name: Enforce architecture and digest policy
+        id: policy
+        continue-on-error: true
         run: |
-          python3 scripts/check_architecture_boundaries.py
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          set -o pipefail
+          {
+            python3 scripts/check_architecture_boundaries.py
+            python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          } 2>&1 | tee policy-errors.txt
+
+      - name: Upload policy diagnostics
+        if: steps.policy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-policy-errors
+          path: policy-errors.txt
+          retention-days: 1
+
+      - name: Fail on policy violation
+        if: steps.policy.outcome == 'failure'
+        run: exit 1
 
       - name: Install stable Rust toolchain
         run: |
@@ -57,7 +75,7 @@ jobs:
           TARGET_BRANCH: agent/blake3-internal-migration
         run: |
           rm -rf .agent scripts/__pycache__ scripts/tests/__pycache__
-          rm -f .github/workflows/agent-blake3-internal-migration-builder.yml
+          rm -f .github/workflows/agent-blake3-internal-migration-builder.yml policy-errors.txt
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
