@@ -19,12 +19,22 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - name: Build internal digest inventory
         run: python3 .agent/audit_internal_digests.py > internal-digest-inventory.txt
+      - name: Build exact source snapshot
+        run: git archive --format=tar.gz --output=source-snapshot.tar.gz HEAD
       - name: Upload immutable inventory
         uses: actions/upload-artifact@v4
         with:
           name: internal-digest-inventory
           path: internal-digest-inventory.txt
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload exact source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-snapshot
+          path: source-snapshot.tar.gz
           if-no-files-found: error
           retention-days: 1
