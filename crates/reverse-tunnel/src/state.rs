@@ -169,6 +169,9 @@ mod tests {
             .await
             .expect_err("capacity must reject new pending streams");
         assert!(error.to_string().contains("capacity"));
-        assert_eq!(state.pending_tcp.lock().await.len(), MAX_PENDING_TCP_STREAMS);
+        assert_eq!(
+            state.pending_tcp.lock().await.len(),
+            MAX_PENDING_TCP_STREAMS
+        );
     }
 }
