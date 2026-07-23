@@ -230,7 +230,8 @@ mod tests {
     use super::{build_rotate_request, is_successful_rotation, render_status};
     use crate::cli::{RotateArgs, StatusFormat};
     use proxy_core::{
-        DEFAULT_AIRPLANE_HOLD_SECS, HealthRecord, JobRecord, RotateRequest, default_rotate_request,
+        BinaryFingerprint, BinaryFingerprintInput, DEFAULT_AIRPLANE_HOLD_SECS, HealthRecord,
+        JobRecord, RotateRequest, default_rotate_request,
     };
     use uuid::Uuid;
 
@@ -266,7 +267,8 @@ mod tests {
         let health = HealthRecord {
             node_id: "node".into(),
             node_name: "node".into(),
-            binary_fingerprint: "fp".into(),
+            config_fingerprint: None,
+            binary_fingerprint: BinaryFingerprintInput::current(BinaryFingerprint::derive([b"fp"])),
             readiness_state: "healthy".into(),
             serving: true,
             proxy_status: "running".into(),

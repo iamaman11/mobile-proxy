@@ -266,7 +266,7 @@ mod tests {
 
     use axum::extract::State;
     use axum::http::{HeaderMap, HeaderValue, StatusCode};
-    use proxy_core::HealthRecord;
+    use proxy_core::{BinaryFingerprint, BinaryFingerprintInput, HealthRecord};
     use reverse_tunnel::{
         TunnelActiveTransport, TunnelDisconnectReason, TunnelEventCounters, TunnelFailoverReason,
         TunnelTransportTransition,
@@ -430,7 +430,10 @@ mod tests {
         HealthRecord {
             node_id: "test-node".into(),
             node_name: "test-node".into(),
-            binary_fingerprint: "test".into(),
+            config_fingerprint: None,
+            binary_fingerprint: BinaryFingerprintInput::current(BinaryFingerprint::derive([
+                b"test",
+            ])),
             readiness_state: "booting".into(),
             serving: false,
             proxy_status: "starting".into(),

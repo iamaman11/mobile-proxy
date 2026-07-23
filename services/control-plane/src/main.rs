@@ -1,5 +1,6 @@
 mod auth;
 mod cli;
+mod fingerprint_migration;
 mod projection;
 mod request_context;
 mod routes;

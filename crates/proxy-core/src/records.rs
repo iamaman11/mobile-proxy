@@ -1,4 +1,9 @@
 use serde::{Deserialize, Serialize};
+
+use crate::fingerprints::{
+    BinaryFingerprint, BinaryFingerprintInput, ConfigFingerprint, ConfigFingerprintInput,
+    deserialize_optional_binary_fingerprint, deserialize_optional_config_fingerprint,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,7 +20,9 @@ pub struct JobRecord {
 pub struct HealthRecord {
     pub node_id: String,
     pub node_name: String,
-    pub binary_fingerprint: String,
+    #[serde(default)]
+    pub config_fingerprint: Option<ConfigFingerprintInput>,
+    pub binary_fingerprint: BinaryFingerprintInput,
     pub readiness_state: String,
     pub serving: bool,
     pub proxy_status: String,
@@ -77,8 +84,8 @@ pub struct HeartbeatRequest {
     pub current_job: Option<Uuid>,
     pub last_proxy_error: Option<String>,
     pub version: Option<String>,
-    pub config_fingerprint: Option<String>,
-    pub binary_fingerprint: Option<String>,
+    pub config_fingerprint: Option<ConfigFingerprintInput>,
+    pub binary_fingerprint: Option<BinaryFingerprintInput>,
     pub active_operator_profile: Option<String>,
     pub active_operator_plmn: Option<String>,
     pub cellular_route_ready: Option<bool>,
@@ -116,8 +123,10 @@ pub struct DeviceRecord {
     pub current_job: Option<Uuid>,
     pub last_proxy_error: Option<String>,
     pub version: Option<String>,
-    pub config_fingerprint: Option<String>,
-    pub binary_fingerprint: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_config_fingerprint")]
+    pub config_fingerprint: Option<ConfigFingerprint>,
+    #[serde(default, deserialize_with = "deserialize_optional_binary_fingerprint")]
+    pub binary_fingerprint: Option<BinaryFingerprint>,
     pub active_operator_profile: Option<String>,
     pub active_operator_plmn: Option<String>,
     pub publicly_serving: bool,

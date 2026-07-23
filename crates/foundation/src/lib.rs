@@ -324,6 +324,13 @@ impl FromStr for ContentDigest {
         let hex = raw
             .strip_prefix("b3:")
             .ok_or(FoundationError::InvalidDigest)?;
+        if hex.len() != 64
+            || !hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(FoundationError::InvalidDigest);
+        }
         blake3::Hash::from_hex(hex)
             .map(Self)
             .map_err(|_| FoundationError::InvalidDigest)
@@ -464,6 +471,14 @@ mod tests {
         assert_ne!(first, other_domain);
         assert_eq!(first.to_string().parse::<ContentDigest>().unwrap(), first);
         assert!(first.to_string().starts_with("b3:"));
+        assert!(
+            first
+                .to_string()
+                .to_uppercase()
+                .parse::<ContentDigest>()
+                .is_err()
+        );
+        assert!("b3:abcd".parse::<ContentDigest>().is_err());
     }
 
     #[test]

@@ -108,7 +108,7 @@ async fn send_heartbeat(
         current_job: runtime.current_job,
         last_proxy_error: runtime.health.last_proxy_error.clone(),
         version: None,
-        config_fingerprint: None,
+        config_fingerprint: runtime.health.config_fingerprint.clone(),
         binary_fingerprint: Some(runtime.health.binary_fingerprint.clone()),
         active_operator_profile: runtime.health.active_operator_profile.clone(),
         active_operator_plmn: runtime.health.active_operator_plmn.clone(),

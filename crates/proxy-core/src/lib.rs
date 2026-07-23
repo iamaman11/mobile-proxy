@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod constants;
 pub mod endpoints;
+pub mod fingerprints;
 pub mod records;
 pub mod runtime;
 
@@ -13,6 +14,10 @@ pub use constants::{
     SOCKS5_PORT,
 };
 pub use endpoints::{ProxyEndpoint, proxy_endpoints};
+pub use fingerprints::{
+    BINARY_FINGERPRINT_DOMAIN, BinaryFingerprint, BinaryFingerprintInput,
+    CONFIG_FINGERPRINT_DOMAIN, ConfigFingerprint, ConfigFingerprintInput, FingerprintInputError,
+};
 pub use records::{
     DeviceList, DeviceRecord, HealthRecord, HeartbeatRequest, JobRecord, ProxyRuntimeRecord,
     PublicProbeReport, RegisterDeviceRequest, RuntimeStatusRecord,

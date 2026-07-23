@@ -20,8 +20,8 @@ All first-party internal persisted digests use BLAKE3-256 through the typed foun
 | Contract or surface | Ownership | Current/previous state | Target | Migration status |
 | --- | --- | --- | --- | --- |
 | Packaged device and VM release file checksums | First-party internal release contracts | Legacy untyped checksum files produced by both packagers | Shared `integrity-manifest.json` with typed `b3:` digests, size and domain metadata | Migrated in the first BLAKE3 backfill slice |
-| `config_fingerprint` fields | First-party internal runtime state | String field; producer audit required | Typed BLAKE3 config digest | Planned producer-by-producer migration |
-| `binary_fingerprint` fields | First-party internal runtime state | String field; producer audit required | Typed BLAKE3 binary digest | Planned producer-by-producer migration |
+| `config_fingerprint` fields | First-party internal runtime state | Previously optional raw strings with no producer | Typed `mobile-proxy/host-daemon-nonsecret-config/v1` digest over canonical redacted config source | Migrated; bounded legacy reader retained temporarily |
+| `binary_fingerprint` fields | First-party internal runtime state | Previously environment-provided raw string with `reconstructed` fallback | Typed `mobile-proxy/host-daemon-binary/v1` digest over exact running executable bytes | Migrated; bounded legacy reader retained temporarily |
 | Future proxy descriptor and endpoint fingerprints | First-party internal contract | Not yet production-owned | Typed BLAKE3 digest | Required from first implementation |
 | Future idempotency, audit and outbox payload digests | First-party internal contract | Not yet production-owned | Typed BLAKE3 digest | Required from first implementation |
 | Reverse-tunnel certificate pinning | TLS security boundary | Certificate DER/pinning semantics determined by TLS contract | Preserve TLS-compatible pinning; do not reinterpret as an internal content digest | Permanent exception |
@@ -50,6 +50,12 @@ All first-party internal persisted digests use BLAKE3-256 through the typed foun
 
 Entries are path-sorted and cover every packaged file except the manifest itself. Both device and VM packaging verify the finished manifest immediately and fail closed on missing, extra, reordered, resized or modified content. Release roots are recreated before packaging, so no legacy checksum file can be carried into a new release.
 
+## Runtime fingerprints v1
+
+The complete producer, reader, API, persistence, migration, observability and rollback contract is defined in [Runtime Config and Binary Fingerprint Migration](runtime-fingerprint-migration.md).
+
+New host-daemon writes are always typed BLAKE3 values derived from canonical source bytes. The migration adapter never computes BLAKE3 over an old digest. Legacy opaque values are accepted only at isolated rolling-read boundaries, are never considered current, and are removed from canonical persistence for typed heartbeat backfill. Unknown prefixes fail closed.
+
 ## Migration rules
 
 1. Inventory the producer, persisted field, index, reader, API and operational tooling.
@@ -62,7 +68,6 @@ Entries are path-sorted and cover every packaged file except the manifest itself
 
 ## Enforcement
 
-The permanent architecture gate scans first-party Rust source and manifests. It rejects direct `sha2` dependencies, `Sha256` construction and the legacy `checksums.sha256` contract. External standardized SHA-256 must live in an explicit adapter exception introduced through a separate ADR and a narrow allowlist.
+The permanent architecture gate scans first-party Rust source and manifests. It rejects direct `sha2` dependencies, `Sha256` construction, the legacy release checksum contracts, untyped runtime fingerprint fields and the removed environment-provided binary fingerprint. It also requires the typed field-specific domains, real producers and isolated persistence migration adapter to remain present. External standardized SHA-256 remains outside this internal migration.
 
-
-The manifest proves deterministic package consistency; it is not a digital signature or trust root. Release authenticity remains a separate signing/provenance responsibility.
+The release manifest and runtime fingerprints prove deterministic consistency for their stated inputs; neither is a digital signature or trust root. Release authenticity remains a separate signing/provenance responsibility.

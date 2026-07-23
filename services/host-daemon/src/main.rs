@@ -3,6 +3,7 @@ mod auth;
 mod cli;
 mod config;
 mod control_plane;
+mod fingerprints;
 mod health;
 mod reverse_tunnel;
 mod rotation;
