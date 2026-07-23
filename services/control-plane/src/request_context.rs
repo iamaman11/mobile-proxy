@@ -9,8 +9,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use mobile_proxy_foundation::{
-    ActorId, ApplicationId, ConsumerId, CorrelationId, Deadline, FoundationError, RequestContext,
-    RequestId, MAX_DEADLINE_WINDOW_SECS,
+    ActorId, ApplicationId, ConsumerId, CorrelationId, Deadline, FoundationError,
+    MAX_DEADLINE_WINDOW_SECS, RequestContext, RequestId,
 };
 use uuid::Uuid;
 
@@ -125,7 +125,7 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue};
     use mobile_proxy_foundation::{ApplicationId, Deadline};
 
-    use super::{context_from_headers, CORRELATION_ID_HEADER, DEADLINE_HEADER, REQUEST_ID_HEADER};
+    use super::{CORRELATION_ID_HEADER, DEADLINE_HEADER, REQUEST_ID_HEADER, context_from_headers};
 
     #[test]
     fn supplied_request_lineage_round_trips() {
@@ -171,7 +171,10 @@ mod tests {
     #[test]
     fn malformed_or_unbounded_headers_fail_closed() {
         let mut malformed = HeaderMap::new();
-        malformed.insert(REQUEST_ID_HEADER, HeaderValue::from_static("credential=secret"));
+        malformed.insert(
+            REQUEST_ID_HEADER,
+            HeaderValue::from_static("credential=secret"),
+        );
         assert!(context_from_headers(&malformed).is_err());
 
         let mut distant = HeaderMap::new();

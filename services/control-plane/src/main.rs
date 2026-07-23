@@ -1,6 +1,7 @@
 mod auth;
 mod cli;
 mod projection;
+mod request_context;
 mod routes;
 mod state;
 

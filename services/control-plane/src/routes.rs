@@ -1,10 +1,11 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
     middleware,
     routing::{get, post},
 };
+use mobile_proxy_foundation::{CommandId, RequestContext};
 use proxy_core::{
     CommandAckRequest, DeviceCommand, DeviceRecord, HeartbeatRequest, IssueCommandRequest,
     PublicProbeReport, RecoveryIntent, RegisterDeviceRequest,
@@ -15,7 +16,7 @@ use crate::auth::{AuthConfig, require_admin, require_device};
 use crate::projection::{
     apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
 };
-use crate::state::AppState;
+use crate::{request_context::attach_request_context, state::AppState};
 
 pub fn router(state: AppState, auth: AuthConfig) -> Router {
     let admin = Router::new()
@@ -24,6 +25,7 @@ pub fn router(state: AppState, auth: AuthConfig) -> Router {
         .route("/api/v1/devices/ready", get(list_ready_devices))
         .route("/api/v1/devices/{id}/public-probe", post(public_probe))
         .route("/api/v1/devices/{id}/commands", post(issue_command))
+        .route_layer(middleware::from_fn(attach_request_context))
         .route_layer(middleware::from_fn_with_state(auth.clone(), require_admin));
     let device = Router::new()
         .route("/api/v1/devices/register", post(register_device))
@@ -33,6 +35,7 @@ pub fn router(state: AppState, auth: AuthConfig) -> Router {
             "/api/v1/devices/{id}/commands/{command_id}/ack",
             post(ack_command),
         )
+        .route_layer(middleware::from_fn(attach_request_context))
         .route_layer(middleware::from_fn_with_state(auth, require_device));
     Router::new().merge(admin).merge(device).with_state(state)
 }
@@ -116,6 +119,7 @@ async fn public_probe(
 
 async fn issue_command(
     State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
     Path(id): Path<String>,
     Json(req): Json<IssueCommandRequest>,
 ) -> Json<DeviceCommand> {
@@ -132,7 +136,7 @@ async fn issue_command(
     }
 
     let command = DeviceCommand {
-        command_id: Uuid::new_v4(),
+        command_id: CommandId::from_uuid(Uuid::new_v4()),
         device_id: id.clone(),
         desired_state: req.desired_state,
         recovery_intent: req.recovery_intent,
@@ -162,6 +166,13 @@ async fn issue_command(
     }
     drop(devices);
     let _ = state.persist().await;
+    tracing::info!(
+        request_id = %context.request_id(),
+        correlation_id = %context.correlation_id(),
+        command_id = %command.command_id,
+        device_id = %id,
+        "device command accepted"
+    );
     Json(command)
 }
 
@@ -179,7 +190,7 @@ async fn next_command(
 
 async fn ack_command(
     State(state): State<AppState>,
-    Path((id, command_id)): Path<(String, Uuid)>,
+    Path((id, command_id)): Path<(String, CommandId)>,
     Json(req): Json<CommandAckRequest>,
 ) -> Json<serde_json::Value> {
     let mut removed = false;
@@ -245,7 +256,8 @@ mod tests {
         http::{Request, StatusCode},
     };
     use proxy_core::{
-        Availability, DeviceRecord, RuntimeProjectionInput, RuntimeReadiness, project_runtime,
+        Availability, DeviceCommand, DeviceRecord, RuntimeProjectionInput, RuntimeReadiness,
+        project_runtime,
     };
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -293,6 +305,170 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wrong_role.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn request_context_generates_response_lineage() {
+        let response = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        for header in ["x-request-id", "x-correlation-id"] {
+            let raw = response.headers().get(header).unwrap().to_str().unwrap();
+            Uuid::parse_str(raw).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn authentication_precedes_request_context_parsing() {
+        let response = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("x-request-id", "credential=secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn malformed_or_expired_authenticated_context_fails_closed() {
+        let malformed = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .header("x-request-id", "credential=secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+        let expired = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .header("x-deadline-unix-secs", "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(expired.status(), StatusCode::REQUEST_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn supplied_request_lineage_round_trips() {
+        let response = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/devices")
+                    .header("authorization", "Bearer admin-token")
+                    .header("x-request-id", "98da1dbc-7de7-4bd2-8a5c-e24af5131f38")
+                    .header("x-correlation-id", "4cd306ef-716e-4f76-aef6-679b93bb7770")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get("x-request-id")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "98da1dbc-7de7-4bd2-8a5c-e24af5131f38"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-correlation-id")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "4cd306ef-716e-4f76-aef6-679b93bb7770"
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_command_boundary_preserves_json_and_deduplicates() {
+        const PAYLOAD: &str = r#"{
+            "desired_state":"healthy_serving",
+            "recovery_intent":"none",
+            "deadline_secs":30,
+            "idempotency_key":"command-123"
+        }"#;
+        let app = test_app().await;
+        let first = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/devices/device-1/commands")
+                    .header("authorization", "Bearer admin-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(PAYLOAD))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_body = axum::body::to_bytes(first.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let first_command: DeviceCommand = serde_json::from_slice(&first_body).unwrap();
+        assert_eq!(first_command.deadline_secs.as_secs(), 30);
+        assert_eq!(first_command.idempotency_key.as_str(), "command-123");
+
+        let second = app
+            .oneshot(
+                Request::post("/api/v1/devices/device-1/commands")
+                    .header("authorization", "Bearer admin-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(PAYLOAD))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_body = axum::body::to_bytes(second.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let second_command: DeviceCommand = serde_json::from_slice(&second_body).unwrap();
+        assert_eq!(second_command.command_id, first_command.command_id);
+    }
+
+    #[tokio::test]
+    async fn invalid_command_idempotency_and_deadline_are_rejected() {
+        for payload in [
+            r#"{"desired_state":"healthy_serving","recovery_intent":"none","deadline_secs":30,"idempotency_key":""}"#,
+            r#"{"desired_state":"healthy_serving","recovery_intent":"none","deadline_secs":0,"idempotency_key":"command-123"}"#,
+        ] {
+            let response = test_app()
+                .await
+                .oneshot(
+                    Request::post("/api/v1/devices/device-1/commands")
+                        .header("authorization", "Bearer admin-token")
+                        .header("content-type", "application/json")
+                        .body(Body::from(payload))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        }
     }
 
     #[test]

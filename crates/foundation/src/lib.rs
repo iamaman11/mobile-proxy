@@ -469,8 +469,7 @@ mod tests {
     #[test]
     fn request_context_keeps_typed_lineage() {
         let request_id = RequestId::from_uuid(uuid("98da1dbc-7de7-4bd2-8a5c-e24af5131f38"));
-        let correlation_id =
-            CorrelationId::from_uuid(uuid("4cd306ef-716e-4f76-aef6-679b93bb7770"));
+        let correlation_id = CorrelationId::from_uuid(uuid("4cd306ef-716e-4f76-aef6-679b93bb7770"));
         let context = RequestContext::new(
             request_id,
             correlation_id,
