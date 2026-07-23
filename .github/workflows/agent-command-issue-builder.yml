@@ -31,7 +31,6 @@ jobs:
           git checkout -q FETCH_HEAD
           cp .agent/apply_command_safety_followup.py /tmp/apply_command_safety_followup.py
           cp .agent/apply_command_safety_fixup.py /tmp/apply_command_safety_fixup.py
-          cp .agent/apply_command_safety_compile_fix.py /tmp/apply_command_safety_compile_fix.py
 
       - name: Check out exact production head
         run: |
@@ -43,7 +42,6 @@ jobs:
         run: |
           python3 /tmp/apply_command_safety_followup.py
           python3 /tmp/apply_command_safety_fixup.py
-          python3 /tmp/apply_command_safety_compile_fix.py
 
       - name: Validate governance and Python regressions
         run: |
