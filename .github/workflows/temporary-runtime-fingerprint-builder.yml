@@ -1,0 +1,163 @@
+name: Temporary Runtime Fingerprint Builder
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.head_ref == 'agent/typed-runtime-fingerprints-builder'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out builder source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Apply payload to exact clean target branch
+        run: |
+          set -euo pipefail
+          expected_base=a6d289b9c8bc93a2bc961d6630dc124f71436746
+          test "$(git rev-parse origin/main)" = "$expected_base"
+          cp .agent/apply_runtime_fingerprint_slice.py /tmp/apply_runtime_fingerprint_slice.py
+          cp -R .agent/runtime-fingerprint-payload /tmp/runtime-fingerprint-payload
+          git fetch origin agent/typed-runtime-fingerprints
+          git checkout -B agent/typed-runtime-fingerprints origin/agent/typed-runtime-fingerprints
+          test "$(git rev-parse HEAD)" = "$expected_base"
+          mkdir -p .agent/runtime-fingerprint-payload
+          cp /tmp/apply_runtime_fingerprint_slice.py .agent/apply_runtime_fingerprint_slice.py
+          cp -R /tmp/runtime-fingerprint-payload/. .agent/runtime-fingerprint-payload/
+          python3 .agent/apply_runtime_fingerprint_slice.py
+          rm -rf .agent
+
+      - name: Enforce bounded file scope
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          expected = {
+              "apps/operator-cli/src/commands.rs",
+              "config/host-daemon.example.env",
+              "contracts/governance/invariant-enforcement.json",
+              "crates/foundation/src/lib.rs",
+              "crates/proxy-core/src/fingerprints.rs",
+              "crates/proxy-core/src/lib.rs",
+              "crates/proxy-core/src/records.rs",
+              "docs/architecture/digest-inventory-and-migration.md",
+              "docs/architecture/invariant-enforcement.md",
+              "docs/architecture/runtime-fingerprint-migration.md",
+              "scripts/check_digest_policy.py",
+              "scripts/tests/test_architecture_boundaries.py",
+              "scripts/tests/test_digest_policy.py",
+              "services/control-plane/src/fingerprint_migration.rs",
+              "services/control-plane/src/main.rs",
+              "services/control-plane/src/projection.rs",
+              "services/control-plane/src/routes.rs",
+              "services/control-plane/src/state.rs",
+              "services/host-daemon/src/api.rs",
+              "services/host-daemon/src/config.rs",
+              "services/host-daemon/src/control_plane.rs",
+              "services/host-daemon/src/fingerprints.rs",
+              "services/host-daemon/src/main.rs",
+              "services/host-daemon/src/rotation.rs",
+          }
+          lines = subprocess.check_output(
+              ["git", "status", "--porcelain=v1"], text=True
+          ).splitlines()
+          actual = {line[3:] for line in lines}
+          if actual != expected:
+              raise SystemExit(
+                  f"unexpected builder scope: missing={sorted(expected - actual)} "
+                  f"extra={sorted(actual - expected)}"
+              )
+          if Path(".agent").exists():
+              raise SystemExit("temporary .agent directory survived payload application")
+          PY
+
+      - name: Enforce architecture and Python regressions
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format target source
+        run: cargo fmt --all
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
+
+      - name: Recheck final scope and publish clean target
+        env:
+          EXPECTED_BASE: a6d289b9c8bc93a2bc961d6630dc124f71436746
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          expected = {
+              "apps/operator-cli/src/commands.rs",
+              "config/host-daemon.example.env",
+              "contracts/governance/invariant-enforcement.json",
+              "crates/foundation/src/lib.rs",
+              "crates/proxy-core/src/fingerprints.rs",
+              "crates/proxy-core/src/lib.rs",
+              "crates/proxy-core/src/records.rs",
+              "docs/architecture/digest-inventory-and-migration.md",
+              "docs/architecture/invariant-enforcement.md",
+              "docs/architecture/runtime-fingerprint-migration.md",
+              "scripts/check_digest_policy.py",
+              "scripts/tests/test_architecture_boundaries.py",
+              "scripts/tests/test_digest_policy.py",
+              "services/control-plane/src/fingerprint_migration.rs",
+              "services/control-plane/src/main.rs",
+              "services/control-plane/src/projection.rs",
+              "services/control-plane/src/routes.rs",
+              "services/control-plane/src/state.rs",
+              "services/host-daemon/src/api.rs",
+              "services/host-daemon/src/config.rs",
+              "services/host-daemon/src/control_plane.rs",
+              "services/host-daemon/src/fingerprints.rs",
+              "services/host-daemon/src/main.rs",
+              "services/host-daemon/src/rotation.rs",
+          }
+          lines = subprocess.check_output(
+              ["git", "status", "--porcelain=v1"], text=True
+          ).splitlines()
+          actual = {line[3:] for line in lines}
+          if actual != expected:
+              raise SystemExit(
+                  f"unexpected final scope: missing={sorted(expected - actual)} "
+                  f"extra={sorted(actual - expected)}"
+              )
+          forbidden = [
+              ".agent",
+              ".github/workflows/temporary-runtime-fingerprint-builder.yml",
+          ]
+          for relative in forbidden:
+              if Path(relative).exists():
+                  raise SystemExit(f"temporary builder artifact survived: {relative}")
+          PY
+          test "$(git merge-base HEAD origin/main)" = "$EXPECTED_BASE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Migrate runtime fingerprints to typed BLAKE3"
+          git push origin HEAD:agent/typed-runtime-fingerprints
