@@ -27,8 +27,8 @@ jobs:
           test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 4
           sed -i '/^    let node_id = req\.node_id\.clone();$/d' services/control-plane/src/routes.rs
           sed -i '/^                node_id = %node_id,$/d' services/control-plane/src/routes.rs
-          test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 0
-          test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 0
+          ! grep -Fq '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs
+          ! grep -Fq '                node_id = %node_id,' services/control-plane/src/routes.rs
           python3 - <<'PY'
           from pathlib import Path
 
