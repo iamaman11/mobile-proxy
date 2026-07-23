@@ -32,6 +32,7 @@ jobs:
           python3 .agent/apply_blake3_internal_migration.py
           python3 .agent/apply_shared_release_integrity.py
           python3 .agent/fix_digest_policy_test_harness.py
+          python3 .agent/fix_release_integrity_clippy.py
 
       - name: Enforce architecture and digest policy
         id: policy
@@ -67,7 +68,23 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        id: clippy
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy-errors.txt
+
+      - name: Upload Clippy diagnostics
+        if: steps.clippy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-clippy-errors
+          path: clippy-errors.txt
+          retention-days: 1
+
+      - name: Fail on Clippy violation
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
 
       - name: Run workspace tests
         run: cargo test --workspace
@@ -77,7 +94,7 @@ jobs:
           TARGET_BRANCH: agent/blake3-internal-migration
         run: |
           rm -rf .agent scripts/__pycache__ scripts/tests/__pycache__
-          rm -f .github/workflows/agent-blake3-internal-migration-builder.yml policy-errors.txt
+          rm -f .github/workflows/agent-blake3-internal-migration-builder.yml policy-errors.txt clippy-errors.txt
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
