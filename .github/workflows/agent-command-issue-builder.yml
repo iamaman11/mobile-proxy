@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - agent/command-issue-application-port-builder
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: agent-command-issue-builder-safety
+  group: agent-command-issue-builder-safety-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
