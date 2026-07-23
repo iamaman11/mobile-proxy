@@ -4,113 +4,56 @@ on:
   push:
     branches:
       - agent/command-issue-application-port-builder
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: agent-command-issue-builder-${{ github.event_name }}
+  group: agent-command-issue-builder-normalize
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build clean command issuance slice
+  normalize:
+    name: Normalize governance JSON
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 10
     steps:
-      - name: Fetch builder inputs quietly
+      - name: Fetch exact production head
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git init -q
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch -q --no-tags --depth=1 origin agent/command-issue-application-port-builder
-          git checkout -q FETCH_HEAD
-          cp .agent/apply_command_issue_followup.py /tmp/apply_command_issue_followup.py
-          cp .agent/test_architecture_boundaries.py /tmp/test_architecture_boundaries.py
-
-      - name: Check out exact production branch
-        run: |
           git fetch -q --no-tags origin agent/command-issue-application-port
           git checkout -q -B agent/command-issue-application-port origin/agent/command-issue-application-port
+          test "$(git rev-parse HEAD)" = "b16f0c21d017eb35c8ebdf18355a8175901d134a"
 
-      - name: Apply bounded follow-up
+      - name: Restore readable section anchors
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path("/tmp/apply_command_issue_followup.py")
-          body = path.read_text(encoding="utf-8").replace("ROOT = Path(__file__).resolve().parents[1]", "ROOT = Path.cwd()")
-          original = "    count = body.count(old)\n    if count != 1:\n        raise SystemExit(f\"{relative}: expected one anchor, found {count}\")\n    path.write_text(body.replace(old, new), encoding=\"utf-8\")\n"
-          replacement = "    count = body.count(old)\n    first_only = relative == \"services/control-plane/src/routes.rs\" and old.startswith(\"use uuid::Uuid;\")\n    expected = 2 if first_only else 1\n    if count != expected:\n        raise SystemExit(f\"{relative}: expected {expected} anchors, found {count}\")\n    path.write_text(body.replace(old, new, 1 if first_only else -1), encoding=\"utf-8\")\n"
-          if original not in body:
-              raise SystemExit("builder helper anchor missing")
-          body = body.replace(original, replacement)
-          body = body.replace("    evidence=[", "    enforcement=[")
-          body = body.replace("    ci_controls=[", "    ci=[")
-          exec(compile(body, str(path), "exec"), {"__name__": "__main__"})
-          doc = Path("docs/architecture/command-issuance-application-port.md")
-          doc.write_text("\n".join(line.rstrip() for line in doc.read_text(encoding="utf-8").splitlines()) + "\n", encoding="utf-8")
-          invariant = Path("docs/architecture/invariant-enforcement.md")
-          invariant_body = invariant.read_text(encoding="utf-8")
-          invariant_body = invariant_body.replace(
-              "Baseline `main`: `3f6a2bb98807d289b5e436911b9dd92c102543d4`  \n",
-              "Baseline `main`: `3f6a2bb98807d289b5e436911b9dd92c102543d4`\n",
-          )
-          invariant.write_text(invariant_body, encoding="utf-8")
+          path = Path("contracts/governance/invariant-enforcement.json")
+          body = path.read_text(encoding="utf-8")
+          normalized = body.replace("\\u00a7", "§")
+          if normalized == body:
+              raise SystemExit("no escaped section anchors found")
+          path.write_text(normalized, encoding="utf-8")
           PY
-          cp /tmp/test_architecture_boundaries.py scripts/tests/test_architecture_boundaries.py
+          git diff --check
 
-      - name: Diagnose production diff whitespace
-        run: git diff --check
-
-      - name: Validate governance and Python regressions
+      - name: Validate normative matrix and regressions
         run: |
+          python3 scripts/check_invariant_enforcement.py
           python3 scripts/check_architecture_boundaries.py
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
-      - name: Install stable Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
-
-      - name: Format and validate Rust workspace
-        run: |
-          cargo fmt --all
-          cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-
-      - name: Check builder inputs are absent
-        run: test ! -e .agent
-
-      - name: Check temporary workflows are absent
-        run: |
-          test ! -e .github/workflows/agent-command-issue-builder.yml
-          test ! -e .github/workflows/agent-command-publish-diagnostic.yml
-
-      - name: Show exact production diff inventory
-        run: git status --short
-
-      - name: Create exact production commit
+      - name: Commit readable governance JSON
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            Cargo.toml Cargo.lock \
-            crates/application \
-            services/control-plane/Cargo.toml \
-            services/control-plane/src/routes.rs \
-            services/control-plane/src/state.rs \
-            scripts/check_architecture_boundaries.py \
-            scripts/tests/test_architecture_boundaries.py \
-            contracts/governance/invariant-enforcement.json \
-            docs/architecture/invariant-enforcement.md \
-            docs/architecture/command-issuance-application-port.md
-          test -z "$(git status --short | grep '^??' || true)"
-          git commit -m "Extract command issuance application port"
+          git add contracts/governance/invariant-enforcement.json
+          test "$(git diff --cached --name-only)" = "contracts/governance/invariant-enforcement.json"
+          git commit -m "Preserve readable invariant anchors"
 
-      - name: Push clean production branch
+      - name: Push normalized production branch
         run: git push origin HEAD:agent/command-issue-application-port
