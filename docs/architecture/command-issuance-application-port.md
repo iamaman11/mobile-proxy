@@ -29,7 +29,7 @@ An identical replay returns the original `DeviceCommand`. A reused key with chan
 
 ## Durable result and queue semantics
 
-The delivery queue remains bounded to 50 commands per device and 1000 pending commands globally. A full per-device or global queue fails with `command_capacity_exceeded`; no pending command is silently evicted. Idempotency results have a deterministic bound of 1000 canonical entries, and pending results are never selected for retention eviction.
+The delivery queue remains bounded to 50 commands per device and 1000 pending commands globally. A full per-device or global queue fails with `command_capacity_exceeded`; no pending command is silently evicted. Idempotency results have a deterministic bound of 1000 canonical entries, and pending results are never selected for retention eviction. Capacity rejection occurs before UUID/time generation and before any candidate-state write, so a rejected command consumes no identity and changes no durable or in-memory state.
 
 The JSON schema adds optional `idempotency_results` and `idempotency_order` fields under `commands`. Serde defaults keep old state readable. The legacy concatenated claim remains as a compatibility alias while canonical result identity uses the typed digest. This lets a previous binary still deduplicate a pending command. If a rollback writer drops the added fields, the new binary reconstructs exact replay evidence from the queue and legacy claim; an unrecoverable retained claim rejects reuse fail closed. Legacy aliases plus canonical history remain bounded to at most 2000 claim records.
 
