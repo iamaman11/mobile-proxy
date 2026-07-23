@@ -53,6 +53,13 @@ jobs:
           exec(compile(body, str(path), "exec"), {"__name__": "__main__"})
           doc = Path("docs/architecture/command-issuance-application-port.md")
           doc.write_text("\n".join(line.rstrip() for line in doc.read_text(encoding="utf-8").splitlines()) + "\n", encoding="utf-8")
+          invariant = Path("docs/architecture/invariant-enforcement.md")
+          invariant_body = invariant.read_text(encoding="utf-8")
+          invariant_body = invariant_body.replace(
+              "Baseline `main`: `3f6a2bb98807d289b5e436911b9dd92c102543d4`  \n",
+              "Baseline `main`: `3f6a2bb98807d289b5e436911b9dd92c102543d4`\n",
+          )
+          invariant.write_text(invariant_body, encoding="utf-8")
           PY
           cp /tmp/test_architecture_boundaries.py scripts/tests/test_architecture_boundaries.py
 
