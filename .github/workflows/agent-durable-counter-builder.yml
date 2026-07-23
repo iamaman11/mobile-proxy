@@ -71,11 +71,11 @@ jobs:
           PY
           } 2>&1 | tee .agent/apply.log
 
-      - name: Upload builder diagnostics
+      - name: Upload apply diagnostics
         if: steps.apply.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: durable-counter-builder-diagnostics
+          name: durable-counter-apply-diagnostics
           path: .agent/apply.log
           if-no-files-found: error
           retention-days: 2
@@ -96,10 +96,44 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        id: clippy
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee .agent/clippy.log
+
+      - name: Upload Clippy diagnostics
+        if: steps.clippy.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: durable-counter-clippy-diagnostics
+          path: .agent/clippy.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Enforce strict Clippy
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
 
       - name: Run workspace tests
-        run: cargo test --workspace
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee .agent/tests.log
+
+      - name: Upload test diagnostics
+        if: steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: durable-counter-test-diagnostics
+          path: .agent/tests.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Enforce workspace tests
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
 
       - name: Publish clean final branch
         run: |
