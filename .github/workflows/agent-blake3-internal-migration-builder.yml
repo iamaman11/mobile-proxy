@@ -31,6 +31,7 @@ jobs:
           python3 .agent/fix_blake3_builder_anchors.py
           python3 .agent/apply_blake3_internal_migration.py
           python3 .agent/apply_shared_release_integrity.py
+          python3 .agent/fix_digest_policy_test_harness.py
 
       - name: Enforce architecture and digest policy
         id: policy
