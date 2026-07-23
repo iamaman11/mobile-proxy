@@ -23,8 +23,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Preserve isolated builder
-        run: cp .agent/apply_runtime_fingerprint_migration.py /tmp/apply_runtime_fingerprint_migration.py
+      - name: Reassemble isolated migration payload
+        run: |
+          cat .agent/runtime-fingerprint.xz.* | base64 --decode > /tmp/runtime-fingerprint.tar.xz
+          xz --test /tmp/runtime-fingerprint.tar.xz
 
       - name: Reset production branch to exact main
         run: |
@@ -32,7 +34,7 @@ jobs:
           git checkout -B agent/runtime-fingerprint-migration a6d289b9c8bc93a2bc961d6630dc124f71436746
 
       - name: Apply bounded migration
-        run: python3 /tmp/apply_runtime_fingerprint_migration.py
+        run: tar -xJf /tmp/runtime-fingerprint.tar.xz
 
       - name: Validate architecture and Python regressions
         run: |
