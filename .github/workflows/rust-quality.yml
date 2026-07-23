@@ -31,8 +31,8 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Apply heartbeat freshness slice
-        run: python3 .github/agent_freshness.py
+      - name: Apply corrected heartbeat freshness slice
+        run: python3 .github/agent_freshness_fix.py
 
       - name: Format production code
         run: cargo fmt --all
@@ -54,12 +54,12 @@ jobs:
       - name: Persist exact Clippy failure
         if: steps.clippy.outcome == 'failure'
         run: |
-          git checkout HEAD -- .github/agent_freshness.py .github/workflows/rust-quality.yml
+          git checkout HEAD -- .github/agent_freshness.py .github/agent_freshness_fix.py .github/workflows/rust-quality.yml
           git checkout origin/main -- crates/reverse-tunnel/src/state.rs crates/reverse-tunnel/src/tunnel.rs
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "record heartbeat freshness Clippy failure"
+          git commit -m "record corrected heartbeat freshness failure"
           git push origin HEAD:agent/session-heartbeat-freshness
 
       - name: Enforce strict Clippy
