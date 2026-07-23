@@ -1,0 +1,17 @@
+diff --git a/crates/application/src/lib.rs b/crates/application/src/lib.rs
+index a9b2e8f..2222222 100644
+--- a/crates/application/src/lib.rs
++++ b/crates/application/src/lib.rs
+@@ -1,4 +1,11 @@
++mod command_delivery;
+ mod command_issue;
+ 
++pub use command_delivery::{
++    AcknowledgeCommandError, AcknowledgeCommandFuture, AcknowledgeCommandInput,
++    AcknowledgeCommandOutcome, AcknowledgeCommandPort, PollCommandError, PollCommandFuture,
++    PollCommandInput, PollCommandOutcome, PollCommandPort,
++};
++
+ pub use command_issue::{
+     IssueCommandError, IssueCommandFuture, IssueCommandInput, IssueCommandOutcome,
+     IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS,
