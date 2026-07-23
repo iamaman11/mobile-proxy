@@ -34,8 +34,11 @@ jobs:
           import lzma
 
           expected = [
-              Path(f".agent/runtime-fingerprint.xz.{index:02d}")
-              for index in range(4)
+              Path(".agent/runtime-fingerprint.xz.00"),
+              Path(".agent/runtime-fingerprint.xz.01"),
+              Path(".agent/runtime-fingerprint.xz.02a"),
+              Path(".agent/runtime-fingerprint.xz.02b"),
+              Path(".agent/runtime-fingerprint.xz.03"),
           ]
           actual = sorted(Path(".agent").glob("runtime-fingerprint.xz.*"))
           if actual != expected:
