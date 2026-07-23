@@ -190,11 +190,15 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
 
-      - name: Publish clean production branch
+      - name: Verify clean production diff
         run: |
           git diff --check
           test ! -e .agent
           test ! -e .github/workflows/agent-command-issue-builder.yml
+          git status --short
+
+      - name: Create exact production commit
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
@@ -210,4 +214,6 @@ jobs:
             docs/architecture/command-issuance-application-port.md
           test -z "$(git status --short | grep '^??' || true)"
           git commit -m "Extract command issuance application port"
-          git push origin HEAD:agent/command-issue-application-port
+
+      - name: Push clean production branch
+        run: git push origin HEAD:agent/command-issue-application-port
