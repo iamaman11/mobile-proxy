@@ -132,10 +132,7 @@ mod tests {
         let request_state = state.clone();
         let request = tokio::spawn(async move {
             request_state
-                .open_tcp_proxy_with_timeout(
-                    Some("test-phone"),
-                    Duration::from_millis(20),
-                )
+                .open_tcp_proxy_with_timeout(Some("test-phone"), Duration::from_millis(20))
                 .await
         });
 
