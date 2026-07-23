@@ -7,7 +7,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: rust-quality-${{ github.workflow }}-${{ github.ref }}
@@ -20,66 +20,40 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Check out source branch
+      - name: Check out source
         uses: actions/checkout@v7
-        with:
-          ref: agent/session-heartbeat-freshness
-          fetch-depth: 0
 
       - name: Install stable Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Apply corrected heartbeat freshness slice
-        run: python3 .github/agent_freshness_fix.py
-
-      - name: Format production code
-        run: cargo fmt --all
-
       - name: Verify formatting
+        id: formatting
+        continue-on-error: true
         run: cargo fmt --all -- --check
 
-      - name: Run strict Clippy
-        id: clippy
-        continue-on-error: true
-        shell: bash
+      - name: Capture rustfmt patch
+        if: steps.formatting.outcome == 'failure'
         run: |
-          set +e
-          cargo clippy --workspace --all-targets -- -D warnings > clippy-error.txt 2>&1
-          status=$?
-          cat clippy-error.txt
-          exit "$status"
+          cargo fmt --all
+          git diff --binary > rustfmt.patch
 
-      - name: Persist exact Clippy failure
-        if: steps.clippy.outcome == 'failure'
-        run: |
-          git checkout HEAD -- .github/agent_freshness.py .github/agent_freshness_fix.py .github/workflows/rust-quality.yml
-          git checkout origin/main -- crates/reverse-tunnel/src/state.rs crates/reverse-tunnel/src/tunnel.rs
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "record corrected heartbeat freshness failure"
-          git push origin HEAD:agent/session-heartbeat-freshness
+      - name: Upload rustfmt patch
+        if: steps.formatting.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: rustfmt-patch
+          path: rustfmt.patch
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Enforce strict Clippy
-        if: steps.clippy.outcome == 'failure'
+      - name: Enforce formatting
+        if: steps.formatting.outcome == 'failure'
         run: exit 1
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
         run: cargo test --workspace
-
-      - name: Verify isolated final diff
-        run: |
-          rm -f clippy-error.txt
-          git diff --check
-          changed="$(git diff --name-only origin/main)"
-          test "$changed" = $'crates/reverse-tunnel/src/state.rs\ncrates/reverse-tunnel/src/tunnel.rs'
-
-      - name: Commit validated production slice
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "enforce heartbeat freshness for tunnel sessions"
-          git push origin HEAD:agent/session-heartbeat-freshness
