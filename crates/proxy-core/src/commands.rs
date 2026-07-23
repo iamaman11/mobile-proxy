@@ -62,7 +62,7 @@ pub struct DeviceCommand {
     pub issued_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandAckRequest {
     pub ok: bool,
     pub message: Option<String>,
