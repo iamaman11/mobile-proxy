@@ -22,46 +22,32 @@ jobs:
           ref: agent/device-registration-application-port
 
       - name: Remove raw registration fields from logs
-        id: harden
-        continue-on-error: true
         run: |
-          set -o pipefail
-          {
-            set -x
-            test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 1
-            test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 4
-            sed -i '/^    let node_id = req\.node_id\.clone();$/d' services/control-plane/src/routes.rs
-            sed -i '/^                node_id = %node_id,$/d' services/control-plane/src/routes.rs
-            ! grep -Fq '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs
-            ! grep -Fq '                node_id = %node_id,' services/control-plane/src/routes.rs
-            python3 - <<'PY'
+          test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 2
+          test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 4
+          python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('docs/architecture/device-registration-application-port.md')
-          body = path.read_text(encoding='utf-8')
+          routes = Path('services/control-plane/src/routes.rs')
+          body = routes.read_text(encoding='utf-8')
+          clone = '    let node_id = req.node_id.clone();\n'
+          body = body.replace(clone, '', 1)
+          raw_log = '                node_id = %node_id,\n'
+          body = body.replace(raw_log, '')
+          routes.write_text(body, encoding='utf-8')
+
+          doc = Path('docs/architecture/device-registration-application-port.md')
+          doc_body = doc.read_text(encoding='utf-8')
           anchor = '`mobile-proxy-application` owns the transport-independent device-registration port. Axum authenticates the device request, decodes the existing JSON request, invokes one use case and maps typed outcomes. The application crate has no runtime, filesystem, process, network or framework dependency.\n'
           replacement = anchor + '\nRaw registration fields are not logged. Structured logs contain only authenticated request lineage, bounded classification and bounded error codes until device identity is represented by a validated type.\n'
-          if body.count(anchor) != 1:
-              raise SystemExit(f'documentation anchor count: {body.count(anchor)}')
-          path.write_text(body.replace(anchor, replacement, 1), encoding='utf-8')
+          if doc_body.count(anchor) != 1:
+              raise SystemExit(f'documentation anchor count: {doc_body.count(anchor)}')
+          doc.write_text(doc_body.replace(anchor, replacement, 1), encoding='utf-8')
           PY
-          } 2>&1 | tee registration-hardening.log
-
-      - name: Upload hardening diagnosis
-        if: steps.harden.outcome == 'failure'
-        uses: actions/upload-artifact@v7
-        with:
-          name: registration-hardening-diagnosis
-          path: registration-hardening.log
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Enforce hardening result
-        if: steps.harden.outcome == 'failure'
-        run: exit 1
+          test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 1
+          ! grep -Fq '                node_id = %node_id,' services/control-plane/src/routes.rs
 
       - name: Validate hardened source
-        if: steps.harden.outcome == 'success'
         run: |
           python3 scripts/check_architecture_boundaries.py
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
@@ -73,10 +59,8 @@ jobs:
           git diff --check
 
       - name: Publish clean source head
-        if: steps.harden.outcome == 'success'
         run: |
           rm .github/workflows/registration-hardening-builder.yml
-          rm -f registration-hardening.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
