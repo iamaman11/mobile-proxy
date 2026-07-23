@@ -33,8 +33,8 @@ The delivery queue remains bounded to 50 commands per device and 1000 pending co
 
 The JSON schema adds optional `idempotency_results` and `idempotency_order` fields under `commands`. Serde defaults keep old state readable. The legacy concatenated claim remains as a compatibility alias while canonical result identity uses the typed digest. This lets a previous binary still deduplicate a pending command. If a rollback writer drops the added fields, the new binary reconstructs exact replay evidence from the queue and legacy claim; an unrecoverable retained claim rejects reuse fail closed. Legacy aliases plus canonical history remain bounded to at most 2000 claim records.
 
-For a new command, the adapter builds a candidate containing the queue, idempotency claim/result and device projection, writes and fsyncs a temporary file, atomically renames it, and only then swaps the in-memory state. A failed write publishes no command in memory.
+For a new command, the adapter builds a candidate containing the queue, idempotency claim/result and device projection, writes and fsyncs a temporary file, atomically renames it, and only then swaps the in-memory state. A failed write publishes no command in memory. This slice does not claim crash durability of the renamed directory entry because a separate parent-directory fsync is not yet implemented.
 
 ## Non-goals
 
-This slice does not claim that JSON is the final canonical store, does not add SQLite, audit or outbox persistence, and does not extract registration, heartbeat, probe, polling or acknowledgement handlers. Those remain explicit matrix gaps.
+This slice does not claim that JSON is the final canonical store, does not add SQLite, directory-entry fsync, audit or outbox persistence, and does not extract registration, heartbeat, probe, polling or acknowledgement handlers. Those remain explicit matrix gaps.
