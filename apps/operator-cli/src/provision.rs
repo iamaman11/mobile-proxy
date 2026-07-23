@@ -6,9 +6,9 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use crate::cli::PackageDeviceReleaseArgs;
+use crate::release_integrity::{verify_integrity_manifest, write_integrity_manifest};
 
 const CURL_SHIM: &str = r#"#!/system/bin/sh
 set -eu
@@ -327,7 +327,8 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     fs::write(release_root.join("config/host-daemon.json"), host_rendered)?;
     fs::write(release_root.join("config/sing-box.json"), sing_box_rendered)?;
     write_release_metadata(&repo_root, &release_root, &args.release_id)?;
-    write_checksums(&release_root)?;
+    write_integrity_manifest(&release_root)?;
+    verify_integrity_manifest(&release_root)?;
 
     println!("{}", release_root.display());
     Ok(())
@@ -487,47 +488,6 @@ fn render_template(template: &str, values: &[(&str, &str)]) -> String {
         rendered = rendered.replace(&format!("{{{{{key}}}}}"), value);
     }
     rendered
-}
-
-fn write_checksums(root: &Path) -> Result<()> {
-    let mut files = Vec::new();
-    collect_files(root, root, &mut files)?;
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut lines = Vec::new();
-    for (relative, absolute) in files {
-        let mut file = fs::File::open(&absolute)?;
-        let mut hasher = Sha256::new();
-        let mut buf = [0_u8; 8192];
-        loop {
-            let read = file.read(&mut buf)?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buf[..read]);
-        }
-        let digest = hasher.finalize();
-        lines.push(format!("{digest:x} *{relative}"));
-    }
-    fs::write(root.join("checksums.sha256"), lines.join("\n"))?;
-    Ok(())
-}
-
-fn collect_files(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_files(root, &path, out)?;
-        } else if path.is_file() {
-            let relative = path
-                .strip_prefix(root)
-                .context("failed to compute relative path")?
-                .to_string_lossy()
-                .replace('\\', "/");
-            out.push((relative, path));
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -241,3 +241,11 @@ Code review for any cryptographic change must answer:
 - The repository temporarily contains both BLAKE3 and SHA-256.
 - External/FIPS deployments may not use the internal default everywhere.
 - Algorithm upgrades require explicit migrations instead of search-and-replace changes.
+
+## 14. First-party persisted digest migration
+
+All existing first-party internal persisted digest contracts are migration targets for BLAKE3-256. The earlier compatibility exception applies only while a concrete legacy reader or backfill is required; it is not permission to create new SHA-256 data.
+
+The authoritative inventory and migration state is maintained in [Digest Inventory and Migration Matrix](digest-inventory-and-migration.md). New internal SHA-256 producers are rejected by the permanent architecture gate. External standardized boundaries, Cargo registry checksums, TLS pinning profiles and compliance-specific algorithms remain outside this internal migration.
+
+Migration must recompute from canonical source bytes. `BLAKE3(SHA256(data))` is a digest of the legacy digest and is not equivalent to `BLAKE3(data)`.

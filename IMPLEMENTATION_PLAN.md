@@ -8,6 +8,7 @@ Related normative architecture artifacts:
 
 - [ADR-001: Bounded Contexts and Clean Dependency Rules](docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md)
 - [ADR-002: Cryptographic Hashing, Password Hashing and KDF Policy](docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md)
+- [Digest Inventory and Migration Matrix](docs/architecture/digest-inventory-and-migration.md)
 - [Foundation Identifiers, Request Lineage and Deadlines](docs/architecture/foundation-primitives.md)
 - [Protected Proxy Compatibility Contract](contracts/compatibility/proxy-surface-v1.json)
 

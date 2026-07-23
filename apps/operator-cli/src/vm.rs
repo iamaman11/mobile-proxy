@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use crate::artifacts::ensure_elf_machine;
 use crate::cli::{DeleteVmArgs, ProvisionVmArgs};
+use crate::release_integrity::{verify_integrity_manifest, write_integrity_manifest};
 
 #[derive(Debug, Deserialize)]
 struct VmManifest {
@@ -261,7 +261,8 @@ fn build_vm_release(
         release_root.join("nginx/mobile-public-proxy.conf"),
         NGINX_STREAM_CONFIG,
     )?;
-    write_checksums(&release_root)?;
+    write_integrity_manifest(&release_root)?;
+    verify_integrity_manifest(&release_root)?;
     Ok(release_root)
 }
 
@@ -769,42 +770,6 @@ fn write_temp(name: &str, body: &str) -> Result<PathBuf> {
     let path = env::temp_dir().join(name);
     fs::write(&path, body)?;
     Ok(path)
-}
-
-fn write_checksums(root: &Path) -> Result<()> {
-    let mut files = Vec::new();
-    collect_files(root, root, &mut files)?;
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut lines = Vec::new();
-    for (relative, absolute) in files {
-        if relative == "SHA256SUMS" {
-            continue;
-        }
-        let body = fs::read(&absolute)?;
-        let mut hasher = Sha256::new();
-        hasher.update(&body);
-        lines.push(format!("{:x}  {}", hasher.finalize(), relative));
-    }
-    fs::write(root.join("SHA256SUMS"), lines.join("\n") + "\n")?;
-    Ok(())
-}
-
-fn collect_files(root: &Path, current: &Path, files: &mut Vec<(String, PathBuf)>) -> Result<()> {
-    for entry in fs::read_dir(current)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_files(root, &path, files)?;
-        } else {
-            files.push((
-                path.strip_prefix(root)?
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-                path,
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn gcloud_status<const N: usize>(args: [&str; N]) -> Result<bool> {

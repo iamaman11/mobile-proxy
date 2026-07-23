@@ -1,26 +1,4 @@
-#!/usr/bin/env python3
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-
-architecture_path = ROOT / "scripts/check_architecture_boundaries.py"
-architecture = architecture_path.read_text(encoding="utf-8")
-old_import = "import tomllib\n\nfrom check_digest_policy import check_repository as check_digest_policy\n"
-new_import = (
-    "import tomllib\n\n"
-    "SCRIPT_DIR = Path(__file__).resolve().parent\n"
-    "if str(SCRIPT_DIR) not in sys.path:\n"
-    "    sys.path.insert(0, str(SCRIPT_DIR))\n\n"
-    "from check_digest_policy import check_repository as check_digest_policy\n"
-)
-if architecture.count(old_import) != 1:
-    raise RuntimeError("digest policy import anchor was not found exactly once")
-architecture_path.write_text(
-    architecture.replace(old_import, new_import, 1), encoding="utf-8"
-)
-
-(ROOT / "scripts/tests/test_digest_policy.py").write_text(
-    r'''from pathlib import Path
 import sys
 import tempfile
 import unittest
@@ -101,6 +79,3 @@ class DigestPolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-''',
-    encoding="utf-8",
-)

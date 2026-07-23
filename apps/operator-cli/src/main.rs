@@ -6,6 +6,7 @@ mod device;
 mod device_stack;
 mod http;
 mod provision;
+mod release_integrity;
 mod secrets;
 mod vm;
 

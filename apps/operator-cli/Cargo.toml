@@ -8,11 +8,11 @@ license.workspace = true
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
+mobile-proxy-foundation = { path = "../../crates/foundation" }
 proxy-core = { path = "../../crates/proxy-core" }
 rcgen = "0.14.8"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 tokio.workspace = true
 uuid.workspace = true

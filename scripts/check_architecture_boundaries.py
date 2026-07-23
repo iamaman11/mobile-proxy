@@ -8,6 +8,12 @@ from pathlib import Path
 import sys
 import tomllib
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from check_digest_policy import check_repository as check_digest_policy
+
 PURE_CRATES: dict[str, frozenset[str]] = {
     "crates/foundation": frozenset({"blake3", "serde", "uuid"}),
     "crates/runtime-domain": frozenset({"serde"}),
@@ -77,6 +83,7 @@ def check_repository(root: Path) -> list[str]:
                     errors.append(
                         f"{source.relative_to(root)}: forbidden pure-crate token {token!r}"
                     )
+    errors.extend(check_digest_policy(root))
     return errors
 
 
@@ -94,7 +101,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("architecture boundary validation passed for foundation and runtime-domain")
+    print("architecture and digest policy validation passed")
     return 0
 
 
