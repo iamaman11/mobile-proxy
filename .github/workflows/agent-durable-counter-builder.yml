@@ -99,6 +99,14 @@ jobs:
               raise SystemExit('expected one ClientSnapshot test constructor')
           body = body.replace(constructor_old, constructor_new, 1)
           path.write_text(body)
+
+          host_path = Path('services/host-daemon/src/reverse_tunnel.rs')
+          host_body = host_path.read_text()
+          import_old = '    ClientSnapshot, ReverseTunnelClientConfig, TunnelEventCounters, TunnelFreshness,\n'
+          import_new = '    ClientSnapshot, ReverseTunnelClientConfig, TunnelFreshness,\n'
+          if host_body.count(import_old) != 1:
+              raise SystemExit('expected one unused TunnelEventCounters import')
+          host_path.write_text(host_body.replace(import_old, import_new, 1))
           PY
           } 2>&1 | tee .agent/apply.log
 
