@@ -27,7 +27,25 @@ jobs:
       - name: Apply production slice
         id: apply
         continue-on-error: true
-        run: python3 .agent/build.py > command-delivery-builder.log 2>&1
+        run: |
+          python3 - <<'PY' > command-delivery-builder.log 2>&1
+          from pathlib import Path
+          path = Path("contracts/governance/invariant-enforcement.json")
+          body = path.read_text(encoding="utf-8")
+          old = '''        "crates/application/src/command_issue.rs",
+                  "services/control-plane/src/state.rs"
+          '''
+          new = '''        "crates/application/src/command_issue.rs",
+                  "crates/application/src/command_delivery.rs",
+                  "services/control-plane/src/state.rs"
+          '''
+          if body.count(old) != 2:
+              raise SystemExit(
+                  f"governance state evidence: expected exactly two anchors, found {body.count(old)}"
+              )
+          path.write_text(body.replace(old, new, 1), encoding="utf-8")
+          PY
+          python3 .agent/build.py >> command-delivery-builder.log 2>&1
 
       - name: Upload builder diagnosis
         if: steps.apply.outcome == 'failure'
