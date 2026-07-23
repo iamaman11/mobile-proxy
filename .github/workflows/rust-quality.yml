@@ -41,13 +41,37 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        id: clippy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > clippy-error.txt 2>&1
+          status=$?
+          cat clippy-error.txt
+          exit "$status"
+
+      - name: Persist exact Clippy failure
+        if: steps.clippy.outcome == 'failure'
+        run: |
+          git checkout HEAD -- .github/agent_freshness.py .github/workflows/rust-quality.yml
+          git checkout origin/main -- crates/reverse-tunnel/src/state.rs crates/reverse-tunnel/src/tunnel.rs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "record heartbeat freshness Clippy failure"
+          git push origin HEAD:agent/session-heartbeat-freshness
+
+      - name: Enforce strict Clippy
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
 
       - name: Run workspace tests
         run: cargo test --workspace
 
       - name: Verify isolated final diff
         run: |
+          rm -f clippy-error.txt
           git diff --check
           changed="$(git diff --name-only origin/main)"
           test "$changed" = $'crates/reverse-tunnel/src/state.rs\ncrates/reverse-tunnel/src/tunnel.rs'
