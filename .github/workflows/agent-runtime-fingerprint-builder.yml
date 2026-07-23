@@ -1,0 +1,82 @@
+name: Agent Runtime Fingerprint Builder
+
+on:
+  push:
+    branches:
+      - agent/runtime-fingerprint-migration-builder
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-runtime-fingerprint-builder
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build clean runtime fingerprint slice
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out builder inputs
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Preserve isolated builder
+        run: cp .agent/apply_runtime_fingerprint_migration.py /tmp/apply_runtime_fingerprint_migration.py
+
+      - name: Reset production branch to exact main
+        run: |
+          git fetch origin main agent/runtime-fingerprint-migration
+          git checkout -B agent/runtime-fingerprint-migration a6d289b9c8bc93a2bc961d6630dc124f71436746
+
+      - name: Apply bounded migration
+        run: python3 /tmp/apply_runtime_fingerprint_migration.py
+
+      - name: Validate architecture and Python regressions
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Validate Rust workspace
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Publish clean source branch
+        run: |
+          git diff --check
+          git status --short
+          test ! -e .agent
+          test ! -e .github/workflows/agent-runtime-fingerprint-builder.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            crates/proxy-core/src/fingerprints.rs \
+            crates/proxy-core/src/lib.rs \
+            crates/proxy-core/src/records.rs \
+            services/host-daemon/src/fingerprints.rs \
+            services/host-daemon/src/main.rs \
+            services/host-daemon/src/config.rs \
+            services/host-daemon/src/control_plane.rs \
+            services/control-plane/src/fingerprint_migration.rs \
+            services/control-plane/src/main.rs \
+            services/control-plane/src/state.rs \
+            apps/operator-cli/src/commands.rs \
+            services/host-daemon/src/api.rs \
+            services/host-daemon/src/rotation.rs \
+            config/host-daemon.example.env \
+            docs/architecture/runtime-fingerprint-migration.md \
+            docs/architecture/digest-inventory-and-migration.md \
+            contracts/governance/invariant-enforcement.json \
+            docs/architecture/invariant-enforcement.md
+          test -z "$(git status --short | grep '^??' || true)"
+          git commit -m "Migrate runtime fingerprints to typed BLAKE3"
+          git push --force-with-lease origin agent/runtime-fingerprint-migration
