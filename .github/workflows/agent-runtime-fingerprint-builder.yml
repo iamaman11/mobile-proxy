@@ -28,8 +28,24 @@ jobs:
 
       - name: Reassemble isolated migration payload
         run: |
-          cat .agent/runtime-fingerprint.xz.* | base64 --decode > /tmp/runtime-fingerprint.tar.xz
-          xz --test /tmp/runtime-fingerprint.tar.xz
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+          import lzma
+
+          expected = [
+              Path(f".agent/runtime-fingerprint.xz.{index:02d}")
+              for index in range(4)
+          ]
+          actual = sorted(Path(".agent").glob("runtime-fingerprint.xz.*"))
+          if actual != expected:
+              raise SystemExit(f"unexpected migration payload chunks: {actual!r}")
+          encoded = b"".join(path.read_bytes() for path in expected)
+          compressed = base64.b64decode(encoded, validate=True)
+          payload = lzma.decompress(compressed)
+          Path("/tmp/runtime-fingerprint.tar").write_bytes(payload)
+          PY
+          tar -tf /tmp/runtime-fingerprint.tar
 
       - name: Reset production branch to exact main
         run: |
@@ -37,7 +53,7 @@ jobs:
           git checkout -B agent/runtime-fingerprint-migration a6d289b9c8bc93a2bc961d6630dc124f71436746
 
       - name: Apply bounded migration
-        run: tar -xJf /tmp/runtime-fingerprint.tar.xz
+        run: tar -xf /tmp/runtime-fingerprint.tar
 
       - name: Validate architecture and Python regressions
         run: |
