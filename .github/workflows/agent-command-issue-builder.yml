@@ -1,0 +1,79 @@
+name: Agent Command Issue Builder
+
+on:
+  push:
+    branches:
+      - agent/command-issue-application-port-builder
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-command-issue-builder-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build clean command issuance slice
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Fetch builder inputs quietly
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git init -q
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --no-tags --depth=1 origin agent/command-issue-application-port-builder
+          git checkout -q FETCH_HEAD
+          cp .agent/apply_command_issue_followup.py /tmp/apply_command_issue_followup.py
+
+      - name: Check out exact production branch
+        run: |
+          git fetch -q --no-tags origin agent/command-issue-application-port
+          git checkout -q -B agent/command-issue-application-port origin/agent/command-issue-application-port
+
+      - name: Apply bounded follow-up
+        run: python3 /tmp/apply_command_issue_followup.py
+
+      - name: Validate governance and Python regressions
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format and validate Rust workspace
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Publish clean production branch
+        run: |
+          git diff --check
+          test ! -e .agent
+          test ! -e .github/workflows/agent-command-issue-builder.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            Cargo.toml Cargo.lock \
+            crates/application \
+            services/control-plane/Cargo.toml \
+            services/control-plane/src/routes.rs \
+            services/control-plane/src/state.rs \
+            scripts/check_architecture_boundaries.py \
+            scripts/tests/test_architecture_boundaries.py \
+            contracts/governance/invariant-enforcement.json \
+            docs/architecture/invariant-enforcement.md \
+            docs/architecture/command-issuance-application-port.md
+          test -z "$(git status --short | grep '^??' || true)"
+          git commit -m "Extract command issuance application port"
+          git push origin HEAD:agent/command-issue-application-port
