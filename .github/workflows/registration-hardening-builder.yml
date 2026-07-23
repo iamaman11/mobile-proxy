@@ -21,95 +21,24 @@ jobs:
           fetch-depth: 0
           ref: agent/device-registration-application-port
 
-      - name: Harden registration transport
+      - name: Remove raw registration fields from logs
         run: |
+          test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 1
+          test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 4
+          sed -i '/^    let node_id = req\.node_id\.clone();$/d' services/control-plane/src/routes.rs
+          sed -i '/^                node_id = %node_id,$/d' services/control-plane/src/routes.rs
+          test "$(grep -Fxc '    let node_id = req.node_id.clone();' services/control-plane/src/routes.rs)" -eq 0
+          test "$(grep -Fxc '                node_id = %node_id,' services/control-plane/src/routes.rs)" -eq 0
           python3 - <<'PY'
           from pathlib import Path
-          from textwrap import dedent, indent
 
-          routes = Path('services/control-plane/src/routes.rs')
-          body = routes.read_text(encoding='utf-8')
-
-          anchor = '    let node_id = req.node_id.clone();\n'
+          path = Path('docs/architecture/device-registration-application-port.md')
+          body = path.read_text(encoding='utf-8')
+          anchor = '`mobile-proxy-application` owns the transport-independent device-registration port. Axum authenticates the device request, decodes the existing JSON request, invokes one use case and maps typed outcomes. The application crate has no runtime, filesystem, process, network or framework dependency.\n'
+          replacement = anchor + '\nRaw registration fields are not logged. Structured logs contain only authenticated request lineage, bounded classification and bounded error codes until device identity is represented by a validated type.\n'
           if body.count(anchor) != 1:
-              raise SystemExit(f'registration node-id clone anchor count: {body.count(anchor)}')
-          body = body.replace(anchor, '', 1)
-
-          raw_log = '                node_id = %node_id,\n'
-          if body.count(raw_log) != 4:
-              raise SystemExit(f'raw registration node-id log count: {body.count(raw_log)}')
-          body = body.replace(raw_log, '')
-
-          import_anchor = 'mod tests {\n    use crate::{auth::AuthConfig, projection::now_unix_secs, routes::router, state::AppState};\n'
-          import_replacement = 'mod tests {\n    use std::fs;\n\n    use crate::{auth::AuthConfig, projection::now_unix_secs, routes::router, state::AppState};\n'
-          if body.count(import_anchor) != 1:
-              raise SystemExit(f'routes test import anchor count: {body.count(import_anchor)}')
-          body = body.replace(import_anchor, import_replacement, 1)
-
-          test_anchor = '    #[tokio::test]\n    async fn typed_command_boundary_preserves_json_and_deduplicates() {\n'
-          test_body = indent(
-              dedent(
-                  r'''\
-                  #[tokio::test]
-                  async fn registration_persistence_failure_returns_service_unavailable() {
-                      let blocking_parent = std::env::temp_dir().join(format!(
-                          "mobile-proxy-control-plane-registration-route-persistence-{}",
-                          Uuid::new_v4()
-                      ));
-                      fs::create_dir(&blocking_parent).unwrap();
-                      let state = AppState::load(blocking_parent.join("state.json"))
-                          .await
-                          .unwrap();
-                      fs::remove_dir(&blocking_parent).unwrap();
-                      fs::write(&blocking_parent, b"not a directory").unwrap();
-                      let app = router(
-                          state,
-                          AuthConfig::new("admin-token".into(), "device-token".into()).unwrap(),
-                      );
-
-                      let response = app
-                          .oneshot(
-                              Request::post("/api/v1/devices/register")
-                                  .header("authorization", "Bearer device-token")
-                                  .header("content-type", "application/json")
-                                  .body(Body::from(
-                                      r#"{
-                                          "node_id":"device-1",
-                                          "node_name":"node",
-                                          "proxy_status":"starting",
-                                          "tunnel_owner":null
-                                      }"#,
-                                  ))
-                                  .unwrap(),
-                          )
-                          .await
-                          .unwrap();
-                      assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-                      let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
-                          .await
-                          .unwrap();
-                      let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                      assert_eq!(error["error"], "state_persistence_failed");
-                      let _ = fs::remove_file(blocking_parent);
-                  }
-
-                  #[tokio::test]
-                  async fn typed_command_boundary_preserves_json_and_deduplicates() {
-                  '''
-              ),
-              '    ',
-          )
-          if body.count(test_anchor) != 1:
-              raise SystemExit(f'route regression anchor count: {body.count(test_anchor)}')
-          routes.write_text(body.replace(test_anchor, test_body, 1), encoding='utf-8')
-
-          doc = Path('docs/architecture/device-registration-application-port.md')
-          doc_body = doc.read_text(encoding='utf-8')
-          doc_anchor = '`mobile-proxy-application` owns the transport-independent device-registration port. Axum authenticates the device request, decodes the existing JSON request, invokes one use case and maps typed outcomes. The application crate has no runtime, filesystem, process, network or framework dependency.\n'
-          doc_new = doc_anchor + '\nRaw registration fields are not logged. Structured logs contain only authenticated request lineage, bounded classification and bounded error codes until device identity is represented by a validated type.\n'
-          if doc_body.count(doc_anchor) != 1:
-              raise SystemExit(f'documentation anchor count: {doc_body.count(doc_anchor)}')
-          doc.write_text(doc_body.replace(doc_anchor, doc_new, 1), encoding='utf-8')
+              raise SystemExit(f'documentation anchor count: {body.count(anchor)}')
+          path.write_text(body.replace(anchor, replacement, 1), encoding='utf-8')
           PY
 
       - name: Validate hardened source
@@ -129,5 +58,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Harden device registration transport"
+          git commit -m "Avoid logging raw registration fields"
           git push origin HEAD:agent/device-registration-application-port
