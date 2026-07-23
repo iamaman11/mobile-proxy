@@ -30,6 +30,7 @@ jobs:
         run: |
           python3 .agent/fix_blake3_builder_anchors.py
           python3 .agent/apply_blake3_internal_migration.py
+          python3 .agent/apply_shared_release_integrity.py
 
       - name: Enforce architecture and digest policy
         id: policy
@@ -80,5 +81,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "Migrate first internal digest contract to BLAKE3"
+          git commit -m "Migrate first internal digest contracts to BLAKE3"
           git push --force origin HEAD:refs/heads/$TARGET_BRANCH
