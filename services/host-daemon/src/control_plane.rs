@@ -119,6 +119,9 @@ async fn send_heartbeat(
         wg_handshake_recent: runtime.health.wg_handshake_recent,
         reverse_tunnel_connected: runtime.health.reverse_tunnel_connected,
         reverse_tunnel_last_error: runtime.health.reverse_tunnel_last_error.clone(),
+        reverse_tunnel_active_transport: runtime.health.reverse_tunnel_active_transport.clone(),
+        reverse_tunnel_freshness: runtime.health.reverse_tunnel_freshness.clone(),
+        reverse_tunnel_failover_reason: runtime.health.reverse_tunnel_failover_reason.clone(),
         tunnel_owner: runtime.tunnel_owner.clone(),
     };
     drop(runtime);

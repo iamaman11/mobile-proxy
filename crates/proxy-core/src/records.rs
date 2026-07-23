@@ -32,6 +32,12 @@ pub struct HealthRecord {
     pub wg_handshake_recent: Option<bool>,
     pub reverse_tunnel_connected: Option<bool>,
     pub reverse_tunnel_last_error: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_active_transport: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_freshness: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_failover_reason: Option<String>,
     pub tunnel_owner: Option<String>,
 }
 
@@ -82,6 +88,12 @@ pub struct HeartbeatRequest {
     pub wg_handshake_recent: Option<bool>,
     pub reverse_tunnel_connected: Option<bool>,
     pub reverse_tunnel_last_error: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_active_transport: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_freshness: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_failover_reason: Option<String>,
     pub tunnel_owner: Option<String>,
 }
 
@@ -118,6 +130,12 @@ pub struct DeviceRecord {
     pub wg_handshake_recent: Option<bool>,
     pub reverse_tunnel_connected: Option<bool>,
     pub reverse_tunnel_last_error: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_active_transport: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_freshness: Option<String>,
+    #[serde(default)]
+    pub reverse_tunnel_failover_reason: Option<String>,
     pub tunnel_owner: Option<String>,
     pub last_heartbeat_at: Option<String>,
     pub availability: String,

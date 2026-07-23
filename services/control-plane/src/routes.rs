@@ -229,6 +229,8 @@ fn mark_stale(mut device: DeviceRecord) -> DeviceRecord {
     device.publicly_serving = false;
     device.reverse_tunnel_connected = Some(false);
     device.reverse_tunnel_last_error = Some("device heartbeat is stale".into());
+    device.reverse_tunnel_active_transport = None;
+    device.reverse_tunnel_freshness = Some("stale".into());
     device.availability = "degraded".into();
     device.degradation_reason_code = Some("heartbeat_stale".into());
     device.serving_failure_reason = Some("device heartbeat is stale".into());
@@ -340,6 +342,9 @@ mod tests {
             wg_handshake_recent: Some(true),
             reverse_tunnel_connected: None,
             reverse_tunnel_last_error: None,
+            reverse_tunnel_active_transport: Some("quic".into()),
+            reverse_tunnel_freshness: Some("fresh".into()),
+            reverse_tunnel_failover_reason: Some("connect_timeout".into()),
             tunnel_owner: Some("stock_wireguard_bridge".into()),
             last_heartbeat_at: Some("1".into()),
             availability: "ready".into(),
@@ -352,6 +357,12 @@ mod tests {
         let projected = super::mark_stale(device);
         assert_eq!(projected.availability, "degraded");
         assert_eq!(projected.reverse_tunnel_connected, Some(false));
+        assert_eq!(projected.reverse_tunnel_active_transport, None);
+        assert_eq!(projected.reverse_tunnel_freshness.as_deref(), Some("stale"));
+        assert_eq!(
+            projected.reverse_tunnel_failover_reason.as_deref(),
+            Some("connect_timeout")
+        );
         assert_eq!(
             projected.degradation_reason_code.as_deref(),
             Some("heartbeat_stale")

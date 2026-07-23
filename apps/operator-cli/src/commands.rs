@@ -239,6 +239,9 @@ mod tests {
             wg_handshake_recent: Some(true),
             reverse_tunnel_connected: None,
             reverse_tunnel_last_error: None,
+            reverse_tunnel_active_transport: None,
+            reverse_tunnel_freshness: None,
+            reverse_tunnel_failover_reason: None,
             tunnel_owner: Some("stock_wireguard_bridge".into()),
         };
         assert!(is_successful_rotation(&job, &health, true));
