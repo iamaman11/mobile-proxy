@@ -1,19 +1,15 @@
 name: Command Delivery Builder
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
+      - agent/command-delivery-application-ports
 
 permissions:
   contents: write
 
 concurrency:
-  group: command-delivery-builder-${{ github.event.pull_request.number }}
+  group: command-delivery-builder
   cancel-in-progress: true
 
 jobs:
