@@ -1,7 +1,7 @@
 # Invariant enforcement audit
 
 Status: normative governance companion  
-Baseline `main`: `960745007e543c9245a69e57a4856b4f39ab3730`
+Baseline `main`: `dd49efd7d90c85ecd6f9a05ab99744b137ff6042`
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -64,7 +64,7 @@ This list is not a claim that every rule in ADR-001 or the Ultimate Plan is enfo
 The highest-impact active gaps remain explicit in the matrix:
 
 - single owner per aggregate and application ports for the remaining mutation routes;
-- thin transport handlers beyond the extracted command lifecycle routes and prohibition of SQL or business transitions in all HTTP routes;
+- thin transport handlers beyond the extracted command lifecycle and device-registration routes, plus prohibition of SQL or business transitions in all HTTP routes;
 - durable SQLite canonical state, durable acknowledgement history, transactional audit/outbox semantics and JSON migration;
 - repository-wide typed status/error taxonomies;
 - application-specific canonical-field detection;
@@ -75,21 +75,25 @@ The highest-impact active gaps remain explicit in the matrix:
 - removal of runtime fingerprint legacy readers after the accepted compatibility window;
 - physical reserve-tunnel acceptance on one immutable SHA.
 
-## Command lifecycle application-port enforcement
+## Command lifecycle and device-registration application-port enforcement
 
-The existing command issue, poll and acknowledgement capabilities now have bounded clean-dependency slices:
+The existing command issue, poll, acknowledgement and device-registration capabilities now have bounded clean-dependency slices:
 
-- `mobile-proxy-application` owns the typed port, deterministic request fingerprint, unambiguous BLAKE3 idempotency scope and exact/conflict classification;
-- the Axum handler calls one use case and maps only typed outcomes to bounded HTTP errors;
+- `mobile-proxy-application` owns typed ports and bounded outcomes;
+- command issuance retains deterministic request fingerprints, unambiguous BLAKE3 idempotency scope and exact/conflict classification;
+- Axum handlers call one use case and map only typed outcomes to bounded HTTP errors;
 - raw idempotency keys are not logged;
-- original results are persisted separately from the bounded delivery queue, so acknowledgement or queue eviction cannot turn an exact replay into a new command;
+- original command results are persisted separately from the bounded delivery queue, so acknowledgement or queue eviction cannot turn an exact replay into a new command;
 - legacy concatenated idempotency claims are normalized through an isolated adapter when their original queued command is recoverable, while stale claims reject reuse fail closed;
 - command queue, idempotency claim/result and device projection are fsynced and atomically renamed before in-memory publication;
-- a failed write returns `state_persistence_failed` and leaves the in-memory state unchanged.
+- command polling validates queue ownership and returns a typed pending-or-empty outcome without transport logic reaching into the queue;
+- successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory;
+- negative acknowledgement preserves the pending command and the existing `{ "accepted": true }` compatibility shape;
+- device registration uses `node_id` as its natural replay key, preserves first-write metadata and bounds the JSON-era registry at 10,000 devices;
+- new and repeated registration persist the complete candidate before returning `{ "accepted": true }`;
+- a failed write returns `state_persistence_failed` and does not publish a new device in memory.
 
-Command polling validates queue ownership and returns a typed pending-or-empty outcome without transport logic reaching into the queue. Successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory. Negative acknowledgement preserves the pending command and the existing `{ "accepted": true }` compatibility shape.
-
-Registration, heartbeat and public probe remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
+Heartbeat and public probe remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
 
 ## Runtime fingerprint enforcement
 

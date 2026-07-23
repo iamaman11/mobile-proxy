@@ -9,9 +9,10 @@ use mobile_proxy_application::{
     AcknowledgeCommandError, AcknowledgeCommandFuture, AcknowledgeCommandInput,
     AcknowledgeCommandOutcome, AcknowledgeCommandPort, IssueCommandError, IssueCommandFuture,
     IssueCommandInput, IssueCommandOutcome, IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE,
-    MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS, PollCommandError, PollCommandFuture,
-    PollCommandInput, PollCommandOutcome, PollCommandPort, classify_existing,
-    idempotency_scope_key,
+    MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS, MAX_REGISTERED_DEVICES, PollCommandError,
+    PollCommandFuture, PollCommandInput, PollCommandOutcome, PollCommandPort, RegisterDeviceError,
+    RegisterDeviceFuture, RegisterDeviceInput, RegisterDeviceOutcome, RegisterDevicePort,
+    classify_existing, idempotency_scope_key,
 };
 use mobile_proxy_foundation::CommandId;
 use proxy_core::{DeviceCommand, DeviceRecord};
@@ -20,7 +21,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::fingerprint_migration::normalize_persisted_fingerprints;
-use crate::projection::now_unix_secs;
+use crate::projection::{build_registered_device, now_unix_secs};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -117,6 +118,43 @@ impl AppState {
             commands: commands.clone(),
         };
         write_stored_state(self.state_path.as_ref(), &stored)
+    }
+
+    async fn register_device_transaction(
+        &self,
+        input: RegisterDeviceInput,
+    ) -> Result<RegisterDeviceOutcome, RegisterDeviceError> {
+        let mut devices_guard = self.devices.lock().await;
+        let commands_guard = self.commands.lock().await;
+        let mut devices = devices_guard.clone();
+        let request = input.request;
+        let node_id = request.node_id.clone();
+
+        let outcome = if let Some(existing) = devices.get(&node_id) {
+            if existing.node_id != node_id {
+                return Err(RegisterDeviceError::StateConflict);
+            }
+            RegisterDeviceOutcome::AlreadyRegistered
+        } else {
+            if devices.len() >= MAX_REGISTERED_DEVICES {
+                return Err(RegisterDeviceError::CapacityExceeded);
+            }
+            let device = build_registered_device(request);
+            let stored_node_id = device.node_id.clone();
+            if devices.insert(stored_node_id, device).is_some() {
+                return Err(RegisterDeviceError::StateConflict);
+            }
+            RegisterDeviceOutcome::Created
+        };
+
+        let stored = StoredState {
+            devices: devices.clone(),
+            commands: commands_guard.clone(),
+        };
+        write_stored_state(self.state_path.as_ref(), &stored)
+            .map_err(|_| RegisterDeviceError::Persistence)?;
+        *devices_guard = devices;
+        Ok(outcome)
     }
 
     async fn issue_command_transaction(
@@ -260,6 +298,12 @@ impl AppState {
 
         debug_assert_eq!(command.command_id, input.command_id);
         Ok(AcknowledgeCommandOutcome::Completed)
+    }
+}
+
+impl RegisterDevicePort for AppState {
+    fn register_device(&self, input: RegisterDeviceInput) -> RegisterDeviceFuture<'_> {
+        Box::pin(async move { self.register_device_transaction(input).await })
     }
 }
 
@@ -472,16 +516,21 @@ mod tests {
     use mobile_proxy_application::{
         AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandOutcome,
         AcknowledgeCommandPort, IssueCommandError, IssueCommandInput, IssueCommandOutcome,
-        IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_PENDING_COMMANDS, PollCommandError,
-        PollCommandInput, PollCommandOutcome, PollCommandPort, idempotency_scope_key,
+        IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_PENDING_COMMANDS,
+        MAX_REGISTERED_DEVICES, PollCommandError, PollCommandInput, PollCommandOutcome,
+        PollCommandPort, RegisterDeviceError, RegisterDeviceInput, RegisterDeviceOutcome,
+        RegisterDevicePort, idempotency_scope_key,
     };
     use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey};
     use proxy_core::{
         CommandAckRequest, DesiredState, DeviceCommand, IssueCommandRequest, RecoveryIntent,
+        RegisterDeviceRequest,
     };
     use serde_json::json;
     use tokio::sync::Mutex;
     use uuid::Uuid;
+
+    use crate::projection::build_registered_device;
 
     use super::{AppState, CommandState};
 
@@ -502,6 +551,17 @@ mod tests {
             device_id: "device-1".into(),
             command_id,
             request: CommandAckRequest { ok, message: None },
+        }
+    }
+
+    fn registration(node_id: &str, node_name: &str) -> RegisterDeviceInput {
+        RegisterDeviceInput {
+            request: RegisterDeviceRequest {
+                node_id: node_id.into(),
+                node_name: node_name.into(),
+                proxy_status: "starting".into(),
+                tunnel_owner: Some("stock_wireguard_bridge".into()),
+            },
         }
     }
 
@@ -762,6 +822,150 @@ mod tests {
         );
         drop(commands);
         let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn registration_is_durable_and_preserves_first_registered_metadata() {
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-device-registration-{}.json",
+            Uuid::new_v4()
+        ));
+        let state = AppState::load(path.clone()).await.unwrap();
+        assert_eq!(
+            state
+                .register_device(registration("device-1", "first-name"))
+                .await
+                .unwrap(),
+            RegisterDeviceOutcome::Created
+        );
+        assert_eq!(
+            state
+                .register_device(RegisterDeviceInput {
+                    request: RegisterDeviceRequest {
+                        node_id: "device-1".into(),
+                        node_name: "changed-name".into(),
+                        proxy_status: "running".into(),
+                        tunnel_owner: Some("first_party_reverse_tunnel".into()),
+                    },
+                })
+                .await
+                .unwrap(),
+            RegisterDeviceOutcome::AlreadyRegistered
+        );
+        let registered = state.devices.lock().await.get("device-1").unwrap().clone();
+        assert_eq!(registered.node_name, "first-name");
+        assert_eq!(registered.proxy_status, "starting");
+        assert_eq!(
+            registered.tunnel_owner.as_deref(),
+            Some("stock_wireguard_bridge")
+        );
+        drop(state);
+
+        let restarted = AppState::load(path.clone()).await.unwrap();
+        let registered = restarted
+            .devices
+            .lock()
+            .await
+            .get("device-1")
+            .unwrap()
+            .clone();
+        assert_eq!(registered.node_name, "first-name");
+        assert_eq!(registered.proxy_status, "starting");
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn failed_registration_persistence_does_not_publish_a_new_device() {
+        let blocking_parent = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-registration-persistence-{}",
+            Uuid::new_v4()
+        ));
+        fs::write(&blocking_parent, b"not a directory").unwrap();
+        let state = AppState {
+            devices: Arc::new(Mutex::new(HashMap::new())),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(blocking_parent.join("state.json")),
+        };
+
+        assert_eq!(
+            state
+                .register_device(registration("device-1", "node"))
+                .await,
+            Err(RegisterDeviceError::Persistence)
+        );
+        assert!(state.devices.lock().await.is_empty());
+        let _ = fs::remove_file(blocking_parent);
+    }
+
+    #[tokio::test]
+    async fn duplicate_registration_reports_persistence_failure() {
+        let blocking_parent = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-registration-replay-persistence-{}",
+            Uuid::new_v4()
+        ));
+        fs::write(&blocking_parent, b"not a directory").unwrap();
+        let device = build_registered_device(registration("device-1", "node").request);
+        let mut devices = HashMap::new();
+        devices.insert("device-1".into(), device);
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(blocking_parent.join("state.json")),
+        };
+
+        assert_eq!(
+            state
+                .register_device(registration("device-1", "node"))
+                .await,
+            Err(RegisterDeviceError::Persistence)
+        );
+        assert_eq!(state.devices.lock().await.len(), 1);
+        let _ = fs::remove_file(blocking_parent);
+    }
+
+    #[tokio::test]
+    async fn registered_device_capacity_is_bounded() {
+        let template = build_registered_device(registration("template", "template").request);
+        let mut devices = HashMap::new();
+        for index in 0..MAX_REGISTERED_DEVICES {
+            let node_id = format!("device-{index}");
+            let mut device = template.clone();
+            device.node_id = node_id.clone();
+            device.node_name = node_id.clone();
+            devices.insert(node_id, device);
+        }
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(std::path::PathBuf::from("unused")),
+        };
+
+        assert_eq!(
+            state
+                .register_device(registration("overflow-device", "overflow"))
+                .await,
+            Err(RegisterDeviceError::CapacityExceeded)
+        );
+        assert_eq!(state.devices.lock().await.len(), MAX_REGISTERED_DEVICES);
+    }
+
+    #[tokio::test]
+    async fn registration_fails_closed_on_a_mismatched_stored_device() {
+        let mismatched = build_registered_device(registration("device-2", "node").request);
+        let mut devices = HashMap::new();
+        devices.insert("device-1".into(), mismatched);
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(std::path::PathBuf::from("unused")),
+        };
+
+        assert_eq!(
+            state
+                .register_device(registration("device-1", "node"))
+                .await,
+            Err(RegisterDeviceError::StateConflict)
+        );
     }
 
     #[tokio::test]
