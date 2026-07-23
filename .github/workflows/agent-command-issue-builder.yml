@@ -46,6 +46,21 @@ jobs:
               "ROOT = Path(__file__).resolve().parents[1]",
               "ROOT = Path.cwd()",
           )
+          original = '''    count = body.count(old)
+    if count != 1:
+        raise SystemExit(f"{relative}: expected one anchor, found {count}")
+    path.write_text(body.replace(old, new), encoding="utf-8")
+'''
+          replacement = '''    count = body.count(old)
+    first_only = relative == "services/control-plane/src/routes.rs" and old == "use uuid::Uuid;\\n\\n"
+    expected = 2 if first_only else 1
+    if count != expected:
+        raise SystemExit(f"{relative}: expected {expected} anchors, found {count}")
+    path.write_text(body.replace(old, new, 1 if first_only else -1), encoding="utf-8")
+'''
+          if original not in body:
+              raise SystemExit("builder helper anchor missing")
+          body = body.replace(original, replacement)
           exec(compile(body, str(path), "exec"), {"__name__": "__main__"})
           PY
 
