@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed when pure crates gain infrastructure dependencies or vocabulary."""
+"""Fail closed when architecture, digest or invariant governance boundaries drift."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from check_digest_policy import check_repository as check_digest_policy
+from check_invariant_enforcement import validate_repository as check_invariant_enforcement
 
 PURE_CRATES: dict[str, frozenset[str]] = {
     "crates/foundation": frozenset({"blake3", "serde", "uuid"}),
@@ -84,6 +85,7 @@ def check_repository(root: Path) -> list[str]:
                         f"{source.relative_to(root)}: forbidden pure-crate token {token!r}"
                     )
     errors.extend(check_digest_policy(root))
+    errors.extend(check_invariant_enforcement(root))
     return errors
 
 
@@ -97,11 +99,11 @@ def main() -> int:
     args = parser.parse_args()
     errors = check_repository(args.repo_root.resolve())
     if errors:
-        print("architecture boundary validation failed:", file=sys.stderr)
+        print("architecture, digest and invariant validation failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("architecture and digest policy validation passed")
+    print("architecture, digest and invariant validation passed")
     return 0
 
 
