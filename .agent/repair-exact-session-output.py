@@ -69,3 +69,44 @@ replace_once(
 """,
     "pending cancellation test new authority call site",
 )
+
+for signature, label in (
+    (
+        "    pub(crate) async fn open_tcp_proxy(&self, node_id: Option<&str>) -> Result<TcpStream> {\n",
+        "test-only open TCP proxy wrapper",
+    ),
+    (
+        "    async fn open_tcp_proxy_with_timeout(\n",
+        "test-only timeout wrapper",
+    ),
+    (
+        "    pub(crate) async fn register_tcp_control(\n",
+        "test-only TCP control registration wrapper",
+    ),
+    (
+        "    pub(crate) async fn remove_tcp_control_for_session(&self, node_id: &str, session_id: Uuid) {\n",
+        "test-only TCP control removal wrapper",
+    ),
+    (
+        "    pub(crate) async fn register_session_liveness(&self, node_id: String, session_id: Uuid) {\n",
+        "test-only liveness registration wrapper",
+    ),
+    (
+        "    pub(crate) async fn remove_session_liveness(&self, node_id: &str, session_id: Uuid) {\n",
+        "test-only liveness removal wrapper",
+    ),
+):
+    replace_once(state_path, signature, "    #[cfg(test)]\n" + signature, label)
+
+replace_once(
+    state_path,
+    """    pub(crate) fn cancel_pending_for_session(&self, node_id: &str, session_id: Uuid) {
+        lock_pending(&self.pending_tcp).retain(|_, request| {
+            request.expected_node_id != node_id || request.expected_session_id != session_id
+        });
+    }
+
+""",
+    "",
+    "obsolete session-only pending cancellation wrapper",
+)
