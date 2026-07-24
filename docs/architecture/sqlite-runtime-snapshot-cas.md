@@ -35,7 +35,7 @@ The returned counts describe persistence work only:
 - idempotency-claim rows inserted or deleted;
 - pending-command rows inserted or deleted.
 
-They are bounded diagnostics and do not contain identifiers or payloads.
+They are bounded diagnostics and do not contain identifiers or payloads. They are not a durable audit trail, business event stream or second source of truth, and callers must not use them to reconstruct state.
 
 ## Row ordering
 
