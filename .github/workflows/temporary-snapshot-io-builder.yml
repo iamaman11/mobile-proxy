@@ -1,0 +1,84 @@
+name: Temporary Snapshot IO Builder
+
+on:
+  push:
+    branches:
+      - agent/phase-b-sqlite-snapshot-io
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/phase-b-sqlite-snapshot-io
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Wire snapshot store module
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/control-plane-sqlite/src/lib.rs")
+          text = path.read_text()
+          first_old = '''mod snapshot_error;
+          mod snapshot_rows;
+          mod snapshot_validation;
+          '''
+          first_new = '''mod snapshot_error;
+          mod snapshot_rows;
+          mod snapshot_store;
+          mod snapshot_validation;
+          '''
+          export_old = '''pub use snapshot_rows::{
+              CommandResultRow, DeviceRow, IdempotencyClaimRow, PendingCommandRow, SnapshotRows,
+          };
+          '''
+          export_new = export_old + 'pub use snapshot_store::SnapshotStoreError;\n'
+          tests_old = '''#[cfg(test)]
+          mod snapshot_tests;
+          #[cfg(test)]
+          mod tests;
+          '''
+          tests_new = '''#[cfg(test)]
+          mod snapshot_store_tests;
+          #[cfg(test)]
+          mod snapshot_tests;
+          #[cfg(test)]
+          mod tests;
+          '''
+          for old, new, label in (
+              (first_old, first_new, "module inventory"),
+              (export_old, export_new, "public export"),
+              (tests_old, tests_new, "test inventory"),
+          ):
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected exactly one {label}")
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+          cargo fmt --all
+
+      - name: Validate exact candidate
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Publish generated candidate
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/control-plane-sqlite
+          git commit -m "Wire and format atomic snapshot IO [skip ci]"
+          git push origin HEAD:agent/phase-b-sqlite-snapshot-io
