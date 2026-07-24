@@ -9,7 +9,7 @@ fn migration_binary() -> &'static str {
 }
 
 #[test]
-fn missing_export_source_fails_without_creating_database_or_diagnostic() {
+fn missing_export_source_fails_without_creating_database_or_outputs() {
     let id = NEXT_DIRECTORY_ID.fetch_add(1, Ordering::Relaxed);
     let directory = std::env::temp_dir().join(format!(
         "mobile-proxy-state-export-missing-{}-{id}",
@@ -18,8 +18,9 @@ fn missing_export_source_fails_without_creating_database_or_diagnostic() {
     fs::create_dir_all(&directory).unwrap();
     let sqlite = directory.join("missing.sqlite3");
     let diagnostic = directory.join("diagnostic.json");
+    let rollback = directory.join("rollback.json");
 
-    let output = Command::new(migration_binary())
+    let diagnostic_output = Command::new(migration_binary())
         .args([
             "export",
             "--sqlite",
@@ -29,9 +30,22 @@ fn missing_export_source_fails_without_creating_database_or_diagnostic() {
         ])
         .output()
         .unwrap();
+    assert!(!diagnostic_output.status.success());
 
-    assert!(!output.status.success());
+    let rollback_output = Command::new(migration_binary())
+        .args([
+            "rollback-export",
+            "--sqlite",
+            sqlite.to_str().unwrap(),
+            "--rollback-json",
+            rollback.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!rollback_output.status.success());
+
     assert!(!sqlite.exists());
     assert!(!diagnostic.exists());
+    assert!(!rollback.exists());
     let _ = fs::remove_dir_all(&directory);
 }
