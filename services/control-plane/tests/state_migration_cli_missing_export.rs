@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -34,5 +33,5 @@ fn missing_export_source_fails_without_creating_database_or_diagnostic() {
     assert!(!output.status.success());
     assert!(!sqlite.exists());
     assert!(!diagnostic.exists());
-    let _ = fs::remove_dir_all(PathBuf::from(directory));
+    let _ = fs::remove_dir_all(&directory);
 }
