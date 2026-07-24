@@ -73,6 +73,20 @@ def verify_switch_report(report: dict[str, Any], mode: str, label: str) -> None:
     require(report.get("public_ports") == [1080, 1081, 3128], f"{label} switch ports differ")
 
 
+def verify_activation_report(report: dict[str, Any], candidate_sha: str) -> None:
+    require(report.get("format_version") == 1, "activation report version is unsupported")
+    require(report.get("candidate_sha") == candidate_sha, "activation report SHA differs")
+    require(report.get("accepted") is True, "activation report is not accepted")
+    require(report.get("full_runtime_restart") is True, "activation did not restart the full runtime")
+    release_id = report.get("release_id")
+    active_release = report.get("active_release")
+    require(isinstance(release_id, str) and release_id, "activation release ID is invalid")
+    require(
+        isinstance(active_release, str) and active_release.endswith(f"/releases/{release_id}"),
+        "activation active release differs",
+    )
+
+
 def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) -> None:
     require(report.get("format_version") == 1, f"{stage} report version is unsupported")
     require(report.get("candidate_sha") == candidate_sha, f"{stage} report SHA differs")
@@ -142,6 +156,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--primary-switch", type=Path, required=True)
     parser.add_argument("--wireguard-switch", type=Path, required=True)
     parser.add_argument("--reverse-switch", type=Path, required=True)
+    parser.add_argument("--reverse-activation", type=Path, required=True)
     parser.add_argument("--online", type=Path, required=True)
     parser.add_argument("--post-reboot", type=Path, required=True)
     parser.add_argument("--fallback", type=Path, required=True)
@@ -166,6 +181,7 @@ def main() -> int:
         verify_switch_report(read_json(args.primary_switch), "reverse-tunnel", "primary")
         verify_switch_report(read_json(args.wireguard_switch), "wireguard", "wireguard")
         verify_switch_report(read_json(args.reverse_switch), "reverse-tunnel", "final")
+        verify_activation_report(read_json(args.reverse_activation), candidate_sha)
         reports = {
             "online": read_json(args.online),
             "post-reboot": read_json(args.post_reboot),
@@ -185,6 +201,7 @@ def main() -> int:
             "device_id": node_ids.pop(),
             "deployment_integrity_accepted": True,
             "transport_switches_accepted": True,
+            "device_reactivation_accepted": True,
             "accepted_stages": list(reports),
             "physical_phone_acceptance_complete": True,
             "accepted": True,
