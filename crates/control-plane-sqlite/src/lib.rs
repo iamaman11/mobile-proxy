@@ -1,9 +1,15 @@
+mod legacy_json_import;
 mod snapshot_error;
 mod snapshot_rows;
 mod snapshot_store;
 mod snapshot_validation;
 
 pub mod snapshot;
+
+pub use legacy_json_import::{
+    LegacyJsonImportError, LegacyJsonImportOutcome, LegacyJsonImportReport,
+    LegacyJsonMigrationStats, LegacyJsonViolation, parse_legacy_json,
+};
 
 pub use snapshot::{
     CommandQueues, ControlPlaneSnapshot, DeviceMap, ReplayRecord, SNAPSHOT_FORMAT_VERSION,
@@ -384,6 +390,8 @@ fn require_nonempty(value: &str, field: &'static str) -> Result<(), StoreError> 
     Ok(())
 }
 
+#[cfg(test)]
+mod legacy_json_import_tests;
 #[cfg(test)]
 mod snapshot_store_tests;
 #[cfg(test)]

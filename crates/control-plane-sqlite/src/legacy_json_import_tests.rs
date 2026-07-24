@@ -115,13 +115,7 @@ fn canonical(snapshot: &ControlPlaneSnapshot) -> Vec<u8> {
 fn representative_legacy_state_imports_and_reopens_with_exact_parity() {
     let database = TempDatabase::new("representative");
     let value = command(1, "device-1", "legacy-command");
-    let body = legacy_body(
-        "device-1",
-        &value,
-        value.command_id,
-        None,
-        Vec::new(),
-    );
+    let body = legacy_body("device-1", &value, value.command_id, None, Vec::new());
     let (expected, expected_stats) = parse_legacy_json(&body).unwrap();
     let mut store = SqliteStore::open(&database.path).unwrap();
 
@@ -138,7 +132,10 @@ fn representative_legacy_state_imports_and_reopens_with_exact_parity() {
     drop(store);
 
     let mut reopened = SqliteStore::open(&database.path).unwrap();
-    assert_eq!(canonical(&reopened.load_snapshot().unwrap()), canonical(&expected));
+    assert_eq!(
+        canonical(&reopened.load_snapshot().unwrap()),
+        canonical(&expected)
+    );
 }
 
 #[test]
@@ -146,7 +143,8 @@ fn legacy_result_keys_and_order_are_canonicalized_deterministically() {
     let first = command(1, "device-1", "first");
     let second = command(2, "device-1", "second");
     let first_scope = idempotency_scope_key(&first.device_id, &first.idempotency_key).to_string();
-    let second_scope = idempotency_scope_key(&second.device_id, &second.idempotency_key).to_string();
+    let second_scope =
+        idempotency_scope_key(&second.device_id, &second.idempotency_key).to_string();
     let first_result = serde_json::to_string(&first).unwrap();
     let second_result = serde_json::to_string(&second).unwrap();
     let device_json = serde_json::to_string(&legacy_device("device-1")).unwrap();
@@ -190,10 +188,7 @@ fn exact_import_replay_is_idempotent() {
 fn different_nonempty_target_fails_without_replacement() {
     let existing_command = command(1, "device-existing", "existing");
     let existing = ControlPlaneSnapshot::from_parts(
-        BTreeMap::from([(
-            "device-existing".to_owned(),
-            device("device-existing"),
-        )]),
+        BTreeMap::from([("device-existing".to_owned(), device("device-existing"))]),
         BTreeMap::from([(
             "device-existing".to_owned(),
             VecDeque::from([existing_command.clone()]),
@@ -224,13 +219,8 @@ fn different_nonempty_target_fails_without_replacement() {
 fn conflicting_or_orphan_legacy_claims_fail_closed() {
     let value = command(1, "device-1", "conflict");
     let conflicting = command(2, "device-1", "other");
-    let conflicting_body = legacy_body(
-        "device-1",
-        &value,
-        conflicting.command_id,
-        None,
-        Vec::new(),
-    );
+    let conflicting_body =
+        legacy_body("device-1", &value, conflicting.command_id, None, Vec::new());
     assert!(matches!(
         parse_legacy_json(&conflicting_body),
         Err(LegacyJsonImportError::Violation(

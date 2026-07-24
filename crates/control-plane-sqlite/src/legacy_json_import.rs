@@ -2,9 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-use mobile_proxy_application::{
-    MAX_IDEMPOTENCY_RESULTS, idempotency_scope_key,
-};
+use mobile_proxy_application::{MAX_IDEMPOTENCY_RESULTS, idempotency_scope_key};
 use mobile_proxy_foundation::CommandId;
 use proxy_core::{
     BinaryFingerprintInput, ConfigFingerprintInput, DeviceCommand, DeviceRecord,
@@ -59,7 +57,9 @@ impl Display for LegacyJsonViolation {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::FingerprintFieldShape => "legacy fingerprint field has an invalid JSON shape",
-            Self::ConflictingCommandResult => "legacy command result conflicts with canonical replay state",
+            Self::ConflictingCommandResult => {
+                "legacy command result conflicts with canonical replay state"
+            }
             Self::ConflictingLegacyClaim => "legacy idempotency claim conflicts with its command",
             Self::OrphanLegacyClaim => "legacy idempotency claim has no recoverable command result",
             Self::ReplayCapacityExceeded => "legacy replay capacity cannot be normalized safely",
@@ -94,14 +94,15 @@ impl Display for LegacyJsonImportError {
             }
             Self::Violation(error) => Display::fmt(error, formatter),
             Self::Snapshot(error) => Display::fmt(error, formatter),
-            Self::SnapshotJson(_) => formatter.write_str("canonical snapshot JSON could not be produced"),
+            Self::SnapshotJson(_) => {
+                formatter.write_str("canonical snapshot JSON could not be produced")
+            }
             Self::Store(_) => formatter.write_str("SQLite legacy import operation failed"),
             Self::TargetContainsDifferentState => {
                 formatter.write_str("SQLite target already contains different canonical state")
             }
-            Self::ParityMismatch => {
-                formatter.write_str("SQLite rehydration does not match the imported canonical snapshot")
-            }
+            Self::ParityMismatch => formatter
+                .write_str("SQLite rehydration does not match the imported canonical snapshot"),
         }
     }
 }
@@ -211,7 +212,11 @@ pub fn parse_legacy_json(
     normalize_commands(&mut stored.commands, &mut stats)?;
 
     let devices = stored.devices.into_iter().collect::<BTreeMap<_, _>>();
-    let queues = stored.commands.queues.into_iter().collect::<BTreeMap<_, _>>();
+    let queues = stored
+        .commands
+        .queues
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
     let mut replay_records = Vec::with_capacity(stored.commands.idempotency_results.len());
     for scope in stored.commands.idempotency_order {
         let command = stored
@@ -421,9 +426,7 @@ fn trim_results(
     Ok(())
 }
 
-fn validate_legacy_claims(
-    commands: &LegacyCommandState,
-) -> Result<(), LegacyJsonImportError> {
+fn validate_legacy_claims(commands: &LegacyCommandState) -> Result<(), LegacyJsonImportError> {
     let mut expected = HashMap::with_capacity(commands.idempotency_results.len());
     for command in commands.idempotency_results.values() {
         let key = legacy_scope(command);
