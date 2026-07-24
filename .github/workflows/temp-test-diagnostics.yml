@@ -1,25 +1,22 @@
 name: Temporary Test Diagnostics
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/temp-test-diagnostics.yml"
+  push:
+    branches:
+      - agent/phase-b-retire-json-runtime
 
 permissions:
   contents: write
 
 jobs:
   diagnose:
-    if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'agent/phase-b-retire-json-runtime'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Check out exact PR head
+      - name: Check out exact branch head
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Install stable Rust toolchain
         run: |
@@ -36,37 +33,37 @@ jobs:
           old = '''    use crate::{auth::AuthConfig, projection::now_unix_secs, routes::router, state::AppState};
 '''
           new = '''    use crate::{
-        auth::AuthConfig,
-        projection::now_unix_secs,
-        routes::router,
-        state::{AppState, StoredState},
-        state_sqlite_backend,
-    };
+              auth::AuthConfig,
+              projection::now_unix_secs,
+              routes::router,
+              state::{AppState, StoredState},
+              state_sqlite_backend,
+          };
 '''
           if text.count(old) != 1:
               raise SystemExit("expected route-test import was not found exactly once")
           text = text.replace(old, new)
           old = '''        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-{}.json",
-            Uuid::new_v4()
-        ));
-        router(
-            AppState::load(path).await.unwrap(),
+              "mobile-proxy-control-plane-{}.json",
+              Uuid::new_v4()
+          ));
+          router(
+              AppState::load(path).await.unwrap(),
 '''
           new = '''        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-{}.sqlite3",
-            Uuid::new_v4()
-        ));
-        state_sqlite_backend::replace_for_test(&path, &StoredState::default()).unwrap();
-        router(
-            AppState::load(path).await.unwrap(),
+              "mobile-proxy-control-plane-{}.sqlite3",
+              Uuid::new_v4()
+          ));
+          state_sqlite_backend::replace_for_test(&path, &StoredState::default()).unwrap();
+          router(
+              AppState::load(path).await.unwrap(),
 '''
           if text.count(old) != 1:
               raise SystemExit("expected JSON-era route test helper was not found exactly once")
           path.write_text(text.replace(old, new), encoding="utf-8")
           PY
           cargo fmt --all
-      - name: Verify control-plane tests
+      - name: Verify focused control-plane tests
         run: cargo test -p control-plane --bin control-plane
       - name: Remove temporary diagnostic workflows
         run: |
@@ -82,4 +79,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Fix SQLite route test setup"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:${{ github.ref_name }}
