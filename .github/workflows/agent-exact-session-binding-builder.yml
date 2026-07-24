@@ -26,8 +26,15 @@ jobs:
 
       - name: Verify and decode bounded transformation
         run: |
-          echo "96ea2a501f7553ddd5d67e23f2e40d8befc4a1890d8109511033708b59852f32  .agent/exact-session-binding.py.gz.b64" | sha256sum --check --strict
-          base64 --decode .agent/exact-session-binding.py.gz.b64 > /tmp/exact-session-binding.py.gz
+          cat \
+            .agent/exact-session-binding.py.gz.b64.00 \
+            .agent/exact-session-binding.py.gz.b64.01 \
+            .agent/exact-session-binding.py.gz.b64.02 \
+            .agent/exact-session-binding.py.gz.b64.03 \
+            .agent/exact-session-binding.py.gz.b64.04 \
+            | tr -d '\n' > /tmp/exact-session-binding.py.gz.b64
+          echo "1d2ab9add1aa51242013119725f3909b6bb20eda4620c5737fecd8557544646c  /tmp/exact-session-binding.py.gz.b64" | sha256sum --check --strict
+          base64 --decode /tmp/exact-session-binding.py.gz.b64 > /tmp/exact-session-binding.py.gz
           echo "ce50b4fbc0524894d58f2e3ffbd0d6faa66c299aaceb7f3f9764497f1487edb0  /tmp/exact-session-binding.py.gz" | sha256sum --check --strict
           gzip --decompress --stdout /tmp/exact-session-binding.py.gz > /tmp/exact-session-binding.py
           echo "eab13b291cf5037ba1236942cc8937292505032084b2de227677cc7993780b20  /tmp/exact-session-binding.py" | sha256sum --check --strict
