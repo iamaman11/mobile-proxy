@@ -37,7 +37,7 @@ This evidence used the production CLI, bearer authentication middleware, HTTP ro
 
 ## Evidence boundary
 
-The preserved pre-cutover JSON demonstrated compatibility but becomes stale once SQLite accepts later writes. It is not the current-state rollback artifact after cutover. The accepted default-cutover procedure therefore stops SQLite, exports the latest canonical snapshot to a new JSON file and starts explicit JSON rollback from that export.
+The preserved pre-cutover JSON demonstrated compatibility but becomes stale once SQLite accepts later writes. It is not the current-state rollback artifact after cutover. The accepted default-cutover procedure therefore stops SQLite, invokes `control-plane-state-migrate rollback-export` to materialize the latest state in the JSON runtime contract, and starts explicit JSON rollback from that separate output. The ordinary diagnostic `export` format is not a JSON backend state file.
 
 ## Historical non-goals
 
