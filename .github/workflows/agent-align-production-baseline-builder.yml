@@ -1,9 +1,9 @@
 name: Agent Align Production Baseline Builder
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/align-production-baseline-builder
+      - main
 
 permissions:
   contents: write
