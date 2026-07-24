@@ -47,21 +47,27 @@ def remote_command(mode: str) -> str:
 CONFIG={shlex.quote(_REMOTE_CONFIG)}
 TEMP={shlex.quote(temporary)}
 BACKUP={shlex.quote(backup)}
-cleanup() {{ sudo rm -f "$TEMP" "$BACKUP"; }}
+COMMITTED=0
+cleanup() {{
+  if [ "$COMMITTED" -ne 1 ] && [ -f "$BACKUP" ]; then
+    sudo cp "$BACKUP" "$CONFIG"
+    if sudo nginx -t; then
+      sudo systemctl reload nginx || true
+    fi
+  fi
+  sudo rm -f "$TEMP" "$BACKUP"
+}}
 trap cleanup EXIT
 sudo cp "$CONFIG" "$BACKUP"
 printf %s {shlex.quote(encoded)} | base64 -d | sudo tee "$TEMP" >/dev/null
 sudo chmod 0644 "$TEMP"
 sudo mv "$TEMP" "$CONFIG"
-if ! sudo nginx -t; then
-  sudo cp "$BACKUP" "$CONFIG"
-  sudo nginx -t
-  exit 1
-fi
+sudo nginx -t
 sudo systemctl reload nginx
 sudo systemctl is-active {required_services}
 sudo ss -lnt | grep -E ':(1080|1081|3128) '
 sudo sha256sum -- "$CONFIG"
+COMMITTED=1
 """
 
 
