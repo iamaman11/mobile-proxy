@@ -110,6 +110,7 @@ fn load_json_state(state_path: &Path) -> Result<StoredState> {
 }
 
 impl AppState {
+    #[cfg(test)]
     pub async fn load(state_path: PathBuf) -> Result<Self> {
         Self::load_with_backend(state_path, StateBackend::Json).await
     }
