@@ -193,11 +193,11 @@ fn run_import(source: &Path, sqlite: &Path, diagnostic: &Path) -> Output {
         .unwrap()
 }
 
-fn run_export(sqlite: &Path, rollback_json: &Path) -> Output {
+fn run_rollback_export(sqlite: &Path, rollback_json: &Path) -> Output {
     Command::new(migration_binary())
-        .args(["export", "--sqlite"])
+        .args(["rollback-export", "--sqlite"])
         .arg(sqlite)
-        .arg("--diagnostic-json")
+        .arg("--rollback-json")
         .arg(rollback_json)
         .output()
         .unwrap()
@@ -357,7 +357,7 @@ async fn sqlite_default_restart_and_current_state_json_rollback_work_through_rea
 
     assert_eq!(fs::read(&source).unwrap(), source_bytes);
 
-    let export = run_export(&sqlite, &rollback_json);
+    let export = run_rollback_export(&sqlite, &rollback_json);
     assert!(
         export.status.success(),
         "rollback export failed: {}",
