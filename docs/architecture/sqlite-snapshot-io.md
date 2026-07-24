@@ -28,14 +28,14 @@ A replacement transaction performs:
 8. insert pending commands;
 9. commit once.
 
-Any serialization, SQLite constraint, trigger or commit failure rolls back the complete candidate, including preceding deletes. A successful smaller snapshot therefore removes every stale row; a failed candidate leaves the previously committed snapshot byte-equivalent after rehydration.
+Any serialization, SQLite constraint, trigger or commit failure rolls back the complete candidate, including preceding deletes and inserts. A successful smaller snapshot therefore removes every stale row; a failed candidate leaves the previously committed snapshot byte-equivalent after rehydration.
 
 A load fails closed for:
 
 - malformed typed JSON despite syntactically valid SQLite JSON;
 - invalid `CommandId`, BLAKE3 scope or request fingerprint text;
 - queue positions outside the supported `u32` range;
-- any missing, duplicated, mismatched or non-contiguous relation rejected by `ControlPlaneSnapshot`.
+- any missing, duplicated, mismatched or non-contiguous relation rejected by `ControlPlaneSnapshot`, including corruption created while foreign-key enforcement was bypassed externally.
 
 No partially decoded state is returned.
 
@@ -46,8 +46,9 @@ Focused tests cover:
 - loading a valid empty database;
 - complete snapshot replacement, close, reopen and byte-exact canonical rehydration;
 - stale relation cleanup after replacing a populated snapshot with an empty one;
-- forced database failure after delete initiation with full rollback to the prior snapshot;
-- corrupt typed relation values failing closed during load.
+- forced failure on the final pending-command insert after devices, command results and claims were already inserted, with full rollback to the prior snapshot;
+- invalid digest text and syntactically valid but incomplete typed JSON failing closed during load;
+- cross-table corruption introduced with foreign-key enforcement disabled still being rejected by canonical relation validation.
 
 ## Non-goals
 

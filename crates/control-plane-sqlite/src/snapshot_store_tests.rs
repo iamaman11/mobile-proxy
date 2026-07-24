@@ -4,10 +4,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey};
 use proxy_core::{DesiredState, DeviceCommand, DeviceRecord, RecoveryIntent};
+use rusqlite::params;
 
 use super::{
-    CommandQueues, ControlPlaneSnapshot, DeviceMap, InventoryCounts, ReplayRecord,
-    SnapshotStoreError, SqliteStore,
+    CommandQueues, ControlPlaneSnapshot, DeviceMap, IdempotencyClaimRow, InventoryCounts,
+    ReplayRecord, SnapshotStoreError, SnapshotViolation, SqliteStore,
 };
 
 static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(1);
@@ -153,7 +154,7 @@ fn replacement_removes_every_stale_relation() {
 }
 
 #[test]
-fn failed_replacement_rolls_back_deletes_and_prior_inserts() {
+fn failed_late_pending_insert_rolls_back_deletes_and_prior_inserts() {
     let baseline_command = command(1, "device-1", "baseline");
     let baseline = snapshot("device-1", &[baseline_command], 1);
     let candidate_command = command(2, "device-2", "candidate");
@@ -165,7 +166,7 @@ fn failed_replacement_rolls_back_deletes_and_prior_inserts() {
     store
         .connection
         .execute_batch(
-            "CREATE TRIGGER fail_snapshot_replace BEFORE INSERT ON devices \
+            "CREATE TRIGGER fail_snapshot_replace BEFORE INSERT ON pending_commands \
              BEGIN SELECT RAISE(ABORT, 'forced snapshot failure'); END;",
         )
         .unwrap();
@@ -202,5 +203,59 @@ fn corrupt_typed_relation_fails_closed_during_load() {
             field: "scope_key",
             ..
         })
+    ));
+}
+
+#[test]
+fn syntactically_valid_but_incomplete_device_json_fails_closed() {
+    let mut store = SqliteStore::open_in_memory().unwrap();
+    store
+        .connection
+        .execute(
+            "INSERT INTO devices (node_id, record_json) VALUES (?1, ?2)",
+            params!["device-1", r#"{"node_id":"device-1"}"#],
+        )
+        .unwrap();
+
+    assert!(matches!(
+        store.load_snapshot(),
+        Err(SnapshotStoreError::Json {
+            relation: "devices",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn foreign_key_bypass_corruption_still_fails_cross_relation_validation() {
+    let value = command(1, "device-1", "missing-result");
+    let claim = IdempotencyClaimRow::from_command(&value);
+    let mut store = SqliteStore::open_in_memory().unwrap();
+    store
+        .connection
+        .pragma_update(None, "foreign_keys", false)
+        .unwrap();
+    store
+        .connection
+        .execute(
+            "INSERT INTO idempotency_claims \
+             (scope_key, command_id, request_fingerprint) VALUES (?1, ?2, ?3)",
+            params![
+                claim.scope_key().to_string(),
+                claim.command_id().to_string(),
+                claim.request_fingerprint().to_string()
+            ],
+        )
+        .unwrap();
+    store
+        .connection
+        .pragma_update(None, "foreign_keys", true)
+        .unwrap();
+
+    assert!(matches!(
+        store.load_snapshot(),
+        Err(SnapshotStoreError::Violation(
+            SnapshotViolation::ClaimResultMissing
+        ))
     ));
 }
