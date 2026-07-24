@@ -1,11 +1,9 @@
-use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use mobile_proxy_control_plane_sqlite::{SCHEMA_VERSION, SqliteStore};
-use rusqlite::{Connection, OpenFlags, params};
 use serde_json::json;
 
 #[derive(Debug, Parser)]
@@ -52,56 +50,60 @@ fn main() -> Result<()> {
 }
 
 fn backup_state(sqlite: &Path, backup: &Path) -> Result<()> {
-    ensure_distinct(sqlite, backup)?;
-    ensure_new_target(backup, "backup")?;
-    let source = validate(sqlite, "backup source")?;
-    prepare_parent(backup)?;
-    let temporary = temporary_path(backup);
-
-    let connection = Connection::open_with_flags(
-        sqlite,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .with_context(|| format!("failed to open SQLite backup source {}", sqlite.display()))?;
-    connection
-        .busy_timeout(mobile_proxy_control_plane_sqlite::BUSY_TIMEOUT)
-        .context("failed to configure SQLite backup timeout")?;
-    if let Err(error) = connection.execute(
-        "VACUUM main INTO ?1",
-        params![temporary.to_string_lossy().as_ref()],
-    ) {
-        cleanup(&temporary);
-        return Err(error).with_context(|| {
-            format!("failed to create SQLite backup {}", backup.display())
-        });
-    }
-    drop(connection);
-
-    let candidate = validate(&temporary, "backup candidate")?;
-    ensure_parity(&source, &candidate, "backup")?;
-    let bytes = fs::metadata(&temporary)?.len();
-    publish(&temporary, backup)?;
-    print_report("backup", &source, "backup_bytes", bytes);
-    Ok(())
+    materialize_validated(sqlite, backup, "backup", "backup source", "backup candidate")
 }
 
 fn restore_state(backup: &Path, sqlite: &Path) -> Result<()> {
-    ensure_distinct(backup, sqlite)?;
-    ensure_new_target(sqlite, "restore target")?;
-    let source = validate(backup, "restore source")?;
-    prepare_parent(sqlite)?;
-    let temporary = temporary_path(sqlite);
-    if let Err(error) = copy_synced(backup, &temporary) {
+    materialize_validated(
+        backup,
+        sqlite,
+        "restore",
+        "restore source",
+        "restore candidate",
+    )
+}
+
+fn materialize_validated(
+    source_path: &Path,
+    target_path: &Path,
+    operation: &str,
+    source_purpose: &str,
+    candidate_purpose: &str,
+) -> Result<()> {
+    ensure_distinct(source_path, target_path)?;
+    ensure_new_target(target_path, operation)?;
+    let source = validate(source_path, source_purpose)?;
+    prepare_parent(target_path)?;
+    let temporary = temporary_path(target_path);
+
+    if let Err(error) = materialize(source_path, &temporary, operation) {
+        cleanup(&temporary);
+        return Err(error);
+    }
+    let candidate = match validate(&temporary, candidate_purpose) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            cleanup(&temporary);
+            return Err(error);
+        }
+    };
+    if let Err(error) = ensure_parity(&source, &candidate, operation) {
         cleanup(&temporary);
         return Err(error);
     }
 
-    let candidate = validate(&temporary, "restore candidate")?;
-    ensure_parity(&source, &candidate, "restore")?;
     let bytes = fs::metadata(&temporary)?.len();
-    publish(&temporary, sqlite)?;
-    print_report("restore", &source, "restored_bytes", bytes);
+    publish(&temporary, target_path)?;
+    print_report(operation, &source, bytes);
     Ok(())
+}
+
+fn materialize(source: &Path, target: &Path, operation: &str) -> Result<()> {
+    let store = SqliteStore::open_existing(source)
+        .with_context(|| format!("failed to open SQLite {operation} source {}", source.display()))?;
+    store
+        .vacuum_into(target)
+        .with_context(|| format!("failed to materialize SQLite {operation} artifact"))
 }
 
 fn verify_state(sqlite: &Path) -> Result<()> {
@@ -132,7 +134,7 @@ fn validate(path: &Path, purpose: &str) -> Result<ValidatedState> {
     let snapshot = store
         .load_snapshot()
         .with_context(|| format!("failed to rehydrate SQLite {purpose}"))?;
-    let state = ValidatedState {
+    Ok(ValidatedState {
         devices: snapshot.devices().len(),
         pending_commands: snapshot
             .queues()
@@ -141,8 +143,7 @@ fn validate(path: &Path, purpose: &str) -> Result<ValidatedState> {
             .sum(),
         replay_records: snapshot.replay_records().len(),
         canonical: snapshot.to_canonical_json()?,
-    };
-    Ok(state)
+    })
 }
 
 fn ensure_parity(left: &ValidatedState, right: &ValidatedState, operation: &str) -> Result<()> {
@@ -152,7 +153,7 @@ fn ensure_parity(left: &ValidatedState, right: &ValidatedState, operation: &str)
     Ok(())
 }
 
-fn print_report(operation: &str, state: &ValidatedState, bytes_key: &str, bytes: u64) {
+fn print_report(operation: &str, state: &ValidatedState, bytes: u64) {
     println!(
         "{}",
         json!({
@@ -161,7 +162,7 @@ fn print_report(operation: &str, state: &ValidatedState, bytes_key: &str, bytes:
             "devices": state.devices,
             "pending_commands": state.pending_commands,
             "replay_records": state.replay_records,
-            bytes_key: bytes
+            "artifact_bytes": bytes
         })
     );
 }
@@ -176,7 +177,7 @@ fn ensure_distinct(left: &Path, right: &Path) -> Result<()> {
 fn ensure_new_target(path: &Path, purpose: &str) -> Result<()> {
     let temporary = temporary_path(path);
     if path.exists() {
-        bail!("SQLite {purpose} already exists");
+        bail!("SQLite {purpose} target already exists");
     }
     if temporary.exists() || wal_path(&temporary).exists() || shm_path(&temporary).exists() {
         bail!("SQLite {purpose} temporary artifact already exists");
@@ -191,19 +192,6 @@ fn prepare_parent(path: &Path) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create SQLite directory {}", parent.display()))?;
     }
-    Ok(())
-}
-
-fn copy_synced(source: &Path, target: &Path) -> Result<()> {
-    let mut input = File::open(source)
-        .with_context(|| format!("failed to open SQLite backup {}", source.display()))?;
-    let mut output = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(target)
-        .with_context(|| format!("failed to create restore candidate {}", target.display()))?;
-    io::copy(&mut input, &mut output)?;
-    output.sync_all()?;
     Ok(())
 }
 
