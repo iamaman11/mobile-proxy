@@ -36,7 +36,7 @@ Before any SQLite write, the importer:
 9. rejects orphan claims whose original result cannot be reconstructed;
 10. constructs and validates one `ControlPlaneSnapshot`.
 
-The resulting snapshot is independent of JSON object ordering.
+The resulting snapshot is independent of JSON object ordering. Parsing and normalization complete before the importer inspects or mutates the SQLite target.
 
 ## Safe target semantics
 
