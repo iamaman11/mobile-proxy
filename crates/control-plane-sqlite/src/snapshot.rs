@@ -250,8 +250,12 @@ impl Display for SnapshotStoreError {
         match self {
             Self::Store(_) => formatter.write_str("SQLite snapshot store operation failed"),
             Self::Json { field, .. } => write!(formatter, "invalid typed JSON in {field}"),
-            Self::InvalidField { field } => write!(formatter, "invalid typed SQLite field: {field}"),
-            Self::InvalidSnapshot(error) => write!(formatter, "invalid control-plane snapshot: {error}"),
+            Self::InvalidField { field } => {
+                write!(formatter, "invalid typed SQLite field: {field}")
+            }
+            Self::InvalidSnapshot(error) => {
+                write!(formatter, "invalid control-plane snapshot: {error}")
+            }
         }
     }
 }
@@ -377,11 +381,12 @@ fn load_snapshot_rows(connection: &Connection) -> Result<SnapshotRows, SnapshotS
 }
 
 fn load_device_rows(connection: &Connection) -> Result<Vec<DeviceRow>, SnapshotStoreError> {
-    let mut statement = connection.prepare(
-        "SELECT node_id, record_json FROM devices ORDER BY node_id",
-    )?;
+    let mut statement =
+        connection.prepare("SELECT node_id, record_json FROM devices ORDER BY node_id")?;
     let raw_rows = statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     raw_rows
@@ -503,17 +508,11 @@ fn decode_json<T: DeserializeOwned>(
     serde_json::from_str(value).map_err(|source| SnapshotStoreError::Json { field, source })
 }
 
-fn parse_digest(
-    field: &'static str,
-    value: &str,
-) -> Result<ContentDigest, SnapshotStoreError> {
+fn parse_digest(field: &'static str, value: &str) -> Result<ContentDigest, SnapshotStoreError> {
     ContentDigest::from_str(value).map_err(|_| SnapshotStoreError::InvalidField { field })
 }
 
-fn parse_command_id(
-    field: &'static str,
-    value: &str,
-) -> Result<CommandId, SnapshotStoreError> {
+fn parse_command_id(field: &'static str, value: &str) -> Result<CommandId, SnapshotStoreError> {
     CommandId::from_str(value).map_err(|_| SnapshotStoreError::InvalidField { field })
 }
 

@@ -11,8 +11,7 @@ use serde_json::json;
 use crate::{InventoryCounts, SqliteStore, StoreError};
 
 use super::{
-    ControlPlaneSnapshot, IdempotencyClaimRow, ReplayRecord, SnapshotStoreError,
-    SnapshotViolation,
+    ControlPlaneSnapshot, IdempotencyClaimRow, ReplayRecord, SnapshotStoreError, SnapshotViolation,
 };
 
 static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(1);
@@ -49,10 +48,7 @@ fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
 
 fn command(index: u64, device_id: &str, key: &str) -> DeviceCommand {
     DeviceCommand {
-        command_id: CommandId::from_str(&format!(
-            "00000000-0000-0000-0000-{index:012x}"
-        ))
-        .unwrap(),
+        command_id: CommandId::from_str(&format!("00000000-0000-0000-0000-{index:012x}")).unwrap(),
         device_id: device_id.to_owned(),
         desired_state: DesiredState::HealthyServing,
         recovery_intent: RecoveryIntent::None,
