@@ -24,19 +24,24 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Generate canonical formatting and lockfile
+      - name: Publish canonical formatting
         run: |
           cargo fmt --all
-          cargo generate-lockfile
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add Cargo.lock crates/control-plane-sqlite
+          git add crates/control-plane-sqlite
           if ! git diff --cached --quiet; then
-            git commit -m "Apply generated snapshot build outputs [skip ci]"
+            git commit -m "Apply canonical snapshot formatting [skip ci]"
             git push origin HEAD:agent/phase-b-state-snapshot-mapping
           fi
 
-      - name: Validate snapshot slice
+      - name: Resolve existing lockfile and validate
         run: |
+          cargo check --workspace --all-targets
+          git add Cargo.lock
+          if ! git diff --cached --quiet; then
+            git commit -m "Update snapshot path dependencies [skip ci]"
+            git push origin HEAD:agent/phase-b-state-snapshot-mapping
+          fi
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
