@@ -13,8 +13,9 @@ use clap::Parser;
 use tokio::time::sleep;
 use tracing::warn;
 
+use crate::android::stop_compatibility_vpns;
 use crate::cli::Cli;
-use crate::config::load_config;
+use crate::config::{TunnelOwner, load_config};
 use crate::dns::reconcile_cellular_dns;
 use crate::health::{
     SupervisorState, fetch_health, reconcile_health, reconcile_startup_cellular_bootstrap,
@@ -34,6 +35,11 @@ async fn main() -> Result<()> {
     let mut state = SupervisorState::new();
 
     cleanup_stale_runtime_processes();
+    if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel
+        && let Err(error) = stop_compatibility_vpns()
+    {
+        warn!("failed to stop compatibility VPNs before reverse-tunnel startup: {error:#}");
+    }
     reconcile_startup_cellular_bootstrap(&config, &mut state);
 
     loop {
