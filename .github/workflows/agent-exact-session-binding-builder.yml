@@ -24,29 +24,72 @@ jobs:
         with:
           ref: agent/exact-session-binding-builder
 
-      - name: Verify and decode bounded transformation
+      - name: Record builder trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cat \
-            .agent/exact-session-binding.py.gz.b64.00 \
-            .agent/exact-session-binding.py.gz.b64.01 \
-            .agent/exact-session-binding.py.gz.b64.02 \
-            .agent/exact-session-binding.py.gz.b64.03a \
-            .agent/exact-session-binding.py.gz.b64.03b \
-            .agent/exact-session-binding.py.gz.b64.03c \
-            .agent/exact-session-binding.py.gz.b64.03d0 \
-            .agent/exact-session-binding.py.gz.b64.03d1 \
-            .agent/exact-session-binding.py.gz.b64.03d2 \
-            .agent/exact-session-binding.py.gz.b64.03d3 \
-            .agent/exact-session-binding.py.gz.b64.04 \
-            | tr -d '\n' > /tmp/exact-session-binding.py.gz.b64
-          echo "1d2ab9add1aa51242013119725f3909b6bb20eda4620c5737fecd8557544646c  /tmp/exact-session-binding.py.gz.b64" | sha256sum --check --strict
-          base64 --decode /tmp/exact-session-binding.py.gz.b64 > /tmp/exact-session-binding.py.gz
-          echo "ce50b4fbc0524894d58f2e3ffbd0d6faa66c299aaceb7f3f9764497f1487edb0  /tmp/exact-session-binding.py.gz" | sha256sum --check --strict
-          gzip --decompress --stdout /tmp/exact-session-binding.py.gz > /tmp/exact-session-binding.py
-          echo "eab13b291cf5037ba1236942cc8937292505032084b2de227677cc7993780b20  /tmp/exact-session-binding.py" | sha256sum --check --strict
-          python3 -m py_compile /tmp/exact-session-binding.py
+          gh issue comment 51 \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "Exact-session builder trigger received for builder commit \`${GITHUB_SHA}\`."
+
+      - name: Verify and decode bounded transformation
+        id: preparation
+        shell: bash
+        run: |
+          set +e
+          log=/tmp/exact-session-binding-preparation.log
+          : > "$log"
+          {
+            cat \
+              .agent/exact-session-binding.py.gz.b64.00 \
+              .agent/exact-session-binding.py.gz.b64.01 \
+              .agent/exact-session-binding.py.gz.b64.02 \
+              .agent/exact-session-binding.py.gz.b64.03a \
+              .agent/exact-session-binding.py.gz.b64.03b \
+              .agent/exact-session-binding.py.gz.b64.03c \
+              .agent/exact-session-binding.py.gz.b64.03d0 \
+              .agent/exact-session-binding.py.gz.b64.03d1 \
+              .agent/exact-session-binding.py.gz.b64.03d2 \
+              .agent/exact-session-binding.py.gz.b64.03d3 \
+              .agent/exact-session-binding.py.gz.b64.04 \
+              | tr -d '\n' > /tmp/exact-session-binding.py.gz.b64
+            echo "1d2ab9add1aa51242013119725f3909b6bb20eda4620c5737fecd8557544646c  /tmp/exact-session-binding.py.gz.b64" | sha256sum --check --strict
+            base64 --decode /tmp/exact-session-binding.py.gz.b64 > /tmp/exact-session-binding.py.gz
+            echo "ce50b4fbc0524894d58f2e3ffbd0d6faa66c299aaceb7f3f9764497f1487edb0  /tmp/exact-session-binding.py.gz" | sha256sum --check --strict
+            gzip --decompress --stdout /tmp/exact-session-binding.py.gz > /tmp/exact-session-binding.py
+            echo "eab13b291cf5037ba1236942cc8937292505032084b2de227677cc7993780b20  /tmp/exact-session-binding.py" | sha256sum --check --strict
+            python3 -m py_compile /tmp/exact-session-binding.py
+          } >> "$log" 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload preparation diagnostic
+        if: steps.preparation.outputs.status != '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: exact-session-binding-preparation-diagnostic
+          path: /tmp/exact-session-binding-preparation.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Record preparation failure
+        if: steps.preparation.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'Exact-session builder failed while verifying or decoding its bounded transformation payload:'
+            echo
+            echo '```text'
+            tail -n 100 /tmp/exact-session-binding-preparation.log
+            echo '```'
+          } > /tmp/exact-session-binding-preparation-failure.md
+          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-preparation-failure.md
+          exit 1
 
       - name: Check out current production baseline
+        if: steps.preparation.outputs.status == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -55,6 +98,7 @@ jobs:
           git checkout -B agent/phase-c-exact-session-binding origin/main
 
       - name: Enforce delivery-order gate
+        if: steps.preparation.outputs.status == '0'
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -69,7 +113,7 @@ jobs:
             --body 'Builder is prepared and integrity-checked, but delivery item 9 remains gated because the item 8 audit is not yet present on `main`. No production source was changed.'
 
       - name: Apply and validate complete bounded slice
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true'
         id: validation
         shell: bash
         run: |
@@ -130,7 +174,7 @@ jobs:
           exit 0
 
       - name: Upload validation diagnostic
-        if: steps.gate.outputs.ready == 'true' && steps.validation.outputs.status != '0'
+        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true' && steps.validation.outputs.status != '0'
         uses: actions/upload-artifact@v7
         with:
           name: exact-session-binding-validation-diagnostic
@@ -139,7 +183,7 @@ jobs:
           retention-days: 2
 
       - name: Record validation failure
-        if: steps.gate.outputs.ready == 'true' && steps.validation.outputs.status != '0'
+        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true' && steps.validation.outputs.status != '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -154,7 +198,7 @@ jobs:
           exit 1
 
       - name: Commit and publish clean production branch
-        if: steps.gate.outputs.ready == 'true' && steps.validation.outputs.status == '0'
+        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true' && steps.validation.outputs.status == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
