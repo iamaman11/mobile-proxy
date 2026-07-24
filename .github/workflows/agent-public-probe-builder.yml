@@ -83,6 +83,11 @@ jobs:
           if state_body.count(call_old) != 3:
               raise SystemExit("unexpected AppState::persist test call count")
           state_body = state_body.replace(call_old, "state.persist_for_test().await.unwrap();")
+          readiness_old = '                "readiness_state": "ready",'
+          readiness_new = '                "readiness_state": "healthy",'
+          if state_body.count(readiness_old) != 1:
+              raise SystemExit("unexpected heartbeat test readiness fixture count")
+          state_body = state_body.replace(readiness_old, readiness_new, 1)
           state_path.write_text(state_body, encoding="utf-8")
           PY
           git diff --check
