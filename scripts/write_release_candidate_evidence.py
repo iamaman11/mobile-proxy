@@ -28,11 +28,16 @@ _ACCEPTED_CHECKS = (
     "tls_tcp_reserve",
     "quic_recovery",
     "mixed_proxy",
+    "mixed_proxy_socks5",
+    "mixed_proxy_http",
+    "mixed_proxy_connect",
     "socks5_proxy",
     "http_proxy",
     "http_connect",
     "wireguard_rollback_compatibility",
     "release_integrity_policy",
+    "deployed_release_identity_verifier",
+    "physical_report_set_verifier",
 )
 
 
