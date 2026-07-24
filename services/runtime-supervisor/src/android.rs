@@ -55,6 +55,25 @@ pub async fn kick_stock_wireguard_bridge() {
     );
 }
 
+pub fn stop_compatibility_vpns() -> Result<()> {
+    let mut failures = Vec::new();
+    for command in [
+        "am broadcast --user 0 --receiver-foreground -a com.example.mobileproxy.action.STOP_TUNNEL -n com.example.mobileproxy/.TunnelCommandReceiver",
+        "am broadcast --user 0 --receiver-foreground -a com.wireguard.android.action.SET_TUNNEL_DOWN --es tunnel WiGandroid",
+        "settings delete secure always_on_vpn_app",
+        "settings put secure always_on_vpn_lockdown 0",
+    ] {
+        if let Err(error) = run_shell(command) {
+            failures.push(format!("{command}: {error:#}"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!("failed to stop compatibility VPNs: {}", failures.join("; "))
+    }
+}
+
 pub fn ensure_cellular_default_route() -> Result<()> {
     let (dev, via) = cellular_route_hint()?.context("no cellular route hint found")?;
     if main_default_route_for(&dev) {
