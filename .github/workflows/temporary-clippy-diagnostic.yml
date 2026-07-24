@@ -32,45 +32,18 @@ jobs:
           path = Path("crates/control-plane-sqlite/src/snapshot_tests.rs")
           text = path.read_text()
           old = 'exact_rows(&[first.clone()], &[(1, first)]),'
-          new = 'exact_rows(std::slice::from_ref(&first), &[(1, first)]),'
+          new = 'exact_rows(std::slice::from_ref(&first), &[(1, first.clone())]),'
           if text.count(old) != 1:
               raise SystemExit("expected exactly one cloned single-element slice")
           path.write_text(text.replace(old, new))
           PY
           cargo fmt --all
 
-      - name: Verify formatting
-        run: cargo fmt --all -- --check 2>&1 | tee rustfmt.log
-
-      - name: Capture strict Clippy
-        id: clippy
-        continue-on-error: true
+      - name: Validate exact candidate
         run: |
-          set -o pipefail
-          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
-
-      - name: Capture workspace tests
-        id: tests
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          cargo test --workspace 2>&1 | tee tests.log
-
-      - name: Upload exact diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: exact-snapshot-validation
-          path: |
-            rustfmt.log
-            clippy.log
-            tests.log
-          if-no-files-found: ignore
-          retention-days: 1
-
-      - name: Preserve validation failure
-        if: steps.clippy.outcome == 'failure' || steps.tests.outcome == 'failure'
-        run: exit 1
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
 
       - name: Publish exact fix
         run: |
