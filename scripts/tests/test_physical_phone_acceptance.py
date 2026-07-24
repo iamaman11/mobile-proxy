@@ -33,13 +33,16 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
             MODULE.verify_candidate(self.evidence())
 
     @mock.patch.object(MODULE, "curl_proxy")
-    def test_proxy_sequence_covers_all_protocols_on_protected_surfaces(self, curl_proxy):
+    def test_proxy_sequence_covers_all_authenticated_protocols(self, curl_proxy):
         result = MODULE.prove_proxy_surfaces(
             "proxy.example",
             "http://probe.example/",
             "https://probe.example/",
+            "user:password",
         )
         self.assertEqual(curl_proxy.call_count, 6)
+        for call in curl_proxy.call_args_list:
+            self.assertEqual(call.args[0][0:2], ["--proxy-user", "user:password"])
         self.assertEqual(
             result,
             {
@@ -76,6 +79,13 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
     def test_non_object_health_response_is_rejected_cleanly(self):
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "response is invalid"):
             MODULE.require_object([], "host readiness")
+
+    @mock.patch.dict("os.environ", {"PROXY_PASSWORD": "secret-value"}, clear=True)
+    def test_secret_validation_does_not_echo_secret(self):
+        self.assertEqual(MODULE._required_secret_env("PROXY_PASSWORD"), "secret-value")
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "MISSING is required") as caught:
+            MODULE._required_secret_env("MISSING")
+        self.assertNotIn("secret-value", str(caught.exception))
 
 
 if __name__ == "__main__":
