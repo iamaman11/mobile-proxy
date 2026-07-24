@@ -268,7 +268,7 @@ impl TestPhoneProxy {
                         connections.spawn(async move { handle_phone_proxy_connection(stream).await });
                     }
                     completed = connections.join_next(), if !connections.is_empty() => {
-                        completed.context("phone proxy task join failed")??;
+                        let _ = completed.context("phone proxy task join failed")??;
                     }
                 }
             }
@@ -434,7 +434,7 @@ async fn run_tls_terminator(
                 });
             }
             completed = connections.join_next(), if !connections.is_empty() => {
-                completed.context("TLS terminator task join failed")??;
+                let _ = completed.context("TLS terminator task join failed")??;
             }
         }
     }
