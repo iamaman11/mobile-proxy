@@ -39,4 +39,4 @@ jobs:
             grep -n -B 28 -A 48 'QUIC heartbeat authority' /tmp/exact-session-binding.py || true
             echo '```'
           } > /tmp/context.md
-          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/context.md
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/context.md
