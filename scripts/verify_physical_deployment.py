@@ -24,6 +24,7 @@ _EXPECTED_ALGORITHM = "blake3-256"
 _EXPECTED_DOMAIN = "mobile-proxy/release-file/v1"
 _MAX_ENTRIES = 128
 _STOCK_WIREGUARD_PACKAGE = "com.wireguard.android"
+_SUPPORTED_DEVICE_OWNERS = {"first_party_reverse_tunnel", "stock_wireguard_bridge"}
 
 _VM_REMOTE_PATHS = {
     "bin/control-plane": "/opt/mobile-relaycontrolpoint/current/control-plane",
@@ -107,6 +108,28 @@ def verify_device_release_metadata(root: Path, candidate_sha: str) -> None:
     require(metadata.get("format_version") == 1, "device release metadata version is unsupported")
     require(metadata.get("git_sha") == candidate_sha, "device package SHA differs from candidate")
     require(metadata.get("git_worktree_clean") is True, "device package was built from a dirty tree")
+
+
+def release_tunnel_owner(root: Path) -> str:
+    path = root / "config" / "host-daemon.json"
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AcceptanceFailure("device host configuration is unreadable") from error
+    require(isinstance(config, dict), "device host configuration is invalid")
+    wireguard = config.get("wireguard")
+    require(isinstance(wireguard, dict), "device WireGuard configuration is invalid")
+    owner = wireguard.get("owner")
+    require(owner in _SUPPORTED_DEVICE_OWNERS, "device release tunnel owner is unsupported")
+    reverse = config.get("reverse_tunnel")
+    require(isinstance(reverse, dict), "device reverse-tunnel configuration is invalid")
+    if owner == "first_party_reverse_tunnel":
+        require(wireguard.get("enabled") is False, "reverse release unexpectedly enables WireGuard")
+        require(reverse.get("enabled") is True, "reverse release disables reverse tunnel")
+    else:
+        require(wireguard.get("enabled") is True, "WireGuard release disables WireGuard")
+        require(reverse.get("enabled") is False, "WireGuard release leaves reverse tunnel enabled")
+    return owner
 
 
 def _run_bytes(command: list[str], failure: str) -> bytes:
@@ -236,8 +259,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device-serial")
     parser.add_argument(
         "--expected-tunnel-owner",
-        choices=["first_party_reverse_tunnel", "stock_wireguard_bridge"],
-        required=True,
+        choices=sorted(_SUPPORTED_DEVICE_OWNERS),
+        help="Optional assertion; the authoritative owner is read from the packaged host config",
     )
     parser.add_argument("--vm-release-root", type=Path, required=True)
     parser.add_argument("--vm-project", required=True)
@@ -255,6 +278,9 @@ def main() -> int:
         candidate_sha = verify_candidate(read_json(args.evidence))
         device_paths = load_release_inventory(args.device_release_root)
         verify_device_release_metadata(args.device_release_root, candidate_sha)
+        expected_owner = release_tunnel_owner(args.device_release_root)
+        if args.expected_tunnel_owner is not None:
+            require(args.expected_tunnel_owner == expected_owner, "requested tunnel owner differs from package")
         vm_paths = load_release_inventory(args.vm_release_root)
         verify_device_files(
             args.device_release_root,
@@ -262,12 +288,12 @@ def main() -> int:
             args.device_serial,
             args.device_root,
         )
-        verify_android_vpn_owner(args.device_serial, args.expected_tunnel_owner)
+        verify_android_vpn_owner(args.device_serial, expected_owner)
         verify_vm_files(args, args.vm_release_root, vm_paths)
         report = {
             "format_version": 1,
             "candidate_sha": candidate_sha,
-            "expected_tunnel_owner": args.expected_tunnel_owner,
+            "expected_tunnel_owner": expected_owner,
             "device_release_entries": len(device_paths),
             "vm_release_entries": len(vm_paths),
             "device_release_metadata_match": True,
