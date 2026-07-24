@@ -44,15 +44,17 @@ A missing, empty, unsupported or corrupt SQLite target stops startup. Operators 
 
 The preserved pre-cutover JSON is migration evidence, not a safe rollback source after SQLite accepts new writes. Starting it after post-cutover mutations could discard acknowledged operations.
 
+The ordinary `export` subcommand produces the typed diagnostic snapshot format. That format is intentionally not the JSON runtime backend contract and must not be used directly as a rollback state file.
+
 To roll back without losing current canonical state:
 
 1. Stop the SQLite-backed daemon so the export observes a stable source.
-2. Export the latest SQLite snapshot atomically to a new JSON path:
+2. Materialize the latest SQLite state atomically into the JSON runtime contract:
 
 ```text
-control-plane-state-migrate export \
+control-plane-state-migrate rollback-export \
   --sqlite /var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3 \
-  --diagnostic-json /var/lib/mobile-relaycontrolpoint/control-plane-state-rollback.json
+  --rollback-json /var/lib/mobile-relaycontrolpoint/control-plane-state-rollback.json
 ```
 
 3. Start the rollback implementation explicitly:
@@ -65,7 +67,7 @@ control-plane \
 
 4. Verify device inventory, pending-command state, exact replay and conflicting replay before reopening normal traffic.
 
-The rollback export is a separate artifact. The original migration source is not overwritten, and no automatic reverse migration occurs during daemon startup.
+The rollback export is a separate artifact. The original migration source and typed diagnostic export are not overwritten, and no automatic reverse migration occurs during daemon startup.
 
 ## Permanent acceptance evidence
 
@@ -76,9 +78,10 @@ The process test uses compiled production binaries and TCP HTTP requests to prov
 - authenticated reads and acknowledgement work through the default backend;
 - acknowledgement and durable replay survive process restart;
 - conflicting idempotency reuse still returns HTTP `409`;
-- the latest SQLite state exports to canonical JSON after the mutation;
+- `rollback-export` materializes the latest post-mutation SQLite state in the JSON backend contract;
 - explicit JSON rollback starts from that current-state export;
 - the acknowledged command remains absent while exact replay and conflict behavior remain intact;
+- a missing rollback-export source creates neither a database nor an output;
 - the preserved original JSON source remains byte-for-byte unchanged.
 
 ## Compatibility and non-goals
