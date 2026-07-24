@@ -182,11 +182,7 @@ fn conflicting_replay_evidence_fails_closed_without_replacement() {
         .unwrap();
 
     let conflict = store.write(|transaction| {
-        transaction.insert_command_result(
-            "scope-1",
-            "command-2",
-            r#"{"command_id":"command-2"}"#,
-        )
+        transaction.insert_command_result("scope-1", "command-2", r#"{"command_id":"command-2"}"#)
     });
     assert!(matches!(conflict, Err(StoreError::Database(_))));
     assert_eq!(
