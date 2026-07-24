@@ -1,0 +1,210 @@
+name: Temporary Phase B Open Existing SQLite Builder
+
+on:
+  push:
+    branches:
+      - agent/phase-b-explicit-sqlite-backend
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/phase-b-explicit-sqlite-backend
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Add no-create runtime SQLite open
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          lib = Path('crates/control-plane-sqlite/src/lib.rs')
+          body = lib.read_text()
+          old_import = 'use rusqlite::{Connection, TransactionBehavior, params};'
+          new_import = 'use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};'
+          if body.count(old_import) != 1:
+              raise SystemExit(f'expected one rusqlite import, found {body.count(old_import)}')
+          body = body.replace(old_import, new_import, 1)
+
+          open_anchor = '''        let connection = Connection::open(path)?;
+                  Self::initialize(connection, true)
+              }
+
+              fn initialize(mut connection: Connection, require_wal: bool) -> Result<Self, StoreError> {
+          '''
+          open_replacement = '''        let connection = Connection::open(path)?;
+                  Self::initialize(connection, true)
+              }
+
+              pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, StoreError> {
+                  let connection = Connection::open_with_flags(
+                      path,
+                      OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                  )?;
+                  Self::initialize_existing(connection, true)
+              }
+
+              fn initialize(mut connection: Connection, require_wal: bool) -> Result<Self, StoreError> {
+          '''
+          if body.count(open_anchor) != 1:
+              raise SystemExit(f'expected one open anchor, found {body.count(open_anchor)}')
+          body = body.replace(open_anchor, open_replacement, 1)
+
+          initialize = '''    fn initialize(mut connection: Connection, require_wal: bool) -> Result<Self, StoreError> {
+                  connection.busy_timeout(BUSY_TIMEOUT)?;
+                  connection.pragma_update(None, "foreign_keys", true)?;
+                  connection.pragma_update(None, "synchronous", "FULL")?;
+
+                  if require_wal {
+                      let journal_mode: String =
+                          connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
+                      if !journal_mode.eq_ignore_ascii_case("wal") {
+                          return Err(StoreError::UnexpectedJournalMode);
+                      }
+                  }
+
+                  let foreign_keys: i64 =
+                      connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+                  if foreign_keys != 1 {
+                      return Err(StoreError::UnexpectedForeignKeyState);
+                  }
+
+                  apply_migrations(&mut connection)?;
+                  validate_schema(&connection)?;
+                  Ok(Self { connection })
+              }
+          '''
+          replacement = '''    fn initialize(mut connection: Connection, require_wal: bool) -> Result<Self, StoreError> {
+                  configure_connection(&connection, require_wal)?;
+                  apply_migrations(&mut connection)?;
+                  validate_schema(&connection)?;
+                  Ok(Self { connection })
+              }
+
+              fn initialize_existing(connection: Connection, require_wal: bool) -> Result<Self, StoreError> {
+                  let found = read_schema_version(&connection)?;
+                  if found != SCHEMA_VERSION {
+                      return Err(StoreError::UnsupportedSchemaVersion {
+                          found,
+                          supported: SCHEMA_VERSION,
+                      });
+                  }
+                  validate_schema(&connection)?;
+                  configure_connection(&connection, require_wal)?;
+                  Ok(Self { connection })
+              }
+          '''
+          if body.count(initialize) != 1:
+              raise SystemExit(f'expected one initialize block, found {body.count(initialize)}')
+          body = body.replace(initialize, replacement, 1)
+
+          marker = 'fn apply_migrations(connection: &mut Connection) -> Result<(), StoreError> {'
+          helper = '''fn configure_connection(
+              connection: &Connection,
+              require_wal: bool,
+          ) -> Result<(), StoreError> {
+              connection.busy_timeout(BUSY_TIMEOUT)?;
+              connection.pragma_update(None, "foreign_keys", true)?;
+              connection.pragma_update(None, "synchronous", "FULL")?;
+
+              if require_wal {
+                  let journal_mode: String =
+                      connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
+                  if !journal_mode.eq_ignore_ascii_case("wal") {
+                      return Err(StoreError::UnexpectedJournalMode);
+                  }
+              }
+
+              let foreign_keys: i64 =
+                  connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+              if foreign_keys != 1 {
+                  return Err(StoreError::UnexpectedForeignKeyState);
+              }
+              Ok(())
+          }
+
+          '''
+          if body.count(marker) != 1:
+              raise SystemExit(f'expected one migration marker, found {body.count(marker)}')
+          body = body.replace(marker, helper + marker, 1)
+          lib.write_text(body)
+
+          backend = Path('services/control-plane/src/state_sqlite_backend.rs')
+          body = backend.read_text()
+          old = 'let mut store = SqliteStore::open(path)'
+          if body.count(old) != 3:
+              raise SystemExit(f'expected three SQLite opens, found {body.count(old)}')
+          body = body.replace(old, 'let mut store = SqliteStore::open_existing(path)', 2)
+          backend.write_text(body)
+
+          tests = Path('services/control-plane/src/state_sqlite_backend_tests.rs')
+          body = tests.read_text()
+          if 'explicit_sqlite_backend_rejects_an_unmigrated_existing_file' in body:
+              raise SystemExit('unmigrated-file test already exists')
+          body += '''
+
+          #[tokio::test]
+          async fn explicit_sqlite_backend_rejects_an_unmigrated_existing_file() {
+              let database = TempDatabase::new("unmigrated-sqlite");
+              fs::write(&database.path, b"").unwrap();
+
+              let error = match AppState::load_with_backend(
+                  database.path.clone(),
+                  StateBackend::Sqlite,
+              )
+              .await
+              {
+                  Ok(_) => panic!("unmigrated SQLite state unexpectedly started"),
+                  Err(error) => error,
+              };
+
+              assert!(error.to_string().contains("unsupported SQLite schema version"));
+              assert_eq!(fs::metadata(&database.path).unwrap().len(), 0);
+          }
+
+          #[tokio::test]
+          async fn sqlite_backend_does_not_recreate_a_removed_database() {
+              let database = TempDatabase::new("removed-sqlite");
+              database.initialize();
+              let state = AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite)
+                  .await
+                  .unwrap();
+
+              fs::remove_file(&database.path).unwrap();
+              let _ = fs::remove_file(sidecar_path(&database.path, "-wal"));
+              let _ = fs::remove_file(sidecar_path(&database.path, "-shm"));
+
+              assert_eq!(
+                  state.register_device(registration("device-after-removal")).await,
+                  Err(RegisterDeviceError::Persistence)
+              );
+              assert!(state.devices.lock().await.is_empty());
+              assert!(!database.path.exists());
+          }
+          '''
+          tests.write_text(body)
+          PY
+          cargo fmt --all
+          cargo check --workspace --all-targets
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/control-plane-sqlite/src/lib.rs services/control-plane/src/state_sqlite_backend.rs services/control-plane/src/state_sqlite_backend_tests.rs
+          git commit -m "Require preexisting migrated SQLite runtime state [skip ci]"
+          git push origin HEAD:agent/phase-b-explicit-sqlite-backend
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
