@@ -9,7 +9,7 @@ Download `release-candidate-evidence.json` from the successful workflow artifact
 
 `software-release-candidate-<candidate-sha>`
 
-Use a clean checkout of that exact SHA. Do not test a branch name or a later commit.
+Use a clean detached checkout of that exact SHA. Do not test a branch name or a later commit.
 
 ```bash
 git fetch --all --tags
@@ -18,11 +18,56 @@ test "$(git rev-parse HEAD)" = "<candidate-sha>"
 test -z "$(git status --porcelain)"
 ```
 
-Build and deploy the device and VM artifacts from this checkout only. Verify the packaged BLAKE3 integrity manifest before installation. Record candidate SHA, workflow run URL, phone identifier, Android version, operator/SIM, VM identifier, tester and UTC timestamps in the test record. Do not record tokens or proxy credentials.
+Record candidate SHA, workflow run URL, phone identifier, Android version, operator/SIM, VM identifier, tester and UTC timestamps. Never record tokens or proxy credentials.
 
-## 2. Configure the staged runner
+## 2. Build and deploy from the frozen checkout
 
-The runner reads tokens only from environment variables and never writes them to its report.
+Build and deploy both release roots from this clean checkout using the normal operator commands. The packaging commands clean their release output before writing, create a BLAKE3 integrity manifest and verify it locally before returning success.
+
+```bash
+cargo run --release -p operator-cli -- package-device-release \
+  --manifest-path <device-manifest> \
+  --release-id <release-id> \
+  --tunnel-owner first_party_reverse_tunnel
+
+cargo run --release -p operator-cli -- provision-vm \
+  --manifest-path <vm-manifest> \
+  --release-id <release-id> \
+  --ssh-user <vm-ssh-user> \
+  --ssh-key <vm-ssh-key>
+
+cargo run --release -p operator-cli -- install-device-release \
+  --manifest-path <device-manifest> \
+  --release-id <release-id> \
+  --device-serial <adb-serial> \
+  --tunnel-owner first_party_reverse_tunnel
+```
+
+Use the exact output roots produced by these commands. Do not edit packaged files after manifest generation.
+
+## 3. Prove deployed artifact identity
+
+Before any network acceptance, compare every packaged device file byte-for-byte with the active phone release and every supported VM release file by SHA-256 with the installed VM copy. The verifier also requires device `release-metadata.json` to contain the evidence SHA and a clean build flag.
+
+```bash
+python3 scripts/verify_physical_deployment.py \
+  --evidence ./release-candidate-evidence.json \
+  --device-release-root target/device-releases/<release-id> \
+  --device-serial <adb-serial> \
+  --vm-release-root target/vm-releases/<release-id> \
+  --vm-project <gcp-project> \
+  --vm-zone <gcp-zone> \
+  --vm-instance <instance-name> \
+  --vm-ssh-user <vm-ssh-user> \
+  --vm-ssh-key <vm-ssh-key> \
+  --output physical-deployment-integrity.json
+```
+
+Do not proceed unless the report contains the same candidate SHA, `device_release_metadata_match=true`, `device_deployment_match=true`, `vm_deployment_match=true` and `accepted=true`.
+
+## 4. Configure the staged runner
+
+The runner reads tokens only from environment variables and never writes them to reports.
 
 ```bash
 export HOST_ADMIN_TOKEN='<host-daemon admin token>'
@@ -39,11 +84,20 @@ COMMON_ARGS=(
 )
 ```
 
-The controlled HTTP and HTTPS probes must be reachable only through the protected proxy path and must not require credentials embedded in their URLs.
+The controlled HTTP and HTTPS probes must be reachable only through the protected proxy path and must not contain credentials in their URLs.
 
-## 3. Clean startup and QUIC-primary acceptance
+Every stage checks six protected protocol paths:
 
-Start the VM services and the phone-side deployed service from a clean stopped state. Wait until both `/livez` and `/readyz` are healthy, then run:
+- SOCKS5 through mixed port `1080`;
+- HTTP through mixed port `1080`;
+- HTTPS through HTTP CONNECT on mixed port `1080`;
+- SOCKS5 on `1081`;
+- HTTP on `3128`;
+- HTTPS through HTTP CONNECT on `3128`.
+
+## 5. Clean startup and QUIC-primary acceptance
+
+Start the VM services and phone-side release from a clean stopped state. Wait until both `/livez` and `/readyz` are healthy, then run:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -51,19 +105,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-online.json
 ```
 
-This stage must prove:
+This stage must prove process health, expected durable device inventory, a connected fresh QUIC tunnel and all six proxy paths.
 
-- host and control-plane process health;
-- restored device inventory contains the expected phone;
-- reverse tunnel is connected, fresh and using QUIC;
-- mixed proxy behavior on `1080`;
-- SOCKS5 on `1081`;
-- HTTP proxy on `3128`;
-- HTTPS through HTTP CONNECT on `3128`.
+## 6. Phone or service reboot and state rehydration
 
-## 4. Phone or service reboot and state rehydration
-
-Reboot the phone, or stop and start the deployed phone-side service using the production service manager. Do not reset the VM or delete SQLite state. Wait for the phone to re-register and the tunnel to become fresh, then run:
+Reboot the phone, or stop and start the deployed phone-side service using the production service manager. Do not reset the VM or delete SQLite state. Wait for the same device to re-register and the tunnel to become fresh, then run:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -71,11 +117,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-post-reboot.json
 ```
 
-The same device ID must reappear from durable control-plane state and all protected proxy surfaces must work over fresh QUIC.
+The expected device ID must remain present in durable control-plane state and all six proxy paths must work over fresh QUIC.
 
-## 5. Forced TLS/TCP reserve
+## 7. Forced TLS/TCP reserve
 
-At the controlled VM or network firewall, block only the configured QUIC UDP path between the phone and reverse-tunnel server. Keep certificate-pinned TLS/TCP reserve reachable. Restart only the tunnel connection or phone-side service if necessary to create a new connection attempt; do not change credentials or the candidate binaries.
+At the controlled VM or network firewall, block only the configured QUIC UDP path between the phone and reverse-tunnel server. Keep certificate-pinned TLS/TCP reserve reachable. Restart only the tunnel connection or phone-side service if needed to create a new attempt; do not change credentials, binaries or configuration.
 
 Wait until authenticated health reports `active_transport=tls_tcp` and `freshness=fresh`, then run:
 
@@ -85,11 +131,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-fallback.json
 ```
 
-All four protected proxy checks must succeed. Any plaintext fallback, stale authority, routing to another device or unbounded retry is a blocking defect.
+All six proxy paths must succeed. Plaintext fallback, stale authority, routing to another device or unbounded retry is a blocking defect.
 
-## 6. Return to QUIC
+## 8. Return to QUIC
 
-Remove the QUIC UDP block. Terminate the current reserve tunnel connection through the existing deployment/service manager so the client performs a new QUIC-first attempt. Do not modify the tested binaries or configuration.
+Remove the QUIC UDP block. Terminate the current reserve tunnel connection through the existing deployment/service manager so the client performs a new QUIC-first attempt. Do not modify the tested release.
 
 Wait until authenticated health reports fresh QUIC and run:
 
@@ -99,11 +145,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-recovered.json
 ```
 
-The same device and logical deployment must serve every protected proxy surface after recovery.
+The same device and deployment must serve all six proxy paths after recovery.
 
-## 7. WireGuard rollback availability
+## 9. WireGuard rollback availability
 
-Activate the existing documented WireGuard rollback configuration without replacing the candidate application binaries. Confirm the phone and VM establish the existing rollback path and authenticated status reports `wireguard_enabled=true`, then run:
+Activate the existing documented WireGuard rollback configuration without replacing candidate binaries. Confirm the phone and VM establish the rollback path and authenticated status reports `wireguard_enabled=true`, then run:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -111,18 +157,40 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-wireguard.json
 ```
 
-All proxy surfaces must remain usable. Restore the normal QUIC-first configuration after the rollback proof and confirm fresh QUIC once more.
+All six proxy paths must remain usable. Restore normal QUIC-first configuration afterward and confirm fresh QUIC again.
 
-## 8. Acceptance record and stop conditions
+## 10. Verify the complete report set
 
-The physical gate passes only when all five reports contain the same `candidate_sha` and `accepted=true`:
+Do not close the physical gate by visual inspection alone. Validate deployment integrity plus all five stage reports as one exact-SHA set:
 
+```bash
+python3 scripts/verify_physical_phone_acceptance_reports.py \
+  --evidence ./release-candidate-evidence.json \
+  --deployment physical-deployment-integrity.json \
+  --online physical-online.json \
+  --post-reboot physical-post-reboot.json \
+  --fallback physical-fallback.json \
+  --recovered physical-recovered.json \
+  --wireguard physical-wireguard.json \
+  --output physical-acceptance-summary.json
+```
+
+The gate passes only when the summary contains the evidence SHA, all five accepted stages, `deployment_integrity_accepted=true`, `physical_phone_acceptance_complete=true` and `accepted=true`.
+
+Attach these bounded files and operator timestamps to the delivery-item issue:
+
+- `physical-deployment-integrity.json`;
 - `physical-online.json`;
 - `physical-post-reboot.json`;
 - `physical-fallback.json`;
 - `physical-recovered.json`;
-- `physical-wireguard.json`.
+- `physical-wireguard.json`;
+- `physical-acceptance-summary.json`.
 
-Attach those bounded reports and operator timestamps to the delivery-item issue. Never attach tokens, private keys, raw configuration, full proxy URLs with credentials or unrestricted service logs.
+Never attach tokens, private keys, raw configuration, credential-bearing proxy URLs or unrestricted service logs.
 
-Stop and reject the candidate for any unresolved P0/P1 defect, SHA mismatch, dirty checkout, failed integrity verification, missing durable state, failed protected surface, stale/mismatched tunnel authority, plaintext downgrade, inability to return to QUIC or unavailable WireGuard rollback. After any source change, rerun the complete `Software Release Candidate` workflow on the new immutable SHA before repeating this physical sequence.
+## 11. Stop conditions
+
+Reject the candidate for any unresolved P0/P1 defect, SHA mismatch, dirty checkout, failed package or deployed-file integrity, missing durable state, missing expected device, failed proxy protocol path, stale or mismatched tunnel authority, plaintext downgrade, inability to return to QUIC or unavailable WireGuard rollback.
+
+After any source change, rerun the complete `Software Release Candidate` workflow on the new immutable SHA, download its new evidence artifact, rebuild both release roots and repeat this physical sequence from the beginning.
