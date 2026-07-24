@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   generate:
-    if: github.event.head_commit.message != 'Generate Phase B artifacts'
+    if: github.event.head_commit.message != 'Generate bounded Phase B artifacts'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -22,10 +22,12 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt
           rustup default stable
 
-      - name: Generate formatted source and lockfile
+      - name: Generate formatted source and bounded lockfile
         run: |
+          git fetch origin main
+          git checkout origin/main -- Cargo.lock
           cargo fmt --all
-          cargo generate-lockfile
+          cargo check -p mobile-proxy-control-plane-sqlite
 
       - name: Commit generated artifacts
         run: |
@@ -35,5 +37,5 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m 'Generate Phase B artifacts'
+          git commit -m 'Generate bounded Phase B artifacts'
           git push
