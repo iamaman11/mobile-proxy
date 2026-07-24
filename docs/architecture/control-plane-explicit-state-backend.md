@@ -21,6 +21,8 @@ and the equivalent `CONTROL_PLANE_STATE_BACKEND` environment variable.
 
 `sqlite` is opt-in. The selected state path must already be an existing regular SQLite file produced or validated by the migration utility. A missing path fails startup and is never initialized as an empty database implicitly.
 
+Runtime SQLite access opens the file read-write without the SQLite `CREATE` flag. The current schema version and exact table inventory are verified before WAL or connection settings are established. An empty, unmigrated, removed or replaced path therefore fails closed instead of being initialized or recreated by a request.
+
 The production composition root always calls `load_with_backend` with the parsed selection. The legacy `AppState::load` wrapper is compiled only for tests so production startup cannot bypass backend selection accidentally.
 
 ## Shared application behavior
@@ -41,10 +43,12 @@ Read-only command polling continues to use the in-memory projection loaded from 
 SQLite startup:
 
 1. requires an existing regular file;
-2. establishes the accepted WAL, foreign-key, synchronous and busy-timeout settings;
-3. validates schema and typed relations;
-4. reconstructs the legacy-compatible in-memory `CommandState` projection from canonical replay records;
-5. validates that legacy claim keys, canonical result keys and retention order are exact.
+2. opens read-write without permission to create a database;
+3. requires the current schema version and exact table inventory without applying migrations;
+4. establishes the accepted WAL, foreign-key, synchronous and busy-timeout settings;
+5. validates typed relations;
+6. reconstructs the legacy-compatible in-memory `CommandState` projection from canonical replay records;
+7. validates that legacy claim keys, canonical result keys and retention order are exact.
 
 No JSON file is read or written while SQLite is explicitly selected.
 
@@ -52,13 +56,15 @@ No JSON file is read or written while SQLite is explicitly selected.
 
 The in-process device and command locks serialize mutations. SQLite additionally compares the complete current relations against the expected pre-transition state inside one `IMMEDIATE` transaction. An external writer or second daemon instance therefore causes a bounded persistence failure instead of overwriting newer state.
 
-The failed candidate is not published in memory. Restarting from the SQLite file rehydrates the externally committed canonical state.
+The failed candidate is not published in memory. Restarting from the SQLite file rehydrates the externally committed canonical state. If the database disappears after startup, later mutations fail without recreating it, including when the expected in-memory state is empty.
 
 ## Evidence
 
 Tests prove:
 
 - selecting SQLite with a missing path fails without creating a database;
+- an existing but unmigrated empty file is rejected without changing its bytes;
+- deleting the selected database after startup makes the next mutation fail without recreating the file or publishing the candidate in memory;
 - registration, heartbeat, public probe, issue, exact replay, polling and acknowledgement preserve their existing outcomes;
 - pending delivery disappears after acknowledgement while replay survives daemon restart;
 - device health and public-probe projections survive restart;
