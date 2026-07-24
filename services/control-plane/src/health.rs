@@ -1,12 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use mobile_proxy_control_plane_sqlite::SqliteStore;
 use serde_json::{Value, json};
 
