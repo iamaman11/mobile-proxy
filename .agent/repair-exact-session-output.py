@@ -91,10 +91,6 @@ for signature, label in (
         "    pub(crate) async fn register_session_liveness(&self, node_id: String, session_id: Uuid) {\n",
         "test-only liveness registration wrapper",
     ),
-    (
-        "    pub(crate) async fn remove_session_liveness(&self, node_id: &str, session_id: Uuid) {\n",
-        "test-only liveness removal wrapper",
-    ),
 ):
     replace_once(state_path, signature, "    #[cfg(test)]\n" + signature, label)
 
