@@ -25,6 +25,7 @@ _EXPECTED_DOMAIN = "mobile-proxy/release-file/v1"
 _MAX_ENTRIES = 128
 _STOCK_WIREGUARD_PACKAGE = "com.wireguard.android"
 _SUPPORTED_DEVICE_OWNERS = {"first_party_reverse_tunnel", "stock_wireguard_bridge"}
+_DYNAMIC_VM_RELEASE_PATHS = {"nginx/mobile-public-proxy.conf"}
 
 _VM_REMOTE_PATHS = {
     "bin/control-plane": "/opt/mobile-relaycontrolpoint/current/control-plane",
@@ -41,7 +42,6 @@ _VM_REMOTE_PATHS = {
     "systemd/mobile-public-proxy.service": "/etc/systemd/system/mobile-public-proxy.service",
     "systemd/mobile-reverse-tunnel-server.service": "/etc/systemd/system/mobile-reverse-tunnel-server.service",
     "nginx/mobile-control-plane-tls": "/etc/nginx/sites-available/mobile-control-plane-tls",
-    "nginx/mobile-public-proxy.conf": "/etc/nginx/stream-available/mobile-public-proxy.conf",
 }
 
 
@@ -64,6 +64,24 @@ def _safe_relative_path(raw: Any) -> str:
     require(".." not in path.parts and "." not in path.parts, "release path escapes its root")
     require(all(part and part not in {"/", "\\"} for part in path.parts), "release path is invalid")
     return path.as_posix()
+
+
+def verify_local_release_integrity(root: Path) -> None:
+    _run_bytes(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "--release",
+            "-p",
+            "operator-cli",
+            "--",
+            "verify-release-integrity",
+            "--root",
+            str(root),
+        ],
+        "local release integrity verification failed",
+    )
 
 
 def load_release_inventory(root: Path) -> list[str]:
@@ -225,8 +243,9 @@ def _parse_sha256sum(output: str) -> dict[str, str]:
 
 
 def verify_vm_files(args: argparse.Namespace, root: Path, paths: list[str]) -> None:
-    require(set(paths) == set(_VM_REMOTE_PATHS), "VM release inventory does not match the supported deployment map")
-    remote_paths = [_VM_REMOTE_PATHS[path] for path in paths]
+    expected_inventory = set(_VM_REMOTE_PATHS) | _DYNAMIC_VM_RELEASE_PATHS
+    require(set(paths) == expected_inventory, "VM release inventory does not match the supported deployment map")
+    remote_paths = list(_VM_REMOTE_PATHS.values())
     remote_command = "sudo sha256sum -- " + " ".join(shlex.quote(path) for path in remote_paths)
     command = [
         "gcloud",
@@ -246,8 +265,7 @@ def verify_vm_files(args: argparse.Namespace, root: Path, paths: list[str]) -> N
     output = _run_bytes(command, "failed to read deployed VM release digests").decode("utf-8", "strict")
     remote_hashes = _parse_sha256sum(output)
     require(set(remote_hashes) == set(remote_paths), "VM digest output is incomplete")
-    for relative in paths:
-        remote = _VM_REMOTE_PATHS[relative]
+    for relative, remote in _VM_REMOTE_PATHS.items():
         require(remote_hashes[remote] == _sha256_file(root / relative), "deployed VM file differs")
 
 
@@ -276,6 +294,8 @@ def main() -> int:
     args = parse_args()
     try:
         candidate_sha = verify_candidate(read_json(args.evidence))
+        verify_local_release_integrity(args.device_release_root)
+        verify_local_release_integrity(args.vm_release_root)
         device_paths = load_release_inventory(args.device_release_root)
         verify_device_release_metadata(args.device_release_root, candidate_sha)
         expected_owner = release_tunnel_owner(args.device_release_root)
@@ -296,6 +316,7 @@ def main() -> int:
             "expected_tunnel_owner": expected_owner,
             "device_release_entries": len(device_paths),
             "vm_release_entries": len(vm_paths),
+            "local_release_integrity_match": True,
             "device_release_metadata_match": True,
             "device_deployment_match": True,
             "android_vpn_owner_match": True,
