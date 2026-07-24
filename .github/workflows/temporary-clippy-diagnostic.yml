@@ -39,11 +39,38 @@ jobs:
           PY
           cargo fmt --all
 
-      - name: Validate exact candidate
+      - name: Verify formatting
+        run: cargo fmt --all -- --check 2>&1 | tee rustfmt.log
+
+      - name: Capture strict Clippy
+        id: clippy
+        continue-on-error: true
         run: |
-          cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+
+      - name: Capture workspace tests
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee tests.log
+
+      - name: Upload exact diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: exact-snapshot-validation
+          path: |
+            rustfmt.log
+            clippy.log
+            tests.log
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Preserve validation failure
+        if: steps.clippy.outcome == 'failure' || steps.tests.outcome == 'failure'
+        run: exit 1
 
       - name: Publish exact fix
         run: |
