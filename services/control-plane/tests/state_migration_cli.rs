@@ -86,10 +86,7 @@ fn legacy_body(device_id: &str, value: &DeviceCommand) -> Vec<u8> {
 fn canonical_snapshot(device_id: &str, value: DeviceCommand) -> ControlPlaneSnapshot {
     ControlPlaneSnapshot::from_parts(
         BTreeMap::from([(device_id.to_owned(), device(device_id))]),
-        BTreeMap::from([(
-            device_id.to_owned(),
-            VecDeque::from([value.clone()]),
-        )]),
+        BTreeMap::from([(device_id.to_owned(), VecDeque::from([value.clone()]))]),
         vec![ReplayRecord::from_command(value)],
     )
     .unwrap()
@@ -194,7 +191,11 @@ fn different_nonempty_target_fails_without_changing_sqlite_or_export() {
     fs::write(&first_source, legacy_body("device-1", &first_command)).unwrap();
     fs::write(&second_source, legacy_body("device-2", &second_command)).unwrap();
 
-    assert!(run_import(&first_source, &sqlite, &first_diagnostic).status.success());
+    assert!(
+        run_import(&first_source, &sqlite, &first_diagnostic)
+            .status
+            .success()
+    );
     let before = {
         let mut store = SqliteStore::open(&sqlite).unwrap();
         store.load_snapshot().unwrap().to_canonical_json().unwrap()
@@ -233,19 +234,19 @@ fn malformed_or_unsupported_source_fails_before_sqlite_creation() {
     )
     .unwrap();
 
-    assert!(!run_import(&malformed, &malformed_sqlite, &malformed_diagnostic)
-        .status
-        .success());
+    assert!(
+        !run_import(&malformed, &malformed_sqlite, &malformed_diagnostic)
+            .status
+            .success()
+    );
     assert!(!malformed_sqlite.exists());
     assert!(!malformed_diagnostic.exists());
 
-    assert!(!run_import(
-        &unsupported,
-        &unsupported_sqlite,
-        &unsupported_diagnostic
-    )
-    .status
-    .success());
+    assert!(
+        !run_import(&unsupported, &unsupported_sqlite, &unsupported_diagnostic)
+            .status
+            .success()
+    );
     assert!(!unsupported_sqlite.exists());
     assert!(!unsupported_diagnostic.exists());
 }

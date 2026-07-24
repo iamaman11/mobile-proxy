@@ -141,8 +141,9 @@ fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create diagnostic directory {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create diagnostic directory {}", parent.display())
+        })?;
     }
     let temporary = temporary_path(path);
     let mut file = OpenOptions::new()
@@ -150,11 +151,24 @@ fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
         .truncate(true)
         .write(true)
         .open(&temporary)
-        .with_context(|| format!("failed to create temporary diagnostic {}", temporary.display()))?;
-    file.write_all(body)
-        .with_context(|| format!("failed to write temporary diagnostic {}", temporary.display()))?;
-    file.sync_all()
-        .with_context(|| format!("failed to sync temporary diagnostic {}", temporary.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to create temporary diagnostic {}",
+                temporary.display()
+            )
+        })?;
+    file.write_all(body).with_context(|| {
+        format!(
+            "failed to write temporary diagnostic {}",
+            temporary.display()
+        )
+    })?;
+    file.sync_all().with_context(|| {
+        format!(
+            "failed to sync temporary diagnostic {}",
+            temporary.display()
+        )
+    })?;
     drop(file);
     fs::rename(&temporary, path).with_context(|| {
         format!(
