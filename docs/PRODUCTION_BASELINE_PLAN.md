@@ -12,6 +12,8 @@ The former long-horizon platform roadmap has been moved to [`future/ULTIMATE_IMP
 
 This document is the sole canonical implementation roadmap for current development. Architecture ADRs and compatibility contracts remain normative for their bounded subjects, but they do not authorize work outside this baseline.
 
+Execution is split into a software-complete release candidate and final physical-device acceptance. Lack of an attached phone does not authorize deferring source-controlled migration, runtime cutover, recovery, backup/restore, process-level tunnel acceptance or operational work that can be proved without the device.
+
 ## 2. Protected compatibility surface
 
 The following behavior must remain available throughout the baseline work:
@@ -38,6 +40,7 @@ Current work is governed by these rules:
 6. Every phase ends with an explicit stop-and-reassess decision before more work begins.
 7. A future-roadmap concept may be referenced only to explain a non-goal or compatibility constraint; it may not become implementation scope implicitly.
 8. When two designs satisfy the same invariant, prefer the one with fewer states, fewer persistence concepts, fewer runtime dependencies and a smaller rollback surface.
+9. Environment unavailability may defer only evidence that intrinsically requires that environment. It must not leave independently testable production code, migration, cutover or recovery work incomplete.
 
 ## 4. Baseline phases
 
@@ -103,21 +106,22 @@ Required work:
 4. Verify that no arbitrary “first device” selection is used where a specific device is required.
 5. Verify exact device and tunnel-session binding; add runtime generation only if a demonstrated stale-session gap remains after current session identity and freshness checks.
 6. Fix only residual correctness gaps found by that audit.
-7. Verify real QUIC-to-TLS/TCP failover by blocking the QUIC path and proving reserve operation.
-8. Restore QUIC and prove new connections return to the primary transport.
+7. Verify QUIC-to-TLS/TCP failover in controlled repository or process infrastructure by blocking the QUIC path and proving reserve operation.
+8. Restore QUIC and prove new connections return to the primary transport in the same controlled acceptance environment.
+9. Preserve an executable physical-device confirmation sequence for the final external gate; do not defer the controlled software evidence until a device is attached.
 
 Completion criteria:
 
 - capacity exhaustion fails closed without evicting a live unrelated stream;
 - stale, expired or mismatched registrations cannot receive traffic;
 - device/session mismatch is rejected deterministically;
-- mixed, SOCKS5, HTTP and CONNECT succeed over both QUIC and TLS/TCP reserve during the acceptance test;
+- mixed, SOCKS5, HTTP and CONNECT succeed over both QUIC and TLS/TCP reserve in controlled software acceptance; the physical run later confirms the same protected surfaces on the real device;
 - WireGuard remains available as the rollback path;
 - no first-party Android tunnel replacement is attempted in this phase.
 
-### Phase D — minimum operations and physical acceptance
+### Phase D — minimum operations and staged acceptance
 
-Goal: prove the resulting system can be operated, restored and trusted on a real device.
+Goal: prove the resulting system can be operated and restored without device access, produce one immutable software-complete release candidate, and then confirm that candidate on a real device.
 
 Required work:
 
@@ -125,7 +129,9 @@ Required work:
 2. Ensure health output identifies durable-store health, tunnel state, active transport and freshness without exposing secrets or unbounded labels.
 3. Implement and document SQLite backup and restore.
 4. Run a restore drill into a clean environment and verify the restored state.
-5. Run a physical-phone acceptance sequence on one immutable Git SHA:
+5. Complete all process-level proxy and tunnel acceptance, rollback and recovery evidence on one immutable Git SHA.
+6. Record a software-complete release-candidate closeout and provide an executable physical-phone acceptance runbook for that SHA.
+7. When a phone is available, run the physical sequence on the immutable candidate SHA:
    - clean startup;
    - all three proxy surfaces plus HTTP CONNECT;
    - phone or service reboot;
@@ -134,14 +140,16 @@ Required work:
    - forced TLS/TCP fallback;
    - return to QUIC;
    - WireGuard rollback availability.
-6. Record any unresolved P0/P1 defect and do not declare the baseline complete while one remains.
+8. Record any unresolved P0/P1 defect and do not declare the baseline complete while one remains.
 
 Completion criteria:
 
 - backup and restore are repeatable and documented;
 - liveness remains healthy when the process is healthy even if no phone is available;
 - readiness accurately reflects critical storage and worker dependencies;
-- physical acceptance passes on one unchanged commit;
+- all source-controlled and process-testable acceptance passes on one unchanged commit, producing a software-complete release candidate;
+- the only permitted remaining gate after software closeout is the documented physical-phone sequence;
+- physical acceptance passes on the immutable candidate commit, or all software evidence is rerun on a later immutable commit before the physical run;
 - the resulting release is suitable for continued real use without requiring the future platform roadmap.
 
 ## 5. Explicit non-goals
@@ -178,10 +186,11 @@ The required order is:
 11. Phase C closeout and reassessment;
 12. health semantics;
 13. backup/restore drill;
-14. immutable-SHA physical acceptance;
-15. final baseline closeout.
+14. controlled immutable-SHA software acceptance and release-candidate closeout;
+15. immutable-SHA physical acceptance when a device is available;
+16. final baseline closeout.
 
-No later item should be pulled forward merely to keep work moving.
+Items 1 through 14 must be completed without waiting for a physical device. Device unavailability may pause only item 15 and the dependent final closeout in item 16. No later item should otherwise be pulled forward merely to keep work moving.
 
 ## 7. System invariants
 
@@ -233,8 +242,10 @@ These invariants apply to every baseline slice. They are stronger than implement
 
 1. Backup is not considered complete until restore into a clean environment succeeds.
 2. Rollback is not considered supported until the documented procedure is exercised against representative state.
-3. Physical acceptance evidence must identify one immutable Git SHA and must not combine results from different source revisions.
-4. No release is declared baseline-complete with an unresolved P0 or P1 defect.
+3. Software-complete acceptance evidence must identify one immutable Git SHA and must not combine results from different source revisions.
+4. Physical acceptance evidence must use that immutable candidate SHA; if source changes, the relevant software evidence must be rerun before physical acceptance.
+5. Software-complete status is not baseline-complete status and must state that the physical gate remains.
+6. No release is declared baseline-complete with an unresolved P0 or P1 defect.
 
 ## 8. Module responsibility map
 
@@ -345,7 +356,8 @@ Activating any item from `docs/future/` requires a separate decision and must no
 
 Development must stop for reassessment when any of the following is true:
 
-- all four baseline phases are complete;
+- all software-completable work through delivery item 14 is complete and only physical-device acceptance remains, in which case implementation pauses with an explicit software-complete release candidate rather than claiming baseline completion;
+- all four baseline phases, including physical acceptance, are complete;
 - a proposed change belongs only to the future roadmap;
 - implementation cost is no longer proportional to a demonstrated operational risk;
 - compatibility can no longer be preserved without a product decision;
