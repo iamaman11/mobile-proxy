@@ -45,16 +45,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo 'Transformed source around current compile failures:'
+            echo 'Transformed helper and call-site context:'
             echo
-            echo '### state.rs 680-745'
+            echo '### SessionBound and removal helper'
             echo '```rust'
-            sed -n '680,745p' crates/reverse-tunnel/src/state.rs
+            grep -n -B 12 -A 30 -E 'struct SessionBound|fn remove_session_bound' crates/reverse-tunnel/src/state.rs
             echo '```'
             echo
-            echo '### tunnel.rs 1280-1385'
+            echo '### SessionAuthority and mark functions'
             echo '```rust'
-            sed -n '1280,1385p' crates/reverse-tunnel/src/tunnel.rs
+            grep -n -B 18 -A 80 -E 'enum SessionAuthority|async fn mark_connected|async fn mark_disconnected' crates/reverse-tunnel/src/tunnel.rs
+            echo '```'
+            echo
+            echo '### Failing legacy test call sites'
+            echo '```rust'
+            sed -n '1300,1375p' crates/reverse-tunnel/src/tunnel.rs
             echo '```'
           } > /tmp/context.md
           gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/context.md
