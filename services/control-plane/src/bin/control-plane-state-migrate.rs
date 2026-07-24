@@ -127,7 +127,7 @@ fn print_import_report(report: LegacyJsonImportReport, diagnostic: &[u8]) {
 fn ensure_distinct(paths: &[&Path]) -> Result<()> {
     let absolute = paths
         .iter()
-        .map(|path| std::path::absolute(path))
+        .map(std::path::absolute)
         .collect::<std::io::Result<Vec<_>>>()?;
     for (index, left) in absolute.iter().enumerate() {
         if absolute.iter().skip(index + 1).any(|right| right == left) {
