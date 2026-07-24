@@ -1,0 +1,50 @@
+name: Open Pending Stream Audit PR
+
+on:
+  push:
+    branches:
+      - agent/open-pending-stream-audit-pr
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open audit pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --head agent/phase-c-pending-stream-lifecycle-audit \
+            --base main \
+            --state open \
+            --json number \
+            --jq 'length' | grep -qx '0'; then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head agent/phase-c-pending-stream-lifecycle-audit \
+              --title 'Audit pending-stream lifecycle and bounds' \
+              --body-file - <<'EOF'
+          ## Decision
+
+          Delivery item 8 requires no new runtime implementation. The accepted reserve TLS/TCP registry already provides deterministic cleanup, bounded expiry, explicit global/per-device capacity and fail-closed exhaustion without eviction.
+
+          ## Scope
+
+          - records the current-code lifecycle and capacity audit;
+          - links each terminal cleanup path to the owning implementation and executable evidence;
+          - preserves all protected proxy, QUIC, TLS/TCP reserve and WireGuard compatibility behavior;
+          - explicitly leaves exact device/session routing authority to delivery item 9.
+
+          ## Validation
+
+          This branch is one documentation-only commit ahead of current `main` and zero commits behind. The audit cites the original accepted implementation and the latest successful Phase B closeout validation.
+
+          Closes #50
+          EOF
+          fi
