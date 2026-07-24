@@ -104,7 +104,7 @@ python3 scripts/switch_vm_proxy_transport.py \
   --output physical-vm-primary-switch.json
 ```
 
-Verify every active phone release file byte-for-byte and every installed VM release file by SHA-256 against the local package roots:
+Verify every active phone release file byte-for-byte, infer the intended owner from the immutable package, verify that no Android VPN owns the reverse-tunnel deployment, and compare every installed VM release file by SHA-256 with the local package root:
 
 ```bash
 python3 scripts/verify_physical_deployment.py \
@@ -120,7 +120,7 @@ python3 scripts/verify_physical_deployment.py \
   --output physical-primary-deployment.json
 ```
 
-Do not continue unless the deployment report has the candidate SHA and all three identity booleans plus `accepted=true`.
+Do not continue unless the report has the candidate SHA, owner `first_party_reverse_tunnel`, all four identity booleans and `accepted=true`.
 
 ## 5. Configure the stage runner
 
@@ -144,7 +144,7 @@ Each stage checks six authenticated paths:
 - SOCKS5 on `1081`;
 - HTTP and HTTPS/CONNECT on `3128`.
 
-It also requires the exact device ID, `serving=true`, an available durable device record, a recent heartbeat, cellular-route readiness, proxy-bind readiness and local-serving readiness.
+It also requires the exact device ID, `serving=true`, an available durable device record, a recent heartbeat, cellular-route readiness, proxy-bind readiness and local-serving readiness. Reverse stages additionally require WireGuard disabled and no active `tun0`.
 
 ## 6. Primary QUIC, reboot, fallback and recovery
 
@@ -192,7 +192,7 @@ cargo run --release -p operator-cli -- install-device-release \
   --tunnel-owner stock_wireguard_bridge
 ```
 
-Switch public ports atomically to the VM WireGuard proxy listeners:
+Switch public ports atomically to the VM WireGuard proxy listeners. The switcher restores the previous Nginx config automatically if validation fails:
 
 ```bash
 python3 scripts/switch_vm_proxy_transport.py \
@@ -205,7 +205,7 @@ python3 scripts/switch_vm_proxy_transport.py \
   --output physical-vm-wireguard-switch.json
 ```
 
-Verify the active WireGuard phone variant and unchanged VM release:
+Verify the active WireGuard phone variant, actual Android VPN owner `com.wireguard.android`, and unchanged VM release:
 
 ```bash
 python3 scripts/verify_physical_deployment.py \
@@ -244,16 +244,17 @@ python3 scripts/switch_vm_proxy_transport.py \
   --output physical-vm-reverse-switch.json
 ```
 
-Reactivate the already installed reverse release without rebuilding it:
+Reapply the original reverse variant through the full controlled install lifecycle. Do not use the lightweight symlink-only rollback path for this acceptance: the full installer stops the active watchdog and processes, activates the intended package and starts it cleanly.
 
 ```bash
-cargo run --release -p operator-cli -- rollback-device \
+cargo run --release -p operator-cli -- install-device-release \
   --manifest-path <device-manifest> \
+  --release-id "$REVERSE_RELEASE" \
   --device-serial <adb-serial> \
-  --release-id "$REVERSE_RELEASE"
+  --tunnel-owner first_party_reverse_tunnel
 ```
 
-Re-run exact deployment verification against the original reverse package:
+Re-run exact deployment and Android VPN-owner verification against the reverse package:
 
 ```bash
 python3 scripts/verify_physical_deployment.py \
@@ -269,7 +270,7 @@ python3 scripts/verify_physical_deployment.py \
   --output physical-final-deployment.json
 ```
 
-Wait for owner `first_party_reverse_tunnel` and fresh QUIC, then run:
+Wait for owner `first_party_reverse_tunnel`, WireGuard disabled, no `tun0`, and fresh QUIC, then run:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -285,6 +286,7 @@ python3 scripts/verify_physical_phone_acceptance_reports.py \
   --primary-deployment physical-primary-deployment.json \
   --wireguard-deployment physical-wireguard-deployment.json \
   --final-deployment physical-final-deployment.json \
+  --primary-switch physical-vm-primary-switch.json \
   --wireguard-switch physical-vm-wireguard-switch.json \
   --reverse-switch physical-vm-reverse-switch.json \
   --online physical-online.json \
@@ -296,12 +298,12 @@ python3 scripts/verify_physical_phone_acceptance_reports.py \
   --output physical-acceptance-summary.json
 ```
 
-The gate passes only when the summary contains one candidate SHA, one device ID, three accepted deployment checks, both accepted VM transport switches, all six accepted stages, `physical_phone_acceptance_complete=true` and `accepted=true`.
+The gate passes only when the summary contains one candidate SHA, one device ID, three owner-bound deployment checks, all three accepted VM transport switches, all six accepted stages, `physical_phone_acceptance_complete=true` and `accepted=true`.
 
 Attach only the bounded JSON reports and operator timestamps to issue #64. Never attach tokens, private keys, raw configuration, credential-bearing URLs or unrestricted logs.
 
 ## 10. Stop conditions
 
-Reject the candidate for any unresolved P0/P1 defect, SHA mismatch, dirty checkout, failed package/deployment identity, missing device, missing heartbeat, unavailable cellular route, failed authenticated protocol path, stale/mismatched tunnel authority, plaintext downgrade, missing `tun0`, stale WireGuard handshake, failed VM transport switch, inability to return to QUIC or any report-set mismatch.
+Reject the candidate for any unresolved P0/P1 defect, SHA mismatch, dirty checkout, failed package/deployment identity, wrong Android VPN owner, missing device, missing heartbeat, unavailable cellular route, failed authenticated protocol path, stale/mismatched tunnel authority, plaintext downgrade, missing or lingering `tun0`, stale WireGuard handshake, failed VM transport switch, inability to return to QUIC or any report-set mismatch.
 
 After any source change, rerun the complete `Software Release Candidate` workflow on the new immutable SHA, download its new evidence artifact, rebuild all three release variants and repeat this procedure from the beginning.
