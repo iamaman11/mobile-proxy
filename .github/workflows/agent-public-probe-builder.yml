@@ -25,8 +25,17 @@ jobs:
 
       - name: Decode exact production files
         run: |
-          cat .agent/public-probe-files.tar.gz.b64.* | tr -d '\n' | base64 --decode > /tmp/public-probe-files.tar.gz
-          test -s /tmp/public-probe-files.tar.gz
+          cat \
+            .agent/public-probe-files.tar.gz.b64.00 \
+            .agent/public-probe-files.tar.gz.b64.01a \
+            .agent/public-probe-files.tar.gz.b64.01b \
+            .agent/public-probe-files.tar.gz.b64.02 \
+            .agent/public-probe-files.tar.gz.b64.03 \
+            .agent/public-probe-files.tar.gz.b64.04 \
+            | tr -d '\n' > /tmp/public-probe-files.b64
+          echo "7a20b6f7dbca3e56f88491f5695c2c02709020181cc1aad615a16d053263828d  /tmp/public-probe-files.b64" | sha256sum --check --strict
+          base64 --decode /tmp/public-probe-files.b64 > /tmp/public-probe-files.tar.gz
+          echo "a6cc24790e303d308a6c8433c74892715dab383d1a8390a22e0c929bd3664f2a  /tmp/public-probe-files.tar.gz" | sha256sum --check --strict
           mkdir -p /tmp/public-probe-files
           tar -xzf /tmp/public-probe-files.tar.gz -C /tmp/public-probe-files
 
