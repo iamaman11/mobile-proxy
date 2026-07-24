@@ -1,0 +1,2 @@
+Delivery item 8 accepted on main at 7c49546d60ea0518cfefe356bfb9ff81dc252520.
+Run the gated exact-session binding builder against current main.
