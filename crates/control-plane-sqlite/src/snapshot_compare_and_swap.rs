@@ -5,9 +5,7 @@ use std::fmt::{Display, Formatter};
 use rusqlite::{Transaction, TransactionBehavior, params};
 use serde::Serialize;
 
-use crate::{
-    ControlPlaneSnapshot, SnapshotStoreError, SnapshotViolation, SqliteStore, StoreError,
-};
+use crate::{ControlPlaneSnapshot, SnapshotStoreError, SnapshotViolation, SqliteStore, StoreError};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SnapshotRowChanges {
@@ -34,8 +32,9 @@ impl Display for SnapshotCompareAndSwapError {
             Self::Store(error) => Display::fmt(error, formatter),
             Self::StaleExpectedState => formatter
                 .write_str("SQLite state does not match the expected control-plane snapshot"),
-            Self::PostWriteParityMismatch => formatter
-                .write_str("SQLite row mutation did not produce the candidate snapshot"),
+            Self::PostWriteParityMismatch => {
+                formatter.write_str("SQLite row mutation did not produce the candidate snapshot")
+            }
         }
     }
 }
@@ -277,7 +276,9 @@ fn apply_row_changes(
         }
     }
     for (scope_key, (command_id, result_json)) in &candidate.command_results {
-        if current.command_results.get(scope_key) != Some(&(command_id.clone(), result_json.clone())) {
+        if current.command_results.get(scope_key)
+            != Some(&(command_id.clone(), result_json.clone()))
+        {
             transaction.execute(
                 "INSERT INTO command_results (scope_key, command_id, result_json) \
                  VALUES (?1, ?2, ?3)",

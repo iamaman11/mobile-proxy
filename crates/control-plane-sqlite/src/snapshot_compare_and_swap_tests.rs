@@ -5,9 +5,7 @@ use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey};
 use proxy_core::{DesiredState, DeviceCommand, DeviceRecord, RecoveryIntent};
 use serde_json::json;
 
-use crate::{
-    ControlPlaneSnapshot, ReplayRecord, SnapshotStoreError, SqliteStore, StoreError,
-};
+use crate::{ControlPlaneSnapshot, ReplayRecord, SnapshotStoreError, SqliteStore, StoreError};
 
 use super::{SnapshotCompareAndSwapError, SnapshotRowChanges};
 
@@ -47,15 +45,9 @@ fn snapshot(
         BTreeMap::from([("device-1".to_owned(), VecDeque::from(pending))])
     };
     ControlPlaneSnapshot::from_parts(
-        BTreeMap::from([(
-            "device-1".to_owned(),
-            device("device-1", proxy_status),
-        )]),
+        BTreeMap::from([("device-1".to_owned(), device("device-1", proxy_status))]),
         queues,
-        replay
-            .into_iter()
-            .map(ReplayRecord::from_command)
-            .collect(),
+        replay.into_iter().map(ReplayRecord::from_command).collect(),
     )
     .unwrap()
 }
