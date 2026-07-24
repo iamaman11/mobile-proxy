@@ -74,30 +74,11 @@ jobs:
 
           state_path = Path("services/control-plane/src/state.rs")
           state_body = state_path.read_text(encoding="utf-8")
-          persist_old = """    pub async fn persist(&self) -> Result<()> {
-              let devices = self.devices.lock().await;
-              let commands = self.commands.lock().await;
-              let stored = StoredState {
-                  devices: devices.clone(),
-                  commands: commands.clone(),
-              };
-              write_stored_state(self.state_path.as_ref(), &stored)
-          }
-          """
-          persist_new = """    #[cfg(test)]
-          async fn persist_for_test(&self) -> Result<()> {
-              let devices = self.devices.lock().await;
-              let commands = self.commands.lock().await;
-              let stored = StoredState {
-                  devices: devices.clone(),
-                  commands: commands.clone(),
-              };
-              write_stored_state(self.state_path.as_ref(), &stored)
-          }
-          """
-          if state_body.count(persist_old) != 1:
-              raise SystemExit("unexpected AppState::persist shape")
-          state_body = state_body.replace(persist_old, persist_new)
+          signature_old = "    pub async fn persist(&self) -> Result<()> {"
+          signature_new = "    #[cfg(test)]\n    async fn persist_for_test(&self) -> Result<()> {"
+          if state_body.count(signature_old) != 1:
+              raise SystemExit("unexpected AppState::persist signature count")
+          state_body = state_body.replace(signature_old, signature_new, 1)
           call_old = "state.persist().await.unwrap();"
           if state_body.count(call_old) != 3:
               raise SystemExit("unexpected AppState::persist test call count")
