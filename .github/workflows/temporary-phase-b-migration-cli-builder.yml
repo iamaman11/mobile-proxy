@@ -1,0 +1,43 @@
+name: Temporary Phase B Migration Utility Builder
+
+on:
+  push:
+    branches:
+      - agent/phase-b-migration-cli-export
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/phase-b-migration-cli-export
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Publish canonical formatting and minimal lockfile
+        run: |
+          cargo fmt --all
+          cargo check --workspace --all-targets
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.lock services/control-plane/Cargo.toml services/control-plane/src/bin/control-plane-state-migrate.rs services/control-plane/tests/state_migration_cli.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "Apply migration utility build outputs [skip ci]"
+            git push origin HEAD:agent/phase-b-migration-cli-export
+          fi
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
