@@ -40,10 +40,12 @@ The resulting snapshot is independent of JSON object ordering.
 
 ## Safe target semantics
 
+The source JSON is read-only migration input. The importer never rewrites, renames or deletes it.
+
 `SqliteStore::import_legacy_json` supports only three outcomes:
 
 - empty target plus valid legacy state: atomically import the snapshot;
-- target already contains the byte-equivalent canonical snapshot: return `AlreadyImported` without rewriting;
+- target already contains the byte-equivalent canonical snapshot: return `AlreadyImported` without rewriting SQLite;
 - target contains any different non-empty state: fail closed without replacement.
 
 After a new import, the store is reloaded and its canonical snapshot bytes must match the normalized source snapshot. A mismatch is reported as a bounded parity failure.
@@ -55,7 +57,7 @@ Focused tests prove:
 - representative legacy fingerprints, queues and claim-only state normalize and survive file close/reopen;
 - missing command results and retention order are reconstructed deterministically;
 - legacy and canonical result-key arrangements produce the same canonical snapshot;
-- exact import replay is idempotent;
+- exact import replay is idempotent and does not rewrite SQLite;
 - a different non-empty SQLite target is never overwritten;
 - conflicting and orphan claims fail closed;
 - unsupported fingerprints and malformed JSON fail before any SQLite write.
