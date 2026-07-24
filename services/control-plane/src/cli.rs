@@ -1,10 +1,8 @@
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
-const JSON_STATE_PATH: &str =
-    "/var/lib/mobile-relaycontrolpoint/control-plane-state.json";
-const SQLITE_STATE_PATH: &str =
-    "/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3";
+const JSON_STATE_PATH: &str = "/var/lib/mobile-relaycontrolpoint/control-plane-state.json";
+const SQLITE_STATE_PATH: &str = "/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3";
 
 #[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[value(rename_all = "snake_case")]
