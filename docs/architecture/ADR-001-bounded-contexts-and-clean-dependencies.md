@@ -54,7 +54,9 @@ Domain crates must not depend on:
 
 ### 3. Bounded contexts
 
-The target contexts are:
+The following list describes the long-horizon target decomposition, not the active Production Baseline backlog. During the current baseline, only existing Foundation, Device Registry/command application responsibilities, Tunnel Session and Proxy Access responsibilities may be advanced. Network Lease, Network Identity, Rotation, Credential Broker and Audit Ledger remain inactive unless the Production Baseline Plan is changed by a separate product decision.
+
+The long-horizon target contexts are:
 
 - Foundation;
 - Device Registry;
@@ -66,7 +68,7 @@ The target contexts are:
 - Credential Broker;
 - Audit Ledger.
 
-Each mutable aggregate has a single owner. Other contexts interact through typed application ports.
+Each current mutable behavior and state has a single authoritative owner. Other responsibilities interact through typed application ports. Architectural roles do not require a dedicated crate per layer; ports may live in the application crate while dependencies remain inward and ownership remains explicit.
 
 ### 4. Multi-consumer platform
 
@@ -118,9 +120,9 @@ No implementation PR may change this inventory without updating the machine-read
 
 ### 7. Durable state
 
-SQLite with WAL is the initial canonical durable store for devices, commands, leases, identities, rotations, credentials metadata, audit and outbox state.
+SQLite with WAL is the initial canonical durable store for the closed Production Baseline inventory: device records, authoritative current health/runtime projection fields, pending commands, durable command results, idempotency claims and replay evidence, plus minimal schema metadata. Lease, identity, rotation, credential, audit and outbox tables are future-only and must not be created without a separate product decision.
 
-JSON remains temporarily as a migration input and diagnostic export, not as the final canonical transaction store.
+JSON remains temporarily as migration input and diagnostic export, not as the final canonical transaction store.
 
 ### 8. Composition roots
 

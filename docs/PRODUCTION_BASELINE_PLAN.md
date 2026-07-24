@@ -76,7 +76,7 @@ Goal: replace JSON as canonical mutable state with a small, recoverable SQLite s
 Required work:
 
 1. Introduce SQLite with WAL, foreign keys, bounded busy timeout and explicit schema migrations.
-2. Persist only the state currently required by the working application: devices, current health/projection data, commands, command replay/idempotency evidence and other existing canonical control-plane state.
+2. Persist only the closed baseline inventory required by the working application: device records; authoritative current health/runtime projection fields; pending commands; durable command results; idempotency claims and replay evidence; and minimal schema metadata. Any additional table or durable concept requires a separate demonstrated risk and plan decision.
 3. Define transaction boundaries so a successful mutation cannot publish in memory before its durable commit.
 4. Import existing JSON state, validate parity and preserve a read-only diagnostic export during the compatibility window.
 5. Provide a tested rollback path to the previous release while the schema is still in the expansion-compatible stage.
@@ -93,17 +93,18 @@ Completion criteria:
 
 ### Phase C — critical reverse-tunnel correctness
 
-Goal: address the concrete tunnel failure modes that can misroute traffic, leak pending state or make reserve transport unreliable.
+Goal: verify and close only the remaining concrete tunnel failure modes that can misroute traffic, leak pending state or make reserve transport unreliable. Accepted controls must be reused and evidenced rather than reimplemented.
 
 Required work:
 
-1. Remove pending TCP stream registrations on success, cancellation and timeout.
-2. Apply explicit global and per-device bounds to pending streams.
-3. Give every pending registration a bounded expiry.
-4. Remove any arbitrary “first device” selection when a specific device is required.
-5. Bind stream routing to the exact device and tunnel session; include runtime generation where already available and useful for stale-session rejection.
-6. Verify real QUIC-to-TLS/TCP failover by blocking the QUIC path and proving reserve operation.
-7. Restore QUIC and prove new connections return to the primary transport.
+1. Audit the existing pending-stream and session-binding implementation against the completion criteria and identify only evidence-backed residual gaps.
+2. Verify that pending TCP stream registrations are removed on success, cancellation and timeout.
+3. Verify explicit global and per-device bounds and bounded expiry for every pending registration.
+4. Verify that no arbitrary “first device” selection is used where a specific device is required.
+5. Verify exact device and tunnel-session binding; add runtime generation only if a demonstrated stale-session gap remains after current session identity and freshness checks.
+6. Fix only residual correctness gaps found by that audit.
+7. Verify real QUIC-to-TLS/TCP failover by blocking the QUIC path and proving reserve operation.
+8. Restore QUIC and prove new connections return to the primary transport.
 
 Completion criteria:
 
@@ -250,7 +251,7 @@ The following responsibility map prevents behavior from drifting between layers.
 | compatibility projection for legacy surfaces | explicit compatibility adapter | canonical domain vocabulary |
 | health and metrics rendering | observability adapters reading authoritative state | independent mutable counters unless the event source is authoritative |
 
-A slice that changes ownership must state the old owner, new owner, migration mechanism and compatibility impact explicitly.
+A slice that changes ownership must state the old owner, new owner, migration mechanism and compatibility impact explicitly. Architectural roles do not require one crate per layer: application ports may remain inside the application crate while dependency direction, ownership and testability remain clear. A separate `ports` crate is introduced only for a demonstrated current need.
 
 ## 9. Strict development protocol
 

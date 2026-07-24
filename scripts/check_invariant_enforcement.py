@@ -20,7 +20,7 @@ ALLOWED_STATUSES = {
     "planned",
     "not_applicable_yet",
 }
-REQUIRED_SOURCE_IDS = {"U", "A1", "A2", "F", "D", "C"}
+REQUIRED_SOURCE_IDS = {"P", "A1", "A2", "F", "D", "C"}
 REQUIRED_COLUMNS = [
     "id",
     "source",
