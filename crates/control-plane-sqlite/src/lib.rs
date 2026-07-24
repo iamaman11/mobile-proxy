@@ -1,5 +1,6 @@
 mod snapshot_error;
 mod snapshot_rows;
+mod snapshot_store;
 mod snapshot_validation;
 
 pub mod snapshot;
@@ -11,6 +12,7 @@ pub use snapshot_error::{SnapshotError, SnapshotViolation};
 pub use snapshot_rows::{
     CommandResultRow, DeviceRow, IdempotencyClaimRow, PendingCommandRow, SnapshotRows,
 };
+pub use snapshot_store::SnapshotStoreError;
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -382,6 +384,8 @@ fn require_nonempty(value: &str, field: &'static str) -> Result<(), StoreError> 
     Ok(())
 }
 
+#[cfg(test)]
+mod snapshot_store_tests;
 #[cfg(test)]
 mod snapshot_tests;
 #[cfg(test)]

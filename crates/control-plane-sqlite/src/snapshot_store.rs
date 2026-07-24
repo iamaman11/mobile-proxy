@@ -38,7 +38,10 @@ impl Display for SnapshotStoreError {
             }
             Self::Foundation {
                 relation, field, ..
-            } => write!(formatter, "{relation}.{field} contains an invalid typed value"),
+            } => write!(
+                formatter,
+                "{relation}.{field} contains an invalid typed value"
+            ),
             Self::QueuePositionOutOfRange(_) => {
                 formatter.write_str("pending_commands.queue_position is outside the u32 range")
             }
@@ -169,11 +172,12 @@ fn load_rows(transaction: &Transaction<'_>) -> Result<SnapshotRows, SnapshotStor
 }
 
 fn load_devices(transaction: &Transaction<'_>) -> Result<Vec<DeviceRow>, SnapshotStoreError> {
-    let mut statement = transaction.prepare(
-        "SELECT node_id, record_json FROM devices ORDER BY node_id",
-    )?;
+    let mut statement =
+        transaction.prepare("SELECT node_id, record_json FROM devices ORDER BY node_id")?;
     let raw = statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     raw.into_iter()
         .map(|(node_id, record_json)| {

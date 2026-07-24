@@ -191,11 +191,7 @@ fn corrupt_typed_relation_fails_closed_during_load() {
     store
         .write(|transaction| {
             transaction.insert_command_result("not-a-digest", &command_id, &result_json)?;
-            transaction.insert_idempotency_claim(
-                "not-a-digest",
-                &command_id,
-                "also-not-a-digest",
-            )
+            transaction.insert_idempotency_claim("not-a-digest", &command_id, "also-not-a-digest")
         })
         .unwrap();
 
