@@ -53,20 +53,23 @@ struct Daemon {
 }
 
 impl Daemon {
-    async fn start(backend: &str, state_path: &Path, client: &Client) -> Self {
+    async fn start(backend: Option<&str>, state_path: &Path, client: &Client) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
 
-        let child = Command::new(control_plane_binary())
+        let mut process = Command::new(control_plane_binary());
+        process
             .arg("--listen")
             .arg(address.to_string())
             .arg("--admin-token")
             .arg(ADMIN_TOKEN)
             .arg("--device-token")
-            .arg(DEVICE_TOKEN)
-            .arg("--state-backend")
-            .arg(backend)
+            .arg(DEVICE_TOKEN);
+        if let Some(backend) = backend {
+            process.arg("--state-backend").arg(backend);
+        }
+        let child = process
             .arg("--state-path")
             .arg(state_path)
             .stdin(Stdio::null())
@@ -190,6 +193,16 @@ fn run_import(source: &Path, sqlite: &Path, diagnostic: &Path) -> Output {
         .unwrap()
 }
 
+fn run_export(sqlite: &Path, rollback_json: &Path) -> Output {
+    Command::new(migration_binary())
+        .args(["export", "--sqlite"])
+        .arg(sqlite)
+        .arg("--diagnostic-json")
+        .arg(rollback_json)
+        .output()
+        .unwrap()
+}
+
 async fn list_devices(client: &Client, daemon: &Daemon) -> Vec<DeviceRecord> {
     client
         .get(format!("{}/api/v1/devices", daemon.base_url))
@@ -221,23 +234,74 @@ async fn next_command(client: &Client, daemon: &Daemon) -> Option<DeviceCommand>
         .unwrap()
 }
 
+async fn replay_command(
+    client: &Client,
+    daemon: &Daemon,
+    desired_state: DesiredState,
+) -> reqwest::Response {
+    client
+        .post(format!(
+            "{}/api/v1/devices/{DEVICE_ID}/commands",
+            daemon.base_url
+        ))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&issue_request(desired_state))
+        .send()
+        .await
+        .unwrap()
+}
+
+#[test]
+fn default_sqlite_startup_fails_closed_for_a_missing_database() {
+    let directory = TempDirectory::new("missing-default");
+    let missing = directory.join("missing.sqlite3");
+    let mut child = Command::new(control_plane_binary())
+        .arg("--listen")
+        .arg("127.0.0.1:0")
+        .arg("--admin-token")
+        .arg(ADMIN_TOKEN)
+        .arg("--device-token")
+        .arg(DEVICE_TOKEN)
+        .arg("--state-path")
+        .arg(&missing)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    for _ in 0..100 {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(!status.success());
+            assert!(!missing.exists());
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    child.kill().unwrap();
+    child.wait().unwrap();
+    panic!("default SQLite startup unexpectedly remained running with a missing database");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_restart_replay_and_json_rollback_work_through_real_daemon() {
+async fn sqlite_default_restart_and_current_state_json_rollback_work_through_real_daemon() {
     let directory = TempDirectory::new("acceptance");
     let source = directory.join("control-plane-state.json");
     let sqlite = directory.join("control-plane-state.sqlite3");
-    let diagnostic = directory.join("control-plane-state-diagnostic.json");
+    let imported_diagnostic = directory.join("control-plane-state-imported.json");
+    let rollback_json = directory.join("control-plane-state-rollback.json");
     let original_command = command();
     let source_bytes = canonical_json_source(&original_command);
     fs::write(&source, &source_bytes).unwrap();
 
-    let import = run_import(&source, &sqlite, &diagnostic);
+    let import = run_import(&source, &sqlite, &imported_diagnostic);
     assert!(
         import.status.success(),
         "migration failed: {}",
         String::from_utf8_lossy(&import.stderr)
     );
-    assert!(diagnostic.is_file());
+    assert!(imported_diagnostic.is_file());
     assert_eq!(fs::read(&source).unwrap(), source_bytes);
 
     let client = Client::builder()
@@ -246,7 +310,7 @@ async fn sqlite_restart_replay_and_json_rollback_work_through_real_daemon() {
         .unwrap();
 
     {
-        let mut daemon = Daemon::start("sqlite", &sqlite, &client).await;
+        let mut daemon = Daemon::start(None, &sqlite, &client).await;
         let devices = list_devices(&client, &daemon).await;
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].node_id, DEVICE_ID);
@@ -273,53 +337,62 @@ async fn sqlite_restart_replay_and_json_rollback_work_through_real_daemon() {
     }
 
     {
-        let mut daemon = Daemon::start("sqlite", &sqlite, &client).await;
+        let mut daemon = Daemon::start(None, &sqlite, &client).await;
         assert_eq!(next_command(&client, &daemon).await, None);
 
-        let replayed: DeviceCommand = client
-            .post(format!(
-                "{}/api/v1/devices/{DEVICE_ID}/commands",
-                daemon.base_url
-            ))
-            .bearer_auth(ADMIN_TOKEN)
-            .json(&issue_request(DesiredState::HealthyServing))
-            .send()
-            .await
-            .unwrap()
-            .error_for_status()
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
+        let replayed: DeviceCommand = replay_command(
+            &client,
+            &daemon,
+            DesiredState::HealthyServing,
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
         assert_eq!(replayed, original_command);
 
-        let conflict = client
-            .post(format!(
-                "{}/api/v1/devices/{DEVICE_ID}/commands",
-                daemon.base_url
-            ))
-            .bearer_auth(ADMIN_TOKEN)
-            .json(&issue_request(DesiredState::DegradedSafe))
-            .send()
-            .await
-            .unwrap();
+        let conflict = replay_command(&client, &daemon, DesiredState::DegradedSafe).await;
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
         daemon.stop();
     }
 
     assert_eq!(fs::read(&source).unwrap(), source_bytes);
 
+    let export = run_export(&sqlite, &rollback_json);
+    assert!(
+        export.status.success(),
+        "rollback export failed: {}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let rollback_bytes = fs::read(&rollback_json).unwrap();
+
     {
-        let mut rollback = Daemon::start("json", &source, &client).await;
+        let mut rollback = Daemon::start(Some("json"), &rollback_json, &client).await;
         let devices = list_devices(&client, &rollback).await;
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].node_id, DEVICE_ID);
-        assert_eq!(
-            next_command(&client, &rollback).await,
-            Some(original_command)
-        );
+        assert_eq!(next_command(&client, &rollback).await, None);
+
+        let replayed: DeviceCommand = replay_command(
+            &client,
+            &rollback,
+            DesiredState::HealthyServing,
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(replayed, original_command);
+
+        let conflict = replay_command(&client, &rollback, DesiredState::DegradedSafe).await;
+        assert_eq!(conflict.status(), StatusCode::CONFLICT);
         rollback.stop();
     }
 
+    assert_eq!(fs::read(&rollback_json).unwrap(), rollback_bytes);
     assert_eq!(fs::read(&source).unwrap(), source_bytes);
 }
