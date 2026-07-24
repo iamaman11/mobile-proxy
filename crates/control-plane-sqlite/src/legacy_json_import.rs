@@ -305,26 +305,34 @@ fn normalize_commands(
         }
     }
 
-    for (device_id, queue) in &commands.queues {
-        for command in queue {
-            if command.device_id != *device_id {
-                return Err(SnapshotViolation::PendingDeviceMismatch.into());
-            }
-            let canonical = canonical_scope(command);
-            match commands.idempotency_results.get(&canonical) {
-                Some(existing) if existing != command => {
-                    return Err(LegacyJsonViolation::ConflictingCommandResult.into());
-                }
-                Some(_) => {}
-                None => {
-                    commands
-                        .idempotency_results
-                        .insert(canonical, command.clone());
-                    stats.recovered_command_results += 1;
-                }
-            }
-            ensure_legacy_claim(commands, command, stats)?;
+    let queued_commands = commands
+        .queues
+        .iter()
+        .flat_map(|(device_id, queue)| {
+            queue
+                .iter()
+                .cloned()
+                .map(move |command| (device_id.clone(), command))
+        })
+        .collect::<Vec<_>>();
+    for (device_id, command) in queued_commands {
+        if command.device_id != device_id {
+            return Err(SnapshotViolation::PendingDeviceMismatch.into());
         }
+        let canonical = canonical_scope(&command);
+        match commands.idempotency_results.get(&canonical) {
+            Some(existing) if existing != &command => {
+                return Err(LegacyJsonViolation::ConflictingCommandResult.into());
+            }
+            Some(_) => {}
+            None => {
+                commands
+                    .idempotency_results
+                    .insert(canonical, command.clone());
+                stats.recovered_command_results += 1;
+            }
+        }
+        ensure_legacy_claim(commands, &command, stats)?;
     }
 
     let canonical_results = commands
