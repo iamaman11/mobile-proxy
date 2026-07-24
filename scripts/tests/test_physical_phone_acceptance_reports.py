@@ -27,13 +27,24 @@ class PhysicalReportVerifierTests(unittest.TestCase):
             "accepted": True,
         }
 
+    def switch(self, mode):
+        return {
+            "format_version": 1,
+            "mode": mode,
+            "config_sha256": "a" * 64,
+            "public_ports": [1080, 1081, 3128],
+            "accepted": True,
+        }
+
     def stage(self, stage):
         transport = {
             "online": "quic",
             "post-reboot": "quic",
             "fallback": "tls_tcp",
             "recovered": "quic",
+            "post-wireguard-recovered": "quic",
         }.get(stage)
+        reverse = transport is not None
         return {
             "format_version": 1,
             "candidate_sha": "a" * 40,
@@ -45,26 +56,52 @@ class PhysicalReportVerifierTests(unittest.TestCase):
             },
             "device_inventory_present": True,
             "expected_device_present": True,
-            "reverse_tunnel": {
-                "connected": True if transport else None,
-                "active_transport": transport,
-                "freshness": "fresh" if transport else None,
+            "device_state": {
+                "node_id": "device-1",
+                "serving": True,
+                "availability": "available",
+                "heartbeat_present": True,
+                "cellular_route_ready": True,
+                "proxy_bind_ready": True,
+                "local_serving_ready": True,
             },
-            "wireguard_enabled": stage == "wireguard",
+            "tunnel_owner": (
+                "first_party_reverse_tunnel" if reverse else "stock_wireguard_bridge"
+            ),
+            "reverse_tunnel": {
+                "connected": True if reverse else False,
+                "active_transport": transport,
+                "freshness": "fresh" if reverse else None,
+            },
+            "wireguard": {
+                "enabled": not reverse,
+                "tun0_present": True if not reverse else None,
+                "handshake_recent": True if not reverse else None,
+            },
             "proxy_surfaces": {name: True for name in MODULE._REQUIRED_PROXY_SURFACES},
             "accepted": True,
         }
 
     def test_complete_report_set_contract(self):
-        MODULE.verify_deployment_report(self.deployment(), "a" * 40)
-        for stage in ["online", "post-reboot", "fallback", "recovered", "wireguard"]:
+        for label in ["primary", "wireguard", "final"]:
+            MODULE.verify_deployment_report(self.deployment(), "a" * 40, label)
+        MODULE.verify_switch_report(self.switch("wireguard"), "wireguard")
+        MODULE.verify_switch_report(self.switch("reverse-tunnel"), "reverse-tunnel")
+        for stage in [
+            "online",
+            "post-reboot",
+            "fallback",
+            "recovered",
+            "wireguard",
+            "post-wireguard-recovered",
+        ]:
             MODULE.verify_stage_report(self.stage(stage), "a" * 40, stage)
 
     def test_wrong_sha_missing_mixed_protocol_or_stale_tunnel_fails(self):
         deployment = self.deployment()
         deployment["candidate_sha"] = "b" * 40
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "SHA differs"):
-            MODULE.verify_deployment_report(deployment, "a" * 40)
+            MODULE.verify_deployment_report(deployment, "a" * 40, "primary")
 
         report = self.stage("online")
         del report["proxy_surfaces"]["mixed_1080_connect"]
@@ -76,11 +113,22 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "stale"):
             MODULE.verify_stage_report(report, "a" * 40, "fallback")
 
-    def test_wireguard_stage_requires_enabled_rollback(self):
+    def test_wireguard_stage_requires_owner_tun_and_handshake(self):
         report = self.stage("wireguard")
-        report["wireguard_enabled"] = False
-        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "not enabled"):
+        report["wireguard"]["handshake_recent"] = False
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "not recent"):
             MODULE.verify_stage_report(report, "a" * 40, "wireguard")
+
+        report = self.stage("wireguard")
+        report["reverse_tunnel"]["connected"] = True
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "remained active"):
+            MODULE.verify_stage_report(report, "a" * 40, "wireguard")
+
+    def test_switch_report_requires_exact_mode_and_ports(self):
+        report = self.switch("wireguard")
+        report["public_ports"] = [1080]
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "ports differ"):
+            MODULE.verify_switch_report(report, "wireguard")
 
 
 if __name__ == "__main__":
