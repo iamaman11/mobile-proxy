@@ -1,10 +1,4 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use serde_json::{Value, json};
 
 use crate::state::{AppState, RuntimeState};
@@ -40,12 +34,7 @@ fn readiness_document(runtime: &RuntimeState) -> (StatusCode, Value) {
         StatusCode::SERVICE_UNAVAILABLE
     };
 
-    let transport = bounded_transport(
-        runtime
-            .health
-            .reverse_tunnel_active_transport
-            .as_deref(),
-    );
+    let transport = bounded_transport(runtime.health.reverse_tunnel_active_transport.as_deref());
     let freshness = bounded_freshness(runtime.health.reverse_tunnel_freshness.as_deref());
 
     (
@@ -159,7 +148,10 @@ mod tests {
         let rendered = body.to_string();
         assert!(!rendered.contains("credential=secret"));
         assert!(!rendered.contains("raw-provider-error"));
-        assert_eq!(body["reverse_tunnel"]["active_transport"], serde_json::Value::Null);
+        assert_eq!(
+            body["reverse_tunnel"]["active_transport"],
+            serde_json::Value::Null
+        );
         assert_eq!(body["reverse_tunnel"]["freshness"], serde_json::Value::Null);
     }
 
