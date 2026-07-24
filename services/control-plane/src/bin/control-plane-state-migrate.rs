@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -5,13 +6,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use mobile_proxy_control_plane_sqlite::{
-    LegacyJsonImportOutcome, LegacyJsonImportReport, SqliteStore, parse_legacy_json,
+    ControlPlaneSnapshot, LegacyJsonImportOutcome, LegacyJsonImportReport, SqliteStore,
+    parse_legacy_json,
 };
+use mobile_proxy_foundation::CommandId;
+use proxy_core::{DeviceCommand, DeviceRecord};
+use serde::Serialize;
 use serde_json::json;
 
 #[derive(Debug, Parser)]
 #[command(name = "control-plane-state-migrate")]
-#[command(about = "Import legacy control-plane JSON into SQLite and export canonical diagnostics")]
+#[command(about = "Import legacy control-plane JSON and export SQLite state")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -33,6 +38,26 @@ enum Command {
         #[arg(long)]
         diagnostic_json: PathBuf,
     },
+    RollbackExport {
+        #[arg(long)]
+        sqlite: PathBuf,
+        #[arg(long)]
+        rollback_json: PathBuf,
+    },
+}
+
+#[derive(Serialize)]
+struct JsonBackendState {
+    devices: BTreeMap<String, DeviceRecord>,
+    commands: JsonBackendCommands,
+}
+
+#[derive(Serialize)]
+struct JsonBackendCommands {
+    queues: BTreeMap<String, VecDeque<DeviceCommand>>,
+    idempotency: BTreeMap<String, CommandId>,
+    idempotency_results: BTreeMap<String, DeviceCommand>,
+    idempotency_order: VecDeque<String>,
 }
 
 fn main() -> Result<()> {
@@ -46,6 +71,10 @@ fn main() -> Result<()> {
             sqlite,
             diagnostic_json,
         } => export(&sqlite, &diagnostic_json),
+        Command::RollbackExport {
+            sqlite,
+            rollback_json,
+        } => rollback_export(&sqlite, &rollback_json),
     }
 }
 
@@ -74,14 +103,7 @@ fn import(legacy_json: &Path, sqlite: &Path, diagnostic_json: &Path) -> Result<(
 
 fn export(sqlite: &Path, diagnostic_json: &Path) -> Result<()> {
     ensure_distinct(&[sqlite, diagnostic_json])?;
-    if !sqlite.is_file() {
-        bail!("SQLite diagnostic export source does not exist or is not a regular file");
-    }
-    let mut store = SqliteStore::open(sqlite)
-        .with_context(|| format!("failed to open SQLite source {}", sqlite.display()))?;
-    let snapshot = store
-        .load_snapshot()
-        .context("failed to rehydrate SQLite state for diagnostic export")?;
+    let snapshot = load_export_snapshot(sqlite, "diagnostic")?;
     let diagnostic = snapshot
         .to_canonical_json()
         .context("failed to serialize canonical diagnostic state")?;
@@ -97,6 +119,76 @@ fn export(sqlite: &Path, diagnostic_json: &Path) -> Result<()> {
         })
     );
     Ok(())
+}
+
+fn rollback_export(sqlite: &Path, rollback_json: &Path) -> Result<()> {
+    ensure_distinct(&[sqlite, rollback_json])?;
+    let snapshot = load_export_snapshot(sqlite, "rollback")?;
+    let devices = snapshot.devices().len();
+    let pending_commands = snapshot
+        .queues()
+        .values()
+        .map(std::collections::VecDeque::len)
+        .sum::<usize>();
+    let replay_records = snapshot.replay_records().len();
+    let body = serialize_json_backend(snapshot)?;
+    write_atomic(rollback_json, &body)?;
+    println!(
+        "{}",
+        json!({
+            "operation": "rollback_export",
+            "devices": devices,
+            "pending_commands": pending_commands,
+            "replay_records": replay_records,
+            "rollback_bytes": body.len(),
+        })
+    );
+    Ok(())
+}
+
+fn load_export_snapshot(sqlite: &Path, purpose: &str) -> Result<ControlPlaneSnapshot> {
+    if !sqlite.is_file() {
+        bail!("SQLite {purpose} export source does not exist or is not a regular file");
+    }
+    let mut store = SqliteStore::open(sqlite)
+        .with_context(|| format!("failed to open SQLite source {}", sqlite.display()))?;
+    store
+        .load_snapshot()
+        .with_context(|| format!("failed to rehydrate SQLite state for {purpose} export"))
+}
+
+fn serialize_json_backend(snapshot: ControlPlaneSnapshot) -> Result<Vec<u8>> {
+    let (devices, queues, replay_records) = snapshot.into_parts();
+    let mut idempotency = BTreeMap::new();
+    let mut idempotency_results = BTreeMap::new();
+    let mut idempotency_order = VecDeque::new();
+
+    for replay in replay_records {
+        let scope = replay.scope_key().to_string();
+        let command = replay.into_command();
+        let legacy_scope = format!("{}:{}", command.device_id, command.idempotency_key);
+        if idempotency
+            .insert(legacy_scope, command.command_id)
+            .is_some()
+            || idempotency_results
+                .insert(scope.clone(), command)
+                .is_some()
+        {
+            bail!("SQLite replay state cannot be represented by the JSON rollback backend");
+        }
+        idempotency_order.push_back(scope);
+    }
+
+    serde_json::to_vec_pretty(&JsonBackendState {
+        devices,
+        commands: JsonBackendCommands {
+            queues,
+            idempotency,
+            idempotency_results,
+            idempotency_order,
+        },
+    })
+    .context("failed to serialize JSON rollback backend state")
 }
 
 fn print_import_report(report: LegacyJsonImportReport, diagnostic: &[u8]) {
@@ -134,7 +226,7 @@ fn ensure_distinct(paths: &[&Path]) -> Result<()> {
         .collect::<std::io::Result<Vec<_>>>()?;
     for (index, left) in absolute.iter().enumerate() {
         if absolute.iter().skip(index + 1).any(|right| right == left) {
-            bail!("migration input, SQLite state and diagnostic output paths must be distinct");
+            bail!("migration input, SQLite state and export output paths must be distinct");
         }
     }
     Ok(())
@@ -144,9 +236,8 @@ fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create diagnostic directory {}", parent.display())
-        })?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create export directory {}", parent.display()))?;
     }
     let temporary = temporary_path(path);
     let mut file = OpenOptions::new()
@@ -154,28 +245,15 @@ fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
         .truncate(true)
         .write(true)
         .open(&temporary)
-        .with_context(|| {
-            format!(
-                "failed to create temporary diagnostic {}",
-                temporary.display()
-            )
-        })?;
-    file.write_all(body).with_context(|| {
-        format!(
-            "failed to write temporary diagnostic {}",
-            temporary.display()
-        )
-    })?;
-    file.sync_all().with_context(|| {
-        format!(
-            "failed to sync temporary diagnostic {}",
-            temporary.display()
-        )
-    })?;
+        .with_context(|| format!("failed to create temporary export {}", temporary.display()))?;
+    file.write_all(body)
+        .with_context(|| format!("failed to write temporary export {}", temporary.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync temporary export {}", temporary.display()))?;
     drop(file);
     fs::rename(&temporary, path).with_context(|| {
         format!(
-            "failed to publish diagnostic {} from {}",
+            "failed to publish export {} from {}",
             path.display(),
             temporary.display()
         )
@@ -196,9 +274,9 @@ fn sync_parent(path: &Path) -> Result<()> {
         && !parent.as_os_str().is_empty()
     {
         File::open(parent)
-            .with_context(|| format!("failed to open diagnostic directory {}", parent.display()))?
+            .with_context(|| format!("failed to open export directory {}", parent.display()))?
             .sync_all()
-            .with_context(|| format!("failed to sync diagnostic directory {}", parent.display()))?;
+            .with_context(|| format!("failed to sync export directory {}", parent.display()))?;
     }
     Ok(())
 }
