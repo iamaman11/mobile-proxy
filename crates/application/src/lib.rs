@@ -2,6 +2,7 @@ mod command_delivery;
 mod command_issue;
 mod device_heartbeat;
 mod device_registration;
+mod public_probe;
 
 pub use command_delivery::{
     AcknowledgeCommandError, AcknowledgeCommandFuture, AcknowledgeCommandInput,
@@ -19,4 +20,7 @@ pub use device_heartbeat::{
 pub use device_registration::{
     MAX_REGISTERED_DEVICES, RegisterDeviceError, RegisterDeviceFuture, RegisterDeviceInput,
     RegisterDeviceOutcome, RegisterDevicePort,
+};
+pub use public_probe::{
+    PublicProbeError, PublicProbeFuture, PublicProbeInput, PublicProbeOutcome, PublicProbePort,
 };

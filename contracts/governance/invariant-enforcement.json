@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-07-24",
-  "baseline_main_sha": "c727fffdc066bc7ac244d6da246b5654ebd27efb",
+  "baseline_main_sha": "4c48d08fc2f06f24c9bc23431547f425078d2eb7",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -350,22 +350,23 @@
       "P",
       "§4 Phase A, §7.5, §8",
       "Other contexts mutate aggregate state only through typed application ports",
-      "partially_enforced",
+      "enforced",
       "application",
       [
         "crates/application/src/command_issue.rs",
         "crates/application/src/command_delivery.rs",
-        "services/control-plane/src/state.rs",
         "crates/application/src/device_registration.rs",
-        "crates/application/src/device_heartbeat.rs"
+        "crates/application/src/device_heartbeat.rs",
+        "crates/application/src/public_probe.rs",
+        "services/control-plane/src/state.rs"
       ],
       [
         "RQ-A",
         "RQ-T"
       ],
-      "public-probe-application-port",
       "",
-      "Command issuance, device registration, heartbeat and successful acknowledgement mutate through typed application ports; public probe remains a direct handler.",
+      "",
+      "All current control-plane mutations—command issuance and acknowledgement, device registration, heartbeat and public probe—enter through typed application ports; query handlers remain read-only.",
       ""
     ],
     [
@@ -373,22 +374,23 @@
       "A1",
       "Decision 8",
       "Transport handlers only authenticate, authorize, validate, call one use case and map a typed result",
-      "partially_enforced",
+      "enforced",
       "application",
       [
         "crates/application/src/command_issue.rs",
         "crates/application/src/command_delivery.rs",
-        "services/control-plane/src/routes.rs",
         "crates/application/src/device_registration.rs",
-        "crates/application/src/device_heartbeat.rs"
+        "crates/application/src/device_heartbeat.rs",
+        "crates/application/src/public_probe.rs",
+        "services/control-plane/src/routes.rs"
       ],
       [
         "RQ-A",
         "RQ-T"
       ],
-      "public-probe-application-port",
       "",
-      "Command issue, poll, acknowledgement, device registration and heartbeat handlers call one typed use case and map typed outcomes; public probe remains transitional.",
+      "",
+      "Every current mutating Axum handler authenticates at the router, decodes input, calls one typed application use case and maps bounded outcomes; no handler owns persistence ordering or canonical mutation.",
       ""
     ],
     [
@@ -396,13 +398,23 @@
       "P",
       "§4 Phase A, §7.5",
       "SQL and business transitions are absent from HTTP handlers",
-      "planned",
+      "partially_enforced",
       "architecture",
-      [],
-      [],
-      "thin-handler-ast-gate",
+      [
+        "services/control-plane/src/routes.rs",
+        "crates/application/src/command_issue.rs",
+        "crates/application/src/command_delivery.rs",
+        "crates/application/src/device_registration.rs",
+        "crates/application/src/device_heartbeat.rs",
+        "crates/application/src/public_probe.rs"
+      ],
+      [
+        "RQ-A",
+        "RQ-T"
+      ],
+      "phase-a-closeout-review",
       "",
-      "",
+      "Current mutating handlers contain no persistence ordering or canonical state transitions. Enforcement remains review-backed rather than adding an unjustified repository-wide AST framework.",
       ""
     ],
     [
