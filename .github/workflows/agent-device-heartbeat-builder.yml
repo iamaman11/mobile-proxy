@@ -1,0 +1,96 @@
+name: Agent Device Heartbeat Builder
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-device-heartbeat-builder
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Validate and publish device heartbeat application port
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out isolated builder inputs
+        uses: actions/checkout@v7
+        with:
+          ref: agent/device-heartbeat-application-port-builder
+
+      - name: Decode exact production files
+        run: |
+          cat .agent/device-heartbeat-files.tar.gz.b64.* | tr -d '\n' | base64 --decode > /tmp/device-heartbeat-files.tar.gz
+          test -s /tmp/device-heartbeat-files.tar.gz
+          mkdir -p /tmp/device-heartbeat-files
+          tar -xzf /tmp/device-heartbeat-files.tar.gz -C /tmp/device-heartbeat-files
+
+      - name: Check out exact production branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags origin agent/device-heartbeat-application-port
+          git checkout -B agent/device-heartbeat-application-port origin/agent/device-heartbeat-application-port
+          test "$(git rev-parse HEAD)" = "c727fffdc066bc7ac244d6da246b5654ebd27efb"
+
+      - name: Install bounded heartbeat slice
+        run: |
+          mkdir -p crates/application/src docs/architecture services/control-plane/src contracts/governance
+          cp /tmp/device-heartbeat-files/contracts/governance/invariant-enforcement.json contracts/governance/invariant-enforcement.json
+          cp /tmp/device-heartbeat-files/docs/architecture/invariant-enforcement.md docs/architecture/invariant-enforcement.md
+          cp /tmp/device-heartbeat-files/docs/architecture/device-heartbeat-application-port.md docs/architecture/device-heartbeat-application-port.md
+          cp /tmp/device-heartbeat-files/crates/application/src/device_heartbeat.rs crates/application/src/device_heartbeat.rs
+          cp /tmp/device-heartbeat-files/crates/application/src/lib.rs crates/application/src/lib.rs
+          cp /tmp/device-heartbeat-files/services/control-plane/src/state.rs services/control-plane/src/state.rs
+          cp /tmp/device-heartbeat-files/services/control-plane/src/routes.rs services/control-plane/src/routes.rs
+          git diff --check
+
+      - name: Validate governance and Python regressions
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format and validate Rust workspace
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo clippy --quiet --workspace --all-targets -- -D warnings
+          cargo test --quiet --workspace
+
+      - name: Verify exact production scope
+        run: |
+          git diff --check
+          test "$(git status --short | awk '{print $2}' | sort)" = "$(printf '%s\n' \
+            contracts/governance/invariant-enforcement.json \
+            crates/application/src/device_heartbeat.rs \
+            crates/application/src/lib.rs \
+            docs/architecture/device-heartbeat-application-port.md \
+            docs/architecture/invariant-enforcement.md \
+            services/control-plane/src/routes.rs \
+            services/control-plane/src/state.rs | sort)"
+
+      - name: Commit and push clean production branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            contracts/governance/invariant-enforcement.json \
+            crates/application/src/device_heartbeat.rs \
+            crates/application/src/lib.rs \
+            docs/architecture/device-heartbeat-application-port.md \
+            docs/architecture/invariant-enforcement.md \
+            services/control-plane/src/routes.rs \
+            services/control-plane/src/state.rs
+          git commit -m "Extract device heartbeat application port"
+          git push origin HEAD:agent/device-heartbeat-application-port
