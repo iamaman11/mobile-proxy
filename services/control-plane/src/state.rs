@@ -7,7 +7,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use mobile_proxy_application::{
     AcknowledgeCommandError, AcknowledgeCommandFuture, AcknowledgeCommandInput,
-    AcknowledgeCommandOutcome, AcknowledgeCommandPort, IssueCommandError, IssueCommandFuture,
+    AcknowledgeCommandOutcome, AcknowledgeCommandPort, HeartbeatError, HeartbeatFuture,
+    HeartbeatInput, HeartbeatOutcome, HeartbeatPort, IssueCommandError, IssueCommandFuture,
     IssueCommandInput, IssueCommandOutcome, IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE,
     MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS, MAX_REGISTERED_DEVICES, PollCommandError,
     PollCommandFuture, PollCommandInput, PollCommandOutcome, PollCommandPort, RegisterDeviceError,
@@ -21,7 +22,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::fingerprint_migration::normalize_persisted_fingerprints;
-use crate::projection::{build_registered_device, now_unix_secs};
+use crate::projection::{build_heartbeat_device, build_registered_device, now_unix_secs};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -155,6 +156,66 @@ impl AppState {
             .map_err(|_| RegisterDeviceError::Persistence)?;
         *devices_guard = devices;
         Ok(outcome)
+    }
+
+    async fn heartbeat_transaction(
+        &self,
+        input: HeartbeatInput,
+    ) -> Result<HeartbeatOutcome, HeartbeatError> {
+        let mut devices_guard = self.devices.lock().await;
+        let commands_guard = self.commands.lock().await;
+        let mut devices = devices_guard.clone();
+        let request = input.request;
+        let node_id = request.node_id.clone();
+        let legacy_config_fingerprint = request
+            .config_fingerprint
+            .as_ref()
+            .is_some_and(proxy_core::ConfigFingerprintInput::is_legacy);
+        let legacy_binary_fingerprint = request
+            .binary_fingerprint
+            .as_ref()
+            .is_some_and(proxy_core::BinaryFingerprintInput::is_legacy);
+
+        if let Some(existing) = devices.get(&node_id) {
+            if existing.node_id != node_id {
+                return Err(HeartbeatError::StateConflict);
+            }
+        } else if devices.len() >= MAX_REGISTERED_DEVICES {
+            return Err(HeartbeatError::CapacityExceeded);
+        }
+
+        let (publicly_serving, public_probe_error, public_probe_at) = devices
+            .get(&node_id)
+            .map(|device| {
+                (
+                    device.publicly_serving,
+                    device.public_probe_error.clone(),
+                    device.public_probe_at.clone(),
+                )
+            })
+            .unwrap_or((false, None, None));
+        let device = build_heartbeat_device(
+            request,
+            publicly_serving,
+            public_probe_error,
+            public_probe_at,
+        );
+        if device.node_id != node_id {
+            return Err(HeartbeatError::StateConflict);
+        }
+        devices.insert(node_id, device);
+
+        let stored = StoredState {
+            devices: devices.clone(),
+            commands: commands_guard.clone(),
+        };
+        write_stored_state(self.state_path.as_ref(), &stored)
+            .map_err(|_| HeartbeatError::Persistence)?;
+        *devices_guard = devices;
+        Ok(HeartbeatOutcome::recorded(
+            legacy_config_fingerprint,
+            legacy_binary_fingerprint,
+        ))
     }
 
     async fn issue_command_transaction(
@@ -304,6 +365,12 @@ impl AppState {
 impl RegisterDevicePort for AppState {
     fn register_device(&self, input: RegisterDeviceInput) -> RegisterDeviceFuture<'_> {
         Box::pin(async move { self.register_device_transaction(input).await })
+    }
+}
+
+impl HeartbeatPort for AppState {
+    fn record_heartbeat(&self, input: HeartbeatInput) -> HeartbeatFuture<'_> {
+        Box::pin(async move { self.heartbeat_transaction(input).await })
     }
 }
 
@@ -515,16 +582,16 @@ mod tests {
 
     use mobile_proxy_application::{
         AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandOutcome,
-        AcknowledgeCommandPort, IssueCommandError, IssueCommandInput, IssueCommandOutcome,
-        IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE, MAX_PENDING_COMMANDS,
-        MAX_REGISTERED_DEVICES, PollCommandError, PollCommandInput, PollCommandOutcome,
-        PollCommandPort, RegisterDeviceError, RegisterDeviceInput, RegisterDeviceOutcome,
-        RegisterDevicePort, idempotency_scope_key,
+        AcknowledgeCommandPort, HeartbeatError, HeartbeatInput, HeartbeatPort, IssueCommandError,
+        IssueCommandInput, IssueCommandOutcome, IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE,
+        MAX_PENDING_COMMANDS, MAX_REGISTERED_DEVICES, PollCommandError, PollCommandInput,
+        PollCommandOutcome, PollCommandPort, RegisterDeviceError, RegisterDeviceInput,
+        RegisterDeviceOutcome, RegisterDevicePort, idempotency_scope_key,
     };
     use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey};
     use proxy_core::{
-        CommandAckRequest, DesiredState, DeviceCommand, IssueCommandRequest, RecoveryIntent,
-        RegisterDeviceRequest,
+        CommandAckRequest, DesiredState, DeviceCommand, HeartbeatRequest, IssueCommandRequest,
+        RecoveryIntent, RegisterDeviceRequest,
     };
     use serde_json::json;
     use tokio::sync::Mutex;
@@ -562,6 +629,19 @@ mod tests {
                 proxy_status: "starting".into(),
                 tunnel_owner: Some("stock_wireguard_bridge".into()),
             },
+        }
+    }
+
+    fn heartbeat(node_id: &str, node_name: &str) -> HeartbeatInput {
+        HeartbeatInput {
+            request: serde_json::from_value::<HeartbeatRequest>(json!({
+                "node_id": node_id,
+                "node_name": node_name,
+                "readiness_state": "ready",
+                "serving": true,
+                "proxy_status": "running"
+            }))
+            .unwrap(),
         }
     }
 
@@ -965,6 +1045,156 @@ mod tests {
                 .register_device(registration("device-1", "node"))
                 .await,
             Err(RegisterDeviceError::StateConflict)
+        );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_is_durable_and_preserves_public_probe_projection() {
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-heartbeat-{}.json",
+            Uuid::new_v4()
+        ));
+        let state = AppState::load(path.clone()).await.unwrap();
+        state
+            .register_device(registration("device-1", "registered-name"))
+            .await
+            .unwrap();
+        {
+            let mut devices = state.devices.lock().await;
+            let device = devices.get_mut("device-1").unwrap();
+            device.publicly_serving = true;
+            device.public_probe_error = Some("bounded_probe_error".into());
+            device.public_probe_at = Some("123".into());
+        }
+        state.persist().await.unwrap();
+
+        let outcome = state
+            .record_heartbeat(heartbeat("device-1", "heartbeat-name"))
+            .await
+            .unwrap();
+        assert!(outcome.accepted());
+        let device = state.devices.lock().await.get("device-1").unwrap().clone();
+        assert_eq!(device.node_name, "heartbeat-name");
+        assert!(device.publicly_serving);
+        assert_eq!(
+            device.public_probe_error.as_deref(),
+            Some("bounded_probe_error")
+        );
+        assert_eq!(device.public_probe_at.as_deref(), Some("123"));
+        drop(state);
+
+        let restarted = AppState::load(path.clone()).await.unwrap();
+        let device = restarted
+            .devices
+            .lock()
+            .await
+            .get("device-1")
+            .unwrap()
+            .clone();
+        assert_eq!(device.node_name, "heartbeat-name");
+        assert!(device.publicly_serving);
+        assert_eq!(device.public_probe_at.as_deref(), Some("123"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn failed_heartbeat_persistence_does_not_publish_a_new_projection() {
+        let blocking_parent = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-heartbeat-persistence-{}",
+            Uuid::new_v4()
+        ));
+        fs::write(&blocking_parent, b"not a directory").unwrap();
+        let existing = build_registered_device(registration("device-1", "registered-name").request);
+        let mut devices = HashMap::new();
+        devices.insert("device-1".into(), existing);
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(blocking_parent.join("state.json")),
+        };
+
+        assert_eq!(
+            state
+                .record_heartbeat(heartbeat("device-1", "heartbeat-name"))
+                .await,
+            Err(HeartbeatError::Persistence)
+        );
+        assert_eq!(
+            state
+                .devices
+                .lock()
+                .await
+                .get("device-1")
+                .unwrap()
+                .node_name,
+            "registered-name"
+        );
+        let _ = fs::remove_file(blocking_parent);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_capacity_rejects_new_devices_but_allows_existing_updates() {
+        let template = build_registered_device(registration("template", "template").request);
+        let mut devices = HashMap::new();
+        for index in 0..MAX_REGISTERED_DEVICES {
+            let node_id = format!("device-{index}");
+            let mut device = template.clone();
+            device.node_id = node_id.clone();
+            device.node_name = node_id.clone();
+            devices.insert(node_id, device);
+        }
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-heartbeat-capacity-{}.json",
+            Uuid::new_v4()
+        ));
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(path.clone()),
+        };
+
+        assert_eq!(
+            state
+                .record_heartbeat(heartbeat("overflow-device", "overflow"))
+                .await,
+            Err(HeartbeatError::CapacityExceeded)
+        );
+        assert!(
+            state
+                .record_heartbeat(heartbeat("device-0", "updated"))
+                .await
+                .is_ok()
+        );
+        assert_eq!(state.devices.lock().await.len(), MAX_REGISTERED_DEVICES);
+        assert_eq!(
+            state
+                .devices
+                .lock()
+                .await
+                .get("device-0")
+                .unwrap()
+                .node_name,
+            "updated"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_fails_closed_on_a_mismatched_stored_device() {
+        let mismatched = build_registered_device(registration("device-2", "node").request);
+        let mut devices = HashMap::new();
+        devices.insert("device-1".into(), mismatched);
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(std::path::PathBuf::from("unused")),
+        };
+
+        assert_eq!(
+            state
+                .record_heartbeat(heartbeat("device-1", "heartbeat-name"))
+                .await,
+            Err(HeartbeatError::StateConflict)
         );
     }
 

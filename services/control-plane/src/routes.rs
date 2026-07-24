@@ -1,5 +1,5 @@
 use crate::auth::{AuthConfig, require_admin, require_device};
-use crate::projection::{apply_public_probe, build_heartbeat_device, now_unix_secs};
+use crate::projection::{apply_public_probe, now_unix_secs};
 use crate::{request_context::attach_request_context, state::AppState};
 use axum::{
     Json, Router,
@@ -9,9 +9,10 @@ use axum::{
     routing::{get, post},
 };
 use mobile_proxy_application::{
-    AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandPort, IssueCommandError,
-    IssueCommandInput, IssueCommandPort, PollCommandError, PollCommandInput, PollCommandPort,
-    RegisterDeviceError, RegisterDeviceInput, RegisterDevicePort,
+    AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandPort, HeartbeatError,
+    HeartbeatInput, HeartbeatPort, IssueCommandError, IssueCommandInput, IssueCommandPort,
+    PollCommandError, PollCommandInput, PollCommandPort, RegisterDeviceError, RegisterDeviceInput,
+    RegisterDevicePort,
 };
 use mobile_proxy_foundation::{CommandId, RequestContext};
 use proxy_core::{
@@ -126,42 +127,74 @@ async fn register_device(
 
 async fn heartbeat(
     State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
     Json(req): Json<HeartbeatRequest>,
-) -> Json<serde_json::Value> {
-    let legacy_config_fingerprint = req
-        .config_fingerprint
-        .as_ref()
-        .is_some_and(proxy_core::ConfigFingerprintInput::is_legacy);
-    let legacy_binary_fingerprint = req
-        .binary_fingerprint
-        .as_ref()
-        .is_some_and(proxy_core::BinaryFingerprintInput::is_legacy);
-    if legacy_config_fingerprint || legacy_binary_fingerprint {
-        tracing::warn!(
-            node_id = %req.node_id,
-            legacy_config_fingerprint,
-            legacy_binary_fingerprint,
-            "legacy runtime fingerprint accepted for rolling migration and not persisted"
-        );
-    }
-    let mut devices = state.devices.lock().await;
-    let previous_probe = devices.get(&req.node_id).map(|device| {
-        (
-            device.publicly_serving,
-            device.public_probe_error.clone(),
-            device.public_probe_at.clone(),
-        )
-    });
-    let (publicly_serving, public_probe_error, public_probe_at) =
-        previous_probe.unwrap_or((false, None, None));
+) -> Result<Json<serde_json::Value>, ControlPlaneRouteError> {
     let node_id = req.node_id.clone();
-    devices.insert(
-        node_id,
-        build_heartbeat_device(req, publicly_serving, public_probe_error, public_probe_at),
-    );
-    drop(devices);
-    let _ = state.persist().await;
-    Json(serde_json::json!({ "accepted": true }))
+    match state
+        .record_heartbeat(HeartbeatInput { request: req })
+        .await
+    {
+        Ok(outcome) => {
+            if outcome.legacy_config_fingerprint() || outcome.legacy_binary_fingerprint() {
+                tracing::warn!(
+                    request_id = %context.request_id(),
+                    correlation_id = %context.correlation_id(),
+                    node_id = %node_id,
+                    legacy_config_fingerprint = outcome.legacy_config_fingerprint(),
+                    legacy_binary_fingerprint = outcome.legacy_binary_fingerprint(),
+                    "legacy runtime fingerprint accepted for rolling migration and not persisted"
+                );
+            }
+            tracing::info!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                node_id = %node_id,
+                classification = outcome.classification(),
+                "device heartbeat processed"
+            );
+            Ok(Json(serde_json::json!({ "accepted": outcome.accepted() })))
+        }
+        Err(HeartbeatError::StateConflict) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                node_id = %node_id,
+                error_code = "device_state_conflict",
+                "device heartbeat failed"
+            );
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "device_state_conflict" })),
+            ))
+        }
+        Err(HeartbeatError::CapacityExceeded) => {
+            tracing::warn!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                node_id = %node_id,
+                error_code = "device_capacity_exceeded",
+                "device heartbeat rejected"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "device_capacity_exceeded" })),
+            ))
+        }
+        Err(HeartbeatError::Persistence) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                node_id = %node_id,
+                error_code = "state_persistence_failed",
+                "device heartbeat failed"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "state_persistence_failed" })),
+            ))
+        }
+    }
 }
 
 async fn public_probe(

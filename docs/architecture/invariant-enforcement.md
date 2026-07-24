@@ -65,7 +65,7 @@ This list is not a claim that every rule in ADR-001 or the Production Baseline P
 
 The highest-impact active gaps remain explicit in the matrix:
 
-- explicit ownership for current mutable state and application ports for heartbeat and public-probe mutations;
+- the remaining public-probe application port and its durable mutation ordering;
 - thin transport handlers for the remaining baseline routes, plus prohibition of SQL or business transitions in HTTP handlers;
 - the closed SQLite baseline inventory, transaction boundaries, JSON migration and exercised rollback;
 - repository-wide typed status/error taxonomies where current baseline behavior still uses raw strings;
@@ -75,7 +75,7 @@ The highest-impact active gaps remain explicit in the matrix:
 - removal of runtime fingerprint legacy readers after the accepted compatibility window;
 - health-surface separation, backup/restore and physical reserve-tunnel acceptance on one immutable SHA.
 
-## Command lifecycle and device-registration application-port enforcement
+## Command lifecycle, registration and heartbeat application-port enforcement
 
 The existing command issue, poll, acknowledgement and device-registration capabilities now have bounded clean-dependency slices:
 
@@ -91,9 +91,12 @@ The existing command issue, poll, acknowledgement and device-registration capabi
 - negative acknowledgement preserves the pending command and the existing `{ "accepted": true }` compatibility shape;
 - device registration uses `node_id` as its natural replay key, preserves first-write metadata and bounds the JSON-era registry at 10,000 devices;
 - new and repeated registration persist the complete candidate before returning `{ "accepted": true }`;
-- a failed write returns `state_persistence_failed` and does not publish a new device in memory.
+- a failed write returns `state_persistence_failed` and does not publish a new device in memory;
+- heartbeat replaces one exact device runtime projection through a typed application port while preserving the last public-probe fields;
+- heartbeat persists the complete candidate before publishing it in memory or returning `{ "accepted": true }`;
+- failed heartbeat persistence leaves the prior projection unchanged, and new heartbeat-created devices respect the 10,000-device bound.
 
-Heartbeat and public probe remain transitional and keep `ARCH-004` and `ARCH-005` at `partially_enforced`.
+Public probe remains transitional and keeps `ARCH-004` and `ARCH-005` at `partially_enforced`.
 
 ## Runtime fingerprint enforcement
 
