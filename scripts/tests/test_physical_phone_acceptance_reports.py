@@ -1,9 +1,13 @@
 import importlib.util
 import pathlib
+import sys
 import unittest
 
 
-MODULE_PATH = pathlib.Path(__file__).parents[1] / "verify_physical_phone_acceptance_reports.py"
+SCRIPTS_DIR = pathlib.Path(__file__).parents[1]
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+MODULE_PATH = SCRIPTS_DIR / "verify_physical_phone_acceptance_reports.py"
 SPEC = importlib.util.spec_from_file_location("physical_reports", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
