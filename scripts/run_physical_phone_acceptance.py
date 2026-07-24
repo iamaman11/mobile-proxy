@@ -41,13 +41,16 @@ _REQUIRED_SOFTWARE_CHECKS = {
     "release_integrity_policy",
     "deployed_release_identity_verifier",
     "physical_report_set_verifier",
+    "vm_proxy_transport_switch",
 }
 _TRANSPORT_BY_STAGE = {
     "online": "quic",
     "post-reboot": "quic",
     "fallback": "tls_tcp",
     "recovered": "quic",
+    "post-wireguard-recovered": "quic",
 }
+_REVERSE_STAGES = frozenset(_TRANSPORT_BY_STAGE)
 
 
 class AcceptanceFailure(RuntimeError):
@@ -193,6 +196,31 @@ def _required_secret_env(name: str) -> str:
     return value
 
 
+def require_serving_health(health: dict[str, Any], device_id: str) -> None:
+    require(health.get("node_id") == device_id, "host health node_id differs from expected device")
+    require(health.get("serving") is True, "device is not serving")
+    require(health.get("proxy_status") == "running", "device proxy is not running")
+    require(health.get("cellular_route_ready") is True, "cellular route is not ready")
+    require(health.get("proxy_bind_ready") is True, "device proxy bind is not ready")
+    require(health.get("local_serving_ready") is True, "local proxy serving is not ready")
+
+
+def require_device_record(devices: list[Any], device_id: str) -> dict[str, Any]:
+    device = next(
+        (
+            value
+            for value in devices
+            if isinstance(value, dict) and value.get("node_id") == device_id
+        ),
+        None,
+    )
+    require(isinstance(device, dict), "expected device is absent from restored inventory")
+    require(device.get("serving") is True, "control-plane device is not serving")
+    require(device.get("availability") == "available", "control-plane device is unavailable")
+    require(device.get("last_heartbeat_at") is not None, "control-plane device heartbeat is missing")
+    return device
+
+
 def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     evidence = read_json(args.evidence)
     candidate_sha = verify_candidate(evidence)
@@ -213,9 +241,11 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
 
     health = require_object(request_json(f"{host_base}/v1/health", host_token), "host health")
     status = require_object(request_json(f"{host_base}/v1/status", host_token), "host status")
+    require_serving_health(health, args.device_id)
 
     expected_transport = _TRANSPORT_BY_STAGE.get(args.stage)
     if expected_transport is not None:
+        require(status.get("tunnel_owner") == "first_party_reverse_tunnel", "reverse stage tunnel owner differs")
         require(health.get("reverse_tunnel_connected") is True, "reverse tunnel is disconnected")
         require(
             health.get("reverse_tunnel_active_transport") == expected_transport,
@@ -225,16 +255,14 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
 
     if args.stage == "wireguard":
         require(status.get("wireguard_enabled") is True, "WireGuard rollback is not enabled")
+        require(status.get("tunnel_owner") == "stock_wireguard_bridge", "WireGuard tunnel owner differs")
+        require(health.get("tun0_present") is True, "WireGuard tun0 is absent")
+        require(health.get("wg_handshake_recent") is True, "WireGuard handshake is not recent")
+        require(health.get("reverse_tunnel_connected") is not True, "reverse tunnel remained active during WireGuard proof")
 
     devices = request_json(f"{control_base}/api/v1/devices", control_token)
     require(isinstance(devices, list) and devices, "restored device inventory is empty")
-    require(
-        any(
-            isinstance(device, dict) and device.get("node_id") == args.device_id
-            for device in devices
-        ),
-        "expected device is absent from restored inventory",
-    )
+    device = require_device_record(devices, args.device_id)
 
     proxies = prove_proxy_surfaces(
         args.proxy_host,
@@ -253,12 +281,26 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         },
         "device_inventory_present": True,
         "expected_device_present": True,
+        "device_state": {
+            "node_id": args.device_id,
+            "serving": True,
+            "availability": device.get("availability"),
+            "heartbeat_present": True,
+            "cellular_route_ready": True,
+            "proxy_bind_ready": True,
+            "local_serving_ready": True,
+        },
+        "tunnel_owner": status.get("tunnel_owner"),
         "reverse_tunnel": {
             "connected": health.get("reverse_tunnel_connected"),
             "active_transport": health.get("reverse_tunnel_active_transport"),
             "freshness": health.get("reverse_tunnel_freshness"),
         },
-        "wireguard_enabled": status.get("wireguard_enabled") is True,
+        "wireguard": {
+            "enabled": status.get("wireguard_enabled") is True,
+            "tun0_present": health.get("tun0_present"),
+            "handshake_recent": health.get("wg_handshake_recent"),
+        },
         "proxy_surfaces": proxies,
         "accepted": True,
     }
@@ -268,7 +310,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--stage",
-        choices=["online", "post-reboot", "fallback", "recovered", "wireguard"],
+        choices=[
+            "online",
+            "post-reboot",
+            "fallback",
+            "recovered",
+            "wireguard",
+            "post-wireguard-recovered",
+        ],
         required=True,
     )
     parser.add_argument("--evidence", type=Path, required=True)
