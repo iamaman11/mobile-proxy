@@ -20,6 +20,8 @@ The current `control-plane` daemon is SQLite-only.
 
 The application state owner loads only SQLite and every candidate mutation uses the accepted row-level compare-and-swap transaction before the in-memory projection is published. JSON loading, JSON runtime writing, backend dispatch and daemon-owned legacy fingerprint migration are removed from production composition.
 
+Legacy fingerprint normalization is now owned exclusively by `crates/control-plane-sqlite/src/legacy_json_import.rs`. Permanent digest-policy enforcement requires that isolated typed import adapter and no longer permits a legacy reader inside the production daemon.
+
 ## Migration and rollback boundary
 
 JSON remains supported only by `control-plane-state-migrate`:
