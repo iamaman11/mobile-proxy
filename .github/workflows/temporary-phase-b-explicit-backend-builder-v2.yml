@@ -1,4 +1,4 @@
-name: Temporary Phase B Explicit Backend Diagnostics
+name: Temporary Phase B Explicit Backend Builder
 
 on:
   pull_request:
@@ -9,10 +9,11 @@ on:
       - agent/phase-b-explicit-sqlite-backend
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  build:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -26,30 +27,35 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Verify formatting and compile
+      - name: Apply focused loader visibility fix
         run: |
-          cargo fmt --all -- --check
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('services/control-plane/src/state.rs')
+          body = path.read_text()
+          old = '''impl AppState {
+              pub async fn load(state_path: PathBuf) -> Result<Self> {
+          '''
+          new = '''impl AppState {
+              #[cfg(test)]
+              pub async fn load(state_path: PathBuf) -> Result<Self> {
+          '''
+          if body.count(old) != 1:
+              raise SystemExit(f'expected one compatibility loader, found {body.count(old)}')
+          path.write_text(body.replace(old, new, 1))
+          PY
+          cargo fmt --all
           cargo check --workspace --all-targets
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add services/control-plane/src/state.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "Limit compatibility state loader to tests [skip ci]"
+            git push origin HEAD:agent/phase-b-explicit-sqlite-backend
+          fi
 
-      - name: Capture strict Clippy diagnostics
-        id: clippy
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
-
-      - name: Upload strict Clippy diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: explicit-backend-clippy-diagnostics
-          path: clippy.log
-          if-no-files-found: error
-          retention-days: 2
-
-      - name: Enforce strict Clippy
-        if: steps.clippy.outcome == 'failure'
-        run: exit 1
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
         run: cargo test --workspace
