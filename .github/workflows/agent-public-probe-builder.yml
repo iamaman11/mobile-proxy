@@ -61,6 +61,16 @@ jobs:
           cp /tmp/public-probe-files/docs/architecture/public-probe-application-port.md docs/architecture/public-probe-application-port.md
           cp /tmp/public-probe-files/services/control-plane/src/routes.rs services/control-plane/src/routes.rs
           cp /tmp/public-probe-files/services/control-plane/src/state.rs services/control-plane/src/state.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("crates/application/src/public_probe.rs")
+          body = path.read_text(encoding="utf-8")
+          old = "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct PublicProbeInput"
+          new = "#[derive(Debug, Clone)]\npub struct PublicProbeInput"
+          if body.count(old) != 1:
+              raise SystemExit("unexpected PublicProbeInput derive shape")
+          path.write_text(body.replace(old, new), encoding="utf-8")
+          PY
           git diff --check
 
       - name: Validate governance and Python regressions
