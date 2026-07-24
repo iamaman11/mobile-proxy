@@ -1,0 +1,39 @@
+name: Temporary Workspace Test Tail
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/temp-test-tail.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/phase-b-retire-json-runtime'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Run workspace tests and capture log
+        shell: bash
+        run: |
+          set +e
+          cargo +stable test --workspace -- --nocapture > /tmp/workspace-test.log 2>&1
+          status=$?
+          tail -n 400 /tmp/workspace-test.log > /tmp/workspace-test-tail.log
+          echo "$status" > /tmp/workspace-test-status.txt
+          exit 0
+      - name: Upload failure tail
+        uses: actions/upload-artifact@v7
+        with:
+          name: workspace-test-tail
+          path: |
+            /tmp/workspace-test-tail.log
+            /tmp/workspace-test-status.txt
+          retention-days: 1
