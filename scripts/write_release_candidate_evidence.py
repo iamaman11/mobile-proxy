@@ -38,6 +38,7 @@ _ACCEPTED_CHECKS = (
     "release_integrity_policy",
     "deployed_release_identity_verifier",
     "physical_report_set_verifier",
+    "vm_proxy_transport_switch",
 )
 
 
