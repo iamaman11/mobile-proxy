@@ -275,10 +275,9 @@ fn apply_row_changes(
             changes.devices_upserted += 1;
         }
     }
-    for (scope_key, (command_id, result_json)) in &candidate.command_results {
-        if current.command_results.get(scope_key)
-            != Some(&(command_id.clone(), result_json.clone()))
-        {
+    for (scope_key, value) in &candidate.command_results {
+        if current.command_results.get(scope_key) != Some(value) {
+            let (command_id, result_json) = value;
             transaction.execute(
                 "INSERT INTO command_results (scope_key, command_id, result_json) \
                  VALUES (?1, ?2, ?3)",
@@ -287,10 +286,9 @@ fn apply_row_changes(
             changes.command_results_inserted += 1;
         }
     }
-    for (scope_key, (command_id, request_fingerprint)) in &candidate.idempotency_claims {
-        if current.idempotency_claims.get(scope_key)
-            != Some(&(command_id.clone(), request_fingerprint.clone()))
-        {
+    for (scope_key, value) in &candidate.idempotency_claims {
+        if current.idempotency_claims.get(scope_key) != Some(value) {
+            let (command_id, request_fingerprint) = value;
             transaction.execute(
                 "INSERT INTO idempotency_claims \
                  (scope_key, command_id, request_fingerprint) VALUES (?1, ?2, ?3)",
@@ -299,10 +297,9 @@ fn apply_row_changes(
             changes.idempotency_claims_inserted += 1;
         }
     }
-    for (command_id, (device_id, queue_position, command_json)) in &candidate.pending_commands {
-        if current.pending_commands.get(command_id)
-            != Some(&(device_id.clone(), *queue_position, command_json.clone()))
-        {
+    for (command_id, value) in &candidate.pending_commands {
+        if current.pending_commands.get(command_id) != Some(value) {
+            let (device_id, queue_position, command_json) = value;
             transaction.execute(
                 "INSERT INTO pending_commands \
                  (command_id, device_id, queue_position, command_json) \
