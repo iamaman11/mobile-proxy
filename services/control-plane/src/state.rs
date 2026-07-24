@@ -22,16 +22,19 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::cli::StateBackend;
 use crate::fingerprint_migration::normalize_persisted_fingerprints;
 use crate::projection::{
     apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
 };
+use crate::state_sqlite_backend;
 
 #[derive(Clone)]
 pub struct AppState {
     pub devices: Arc<Mutex<HashMap<String, DeviceRecord>>>,
     pub commands: Arc<Mutex<CommandState>>,
     state_path: Arc<PathBuf>,
+    state_backend: StateBackend,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -45,9 +48,9 @@ pub struct CommandState {
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
-struct StoredState {
-    devices: HashMap<String, DeviceRecord>,
-    commands: CommandState,
+pub(crate) struct StoredState {
+    pub(crate) devices: HashMap<String, DeviceRecord>,
+    pub(crate) commands: CommandState,
 }
 
 #[derive(Default)]
@@ -67,51 +70,104 @@ impl CommandStateMigration {
     }
 }
 
+fn load_json_state(state_path: &Path) -> Result<StoredState> {
+    match fs::read_to_string(state_path) {
+        Ok(body) => {
+            let (normalized, fingerprint_migration) = normalize_persisted_fingerprints(&body)
+                .with_context(|| format!("failed to migrate {}", state_path.display()))?;
+            let mut stored: StoredState = serde_json::from_value(normalized)
+                .with_context(|| format!("failed to parse {}", state_path.display()))?;
+            let command_migration = normalize_command_state(&mut stored.commands)
+                .map_err(|_| anyhow!("persisted command idempotency state is inconsistent"))?;
+            if fingerprint_migration.total() > 0 || command_migration.changed() {
+                write_stored_state(state_path, &stored).with_context(|| {
+                    format!("failed to persist migrated {}", state_path.display())
+                })?;
+            }
+            if fingerprint_migration.total() > 0 {
+                tracing::warn!(
+                    legacy_config_fingerprints = fingerprint_migration.legacy_config_values,
+                    legacy_binary_fingerprints = fingerprint_migration.legacy_binary_values,
+                    "legacy persisted fingerprints removed for typed heartbeat backfill"
+                );
+            }
+            if command_migration.changed() {
+                tracing::warn!(
+                    recovered_idempotency_results = command_migration.recovered_results,
+                    canonicalized_idempotency_keys = command_migration.canonicalized_keys,
+                    rebuilt_idempotency_order = command_migration.rebuilt_order,
+                    evicted_idempotency_entries = command_migration.evicted_entries,
+                    "legacy command idempotency state normalized"
+                );
+            }
+            Ok(stored)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(StoredState::default()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to read {}", state_path.display()))
+        }
+    }
+}
+
 impl AppState {
+    #[cfg(test)]
     pub async fn load(state_path: PathBuf) -> Result<Self> {
-        let stored = match fs::read_to_string(&state_path) {
-            Ok(body) => {
-                let (normalized, fingerprint_migration) =
-                    normalize_persisted_fingerprints(&body)
-                        .with_context(|| format!("failed to migrate {}", state_path.display()))?;
-                let mut stored: StoredState = serde_json::from_value(normalized)
-                    .with_context(|| format!("failed to parse {}", state_path.display()))?;
-                let command_migration = normalize_command_state(&mut stored.commands)
-                    .map_err(|_| anyhow!("persisted command idempotency state is inconsistent"))?;
-                if fingerprint_migration.total() > 0 || command_migration.changed() {
-                    write_stored_state(&state_path, &stored).with_context(|| {
-                        format!("failed to persist migrated {}", state_path.display())
-                    })?;
-                }
-                if fingerprint_migration.total() > 0 {
-                    tracing::warn!(
-                        legacy_config_fingerprints = fingerprint_migration.legacy_config_values,
-                        legacy_binary_fingerprints = fingerprint_migration.legacy_binary_values,
-                        "legacy persisted fingerprints removed for typed heartbeat backfill"
-                    );
-                }
-                if command_migration.changed() {
-                    tracing::warn!(
-                        recovered_idempotency_results = command_migration.recovered_results,
-                        canonicalized_idempotency_keys = command_migration.canonicalized_keys,
-                        rebuilt_idempotency_order = command_migration.rebuilt_order,
-                        evicted_idempotency_entries = command_migration.evicted_entries,
-                        "legacy command idempotency state normalized"
-                    );
-                }
-                stored
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => StoredState::default(),
-            Err(err) => {
-                return Err(err)
-                    .with_context(|| format!("failed to read {}", state_path.display()));
-            }
+        Self::load_with_backend(state_path, StateBackend::Json).await
+    }
+
+    pub async fn load_with_backend(
+        state_path: PathBuf,
+        state_backend: StateBackend,
+    ) -> Result<Self> {
+        let stored = match state_backend {
+            StateBackend::Json => load_json_state(&state_path)?,
+            StateBackend::Sqlite => state_sqlite_backend::load_existing(&state_path)?,
         };
         Ok(Self {
             devices: Arc::new(Mutex::new(stored.devices)),
             commands: Arc::new(Mutex::new(stored.commands)),
             state_path: Arc::new(state_path),
+            state_backend,
         })
+    }
+
+    fn persist_candidate(
+        &self,
+        expected_devices: &HashMap<String, DeviceRecord>,
+        expected_commands: &CommandState,
+        candidate_devices: &HashMap<String, DeviceRecord>,
+        candidate_commands: &CommandState,
+    ) -> Result<()> {
+        let candidate = StoredState {
+            devices: candidate_devices.clone(),
+            commands: candidate_commands.clone(),
+        };
+        match self.state_backend {
+            StateBackend::Json => write_stored_state(self.state_path.as_ref(), &candidate),
+            StateBackend::Sqlite => {
+                let expected = StoredState {
+                    devices: expected_devices.clone(),
+                    commands: expected_commands.clone(),
+                };
+                let changes = state_sqlite_backend::compare_and_swap(
+                    self.state_path.as_ref(),
+                    &expected,
+                    &candidate,
+                )?;
+                tracing::debug!(
+                    devices_upserted = changes.devices_upserted,
+                    devices_deleted = changes.devices_deleted,
+                    command_results_inserted = changes.command_results_inserted,
+                    command_results_deleted = changes.command_results_deleted,
+                    idempotency_claims_inserted = changes.idempotency_claims_inserted,
+                    idempotency_claims_deleted = changes.idempotency_claims_deleted,
+                    pending_commands_inserted = changes.pending_commands_inserted,
+                    pending_commands_deleted = changes.pending_commands_deleted,
+                    "SQLite control-plane candidate committed"
+                );
+                Ok(())
+            }
+        }
     }
 
     #[cfg(test)]
@@ -122,7 +178,12 @@ impl AppState {
             devices: devices.clone(),
             commands: commands.clone(),
         };
-        write_stored_state(self.state_path.as_ref(), &stored)
+        match self.state_backend {
+            StateBackend::Json => write_stored_state(self.state_path.as_ref(), &stored),
+            StateBackend::Sqlite => {
+                state_sqlite_backend::replace_for_test(self.state_path.as_ref(), &stored)
+            }
+        }
     }
 
     async fn register_device_transaction(
@@ -152,11 +213,7 @@ impl AppState {
             RegisterDeviceOutcome::Created
         };
 
-        let stored = StoredState {
-            devices: devices.clone(),
-            commands: commands_guard.clone(),
-        };
-        write_stored_state(self.state_path.as_ref(), &stored)
+        self.persist_candidate(&devices_guard, &commands_guard, &devices, &commands_guard)
             .map_err(|_| RegisterDeviceError::Persistence)?;
         *devices_guard = devices;
         Ok(outcome)
@@ -209,11 +266,7 @@ impl AppState {
         }
         devices.insert(node_id, device);
 
-        let stored = StoredState {
-            devices: devices.clone(),
-            commands: commands_guard.clone(),
-        };
-        write_stored_state(self.state_path.as_ref(), &stored)
+        self.persist_candidate(&devices_guard, &commands_guard, &devices, &commands_guard)
             .map_err(|_| HeartbeatError::Persistence)?;
         *devices_guard = devices;
         Ok(HeartbeatOutcome::recorded(
@@ -244,11 +297,7 @@ impl AppState {
             return Err(PublicProbeError::StateConflict);
         }
 
-        let stored = StoredState {
-            devices: devices.clone(),
-            commands: commands_guard.clone(),
-        };
-        write_stored_state(self.state_path.as_ref(), &stored)
+        self.persist_candidate(&devices_guard, &commands_guard, &devices, &commands_guard)
             .map_err(|_| PublicProbeError::Persistence)?;
         *devices_guard = devices;
         Ok(PublicProbeOutcome::Updated)
@@ -262,6 +311,8 @@ impl AppState {
         let mut commands_guard = self.commands.lock().await;
         let mut devices = devices_guard.clone();
         let mut commands = commands_guard.clone();
+        let expected_devices = devices.clone();
+        let expected_commands = commands.clone();
 
         let migration =
             normalize_command_state(&mut commands).map_err(|_| IssueCommandError::StateConflict)?;
@@ -272,7 +323,8 @@ impl AppState {
         if let Some(existing) = commands.idempotency_results.get(&scope) {
             let original = classify_existing(existing, &input.device_id, &input.request)?;
             if migration.changed() {
-                persist_candidate(self.state_path.as_ref(), &devices, &commands)?;
+                self.persist_candidate(&expected_devices, &expected_commands, &devices, &commands)
+                    .map_err(|_| IssueCommandError::Persistence)?;
                 *devices_guard = devices;
                 *commands_guard = commands;
             }
@@ -320,7 +372,8 @@ impl AppState {
             device.last_event_at = Some(command.issued_at.clone());
         }
 
-        persist_candidate(self.state_path.as_ref(), &devices, &commands)?;
+        self.persist_candidate(&expected_devices, &expected_commands, &devices, &commands)
+            .map_err(|_| IssueCommandError::Persistence)?;
         *devices_guard = devices;
         *commands_guard = commands;
         Ok(IssueCommandOutcome::Created(command))
@@ -384,11 +437,7 @@ impl AppState {
             device.last_event_at = Some(now_unix_secs());
         }
 
-        let stored = StoredState {
-            devices: devices.clone(),
-            commands: commands.clone(),
-        };
-        write_stored_state(self.state_path.as_ref(), &stored)
+        self.persist_candidate(&devices_guard, &commands_guard, &devices, &commands)
             .map_err(|_| AcknowledgeCommandError::Persistence)?;
         *devices_guard = devices;
         *commands_guard = commands;
@@ -590,18 +639,6 @@ fn trim_idempotency_state(commands: &mut CommandState) -> Result<u64, ()> {
     Ok(evicted)
 }
 
-fn persist_candidate(
-    path: &Path,
-    devices: &HashMap<String, DeviceRecord>,
-    commands: &CommandState,
-) -> Result<(), IssueCommandError> {
-    let stored = StoredState {
-        devices: devices.clone(),
-        commands: commands.clone(),
-    };
-    write_stored_state(path, &stored).map_err(|_| IssueCommandError::Persistence)
-}
-
 fn write_stored_state(path: &Path, stored: &StoredState) -> Result<()> {
     let body = serde_json::to_vec_pretty(stored)?;
     if let Some(parent) = path.parent() {
@@ -642,7 +679,7 @@ mod tests {
 
     use crate::projection::build_registered_device;
 
-    use super::{AppState, CommandState};
+    use super::{AppState, CommandState, StateBackend};
 
     fn command_input(desired_state: DesiredState) -> IssueCommandInput {
         IssueCommandInput {
@@ -871,6 +908,7 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(path.clone()),
+            state_backend: StateBackend::Json,
         };
 
         let result = state
@@ -934,6 +972,7 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(path.clone()),
+            state_backend: StateBackend::Json,
         };
 
         let result = state
@@ -1019,6 +1058,7 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1045,6 +1085,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1072,6 +1113,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1092,6 +1134,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1165,6 +1208,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1205,6 +1249,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(path.clone()),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1242,6 +1287,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1305,6 +1351,7 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1331,6 +1378,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1354,6 +1402,7 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1375,6 +1424,7 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
+            state_backend: StateBackend::Json,
         };
 
         let result = state
@@ -1531,6 +1581,7 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(blocking_parent.join("state.json")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1572,6 +1623,7 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
+            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1584,3 +1636,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "state_sqlite_backend_tests.rs"]
+mod sqlite_backend_tests;

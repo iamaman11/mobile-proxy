@@ -30,7 +30,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 
 pub const SCHEMA_VERSION: i64 = 1;
 pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -164,27 +164,31 @@ impl SqliteStore {
         Self::initialize(connection, true)
     }
 
+    pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, StoreError> {
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        Self::initialize_existing(connection, true)
+    }
+
     fn initialize(mut connection: Connection, require_wal: bool) -> Result<Self, StoreError> {
-        connection.busy_timeout(BUSY_TIMEOUT)?;
-        connection.pragma_update(None, "foreign_keys", true)?;
-        connection.pragma_update(None, "synchronous", "FULL")?;
-
-        if require_wal {
-            let journal_mode: String =
-                connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
-            if !journal_mode.eq_ignore_ascii_case("wal") {
-                return Err(StoreError::UnexpectedJournalMode);
-            }
-        }
-
-        let foreign_keys: i64 =
-            connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
-        if foreign_keys != 1 {
-            return Err(StoreError::UnexpectedForeignKeyState);
-        }
-
+        configure_connection(&connection, require_wal)?;
         apply_migrations(&mut connection)?;
         validate_schema(&connection)?;
+        Ok(Self { connection })
+    }
+
+    fn initialize_existing(connection: Connection, require_wal: bool) -> Result<Self, StoreError> {
+        let found = read_schema_version(&connection)?;
+        if found != SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedSchemaVersion {
+                found,
+                supported: SCHEMA_VERSION,
+            });
+        }
+        validate_schema(&connection)?;
+        configure_connection(&connection, require_wal)?;
         Ok(Self { connection })
     }
 
@@ -321,6 +325,26 @@ impl WriteTransaction<'_> {
             params![command_id],
         )? == 1)
     }
+}
+
+fn configure_connection(connection: &Connection, require_wal: bool) -> Result<(), StoreError> {
+    connection.busy_timeout(BUSY_TIMEOUT)?;
+    connection.pragma_update(None, "foreign_keys", true)?;
+    connection.pragma_update(None, "synchronous", "FULL")?;
+
+    if require_wal {
+        let journal_mode: String =
+            connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
+        if !journal_mode.eq_ignore_ascii_case("wal") {
+            return Err(StoreError::UnexpectedJournalMode);
+        }
+    }
+
+    let foreign_keys: i64 = connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    if foreign_keys != 1 {
+        return Err(StoreError::UnexpectedForeignKeyState);
+    }
+    Ok(())
 }
 
 fn apply_migrations(connection: &mut Connection) -> Result<(), StoreError> {
