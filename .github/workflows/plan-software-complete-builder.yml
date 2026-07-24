@@ -1,0 +1,98 @@
+name: Plan Software Complete Builder
+
+on:
+  push:
+    branches:
+      - agent/plan-software-complete-before-device
+
+permissions:
+  contents: write
+
+jobs:
+  update-plan:
+    if: github.event.head_commit.message != 'Generate software-complete plan decision'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Update canonical plan and governance pin
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+
+          plan_path = Path('docs/PRODUCTION_BASELINE_PLAN.md')
+          plan = plan_path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  'This document is the sole canonical implementation roadmap for current development. Architecture ADRs and compatibility contracts remain normative for their bounded subjects, but they do not authorize work outside this baseline.\n',
+                  'This document is the sole canonical implementation roadmap for current development. Architecture ADRs and compatibility contracts remain normative for their bounded subjects, but they do not authorize work outside this baseline.\n\nExecution is split into a software-complete release candidate and final physical-device acceptance. Lack of an attached phone does not authorize deferring source-controlled migration, runtime cutover, recovery, backup/restore, process-level tunnel acceptance or operational work that can be proved without the device.\n'
+              ),
+              (
+                  '8. When two designs satisfy the same invariant, prefer the one with fewer states, fewer persistence concepts, fewer runtime dependencies and a smaller rollback surface.\n',
+                  '8. When two designs satisfy the same invariant, prefer the one with fewer states, fewer persistence concepts, fewer runtime dependencies and a smaller rollback surface.\n9. Environment unavailability may defer only evidence that intrinsically requires that environment. It must not leave independently testable production code, migration, cutover or recovery work incomplete.\n'
+              ),
+              (
+                  '7. Verify real QUIC-to-TLS/TCP failover by blocking the QUIC path and proving reserve operation.\n8. Restore QUIC and prove new connections return to the primary transport.\n',
+                  '7. Verify QUIC-to-TLS/TCP failover in controlled repository or process infrastructure by blocking the QUIC path and proving reserve operation.\n8. Restore QUIC and prove new connections return to the primary transport in the same controlled acceptance environment.\n9. Preserve an executable physical-device confirmation sequence for the final external gate; do not defer the controlled software evidence until a device is attached.\n'
+              ),
+              (
+                  '- mixed, SOCKS5, HTTP and CONNECT succeed over both QUIC and TLS/TCP reserve during the acceptance test;\n',
+                  '- mixed, SOCKS5, HTTP and CONNECT succeed over both QUIC and TLS/TCP reserve in controlled software acceptance; the physical run later confirms the same protected surfaces on the real device;\n'
+              ),
+              (
+                  '### Phase D — minimum operations and physical acceptance\n\nGoal: prove the resulting system can be operated, restored and trusted on a real device.\n',
+                  '### Phase D — minimum operations and staged acceptance\n\nGoal: prove the resulting system can be operated and restored without device access, produce one immutable software-complete release candidate, and then confirm that candidate on a real device.\n'
+              ),
+              (
+                  '1. Define separate liveness and readiness semantics that do not conflate process health with phone availability.\n2. Ensure health output identifies durable-store health, tunnel state, active transport and freshness without exposing secrets or unbounded labels.\n3. Implement and document SQLite backup and restore.\n4. Run a restore drill into a clean environment and verify the restored state.\n5. Run a physical-phone acceptance sequence on one immutable Git SHA:\n   - clean startup;\n   - all three proxy surfaces plus HTTP CONNECT;\n   - phone or service reboot;\n   - state rehydration;\n   - QUIC operation;\n   - forced TLS/TCP fallback;\n   - return to QUIC;\n   - WireGuard rollback availability.\n6. Record any unresolved P0/P1 defect and do not declare the baseline complete while one remains.\n',
+                  '1. Define separate liveness and readiness semantics that do not conflate process health with phone availability.\n2. Ensure health output identifies durable-store health, tunnel state, active transport and freshness without exposing secrets or unbounded labels.\n3. Implement and document SQLite backup and restore.\n4. Run a restore drill into a clean environment and verify the restored state.\n5. Complete all process-level proxy and tunnel acceptance, rollback and recovery evidence on one immutable Git SHA.\n6. Record a software-complete release-candidate closeout and provide an executable physical-phone acceptance runbook for that SHA.\n7. When a phone is available, run the physical sequence on the immutable candidate SHA:\n   - clean startup;\n   - all three proxy surfaces plus HTTP CONNECT;\n   - phone or service reboot;\n   - state rehydration;\n   - QUIC operation;\n   - forced TLS/TCP fallback;\n   - return to QUIC;\n   - WireGuard rollback availability.\n8. Record any unresolved P0/P1 defect and do not declare the baseline complete while one remains.\n'
+              ),
+              (
+                  '- backup and restore are repeatable and documented;\n- liveness remains healthy when the process is healthy even if no phone is available;\n- readiness accurately reflects critical storage and worker dependencies;\n- physical acceptance passes on one unchanged commit;\n- the resulting release is suitable for continued real use without requiring the future platform roadmap.\n',
+                  '- backup and restore are repeatable and documented;\n- liveness remains healthy when the process is healthy even if no phone is available;\n- readiness accurately reflects critical storage and worker dependencies;\n- all source-controlled and process-testable acceptance passes on one unchanged commit, producing a software-complete release candidate;\n- the only permitted remaining gate after software closeout is the documented physical-phone sequence;\n- physical acceptance passes on the immutable candidate commit, or all software evidence is rerun on a later immutable commit before the physical run;\n- the resulting release is suitable for continued real use without requiring the future platform roadmap.\n'
+              ),
+              (
+                  '12. health semantics;\n13. backup/restore drill;\n14. immutable-SHA physical acceptance;\n15. final baseline closeout.\n\nNo later item should be pulled forward merely to keep work moving.\n',
+                  '12. health semantics;\n13. backup/restore drill;\n14. controlled immutable-SHA software acceptance and release-candidate closeout;\n15. immutable-SHA physical acceptance when a device is available;\n16. final baseline closeout.\n\nItems 1 through 14 must be completed without waiting for a physical device. Device unavailability may pause only item 15 and the dependent final closeout in item 16. No later item should otherwise be pulled forward merely to keep work moving.\n'
+              ),
+              (
+                  '3. Physical acceptance evidence must identify one immutable Git SHA and must not combine results from different source revisions.\n4. No release is declared baseline-complete with an unresolved P0 or P1 defect.\n',
+                  '3. Software-complete acceptance evidence must identify one immutable Git SHA and must not combine results from different source revisions.\n4. Physical acceptance evidence must use that immutable candidate SHA; if source changes, the relevant software evidence must be rerun before physical acceptance.\n5. Software-complete status is not baseline-complete status and must state that the physical gate remains.\n6. No release is declared baseline-complete with an unresolved P0 or P1 defect.\n'
+              ),
+              (
+                  '- all four baseline phases are complete;\n',
+                  '- all software-completable work through delivery item 14 is complete and only physical-device acceptance remains, in which case implementation pauses with an explicit software-complete release candidate rather than claiming baseline completion;\n- all four baseline phases, including physical acceptance, are complete;\n'
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in plan:
+                  raise SystemExit(f'missing expected plan fragment: {old[:80]!r}')
+              plan = plan.replace(old, new, 1)
+
+          plan_path.write_text(plan, encoding='utf-8')
+          blob_sha = subprocess.check_output(
+              ['git', 'hash-object', str(plan_path)], text=True
+          ).strip()
+
+          catalog_path = Path('contracts/governance/invariant-enforcement.json')
+          catalog = json.loads(catalog_path.read_text(encoding='utf-8'))
+          catalog['baseline_main_sha'] = 'e8ce5be9cfc0c8eb05ea05945e3bdda423e6183c'
+          catalog['sources']['P']['blob_sha'] = blob_sha
+          catalog_path.write_text(json.dumps(catalog, indent=2) + '\n', encoding='utf-8')
+          PY
+
+          python3 scripts/check_architecture_boundaries.py
+
+      - name: Commit generated decision
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/PRODUCTION_BASELINE_PLAN.md contracts/governance/invariant-enforcement.json
+          git commit -m 'Generate software-complete plan decision'
+          git push
