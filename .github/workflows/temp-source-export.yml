@@ -1,4 +1,4 @@
-name: Temporary Source Export
+name: Temporary Patch Publisher
 
 on:
   pull_request:
@@ -6,19 +6,34 @@ on:
       - ".github/workflows/temp-source-export.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/phase-b-retire-json-runtime'
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out source
+      - name: Check out source branch
         uses: actions/checkout@v7
-      - name: Package source
-        run: tar --exclude=.git -czf /tmp/mobile-proxy-source.tgz .
-      - name: Upload source
-        uses: actions/upload-artifact@v7
         with:
-          name: temporary-source-snapshot
-          path: /tmp/mobile-proxy-source.tgz
-          retention-days: 1
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply reviewed transformations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .tmp/retire_json.py
+          python .tmp/modify_process.py
+          python .tmp/update_docs.py
+          git diff --check
+      - name: Publish branch update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Retire JSON from control-plane runtime"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
