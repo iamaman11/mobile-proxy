@@ -114,9 +114,7 @@ impl Display for SnapshotViolation {
             Self::PendingDeviceMismatch => {
                 formatter.write_str("pending command is bound to another device")
             }
-            Self::DuplicatePendingCommand => {
-                formatter.write_str("pending command is duplicated")
-            }
+            Self::DuplicatePendingCommand => formatter.write_str("pending command is duplicated"),
             Self::DuplicateQueuePosition => {
                 formatter.write_str("pending queue position is duplicated")
             }

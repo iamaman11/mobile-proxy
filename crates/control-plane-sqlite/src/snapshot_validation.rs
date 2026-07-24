@@ -18,9 +18,7 @@ pub(super) fn validate_rows(
     if device_rows.len() > MAX_REGISTERED_DEVICES {
         return Err(SnapshotViolation::DeviceCapacityExceeded);
     }
-    if result_rows.len() > MAX_IDEMPOTENCY_RESULTS
-        || claim_rows.len() > MAX_IDEMPOTENCY_RESULTS
-    {
+    if result_rows.len() > MAX_IDEMPOTENCY_RESULTS || claim_rows.len() > MAX_IDEMPOTENCY_RESULTS {
         return Err(SnapshotViolation::ReplayCapacityExceeded);
     }
     if pending_rows.len() > MAX_PENDING_COMMANDS {
@@ -135,8 +133,8 @@ pub(super) fn validate_rows(
     for (device_id, positions) in pending_by_device {
         let mut queue = VecDeque::with_capacity(positions.len());
         for (expected, (position, command)) in positions.into_iter().enumerate() {
-            let expected = u32::try_from(expected)
-                .map_err(|_| SnapshotViolation::PendingCapacityExceeded)?;
+            let expected =
+                u32::try_from(expected).map_err(|_| SnapshotViolation::PendingCapacityExceeded)?;
             if position != expected {
                 return Err(SnapshotViolation::NonContiguousQueuePosition);
             }

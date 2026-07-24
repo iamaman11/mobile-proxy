@@ -52,9 +52,7 @@ fn exact_rows(commands: &[DeviceCommand], pending: &[(u32, DeviceCommand)]) -> S
             .collect(),
         pending
             .iter()
-            .map(|(position, command)| {
-                PendingCommandRow::from_command(*position, command.clone())
-            })
+            .map(|(position, command)| PendingCommandRow::from_command(*position, command.clone()))
             .collect(),
     )
 }
@@ -67,10 +65,7 @@ fn unrelated_digest(label: &'static str) -> ContentDigest {
 }
 
 fn assert_violation(rows: SnapshotRows, expected: SnapshotViolation) {
-    assert_eq!(
-        ControlPlaneSnapshot::from_rows(rows).unwrap_err(),
-        expected
-    );
+    assert_eq!(ControlPlaneSnapshot::from_rows(rows).unwrap_err(), expected);
 }
 
 #[test]
