@@ -27,6 +27,7 @@ pub enum Command {
     InstallDeviceStack(InstallDeviceStackArgs),
     PackageDeviceRelease(PackageDeviceReleaseArgs),
     InstallDeviceRelease(InstallDeviceReleaseArgs),
+    VerifyReleaseIntegrity(VerifyReleaseIntegrityArgs),
     VerifyDevice(VerifyDeviceArgs),
     RollbackDevice(RollbackDeviceArgs),
     GenerateReverseTunnelIdentity(GenerateReverseTunnelIdentityArgs),
@@ -217,6 +218,12 @@ pub struct InstallDeviceReleaseArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct VerifyReleaseIntegrityArgs {
+    #[arg(long)]
+    pub root: String,
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct VerifyDeviceArgs {
     #[arg(long)]
     pub manifest_path: String,
@@ -269,5 +276,20 @@ mod tests {
 
         let metrics = Cli::try_parse_from(["operator-cli", "metrics"]).unwrap();
         assert!(matches!(metrics.command, Command::Metrics));
+    }
+
+    #[test]
+    fn release_integrity_verification_is_an_explicit_offline_surface() {
+        let cli = Cli::try_parse_from([
+            "operator-cli",
+            "verify-release-integrity",
+            "--root",
+            "target/device-releases/candidate",
+        ])
+        .unwrap();
+        let Command::VerifyReleaseIntegrity(args) = cli.command else {
+            panic!("verify-release-integrity command must parse");
+        };
+        assert_eq!(args.root, "target/device-releases/candidate");
     }
 }
