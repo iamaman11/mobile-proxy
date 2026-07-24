@@ -5,6 +5,7 @@ mod projection;
 mod request_context;
 mod routes;
 mod state;
+mod state_sqlite_backend;
 
 use crate::auth::AuthConfig;
 use crate::cli::Cli;
@@ -19,7 +20,10 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     let auth = AuthConfig::new(cli.admin_token, cli.device_token)?;
-    let app = router(AppState::load(cli.state_path).await?, auth);
+    let app = router(
+        AppState::load_with_backend(cli.state_path, cli.state_backend).await?,
+        auth,
+    );
     let listener = TcpListener::bind(&cli.listen).await?;
     info!("control-plane listening on {}", cli.listen);
     axum::serve(listener, app).await?;

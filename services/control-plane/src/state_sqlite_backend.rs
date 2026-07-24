@@ -120,7 +120,8 @@ pub(crate) fn stored_from_snapshot(snapshot: ControlPlaneSnapshot) -> Result<Sto
 }
 
 fn validate_legacy_claims(commands: &CommandState) -> Result<()> {
-    let mut expected = HashMap::<String, CommandId>::with_capacity(commands.idempotency_results.len());
+    let mut expected =
+        HashMap::<String, CommandId>::with_capacity(commands.idempotency_results.len());
     for (scope, command) in &commands.idempotency_results {
         let canonical = idempotency_scope_key(&command.device_id, &command.idempotency_key);
         if canonical.to_string() != *scope {

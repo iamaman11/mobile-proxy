@@ -112,9 +112,11 @@ fn external_device(node_id: &str) -> DeviceRecord {
 #[tokio::test]
 async fn explicit_sqlite_backend_requires_an_existing_migrated_file() {
     let database = TempDatabase::new("missing-sqlite");
-    let error = AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite)
-        .await
-        .unwrap_err();
+    let error = match AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite).await
+    {
+        Ok(_) => panic!("missing SQLite state unexpectedly started"),
+        Err(error) => error,
+    };
     assert!(error.to_string().contains("run the migration utility"));
     assert!(!database.path.exists());
 }

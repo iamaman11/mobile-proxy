@@ -1,5 +1,13 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[value(rename_all = "snake_case")]
+pub enum StateBackend {
+    #[default]
+    Json,
+    Sqlite,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "control-plane")]
@@ -13,8 +21,19 @@ pub struct Cli {
     pub device_token: String,
     #[arg(
         long,
+        env = "CONTROL_PLANE_STATE_BACKEND",
+        value_enum,
+        default_value = "json"
+    )]
+    pub state_backend: StateBackend,
+    #[arg(
+        long,
         env = "CONTROL_PLANE_STATE_PATH",
         default_value = "/var/lib/mobile-relaycontrolpoint/control-plane-state.json"
     )]
     pub state_path: PathBuf,
 }
+
+#[cfg(test)]
+#[path = "cli_backend_tests.rs"]
+mod backend_tests;
