@@ -33,12 +33,19 @@ _REQUIRED_PROXY_SURFACES = {
 }
 
 
-def verify_deployment_report(report: dict[str, Any], candidate_sha: str, label: str) -> None:
+def verify_deployment_report(
+    report: dict[str, Any],
+    candidate_sha: str,
+    label: str,
+    expected_owner: str,
+) -> None:
     require(report.get("format_version") == 1, f"{label} deployment report version is unsupported")
     require(report.get("candidate_sha") == candidate_sha, f"{label} deployment report SHA differs")
     require(report.get("accepted") is True, f"{label} deployment report is not accepted")
+    require(report.get("expected_tunnel_owner") == expected_owner, f"{label} deployment tunnel owner differs")
     require(report.get("device_release_metadata_match") is True, f"{label} device release metadata differs")
     require(report.get("device_deployment_match") is True, f"{label} device deployment differs")
+    require(report.get("android_vpn_owner_match") is True, f"{label} Android VPN owner differs")
     require(report.get("vm_deployment_match") is True, f"{label} VM deployment differs")
     require(
         isinstance(report.get("device_release_entries"), int)
@@ -52,18 +59,18 @@ def verify_deployment_report(report: dict[str, Any], candidate_sha: str, label: 
     )
 
 
-def verify_switch_report(report: dict[str, Any], mode: str) -> None:
-    require(report.get("format_version") == 1, f"{mode} switch report version is unsupported")
-    require(report.get("mode") == mode, f"{mode} switch report mode differs")
-    require(report.get("accepted") is True, f"{mode} switch report is not accepted")
+def verify_switch_report(report: dict[str, Any], mode: str, label: str) -> None:
+    require(report.get("format_version") == 1, f"{label} switch report version is unsupported")
+    require(report.get("mode") == mode, f"{label} switch report mode differs")
+    require(report.get("accepted") is True, f"{label} switch report is not accepted")
     digest = report.get("config_sha256")
     require(
         isinstance(digest, str)
         and len(digest) == 64
         and all(character in "0123456789abcdef" for character in digest),
-        f"{mode} switch digest is invalid",
+        f"{label} switch digest is invalid",
     )
-    require(report.get("public_ports") == [1080, 1081, 3128], f"{mode} switch ports differ")
+    require(report.get("public_ports") == [1080, 1081, 3128], f"{label} switch ports differ")
 
 
 def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) -> None:
@@ -116,6 +123,8 @@ def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) 
             f"{stage} tunnel transport differs",
         )
         require(reverse_tunnel.get("freshness") == "fresh", f"{stage} tunnel is stale")
+        require(wireguard.get("enabled") is False, f"{stage} unexpectedly enables WireGuard")
+        require(wireguard.get("tun0_present") is not True, f"{stage} leaves tun0 active")
     if stage == "wireguard":
         require(report.get("tunnel_owner") == "stock_wireguard_bridge", "WireGuard tunnel owner differs")
         require(wireguard.get("enabled") is True, "WireGuard rollback report is not enabled")
@@ -130,6 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--primary-deployment", type=Path, required=True)
     parser.add_argument("--wireguard-deployment", type=Path, required=True)
     parser.add_argument("--final-deployment", type=Path, required=True)
+    parser.add_argument("--primary-switch", type=Path, required=True)
     parser.add_argument("--wireguard-switch", type=Path, required=True)
     parser.add_argument("--reverse-switch", type=Path, required=True)
     parser.add_argument("--online", type=Path, required=True)
@@ -147,14 +157,15 @@ def main() -> int:
     try:
         candidate_sha = verify_candidate(read_json(args.evidence))
         deployments = {
-            "primary": read_json(args.primary_deployment),
-            "wireguard": read_json(args.wireguard_deployment),
-            "final": read_json(args.final_deployment),
+            "primary": (read_json(args.primary_deployment), "first_party_reverse_tunnel"),
+            "wireguard": (read_json(args.wireguard_deployment), "stock_wireguard_bridge"),
+            "final": (read_json(args.final_deployment), "first_party_reverse_tunnel"),
         }
-        for label, report in deployments.items():
-            verify_deployment_report(report, candidate_sha, label)
-        verify_switch_report(read_json(args.wireguard_switch), "wireguard")
-        verify_switch_report(read_json(args.reverse_switch), "reverse-tunnel")
+        for label, (report, owner) in deployments.items():
+            verify_deployment_report(report, candidate_sha, label, owner)
+        verify_switch_report(read_json(args.primary_switch), "reverse-tunnel", "primary")
+        verify_switch_report(read_json(args.wireguard_switch), "wireguard", "wireguard")
+        verify_switch_report(read_json(args.reverse_switch), "reverse-tunnel", "final")
         reports = {
             "online": read_json(args.online),
             "post-reboot": read_json(args.post_reboot),
