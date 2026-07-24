@@ -25,7 +25,13 @@ jobs:
       - name: Transform process acceptance
         run: python -u .tmp/modify_process.py
       - name: Transform documentation
-        run: python -u .tmp/update_docs.py
+        run: |
+          python -u .tmp/update_docs.py
+          sed -i 's/[[:space:]]\+$//' \
+            docs/architecture/control-plane-explicit-state-backend.md \
+            docs/architecture/control-plane-sqlite-default-cutover.md \
+            docs/architecture/control-plane-sqlite-process-acceptance.md \
+            docs/architecture/control-plane-sqlite-runtime-retirement.md
       - name: Verify patch whitespace
         run: git diff --check
       - name: Publish branch update
