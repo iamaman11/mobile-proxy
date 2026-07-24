@@ -266,11 +266,8 @@ async fn explicit_sqlite_backend_rejects_an_unmigrated_existing_file() {
         Err(error) => error,
     };
 
-    assert!(
-        error
-            .to_string()
-            .contains("unsupported SQLite schema version")
-    );
+    let chain = format!("{error:#}");
+    assert!(chain.contains("unsupported SQLite schema version"));
     assert_eq!(fs::metadata(&database.path).unwrap().len(), 0);
 }
 
