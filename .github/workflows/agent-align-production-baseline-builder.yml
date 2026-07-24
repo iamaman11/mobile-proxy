@@ -1,0 +1,87 @@
+name: Agent Align Production Baseline Builder
+
+on:
+  push:
+    branches:
+      - agent/align-production-baseline-builder
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-align-production-baseline-builder
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Validate and publish baseline governance alignment
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out isolated builder inputs
+        uses: actions/checkout@v7
+        with:
+          ref: agent/align-production-baseline-builder
+
+      - name: Decode exact production patch
+        run: |
+          cat .agent/align-production-baseline.patch.b64.* | tr -d '\n' | base64 --decode > /tmp/align-production-baseline.patch
+          test -s /tmp/align-production-baseline.patch
+
+      - name: Check out exact production branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags origin agent/align-production-baseline
+          git checkout -B agent/align-production-baseline origin/agent/align-production-baseline
+          test "$(git rev-parse HEAD)" = "d49a9208f5a586a5d51017547b2e17f9470bb2e8"
+
+      - name: Apply bounded governance alignment
+        run: |
+          git apply --check /tmp/align-production-baseline.patch
+          git apply /tmp/align-production-baseline.patch
+          git diff --check
+
+      - name: Validate governance and Python regressions
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Validate Rust workspace
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --quiet --workspace --all-targets -- -D warnings
+          cargo test --quiet --workspace
+
+      - name: Verify exact production scope
+        run: |
+          git diff --check
+          test "$(git status --short | awk '{print $2}' | sort)" = "$(printf '%s\n' \
+            contracts/governance/invariant-enforcement.json \
+            docs/PRODUCTION_BASELINE_PLAN.md \
+            docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md \
+            docs/architecture/invariant-enforcement.md \
+            scripts/check_architecture_boundaries.py \
+            scripts/check_invariant_enforcement.py \
+            scripts/tests/test_invariant_enforcement.py | sort)"
+
+      - name: Commit and push clean production branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            contracts/governance/invariant-enforcement.json \
+            docs/PRODUCTION_BASELINE_PLAN.md \
+            docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md \
+            docs/architecture/invariant-enforcement.md \
+            scripts/check_architecture_boundaries.py \
+            scripts/check_invariant_enforcement.py \
+            scripts/tests/test_invariant_enforcement.py
+          git commit -m "Align governance to production baseline"
+          git push origin HEAD:agent/align-production-baseline
