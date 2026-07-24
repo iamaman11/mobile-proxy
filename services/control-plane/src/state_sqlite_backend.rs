@@ -18,7 +18,7 @@ pub(crate) fn load_existing(path: &Path) -> Result<StoredState> {
             path.display()
         );
     }
-    let mut store = SqliteStore::open(path)
+    let mut store = SqliteStore::open_existing(path)
         .with_context(|| format!("failed to open SQLite state {}", path.display()))?;
     let snapshot = store
         .load_snapshot()
@@ -33,7 +33,7 @@ pub(crate) fn compare_and_swap(
 ) -> Result<SnapshotRowChanges> {
     let expected = snapshot_from_stored(expected)?;
     let candidate = snapshot_from_stored(candidate)?;
-    let mut store = SqliteStore::open(path)
+    let mut store = SqliteStore::open_existing(path)
         .with_context(|| format!("failed to open SQLite state {}", path.display()))?;
     store
         .compare_and_swap_snapshot(&expected, &candidate)

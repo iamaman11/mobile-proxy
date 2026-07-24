@@ -254,3 +254,44 @@ async fn stale_external_sqlite_writer_prevents_in_memory_publication() {
     assert!(rehydrated.devices().contains_key("external-device"));
     assert!(!rehydrated.devices().contains_key("device-local"));
 }
+
+#[tokio::test]
+async fn explicit_sqlite_backend_rejects_an_unmigrated_existing_file() {
+    let database = TempDatabase::new("unmigrated-sqlite");
+    fs::write(&database.path, b"").unwrap();
+
+    let error = match AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite).await
+    {
+        Ok(_) => panic!("unmigrated SQLite state unexpectedly started"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported SQLite schema version")
+    );
+    assert_eq!(fs::metadata(&database.path).unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn sqlite_backend_does_not_recreate_a_removed_database() {
+    let database = TempDatabase::new("removed-sqlite");
+    database.initialize();
+    let state = AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite)
+        .await
+        .unwrap();
+
+    fs::remove_file(&database.path).unwrap();
+    let _ = fs::remove_file(sidecar_path(&database.path, "-wal"));
+    let _ = fs::remove_file(sidecar_path(&database.path, "-shm"));
+
+    assert_eq!(
+        state
+            .register_device(registration("device-after-removal"))
+            .await,
+        Err(RegisterDeviceError::Persistence)
+    );
+    assert!(state.devices.lock().await.is_empty());
+    assert!(!database.path.exists());
+}
