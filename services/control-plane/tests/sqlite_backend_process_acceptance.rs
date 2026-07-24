@@ -340,17 +340,14 @@ async fn sqlite_default_restart_and_current_state_json_rollback_work_through_rea
         let mut daemon = Daemon::start(None, &sqlite, &client).await;
         assert_eq!(next_command(&client, &daemon).await, None);
 
-        let replayed: DeviceCommand = replay_command(
-            &client,
-            &daemon,
-            DesiredState::HealthyServing,
-        )
-        .await
-        .error_for_status()
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+        let replayed: DeviceCommand =
+            replay_command(&client, &daemon, DesiredState::HealthyServing)
+                .await
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
         assert_eq!(replayed, original_command);
 
         let conflict = replay_command(&client, &daemon, DesiredState::DegradedSafe).await;
@@ -375,17 +372,14 @@ async fn sqlite_default_restart_and_current_state_json_rollback_work_through_rea
         assert_eq!(devices[0].node_id, DEVICE_ID);
         assert_eq!(next_command(&client, &rollback).await, None);
 
-        let replayed: DeviceCommand = replay_command(
-            &client,
-            &rollback,
-            DesiredState::HealthyServing,
-        )
-        .await
-        .error_for_status()
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+        let replayed: DeviceCommand =
+            replay_command(&client, &rollback, DesiredState::HealthyServing)
+                .await
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
         assert_eq!(replayed, original_command);
 
         let conflict = replay_command(&client, &rollback, DesiredState::DegradedSafe).await;
