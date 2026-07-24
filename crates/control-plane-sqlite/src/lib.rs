@@ -1,4 +1,5 @@
 mod legacy_json_import;
+mod snapshot_compare_and_swap;
 mod snapshot_error;
 mod snapshot_rows;
 mod snapshot_store;
@@ -10,6 +11,8 @@ pub use legacy_json_import::{
     LegacyJsonImportError, LegacyJsonImportOutcome, LegacyJsonImportReport,
     LegacyJsonMigrationStats, LegacyJsonViolation, parse_legacy_json,
 };
+
+pub use snapshot_compare_and_swap::{SnapshotCompareAndSwapError, SnapshotRowChanges};
 
 pub use snapshot::{
     CommandQueues, ControlPlaneSnapshot, DeviceMap, ReplayRecord, SNAPSHOT_FORMAT_VERSION,
