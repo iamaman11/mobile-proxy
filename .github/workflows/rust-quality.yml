@@ -58,7 +58,25 @@ jobs:
         run: exit 1
 
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        id: clippy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+
+      - name: Upload Clippy log
+        if: steps.clippy.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: clippy-log
+          path: clippy.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Enforce Clippy
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
 
       - name: Run workspace tests
         run: cargo test --workspace
