@@ -1,4 +1,4 @@
-name: Temporary Phase B Explicit Backend Builder V2
+name: Temporary Phase B Explicit Backend Diagnostics
 
 on:
   pull_request:
@@ -9,11 +9,10 @@ on:
       - agent/phase-b-explicit-sqlite-backend
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    if: github.actor != 'github-actions[bot]'
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -27,54 +26,30 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Apply explicit backend patch
-        id: apply
+      - name: Verify formatting and compile
+        run: |
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+
+      - name: Capture strict Clippy diagnostics
+        id: clippy
         continue-on-error: true
         run: |
           set -o pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('scripts/temporary_wire_explicit_state_backend.py')
-          body = path.read_text()
-          body = body.replace('if count != 16:', 'if count != 15:', 1)
-          body = body.replace('expected 16, found {count}', 'expected 15, found {count}', 1)
-          body = body.replace('if inserted != 16:', 'if inserted != 15:', 1)
-          body = body.replace('expected 16, inserted {inserted}', 'expected 15, inserted {inserted}', 1)
-          path.write_text(body)
-          PY
-          python3 scripts/temporary_wire_explicit_state_backend.py 2>&1 | tee patch.log
-          cargo fmt --all 2>&1 | tee format.log
-          cargo check --workspace --all-targets 2>&1 | tee check.log
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
 
-      - name: Upload explicit backend diagnostics
+      - name: Upload strict Clippy diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: explicit-backend-build-diagnostics
-          path: |
-            patch.log
-            format.log
-            check.log
-          if-no-files-found: ignore
+          name: explicit-backend-clippy-diagnostics
+          path: clippy.log
+          if-no-files-found: error
           retention-days: 2
 
-      - name: Publish generated source
-        if: steps.apply.outcome == 'success'
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add Cargo.lock services/control-plane
-          if ! git diff --cached --quiet; then
-            git commit -m "Wire explicit control-plane state backend [skip ci]"
-            git push origin HEAD:agent/phase-b-explicit-sqlite-backend
-          fi
-
-      - name: Enforce explicit backend build
-        if: steps.apply.outcome == 'failure'
+      - name: Enforce strict Clippy
+        if: steps.clippy.outcome == 'failure'
         run: exit 1
-
-      - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
         run: cargo test --workspace
