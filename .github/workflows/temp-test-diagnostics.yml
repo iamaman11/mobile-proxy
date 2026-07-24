@@ -1,0 +1,39 @@
+name: Temporary Test Diagnostics
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/temp-test-diagnostics.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Run control-plane tests and capture bounded log
+        id: tests
+        shell: bash
+        run: |
+          set +e
+          cargo test -p control-plane -- --nocapture > /tmp/control-plane-tests.log 2>&1
+          status=$?
+          tail -n 240 /tmp/control-plane-tests.log > /tmp/control-plane-tests-tail.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload bounded test log
+        uses: actions/upload-artifact@v7
+        with:
+          name: control-plane-test-tail
+          path: /tmp/control-plane-tests-tail.log
+          retention-days: 1
+      - name: Preserve test result
+        if: steps.tests.outputs.status != '0'
+        run: exit 1
