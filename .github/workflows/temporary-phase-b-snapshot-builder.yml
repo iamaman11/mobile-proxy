@@ -27,10 +27,14 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Resolve existing lockfile and validate
+      - name: Check and publish minimal lockfile
+        id: check
         run: |
-          cargo fmt --all -- --check
-          cargo check --workspace --all-targets
+          set +e
+          cargo fmt --all -- --check 2>&1 | tee rustfmt.log
+          fmt_status=${PIPESTATUS[0]}
+          cargo check --workspace --all-targets 2>&1 | tee cargo-check.log
+          check_status=${PIPESTATUS[0]}
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Cargo.lock
@@ -38,5 +42,25 @@ jobs:
             git commit -m "Update snapshot path dependencies [skip ci]"
             git push origin HEAD:agent/phase-b-state-snapshot-mapping
           fi
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          if [ "$fmt_status" -ne 0 ] || [ "$check_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+
+      - name: Run workspace tests
+        run: cargo test --workspace 2>&1 | tee tests.log
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: phase-b-snapshot-diagnostics
+          path: |
+            rustfmt.log
+            cargo-check.log
+            clippy.log
+            tests.log
+          if-no-files-found: ignore
+          retention-days: 2
