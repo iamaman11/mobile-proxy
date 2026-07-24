@@ -28,10 +28,29 @@ jobs:
           rustup default stable
 
       - name: Apply explicit backend patch
+        id: apply
+        continue-on-error: true
         run: |
-          python3 scripts/temporary_wire_explicit_state_backend.py
-          cargo fmt --all
-          cargo check --workspace --all-targets
+          set -o pipefail
+          python3 scripts/temporary_wire_explicit_state_backend.py 2>&1 | tee patch.log
+          cargo fmt --all 2>&1 | tee format.log
+          cargo check --workspace --all-targets 2>&1 | tee check.log
+
+      - name: Upload explicit backend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: explicit-backend-build-diagnostics
+          path: |
+            patch.log
+            format.log
+            check.log
+          if-no-files-found: ignore
+          retention-days: 2
+
+      - name: Publish generated source
+        if: steps.apply.outcome == 'success'
+        run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Cargo.lock services/control-plane
@@ -39,6 +58,10 @@ jobs:
             git commit -m "Wire explicit control-plane state backend [skip ci]"
             git push origin HEAD:agent/phase-b-explicit-sqlite-backend
           fi
+
+      - name: Enforce explicit backend build
+        if: steps.apply.outcome == 'failure'
+        run: exit 1
 
       - name: Run strict Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
