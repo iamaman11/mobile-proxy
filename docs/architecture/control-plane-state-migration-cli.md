@@ -29,7 +29,7 @@ The command:
 5. writes its canonical snapshot JSON atomically;
 6. prints one bounded JSON report containing counts, outcome and migration counters.
 
-The legacy source is never rewritten, renamed or deleted.
+The legacy source is never rewritten, renamed or deleted. A failed import does not publish a new diagnostic document and does not modify a previously published diagnostic document.
 
 ### Export
 
