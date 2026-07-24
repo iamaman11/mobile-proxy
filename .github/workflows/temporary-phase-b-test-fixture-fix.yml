@@ -1,0 +1,77 @@
+name: Temporary Phase B Test Fixture Fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/phase-b-explicit-sqlite-backend
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Fix exact backend test fixtures
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cli = Path('services/control-plane/src/cli_backend_tests.rs')
+          body = cli.read_text()
+          replacements = [
+              (
+                  'Cli::try_parse_from(["control-plane"]).unwrap()',
+                  'Cli::try_parse_from([\n        "control-plane",\n        "--admin-token",\n        "admin",\n        "--device-token",\n        "device",\n    ])\n    .unwrap()',
+              ),
+              (
+                  'Cli::try_parse_from(["control-plane", "--state-backend", "sqlite"]).unwrap()',
+                  'Cli::try_parse_from([\n        "control-plane",\n        "--admin-token",\n        "admin",\n        "--device-token",\n        "device",\n        "--state-backend",\n        "sqlite",\n    ])\n    .unwrap()',
+              ),
+              (
+                  'Cli::try_parse_from(["control-plane", "--state-backend", "unknown"]).is_err()',
+                  'Cli::try_parse_from([\n        "control-plane",\n        "--admin-token",\n        "admin",\n        "--device-token",\n        "device",\n        "--state-backend",\n        "unknown",\n    ])\n    .is_err()',
+              ),
+          ]
+          for old, new in replacements:
+              if body.count(old) != 1:
+                  raise SystemExit(f'CLI fixture expected one match, found {body.count(old)}: {old}')
+              body = body.replace(old, new, 1)
+          cli.write_text(body)
+
+          state = Path('services/control-plane/src/state_sqlite_backend_tests.rs')
+          body = state.read_text()
+          old = '''    assert!(
+                  error
+                      .to_string()
+                      .contains("unsupported SQLite schema version")
+              );
+          '''
+          new = '''    let chain = format!("{error:#}");
+              assert!(chain.contains("unsupported SQLite schema version"));
+          '''
+          if body.count(old) != 1:
+              raise SystemExit(f'SQLite error-chain fixture expected one match, found {body.count(old)}')
+          state.write_text(body.replace(old, new, 1))
+          PY
+          cargo fmt --all
+          cargo test -p control-plane --bin control-plane
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add services/control-plane/src/cli_backend_tests.rs services/control-plane/src/state_sqlite_backend_tests.rs
+          git commit -m "Fix explicit backend test fixtures [skip ci]"
+          git push origin HEAD:agent/phase-b-explicit-sqlite-backend
