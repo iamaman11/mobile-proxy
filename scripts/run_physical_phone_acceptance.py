@@ -129,7 +129,11 @@ def require_object(value: dict[str, Any] | list[Any], name: str) -> dict[str, An
     return value
 
 
-def curl_proxy(arguments: list[str]) -> None:
+def _curl_config_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def curl_proxy(arguments: list[str], proxy_credentials: str) -> None:
     command = [
         "curl",
         "--fail",
@@ -137,10 +141,25 @@ def curl_proxy(arguments: list[str]) -> None:
         "--show-error",
         "--max-time",
         "20",
+        "--noproxy",
+        "",
+        "--config",
+        "-",
         *arguments,
     ]
+    environment = os.environ.copy()
+    environment["NO_PROXY"] = ""
+    environment["no_proxy"] = ""
+    curl_config = f'proxy-user = "{_curl_config_value(proxy_credentials)}"\n'
     try:
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            command,
+            check=True,
+            input=curl_config,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            env=environment,
+        )
     except (OSError, subprocess.CalledProcessError) as error:
         raise AcceptanceFailure("protected proxy surface failed") from error
 
@@ -151,13 +170,12 @@ def prove_proxy_surfaces(
     https_probe_url: str,
     proxy_credentials: str,
 ) -> dict[str, bool]:
-    auth = ["--proxy-user", proxy_credentials]
-    curl_proxy([*auth, "--socks5-hostname", f"{proxy_host}:1080", http_probe_url])
-    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:1080", http_probe_url])
-    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:1080", https_probe_url])
-    curl_proxy([*auth, "--socks5-hostname", f"{proxy_host}:1081", http_probe_url])
-    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:3128", http_probe_url])
-    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:3128", https_probe_url])
+    curl_proxy(["--socks5-hostname", f"{proxy_host}:1080", http_probe_url], proxy_credentials)
+    curl_proxy(["--proxy", f"http://{proxy_host}:1080", http_probe_url], proxy_credentials)
+    curl_proxy(["--proxy", f"http://{proxy_host}:1080", https_probe_url], proxy_credentials)
+    curl_proxy(["--socks5-hostname", f"{proxy_host}:1081", http_probe_url], proxy_credentials)
+    curl_proxy(["--proxy", f"http://{proxy_host}:3128", http_probe_url], proxy_credentials)
+    curl_proxy(["--proxy", f"http://{proxy_host}:3128", https_probe_url], proxy_credentials)
     return {
         "mixed_1080_socks5": True,
         "mixed_1080_http": True,
