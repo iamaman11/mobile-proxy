@@ -37,17 +37,20 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
             MODULE.config_digest("wireguard"),
         )
 
-    def test_remote_command_is_atomic_validated_and_reversible_on_failure(self):
+    def test_remote_command_is_atomic_validated_and_reversible_on_any_failure(self):
         command = MODULE.remote_command("wireguard")
         self.assertIn(".candidate.$", command)
         self.assertIn(".backup.$", command)
+        self.assertIn("COMMITTED=0", command)
+        self.assertIn("trap cleanup EXIT", command)
         self.assertIn("sudo cp \"$CONFIG\" \"$BACKUP\"", command)
-        self.assertIn("if ! sudo nginx -t", command)
         self.assertIn("sudo cp \"$BACKUP\" \"$CONFIG\"", command)
+        self.assertIn("sudo nginx -t", command)
         self.assertIn("systemctl reload nginx", command)
         self.assertIn("wg-quick@wg0.service", command)
         self.assertIn("mobile-public-proxy.service", command)
         self.assertIn("sha256sum", command)
+        self.assertIn("COMMITTED=1", command)
 
     @mock.patch.object(MODULE.subprocess, "run")
     def test_switch_requires_exact_remote_config_digest(self, run):
