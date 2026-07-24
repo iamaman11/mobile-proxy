@@ -41,19 +41,28 @@ def remote_command(mode: str) -> str:
         if mode == "wireguard"
         else "mobile-reverse-tunnel-server.service"
     )
-    temporary = f"{_REMOTE_CONFIG}.candidate"
-    return " && ".join(
-        [
-            f"printf %s {shlex.quote(encoded)} | base64 -d | sudo tee {shlex.quote(temporary)} >/dev/null",
-            f"sudo chmod 0644 {shlex.quote(temporary)}",
-            f"sudo mv {shlex.quote(temporary)} {shlex.quote(_REMOTE_CONFIG)}",
-            "sudo nginx -t",
-            "sudo systemctl reload nginx",
-            f"sudo systemctl is-active {required_services}",
-            "sudo ss -lnt | grep -E ':(1080|1081|3128) '",
-            f"sudo sha256sum -- {shlex.quote(_REMOTE_CONFIG)}",
-        ]
-    )
+    temporary = f"{_REMOTE_CONFIG}.candidate.$$"
+    backup = f"{_REMOTE_CONFIG}.backup.$$"
+    return f"""set -eu
+CONFIG={shlex.quote(_REMOTE_CONFIG)}
+TEMP={shlex.quote(temporary)}
+BACKUP={shlex.quote(backup)}
+cleanup() {{ sudo rm -f "$TEMP" "$BACKUP"; }}
+trap cleanup EXIT
+sudo cp "$CONFIG" "$BACKUP"
+printf %s {shlex.quote(encoded)} | base64 -d | sudo tee "$TEMP" >/dev/null
+sudo chmod 0644 "$TEMP"
+sudo mv "$TEMP" "$CONFIG"
+if ! sudo nginx -t; then
+  sudo cp "$BACKUP" "$CONFIG"
+  sudo nginx -t
+  exit 1
+fi
+sudo systemctl reload nginx
+sudo systemctl is-active {required_services}
+sudo ss -lnt | grep -E ':(1080|1081|3128) '
+sudo sha256sum -- "$CONFIG"
+"""
 
 
 def parse_remote_digest(output: str) -> str:
