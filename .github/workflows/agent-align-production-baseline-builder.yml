@@ -23,10 +23,12 @@ jobs:
         with:
           ref: agent/align-production-baseline-builder
 
-      - name: Decode exact production patch
+      - name: Decode exact production files
         run: |
-          cat .agent/align-production-baseline.patch.b64.* | tr -d '\n' | base64 --decode > /tmp/align-production-baseline.patch
-          test -s /tmp/align-production-baseline.patch
+          cat .agent/align-production-baseline-files.tar.gz.b64.* | tr -d '\n' | base64 --decode > /tmp/align-production-baseline-files.tar.gz
+          test -s /tmp/align-production-baseline-files.tar.gz
+          mkdir -p /tmp/align-production-baseline-files
+          tar -xzf /tmp/align-production-baseline-files.tar.gz -C /tmp/align-production-baseline-files
 
       - name: Check out exact production branch
         env:
@@ -37,10 +39,15 @@ jobs:
           git checkout -B agent/align-production-baseline origin/agent/align-production-baseline
           test "$(git rev-parse HEAD)" = "d49a9208f5a586a5d51017547b2e17f9470bb2e8"
 
-      - name: Apply bounded governance alignment
+      - name: Install bounded governance alignment
         run: |
-          git apply --check /tmp/align-production-baseline.patch
-          git apply /tmp/align-production-baseline.patch
+          cp /tmp/align-production-baseline-files/contracts/governance/invariant-enforcement.json contracts/governance/invariant-enforcement.json
+          cp /tmp/align-production-baseline-files/docs/PRODUCTION_BASELINE_PLAN.md docs/PRODUCTION_BASELINE_PLAN.md
+          cp /tmp/align-production-baseline-files/docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md
+          cp /tmp/align-production-baseline-files/docs/architecture/invariant-enforcement.md docs/architecture/invariant-enforcement.md
+          cp /tmp/align-production-baseline-files/scripts/check_architecture_boundaries.py scripts/check_architecture_boundaries.py
+          cp /tmp/align-production-baseline-files/scripts/check_invariant_enforcement.py scripts/check_invariant_enforcement.py
+          cp /tmp/align-production-baseline-files/scripts/tests/test_invariant_enforcement.py scripts/tests/test_invariant_enforcement.py
           git diff --check
 
       - name: Validate governance and Python regressions
