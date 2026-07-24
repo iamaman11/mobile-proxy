@@ -170,9 +170,7 @@ fn serialize_json_backend(snapshot: ControlPlaneSnapshot) -> Result<Vec<u8>> {
         if idempotency
             .insert(legacy_scope, command.command_id)
             .is_some()
-            || idempotency_results
-                .insert(scope.clone(), command)
-                .is_some()
+            || idempotency_results.insert(scope.clone(), command).is_some()
         {
             bail!("SQLite replay state cannot be represented by the JSON rollback backend");
         }
