@@ -67,11 +67,13 @@ Do not proceed unless the report contains the same candidate SHA, `device_releas
 
 ## 4. Configure the staged runner
 
-The runner reads tokens only from environment variables and never writes them to reports.
+The runner reads all secrets only from environment variables and never writes them to reports or error messages.
 
 ```bash
 export HOST_ADMIN_TOKEN='<host-daemon admin token>'
 export CONTROL_PLANE_ADMIN_TOKEN='<control-plane admin token>'
+export PROXY_USERNAME='<relay proxy username>'
+export PROXY_PASSWORD='<relay proxy password>'
 
 COMMON_ARGS=(
   --evidence ./release-candidate-evidence.json
@@ -84,9 +86,9 @@ COMMON_ARGS=(
 )
 ```
 
-The controlled HTTP and HTTPS probes must be reachable only through the protected proxy path and must not contain credentials in their URLs.
+The proxy username and password must be the same values rendered into the deployed phone proxy. The controlled HTTP and HTTPS probes must be reachable only through the protected proxy path and must not contain credentials in their URLs.
 
-Every stage checks six protected protocol paths:
+Every stage checks six authenticated protected protocol paths:
 
 - SOCKS5 through mixed port `1080`;
 - HTTP through mixed port `1080`;
@@ -105,7 +107,7 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-online.json
 ```
 
-This stage must prove process health, expected durable device inventory, a connected fresh QUIC tunnel and all six proxy paths.
+This stage must prove process health, expected durable device inventory, a connected fresh QUIC tunnel and all six authenticated proxy paths.
 
 ## 6. Phone or service reboot and state rehydration
 
@@ -191,6 +193,6 @@ Never attach tokens, private keys, raw configuration, credential-bearing proxy U
 
 ## 11. Stop conditions
 
-Reject the candidate for any unresolved P0/P1 defect, SHA mismatch, dirty checkout, failed package or deployed-file integrity, missing durable state, missing expected device, failed proxy protocol path, stale or mismatched tunnel authority, plaintext downgrade, inability to return to QUIC or unavailable WireGuard rollback.
+Reject the candidate for any unresolved P0/P1 defect, SHA mismatch, dirty checkout, failed package or deployed-file integrity, missing durable state, missing expected device, failed authenticated proxy protocol path, stale or mismatched tunnel authority, plaintext downgrade, inability to return to QUIC or unavailable WireGuard rollback.
 
 After any source change, rerun the complete `Software Release Candidate` workflow on the new immutable SHA, download its new evidence artifact, rebuild both release roots and repeat this physical sequence from the beginning.
