@@ -23,6 +23,7 @@ _MANIFEST_NAME = "integrity-manifest.json"
 _EXPECTED_ALGORITHM = "blake3-256"
 _EXPECTED_DOMAIN = "mobile-proxy/release-file/v1"
 _MAX_ENTRIES = 128
+_STOCK_WIREGUARD_PACKAGE = "com.wireguard.android"
 
 _VM_REMOTE_PATHS = {
     "bin/control-plane": "/opt/mobile-relaycontrolpoint/current/control-plane",
@@ -116,10 +117,66 @@ def _run_bytes(command: list[str], failure: str) -> bytes:
     return result.stdout
 
 
-def verify_device_files(root: Path, paths: list[str], serial: str | None, device_root: str) -> None:
+def _adb_prefix(serial: str | None) -> list[str]:
     prefix = ["adb"]
     if serial:
         prefix += ["-s", serial]
+    return prefix
+
+
+def _adb_text(serial: str | None, arguments: list[str], failure: str) -> str:
+    return _run_bytes([*_adb_prefix(serial), *arguments], failure).decode("utf-8", "strict")
+
+
+def parse_package_uid(output: str, package: str) -> int | None:
+    for line in output.splitlines():
+        if f"package:{package}" not in line:
+            continue
+        for part in line.split():
+            if part.startswith("uid:") and part[4:].isdigit():
+                return int(part[4:])
+    return None
+
+
+def parse_active_vpn_owner_uid(output: str) -> int | None:
+    for line in output.splitlines():
+        if "Transports:" not in line or "VPN" not in line or "OwnerUid:" not in line:
+            continue
+        suffix = line.split("OwnerUid:", 1)[1]
+        digits = ""
+        for character in suffix:
+            if character.isdigit():
+                digits += character
+            elif digits:
+                break
+        if digits:
+            return int(digits)
+    return None
+
+
+def verify_android_vpn_owner(serial: str | None, expected_owner: str) -> None:
+    connectivity = _adb_text(
+        serial,
+        ["shell", "dumpsys", "connectivity"],
+        "failed to inspect Android VPN owner",
+    )
+    active_uid = parse_active_vpn_owner_uid(connectivity)
+    if expected_owner == "first_party_reverse_tunnel":
+        require(active_uid is None, "Android VPN remained active during reverse-tunnel deployment")
+        return
+
+    packages = _adb_text(
+        serial,
+        ["shell", "cmd", "package", "list", "packages", "-U", _STOCK_WIREGUARD_PACKAGE],
+        "failed to inspect stock WireGuard package",
+    )
+    expected_uid = parse_package_uid(packages, _STOCK_WIREGUARD_PACKAGE)
+    require(expected_uid is not None, "stock WireGuard package UID is missing")
+    require(active_uid == expected_uid, "active Android VPN owner is not stock WireGuard")
+
+
+def verify_device_files(root: Path, paths: list[str], serial: str | None, device_root: str) -> None:
+    prefix = _adb_prefix(serial)
     for relative in paths:
         remote = f"{device_root.rstrip('/')}/current/{relative}"
         remote_bytes = _run_bytes(
@@ -177,6 +234,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device-release-root", type=Path, required=True)
     parser.add_argument("--device-root", default="/data/adb/mobile-proxy-node")
     parser.add_argument("--device-serial")
+    parser.add_argument(
+        "--expected-tunnel-owner",
+        choices=["first_party_reverse_tunnel", "stock_wireguard_bridge"],
+        required=True,
+    )
     parser.add_argument("--vm-release-root", type=Path, required=True)
     parser.add_argument("--vm-project", required=True)
     parser.add_argument("--vm-zone", required=True)
@@ -200,14 +262,17 @@ def main() -> int:
             args.device_serial,
             args.device_root,
         )
+        verify_android_vpn_owner(args.device_serial, args.expected_tunnel_owner)
         verify_vm_files(args, args.vm_release_root, vm_paths)
         report = {
             "format_version": 1,
             "candidate_sha": candidate_sha,
+            "expected_tunnel_owner": args.expected_tunnel_owner,
             "device_release_entries": len(device_paths),
             "vm_release_entries": len(vm_paths),
             "device_release_metadata_match": True,
             "device_deployment_match": True,
+            "android_vpn_owner_match": True,
             "vm_deployment_match": True,
             "accepted": True,
         }
