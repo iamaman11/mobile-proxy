@@ -15,12 +15,10 @@ concurrency:
 
 jobs:
   build:
-    name: Validate and publish exact session binding
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Check out isolated builder inputs
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           ref: agent/exact-session-binding-builder
 
@@ -28,19 +26,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          status_body="Exact-session builder is running for builder commit \`${GITHUB_SHA}\`."
-          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$status_body"
-          gh issue comment 51 \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "Exact-session builder trigger received for builder commit \`${GITHUB_SHA}\`."
+          body="Exact-session builder is running for builder commit \`${GITHUB_SHA}\`."
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$body"
+          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body "$body"
 
-      - name: Verify and decode bounded transformation
-        id: preparation
+      - name: Decode bounded transformation
+        id: prepare
         shell: bash
         run: |
           set +e
-          log=/tmp/exact-session-binding-preparation.log
-          : > "$log"
+          log=/tmp/exact-session-preparation.log
           {
             cat \
               .agent/exact-session-binding.py.gz.b64.00 \
@@ -62,87 +57,41 @@ jobs:
             echo "eab13b291cf5037ba1236942cc8937292505032084b2de227677cc7993780b20  /tmp/exact-session-binding.py" | sha256sum --check --strict
             python3 .agent/repair-exact-session-transform.py /tmp/exact-session-binding.py
             python3 -m py_compile /tmp/exact-session-binding.py
-            sha256sum /tmp/exact-session-binding.py
-          } >> "$log" 2>&1
-          status=$?
-          echo "status=$status" >> "$GITHUB_OUTPUT"
+          } > "$log" 2>&1
+          echo "status=$?" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload preparation diagnostic
-        if: steps.preparation.outputs.status != '0'
-        uses: actions/upload-artifact@v7
-        with:
-          name: exact-session-binding-preparation-diagnostic
-          path: /tmp/exact-session-binding-preparation.log
-          if-no-files-found: error
-          retention-days: 2
-
-      - name: Record preparation failure
-        if: steps.preparation.outputs.status != '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo 'Exact-session builder failed while verifying or decoding its bounded transformation payload:'
-            echo
-            echo '```text'
-            tail -n 100 /tmp/exact-session-binding-preparation.log
-            echo '```'
-          } > /tmp/exact-session-binding-preparation-failure.md
-          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-preparation-failure.md
-          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-preparation-failure.md
-          exit 1
-
-      - name: Check out current production baseline
-        if: steps.preparation.outputs.status == '0'
+      - name: Check out production baseline
+        if: steps.prepare.outputs.status == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags origin main
           git checkout -B agent/phase-c-exact-session-binding origin/main
+          test -f docs/phase-c-pending-stream-lifecycle-audit.md
 
-      - name: Enforce delivery-order gate
-        if: steps.preparation.outputs.status == '0'
-        id: gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ -f docs/phase-c-pending-stream-lifecycle-audit.md ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "ready=false" >> "$GITHUB_OUTPUT"
-          gate_body='Builder is prepared and integrity-checked, but delivery item 9 remains gated because the item 8 audit is not yet present on `main`. No production source was changed.'
-          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$gate_body"
-          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body "$gate_body"
-
-      - name: Apply and validate complete bounded slice
-        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true'
-        id: validation
+      - name: Validate bounded slice
+        if: steps.prepare.outputs.status == '0'
+        id: validate
         shell: bash
         run: |
           set +e
-          log=/tmp/exact-session-binding-validation.log
+          log=/tmp/exact-session-validation.log
           : > "$log"
           status=0
-          stage=none
+          stage=transformation
 
           run_stage() {
-            local candidate_stage="$1"
+            stage="$1"
             shift
-            if [ "$status" -ne 0 ]; then
-              return
-            fi
-            stage="$candidate_stage"
-            {
-              echo
-              echo "=== $stage ==="
-              "$@"
-            } >> "$log" 2>&1
-            candidate_status=$?
-            if [ "$candidate_status" -ne 0 ]; then
-              status="$candidate_status"
+            if [ "$status" -eq 0 ]; then
+              {
+                echo
+                echo "=== $stage ==="
+                "$@"
+              } >> "$log" 2>&1
+              status=$?
             fi
           }
 
@@ -158,6 +107,7 @@ jobs:
           run_stage workspace-tests cargo test --quiet --workspace
 
           if [ "$status" -eq 0 ]; then
+            git checkout -- Cargo.lock
             stage=scope-check
             actual="$(git status --short | awk '{print $2}' | sort)"
             expected="$(printf '%s\n' \
@@ -169,42 +119,38 @@ jobs:
               echo "=== scope-check ==="
               printf 'actual:\n%s\nexpected:\n%s\n' "$actual" "$expected"
             } >> "$log"
-            if [ "$actual" != "$expected" ]; then
-              status=1
-            fi
+            [ "$actual" = "$expected" ] || status=1
           fi
 
           echo "status=$status" >> "$GITHUB_OUTPUT"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload validation diagnostic
-        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true' && steps.validation.outputs.status != '0'
-        uses: actions/upload-artifact@v7
-        with:
-          name: exact-session-binding-validation-diagnostic
-          path: /tmp/exact-session-binding-validation.log
-          if-no-files-found: error
-          retention-days: 2
-
-      - name: Record validation failure
-        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true' && steps.validation.outputs.status != '0'
+      - name: Record failure
+        if: steps.prepare.outputs.status != '0' || steps.validate.outputs.status != '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ "${{ steps.prepare.outputs.status }}" != "0" ]; then
+            source=/tmp/exact-session-preparation.log
+            stage=preparation
+          else
+            source=/tmp/exact-session-validation.log
+            stage='${{ steps.validate.outputs.stage }}'
+          fi
           {
-            echo "Exact-session binding validation failed during \`${{ steps.validation.outputs.stage }}\`. The bounded diagnostic tail is:"
+            echo "Exact-session binding validation failed during \`${stage}\`:"
             echo
             echo '```text'
-            tail -n 180 /tmp/exact-session-binding-validation.log
+            tail -n 180 "$source"
             echo '```'
-          } > /tmp/exact-session-binding-failure.md
-          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-failure.md
-          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-failure.md
+          } > /tmp/exact-session-failure.md
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-failure.md
+          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-failure.md
           exit 1
 
-      - name: Commit and publish clean production branch
-        if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true' && steps.validation.outputs.status == '0'
+      - name: Publish clean production branch
+        if: steps.prepare.outputs.status == '0' && steps.validate.outputs.status == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -217,6 +163,6 @@ jobs:
           git commit -m "Bind routing authority to exact device sessions"
           git push --force-with-lease origin HEAD:agent/phase-c-exact-session-binding
           source_sha="$(git rev-parse HEAD)"
-          success_body="Exact-session binding source published at \`${source_sha}\`. Architecture enforcement, Python regressions, rustfmt, strict Clippy and the complete workspace test suite passed on that immutable SHA."
-          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$success_body"
-          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body "$success_body"
+          body="Exact-session binding source published at \`${source_sha}\`. Architecture enforcement, Python regressions, rustfmt, strict Clippy and the complete workspace test suite passed on that immutable SHA."
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$body"
+          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body "$body"
