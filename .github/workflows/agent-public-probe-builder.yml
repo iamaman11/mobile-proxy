@@ -77,8 +77,17 @@ jobs:
         run: |
           cargo fmt --all
           cargo fmt --all -- --check
-          cargo clippy --quiet --workspace --all-targets -- -D warnings
-          cargo test --quiet --workspace
+          if ! cargo clippy --quiet --workspace --all-targets --message-format=short -- -D warnings > /tmp/clippy.log 2>&1; then
+            echo 'strict Clippy failed'
+            grep -E 'error(\[|:)|warning:' /tmp/clippy.log | tail -n 120 || true
+            tail -n 80 /tmp/clippy.log
+            exit 1
+          fi
+          if ! cargo test --quiet --workspace > /tmp/tests.log 2>&1; then
+            echo 'workspace tests failed'
+            tail -n 160 /tmp/tests.log
+            exit 1
+          fi
 
       - name: Verify exact production scope
         run: |
