@@ -114,3 +114,29 @@ replace_once(
     "",
     "obsolete session-only pending cancellation wrapper",
 )
+
+replace_once(
+    state_path,
+    """        assert!(error.to_string().contains("control channel closed"));
+""",
+    """        assert!(
+            error
+                .to_string()
+                .contains("no unambiguous authenticated reverse tunnel is active")
+        );
+""",
+    "closed-control fail-closed expectation",
+)
+
+replace_once(
+    state_path,
+    """        assert!(error.to_string().contains("no authenticated"));
+""",
+    """        assert!(
+            error
+                .to_string()
+                .contains("no unambiguous authenticated reverse tunnel is active")
+        );
+""",
+    "stale-session fail-closed expectation",
+)
