@@ -1,6 +1,9 @@
 name: Temporary Snapshot IO Builder
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - agent/phase-b-sqlite-snapshot-io
