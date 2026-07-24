@@ -38,6 +38,16 @@ class PhysicalReportVerifierTests(unittest.TestCase):
             "accepted": True,
         }
 
+    def activation(self):
+        return {
+            "format_version": 1,
+            "candidate_sha": "a" * 40,
+            "release_id": "candidate-reverse",
+            "active_release": "/data/adb/mobile-proxy-node/releases/candidate-reverse",
+            "full_runtime_restart": True,
+            "accepted": True,
+        }
+
     def stage(self, stage):
         transport = {
             "online": "quic",
@@ -100,6 +110,7 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         MODULE.verify_switch_report(self.switch("reverse-tunnel"), "reverse-tunnel", "primary")
         MODULE.verify_switch_report(self.switch("wireguard"), "wireguard", "wireguard")
         MODULE.verify_switch_report(self.switch("reverse-tunnel"), "reverse-tunnel", "final")
+        MODULE.verify_activation_report(self.activation(), "a" * 40)
         for stage in [
             "online",
             "post-reboot",
@@ -150,11 +161,21 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "remained active"):
             MODULE.verify_stage_report(report, "a" * 40, "wireguard")
 
-    def test_switch_report_requires_exact_mode_and_ports(self):
+    def test_switch_and_activation_reports_fail_closed(self):
         report = self.switch("wireguard")
         report["public_ports"] = [1080]
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "ports differ"):
             MODULE.verify_switch_report(report, "wireguard", "wireguard")
+
+        activation = self.activation()
+        activation["full_runtime_restart"] = False
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "did not restart"):
+            MODULE.verify_activation_report(activation, "a" * 40)
+
+        activation = self.activation()
+        activation["active_release"] = "/data/adb/mobile-proxy-node/releases/other"
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "differs"):
+            MODULE.verify_activation_report(activation, "a" * 40)
 
 
 if __name__ == "__main__":
