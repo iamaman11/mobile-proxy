@@ -53,23 +53,18 @@ struct Daemon {
 }
 
 impl Daemon {
-    async fn start(backend: Option<&str>, state_path: &Path, client: &Client) -> Self {
+    async fn start(state_path: &Path, client: &Client) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
 
-        let mut process = Command::new(control_plane_binary());
-        process
+        let child = Command::new(control_plane_binary())
             .arg("--listen")
             .arg(address.to_string())
             .arg("--admin-token")
             .arg(ADMIN_TOKEN)
             .arg("--device-token")
-            .arg(DEVICE_TOKEN);
-        if let Some(backend) = backend {
-            process.arg("--state-backend").arg(backend);
-        }
-        let child = process
+            .arg(DEVICE_TOKEN)
             .arg("--state-path")
             .arg(state_path)
             .stdin(Stdio::null())
@@ -284,13 +279,36 @@ fn default_sqlite_startup_fails_closed_for_a_missing_database() {
     panic!("default SQLite startup unexpectedly remained running with a missing database");
 }
 
+#[test]
+fn retired_state_backend_option_is_rejected_before_state_access() {
+    let directory = TempDirectory::new("retired-backend");
+    let missing = directory.join("must-not-be-created.sqlite3");
+    let output = Command::new(control_plane_binary())
+        .arg("--admin-token")
+        .arg(ADMIN_TOKEN)
+        .arg("--device-token")
+        .arg(DEVICE_TOKEN)
+        .arg("--state-backend")
+        .arg("json")
+        .arg("--state-path")
+        .arg(&missing)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(!missing.exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--state-backend'"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_default_restart_and_current_state_json_rollback_work_through_real_daemon() {
+async fn sqlite_only_restart_and_previous_release_rollback_artifact_round_trip() {
     let directory = TempDirectory::new("acceptance");
     let source = directory.join("control-plane-state.json");
     let sqlite = directory.join("control-plane-state.sqlite3");
     let imported_diagnostic = directory.join("control-plane-state-imported.json");
     let rollback_json = directory.join("control-plane-state-rollback.json");
+    let rollback_sqlite = directory.join("control-plane-state-rollback.sqlite3");
+    let rollback_diagnostic = directory.join("control-plane-state-rollback-diagnostic.json");
     let original_command = command();
     let source_bytes = canonical_json_source(&original_command);
     fs::write(&source, &source_bytes).unwrap();
@@ -310,7 +328,7 @@ async fn sqlite_default_restart_and_current_state_json_rollback_work_through_rea
         .unwrap();
 
     {
-        let mut daemon = Daemon::start(None, &sqlite, &client).await;
+        let mut daemon = Daemon::start(&sqlite, &client).await;
         let devices = list_devices(&client, &daemon).await;
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].node_id, DEVICE_ID);
@@ -337,7 +355,7 @@ async fn sqlite_default_restart_and_current_state_json_rollback_work_through_rea
     }
 
     {
-        let mut daemon = Daemon::start(None, &sqlite, &client).await;
+        let mut daemon = Daemon::start(&sqlite, &client).await;
         assert_eq!(next_command(&client, &daemon).await, None);
 
         let replayed: DeviceCommand =
@@ -365,15 +383,23 @@ async fn sqlite_default_restart_and_current_state_json_rollback_work_through_rea
     );
     let rollback_bytes = fs::read(&rollback_json).unwrap();
 
+    let rollback_import = run_import(&rollback_json, &rollback_sqlite, &rollback_diagnostic);
+    assert!(
+        rollback_import.status.success(),
+        "previous-release rollback artifact failed round-trip import: {}",
+        String::from_utf8_lossy(&rollback_import.stderr)
+    );
+    assert!(rollback_diagnostic.is_file());
+
     {
-        let mut rollback = Daemon::start(Some("json"), &rollback_json, &client).await;
-        let devices = list_devices(&client, &rollback).await;
+        let mut round_trip = Daemon::start(&rollback_sqlite, &client).await;
+        let devices = list_devices(&client, &round_trip).await;
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].node_id, DEVICE_ID);
-        assert_eq!(next_command(&client, &rollback).await, None);
+        assert_eq!(next_command(&client, &round_trip).await, None);
 
         let replayed: DeviceCommand =
-            replay_command(&client, &rollback, DesiredState::HealthyServing)
+            replay_command(&client, &round_trip, DesiredState::HealthyServing)
                 .await
                 .error_for_status()
                 .unwrap()
@@ -382,9 +408,9 @@ async fn sqlite_default_restart_and_current_state_json_rollback_work_through_rea
                 .unwrap();
         assert_eq!(replayed, original_command);
 
-        let conflict = replay_command(&client, &rollback, DesiredState::DegradedSafe).await;
+        let conflict = replay_command(&client, &round_trip, DesiredState::DegradedSafe).await;
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
-        rollback.stop();
+        round_trip.stop();
     }
 
     assert_eq!(fs::read(&rollback_json).unwrap(), rollback_bytes);

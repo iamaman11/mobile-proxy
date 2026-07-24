@@ -1,44 +1,16 @@
-# Control-Plane SQLite Process Acceptance and JSON Compatibility
+# Historical Control-Plane SQLite Process Acceptance
 
-Status: accepted historical Phase B process-evidence slice; superseded for current defaults and rollback operations by [`control-plane-sqlite-default-cutover.md`](control-plane-sqlite-default-cutover.md)  
+Status: accepted historical Phase B process-evidence slice; superseded by [`control-plane-sqlite-runtime-retirement.md`](control-plane-sqlite-runtime-retirement.md)
 Baseline source: `f88746574640de66a415b4e498fcba713ea89805`
 
 ## Historical purpose
 
-This slice proved the complete operator path through real compiled processes before SQLite became the production default. At acceptance time JSON remained implicit and SQLite required explicit selection.
+Before SQLite became the production default, this slice exercised migration, the real daemon, authenticated HTTP reads and mutation, process termination, restart, exact replay, conflicting replay and JSON compatibility through compiled binaries.
 
-The current cutover contract additionally proves omitted backend selection, fail-closed default startup and rollback from an export of the latest SQLite state. Those current requirements are defined only by the default-cutover document linked above.
+The preserved pre-cutover JSON proved compatibility but became stale after SQLite accepted later writes. The subsequent default-cutover slice therefore added `rollback-export` for current state.
 
-## Threatened invariants
+## Superseding decision
 
-- SQLite startup uses only an existing explicitly migrated database;
-- authenticated mutation success survives daemon termination and restart;
-- acknowledgement removes pending delivery without removing durable replay evidence;
-- exact replay after restart returns the original result;
-- conflicting idempotency reuse fails closed;
-- the preserved JSON migration source remains independently readable during the compatibility window;
-- neither path introduces dual-write or fallback behavior.
+The current daemon no longer exposes JSON compatibility. SQLite is its sole runtime mutable store and the retired backend option is rejected before state access.
 
-## Accepted process sequence
-
-The permanent integration test used compiled binaries and TCP HTTP requests to:
-
-1. write fully normalized JSON state with a device, pending command, durable result, compatibility claim and retention order;
-2. invoke `control-plane-state-migrate import` in a subprocess;
-3. prove the source JSON remained byte-for-byte unchanged;
-4. start the real daemon with explicit SQLite selection;
-5. read device and pending-command state through authenticated routes;
-6. acknowledge the command and terminate the process;
-7. restart on the same SQLite database;
-8. prove pending removal, exact replay and HTTP `409` for conflicting replay;
-9. start the real daemon with explicit JSON selection against the preserved source and prove compatibility readability.
-
-This evidence used the production CLI, bearer authentication middleware, HTTP routes, migration binary and persistence implementations rather than an in-process router.
-
-## Evidence boundary
-
-The preserved pre-cutover JSON demonstrated compatibility but becomes stale once SQLite accepts later writes. It is not the current-state rollback artifact after cutover. The accepted default-cutover procedure therefore stops SQLite, invokes `control-plane-state-migrate rollback-export` to materialize the latest state in the JSON runtime contract, and starts explicit JSON rollback from that separate output. The ordinary diagnostic `export` format is not a JSON backend state file.
-
-## Historical non-goals
-
-This slice did not change the default backend, prove omitted-backend startup, export current SQLite state for rollback, add automatic migration/fallback/dual-write, delete JSON, change proxy or tunnel behavior, claim backup/restore completion, or close Phase B.
+The current process suite retains and strengthens the accepted evidence: it proves SQLite-only restart/replay, fail-closed startup, retired-option rejection, current-state rollback export and round-trip validation of the previous-release artifact without starting a JSON backend in the current binary.

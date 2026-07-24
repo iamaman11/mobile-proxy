@@ -43,7 +43,8 @@ Current observed layout:
 - control plane binary:
   - `/opt/mobile-relaycontrolpoint/current/control-plane`
 - control plane state:
-  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.json`
+  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3` (canonical runtime)
+  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.json` (preserved migration input only)
 - relay gate binary:
   - `/opt/mobile-relaycontrolpoint/current/relay-gate`
 - public proxy backend:

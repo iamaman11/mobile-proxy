@@ -64,7 +64,7 @@ Acceptance:
 - SSH admin access works
 - `mobile-relaycontrolpoint`, `mobile-relay-gate`, `mobile-reverse-tunnel-server`, and `nginx` are active
 - `wg-quick@wg0` and `mobile-public-proxy` may remain installed only as optional WireGuard backend components, not as required first-party reverse-tunnel dependencies
-- control-plane state exists at `/var/lib/mobile-relaycontrolpoint/control-plane-state.json` after registration/heartbeat and survives service restart
+- control-plane state exists at `/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3` after explicit migration, registration/heartbeat and service restart; a missing or invalid database fails startup without JSON fallback
 - ports `8080`, `1080`, `1081`, `3128`, and `18090/udp` are reachable as designed
 - VM nginx public ports `1080`, `1081`, and `3128` forward to Rust reverse-tunnel-server loopback listeners `14080`, `14081`, and `14128`
 - the provision command is idempotent against an existing VM

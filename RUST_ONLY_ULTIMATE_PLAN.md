@@ -32,7 +32,7 @@ These are not theoretical concerns. They are visible in the current codebase.
    Current state: rotation execution is command-backed, health is probe-backed, startup is fail-closed, and public serving is not accepted without route/proxy/public-observer success.
 
 3. VM-side `control-plane` is no longer memory-only.
-   Current state: control-plane loads and persists registry/command state as JSON at `CONTROL_PLANE_STATE_PATH`, defaulting to `/var/lib/mobile-relaycontrolpoint/control-plane-state.json`.
+   Current state: control-plane loads and persists registry/command state only in the existing SQLite database at `CONTROL_PLANE_STATE_PATH`, defaulting to `/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3`; JSON is limited to migration and export artifacts.
    Current VM identity:
    - project: `project-56ecc519-f3ab-429a-b0a`
    - instance: `mobile-relaycontrolpoint-v2`

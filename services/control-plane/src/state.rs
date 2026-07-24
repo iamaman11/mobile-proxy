@@ -1,10 +1,8 @@
 use std::collections::{HashMap, VecDeque};
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 use mobile_proxy_application::{
     AcknowledgeCommandError, AcknowledgeCommandFuture, AcknowledgeCommandInput,
     AcknowledgeCommandOutcome, AcknowledgeCommandPort, HeartbeatError, HeartbeatFuture,
@@ -18,12 +16,9 @@ use mobile_proxy_application::{
 };
 use mobile_proxy_foundation::CommandId;
 use proxy_core::{DeviceCommand, DeviceRecord};
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::cli::StateBackend;
-use crate::fingerprint_migration::normalize_persisted_fingerprints;
 use crate::projection::{
     apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
 };
@@ -34,20 +29,17 @@ pub struct AppState {
     pub devices: Arc<Mutex<HashMap<String, DeviceRecord>>>,
     pub commands: Arc<Mutex<CommandState>>,
     state_path: Arc<PathBuf>,
-    state_backend: StateBackend,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone)]
 pub struct CommandState {
     pub queues: HashMap<String, VecDeque<DeviceCommand>>,
     pub idempotency: HashMap<String, CommandId>,
-    #[serde(default)]
     pub idempotency_results: HashMap<String, DeviceCommand>,
-    #[serde(default)]
     pub idempotency_order: VecDeque<String>,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone)]
 pub(crate) struct StoredState {
     pub(crate) devices: HashMap<String, DeviceRecord>,
     pub(crate) commands: CommandState,
@@ -70,64 +62,13 @@ impl CommandStateMigration {
     }
 }
 
-fn load_json_state(state_path: &Path) -> Result<StoredState> {
-    match fs::read_to_string(state_path) {
-        Ok(body) => {
-            let (normalized, fingerprint_migration) = normalize_persisted_fingerprints(&body)
-                .with_context(|| format!("failed to migrate {}", state_path.display()))?;
-            let mut stored: StoredState = serde_json::from_value(normalized)
-                .with_context(|| format!("failed to parse {}", state_path.display()))?;
-            let command_migration = normalize_command_state(&mut stored.commands)
-                .map_err(|_| anyhow!("persisted command idempotency state is inconsistent"))?;
-            if fingerprint_migration.total() > 0 || command_migration.changed() {
-                write_stored_state(state_path, &stored).with_context(|| {
-                    format!("failed to persist migrated {}", state_path.display())
-                })?;
-            }
-            if fingerprint_migration.total() > 0 {
-                tracing::warn!(
-                    legacy_config_fingerprints = fingerprint_migration.legacy_config_values,
-                    legacy_binary_fingerprints = fingerprint_migration.legacy_binary_values,
-                    "legacy persisted fingerprints removed for typed heartbeat backfill"
-                );
-            }
-            if command_migration.changed() {
-                tracing::warn!(
-                    recovered_idempotency_results = command_migration.recovered_results,
-                    canonicalized_idempotency_keys = command_migration.canonicalized_keys,
-                    rebuilt_idempotency_order = command_migration.rebuilt_order,
-                    evicted_idempotency_entries = command_migration.evicted_entries,
-                    "legacy command idempotency state normalized"
-                );
-            }
-            Ok(stored)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(StoredState::default()),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to read {}", state_path.display()))
-        }
-    }
-}
-
 impl AppState {
-    #[cfg(test)]
     pub async fn load(state_path: PathBuf) -> Result<Self> {
-        Self::load_with_backend(state_path, StateBackend::Json).await
-    }
-
-    pub async fn load_with_backend(
-        state_path: PathBuf,
-        state_backend: StateBackend,
-    ) -> Result<Self> {
-        let stored = match state_backend {
-            StateBackend::Json => load_json_state(&state_path)?,
-            StateBackend::Sqlite => state_sqlite_backend::load_existing(&state_path)?,
-        };
+        let stored = state_sqlite_backend::load_existing(&state_path)?;
         Ok(Self {
             devices: Arc::new(Mutex::new(stored.devices)),
             commands: Arc::new(Mutex::new(stored.commands)),
             state_path: Arc::new(state_path),
-            state_backend,
         })
     }
 
@@ -142,32 +83,27 @@ impl AppState {
             devices: candidate_devices.clone(),
             commands: candidate_commands.clone(),
         };
-        match self.state_backend {
-            StateBackend::Json => write_stored_state(self.state_path.as_ref(), &candidate),
-            StateBackend::Sqlite => {
-                let expected = StoredState {
-                    devices: expected_devices.clone(),
-                    commands: expected_commands.clone(),
-                };
-                let changes = state_sqlite_backend::compare_and_swap(
-                    self.state_path.as_ref(),
-                    &expected,
-                    &candidate,
-                )?;
-                tracing::debug!(
-                    devices_upserted = changes.devices_upserted,
-                    devices_deleted = changes.devices_deleted,
-                    command_results_inserted = changes.command_results_inserted,
-                    command_results_deleted = changes.command_results_deleted,
-                    idempotency_claims_inserted = changes.idempotency_claims_inserted,
-                    idempotency_claims_deleted = changes.idempotency_claims_deleted,
-                    pending_commands_inserted = changes.pending_commands_inserted,
-                    pending_commands_deleted = changes.pending_commands_deleted,
-                    "SQLite control-plane candidate committed"
-                );
-                Ok(())
-            }
-        }
+        let expected = StoredState {
+            devices: expected_devices.clone(),
+            commands: expected_commands.clone(),
+        };
+        let changes = state_sqlite_backend::compare_and_swap(
+            self.state_path.as_ref(),
+            &expected,
+            &candidate,
+        )?;
+        tracing::debug!(
+            devices_upserted = changes.devices_upserted,
+            devices_deleted = changes.devices_deleted,
+            command_results_inserted = changes.command_results_inserted,
+            command_results_deleted = changes.command_results_deleted,
+            idempotency_claims_inserted = changes.idempotency_claims_inserted,
+            idempotency_claims_deleted = changes.idempotency_claims_deleted,
+            pending_commands_inserted = changes.pending_commands_inserted,
+            pending_commands_deleted = changes.pending_commands_deleted,
+            "SQLite control-plane candidate committed"
+        );
+        Ok(())
     }
 
     #[cfg(test)]
@@ -178,12 +114,7 @@ impl AppState {
             devices: devices.clone(),
             commands: commands.clone(),
         };
-        match self.state_backend {
-            StateBackend::Json => write_stored_state(self.state_path.as_ref(), &stored),
-            StateBackend::Sqlite => {
-                state_sqlite_backend::replace_for_test(self.state_path.as_ref(), &stored)
-            }
-        }
+        state_sqlite_backend::replace_for_test(self.state_path.as_ref(), &stored)
     }
 
     async fn register_device_transaction(
@@ -639,20 +570,6 @@ fn trim_idempotency_state(commands: &mut CommandState) -> Result<u64, ()> {
     Ok(evicted)
 }
 
-fn write_stored_state(path: &Path, stored: &StoredState) -> Result<()> {
-    let body = serde_json::to_vec_pretty(stored)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    let mut file = fs::File::create(&tmp)?;
-    file.write_all(&body)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, VecDeque};
@@ -679,7 +596,39 @@ mod tests {
 
     use crate::projection::build_registered_device;
 
-    use super::{AppState, CommandState, StateBackend};
+    use super::{AppState, CommandState, StoredState};
+
+    struct TempState {
+        path: std::path::PathBuf,
+    }
+
+    impl TempState {
+        fn initialized(label: &str, stored: &StoredState) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "mobile-proxy-control-plane-{label}-{}.sqlite3",
+                Uuid::new_v4()
+            ));
+            crate::state_sqlite_backend::replace_for_test(&path, stored).unwrap();
+            Self { path }
+        }
+    }
+
+    impl Drop for TempState {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+            for suffix in ["-wal", "-shm"] {
+                let mut sidecar = self.path.as_os_str().to_os_string();
+                sidecar.push(suffix);
+                let _ = fs::remove_file(std::path::PathBuf::from(sidecar));
+            }
+        }
+    }
+
+    async fn load_state(label: &str, stored: StoredState) -> (TempState, AppState) {
+        let database = TempState::initialized(label, &stored);
+        let state = AppState::load(database.path.clone()).await.unwrap();
+        (database, state)
+    }
 
     fn command_input(desired_state: DesiredState) -> IssueCommandInput {
         IssueCommandInput {
@@ -737,79 +686,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_fingerprint_migration_is_restart_safe() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-fingerprint-migration-{}.json",
-            Uuid::new_v4()
-        ));
-        fs::write(
-            &path,
-            serde_json::to_vec_pretty(&json!({
-                "devices": {
-                    "node": {
-                        "node_id": "node",
-                        "node_name": "node",
-                        "readiness_state": "booting",
-                        "serving": false,
-                        "proxy_status": "starting",
-                        "proxy_pid": null,
-                        "last_public_ip": null,
-                        "current_job": null,
-                        "last_proxy_error": null,
-                        "version": null,
-                        "config_fingerprint": "legacy-config",
-                        "binary_fingerprint": "legacy-binary",
-                        "active_operator_profile": null,
-                        "active_operator_plmn": null,
-                        "publicly_serving": false,
-                        "public_probe_error": null,
-                        "public_probe_at": null,
-                        "cellular_route_ready": null,
-                        "proxy_bind_ready": null,
-                        "local_serving_ready": null,
-                        "tun0_present": null,
-                        "wg_handshake_recent": null,
-                        "reverse_tunnel_connected": null,
-                        "reverse_tunnel_last_error": null,
-                        "reverse_tunnel_active_transport": null,
-                        "reverse_tunnel_freshness": null,
-                        "reverse_tunnel_failover_reason": null,
-                        "tunnel_owner": null,
-                        "last_heartbeat_at": null,
-                        "availability": "degraded",
-                        "degradation_reason_code": null,
-                        "serving_failure_reason": null,
-                        "desired_state": null,
-                        "recovery_intent": null,
-                        "last_event_at": null
-                    }
-                },
-                "commands": {"queues": {}, "idempotency": {}}
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let first = AppState::load(path.clone()).await.unwrap();
-        let device = first.devices.lock().await.get("node").unwrap().clone();
-        assert!(device.config_fingerprint.is_none());
-        assert!(device.binary_fingerprint.is_none());
-        drop(first);
-
-        let second = AppState::load(path.clone()).await.unwrap();
-        let device = second.devices.lock().await.get("node").unwrap().clone();
-        assert!(device.config_fingerprint.is_none());
-        assert!(device.binary_fingerprint.is_none());
-        let _ = fs::remove_file(path);
-    }
-
-    #[tokio::test]
     async fn exact_duplicate_survives_queue_removal() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-command-idempotency-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (_database, state) = load_state("command-idempotency", StoredState::default()).await;
         let first = state
             .issue_command(command_input(DesiredState::HealthyServing))
             .await
@@ -823,16 +701,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(duplicate, IssueCommandOutcome::ExactDuplicate(original));
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
     async fn reused_key_with_changed_parameters_fails_closed() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-command-conflict-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (_database, state) = load_state("command-conflict", StoredState::default()).await;
         state
             .issue_command(command_input(DesiredState::HealthyServing))
             .await
@@ -841,37 +714,6 @@ mod tests {
             .issue_command(command_input(DesiredState::DegradedSafe))
             .await;
         assert_eq!(conflict, Err(IssueCommandError::IdempotencyConflict));
-        let _ = fs::remove_file(path);
-    }
-
-    #[tokio::test]
-    async fn rollback_writer_can_drop_new_fields_without_losing_pending_dedupe() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-command-rollback-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
-        let first = state
-            .issue_command(command_input(DesiredState::HealthyServing))
-            .await
-            .unwrap();
-        let (_, original) = first.into_parts();
-        {
-            let mut commands = state.commands.lock().await;
-            assert!(commands.idempotency.contains_key("device-1:command-123"));
-            commands.idempotency_results.clear();
-            commands.idempotency_order.clear();
-        }
-        state.persist_for_test().await.unwrap();
-        drop(state);
-
-        let restarted = AppState::load(path.clone()).await.unwrap();
-        let duplicate = restarted
-            .issue_command(command_input(DesiredState::HealthyServing))
-            .await
-            .unwrap();
-        assert_eq!(duplicate, IssueCommandOutcome::ExactDuplicate(original));
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -908,7 +750,6 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(path.clone()),
-            state_backend: StateBackend::Json,
         };
 
         let result = state
@@ -934,7 +775,6 @@ mod tests {
                 .len(),
             MAX_COMMAND_QUEUE_PER_DEVICE
         );
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -972,7 +812,6 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(path.clone()),
-            state_backend: StateBackend::Json,
         };
 
         let result = state
@@ -994,16 +833,11 @@ mod tests {
             MAX_PENDING_COMMANDS
         );
         drop(commands);
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
     async fn registration_is_durable_and_preserves_first_registered_metadata() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-device-registration-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (database, state) = load_state("device-registration", StoredState::default()).await;
         assert_eq!(
             state
                 .register_device(registration("device-1", "first-name"))
@@ -1034,7 +868,7 @@ mod tests {
         );
         drop(state);
 
-        let restarted = AppState::load(path.clone()).await.unwrap();
+        let restarted = AppState::load(database.path.clone()).await.unwrap();
         let registered = restarted
             .devices
             .lock()
@@ -1044,7 +878,6 @@ mod tests {
             .clone();
         assert_eq!(registered.node_name, "first-name");
         assert_eq!(registered.proxy_status, "starting");
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -1058,7 +891,6 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1085,7 +917,6 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1113,7 +944,6 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1134,7 +964,6 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1147,11 +976,7 @@ mod tests {
 
     #[tokio::test]
     async fn heartbeat_is_durable_and_preserves_public_probe_projection() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-heartbeat-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (database, state) = load_state("heartbeat", StoredState::default()).await;
         state
             .register_device(registration("device-1", "registered-name"))
             .await
@@ -1180,7 +1005,7 @@ mod tests {
         assert_eq!(device.public_probe_at.as_deref(), Some("123"));
         drop(state);
 
-        let restarted = AppState::load(path.clone()).await.unwrap();
+        let restarted = AppState::load(database.path.clone()).await.unwrap();
         let device = restarted
             .devices
             .lock()
@@ -1191,7 +1016,6 @@ mod tests {
         assert_eq!(device.node_name, "heartbeat-name");
         assert!(device.publicly_serving);
         assert_eq!(device.public_probe_at.as_deref(), Some("123"));
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -1208,7 +1032,6 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1241,16 +1064,14 @@ mod tests {
             device.node_name = node_id.clone();
             devices.insert(node_id, device);
         }
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-heartbeat-capacity-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState {
-            devices: Arc::new(Mutex::new(devices)),
-            commands: Arc::new(Mutex::new(CommandState::default())),
-            state_path: Arc::new(path.clone()),
-            state_backend: StateBackend::Json,
-        };
+        let (_database, state) = load_state(
+            "heartbeat-capacity",
+            StoredState {
+                devices,
+                commands: CommandState::default(),
+            },
+        )
+        .await;
 
         assert_eq!(
             state
@@ -1275,7 +1096,6 @@ mod tests {
                 .node_name,
             "updated"
         );
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -1287,7 +1107,6 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1300,11 +1119,7 @@ mod tests {
 
     #[tokio::test]
     async fn public_probe_is_durable_and_uses_an_authoritative_timestamp() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-public-probe-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (database, state) = load_state("public-probe", StoredState::default()).await;
         state
             .record_heartbeat(heartbeat("device-1", "heartbeat-name"))
             .await
@@ -1328,7 +1143,7 @@ mod tests {
         assert_eq!(device.availability, "ready");
         drop(state);
 
-        let restarted = AppState::load(path.clone()).await.unwrap();
+        let restarted = AppState::load(database.path.clone()).await.unwrap();
         let device = restarted
             .devices
             .lock()
@@ -1342,7 +1157,6 @@ mod tests {
             device.public_probe_at.as_deref(),
             Some("untrusted-client-time")
         );
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -1351,7 +1165,6 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1378,7 +1191,6 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1402,7 +1214,6 @@ mod tests {
             devices: Arc::new(Mutex::new(devices)),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1424,7 +1235,6 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(CommandState::default())),
             state_path: Arc::new(blocking_parent.join("state.json")),
-            state_backend: StateBackend::Json,
         };
 
         let result = state
@@ -1437,11 +1247,7 @@ mod tests {
 
     #[tokio::test]
     async fn polling_and_negative_acknowledgement_keep_the_command_pending() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-command-retry-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (_database, state) = load_state("command-retry", StoredState::default()).await;
         let (_, original) = state
             .issue_command(command_input(DesiredState::HealthyServing))
             .await
@@ -1470,16 +1276,11 @@ mod tests {
                 .unwrap(),
             PollCommandOutcome::Pending(original)
         );
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
     async fn positive_acknowledgement_is_durable_and_preserves_exact_replay() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-command-ack-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (database, state) = load_state("command-ack", StoredState::default()).await;
         let (_, original) = state
             .issue_command(command_input(DesiredState::HealthyServing))
             .await
@@ -1503,7 +1304,7 @@ mod tests {
         );
         drop(state);
 
-        let restarted = AppState::load(path.clone()).await.unwrap();
+        let restarted = AppState::load(database.path.clone()).await.unwrap();
         assert_eq!(
             restarted
                 .poll_command(PollCommandInput {
@@ -1520,16 +1321,11 @@ mod tests {
                 .unwrap(),
             IssueCommandOutcome::ExactDuplicate(original)
         );
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
     async fn unknown_positive_acknowledgement_does_not_remove_a_command() {
-        let path = std::env::temp_dir().join(format!(
-            "mobile-proxy-control-plane-command-unknown-ack-{}.json",
-            Uuid::new_v4()
-        ));
-        let state = AppState::load(path.clone()).await.unwrap();
+        let (_database, state) = load_state("command-unknown-ack", StoredState::default()).await;
         let (_, original) = state
             .issue_command(command_input(DesiredState::HealthyServing))
             .await
@@ -1552,7 +1348,6 @@ mod tests {
                 .unwrap(),
             PollCommandOutcome::Pending(original)
         );
-        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -1581,7 +1376,6 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(blocking_parent.join("state.json")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
@@ -1623,7 +1417,6 @@ mod tests {
             devices: Arc::new(Mutex::new(HashMap::new())),
             commands: Arc::new(Mutex::new(commands)),
             state_path: Arc::new(std::path::PathBuf::from("unused")),
-            state_backend: StateBackend::Json,
         };
 
         assert_eq!(
