@@ -62,7 +62,11 @@ jobs:
         run: cargo test -p control-plane --test state_migration_cli -- --nocapture
 
       - name: Prove QUIC fallback, protected surfaces and recovery
-        run: cargo test -p reverse-tunnel --test hybrid_transport_recovery -- --nocapture
+        run: |
+          cargo test -p reverse-tunnel \
+            --test hybrid_transport_recovery \
+            --test hybrid_mixed_protocol_recovery \
+            -- --nocapture
 
       - name: Run complete workspace acceptance
         run: cargo test --workspace
