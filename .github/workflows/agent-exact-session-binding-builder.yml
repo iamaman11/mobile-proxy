@@ -30,7 +30,13 @@ jobs:
             .agent/exact-session-binding.py.gz.b64.00 \
             .agent/exact-session-binding.py.gz.b64.01 \
             .agent/exact-session-binding.py.gz.b64.02 \
-            .agent/exact-session-binding.py.gz.b64.03 \
+            .agent/exact-session-binding.py.gz.b64.03a \
+            .agent/exact-session-binding.py.gz.b64.03b \
+            .agent/exact-session-binding.py.gz.b64.03c \
+            .agent/exact-session-binding.py.gz.b64.03d0 \
+            .agent/exact-session-binding.py.gz.b64.03d1 \
+            .agent/exact-session-binding.py.gz.b64.03d2 \
+            .agent/exact-session-binding.py.gz.b64.03d3 \
             .agent/exact-session-binding.py.gz.b64.04 \
             | tr -d '\n' > /tmp/exact-session-binding.py.gz.b64
           echo "1d2ab9add1aa51242013119725f3909b6bb20eda4620c5737fecd8557544646c  /tmp/exact-session-binding.py.gz.b64" | sha256sum --check --strict
