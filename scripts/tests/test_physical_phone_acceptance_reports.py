@@ -15,14 +15,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class PhysicalReportVerifierTests(unittest.TestCase):
-    def deployment(self):
+    def deployment(self, owner="first_party_reverse_tunnel"):
         return {
             "format_version": 1,
             "candidate_sha": "a" * 40,
+            "expected_tunnel_owner": owner,
             "device_release_entries": 10,
             "vm_release_entries": 15,
             "device_release_metadata_match": True,
             "device_deployment_match": True,
+            "android_vpn_owner_match": True,
             "vm_deployment_match": True,
             "accepted": True,
         }
@@ -83,10 +85,21 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         }
 
     def test_complete_report_set_contract(self):
-        for label in ["primary", "wireguard", "final"]:
-            MODULE.verify_deployment_report(self.deployment(), "a" * 40, label)
-        MODULE.verify_switch_report(self.switch("wireguard"), "wireguard")
-        MODULE.verify_switch_report(self.switch("reverse-tunnel"), "reverse-tunnel")
+        MODULE.verify_deployment_report(
+            self.deployment(), "a" * 40, "primary", "first_party_reverse_tunnel"
+        )
+        MODULE.verify_deployment_report(
+            self.deployment("stock_wireguard_bridge"),
+            "a" * 40,
+            "wireguard",
+            "stock_wireguard_bridge",
+        )
+        MODULE.verify_deployment_report(
+            self.deployment(), "a" * 40, "final", "first_party_reverse_tunnel"
+        )
+        MODULE.verify_switch_report(self.switch("reverse-tunnel"), "reverse-tunnel", "primary")
+        MODULE.verify_switch_report(self.switch("wireguard"), "wireguard", "wireguard")
+        MODULE.verify_switch_report(self.switch("reverse-tunnel"), "reverse-tunnel", "final")
         for stage in [
             "online",
             "post-reboot",
@@ -97,11 +110,19 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         ]:
             MODULE.verify_stage_report(self.stage(stage), "a" * 40, stage)
 
-    def test_wrong_sha_missing_mixed_protocol_or_stale_tunnel_fails(self):
+    def test_wrong_sha_owner_missing_mixed_protocol_or_stale_tunnel_fails(self):
         deployment = self.deployment()
         deployment["candidate_sha"] = "b" * 40
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "SHA differs"):
-            MODULE.verify_deployment_report(deployment, "a" * 40, "primary")
+            MODULE.verify_deployment_report(
+                deployment, "a" * 40, "primary", "first_party_reverse_tunnel"
+            )
+
+        deployment = self.deployment("stock_wireguard_bridge")
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "tunnel owner differs"):
+            MODULE.verify_deployment_report(
+                deployment, "a" * 40, "primary", "first_party_reverse_tunnel"
+            )
 
         report = self.stage("online")
         del report["proxy_surfaces"]["mixed_1080_connect"]
@@ -112,6 +133,11 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         report["reverse_tunnel"]["freshness"] = "stale"
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "stale"):
             MODULE.verify_stage_report(report, "a" * 40, "fallback")
+
+        report = self.stage("online")
+        report["wireguard"]["tun0_present"] = True
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "leaves tun0 active"):
+            MODULE.verify_stage_report(report, "a" * 40, "online")
 
     def test_wireguard_stage_requires_owner_tun_and_handshake(self):
         report = self.stage("wireguard")
@@ -128,7 +154,7 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         report = self.switch("wireguard")
         report["public_ports"] = [1080]
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "ports differ"):
-            MODULE.verify_switch_report(report, "wireguard")
+            MODULE.verify_switch_report(report, "wireguard", "wireguard")
 
 
 if __name__ == "__main__":
