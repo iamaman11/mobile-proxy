@@ -21,4 +21,5 @@ uuid.workspace = true
 subtle.workspace = true
 
 [dev-dependencies]
+reqwest.workspace = true
 tower = { version = "0.5", features = ["util"] }
