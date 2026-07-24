@@ -1,0 +1,21 @@
+name: Agent Exact Session Binding Start Marker
+
+on:
+  push:
+    branches:
+      - agent/exact-session-binding-builder
+
+permissions:
+  issues: write
+
+jobs:
+  mark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record builder trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 51 \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "Exact-session builder trigger received for builder commit \`${GITHUB_SHA}\`."
