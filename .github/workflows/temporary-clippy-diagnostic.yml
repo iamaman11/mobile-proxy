@@ -6,35 +6,49 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  fix:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - name: Check out source
+      - name: Check out branch
         uses: actions/checkout@v7
+        with:
+          ref: agent/phase-b-state-snapshot-mapping
 
       - name: Install stable Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Capture strict Clippy diagnostic
-        id: clippy
-        continue-on-error: true
+      - name: Apply exact Clippy fix
         run: |
-          set -o pipefail
-          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Upload diagnostic
-        uses: actions/upload-artifact@v7
-        with:
-          name: strict-clippy-diagnostic
-          path: clippy.log
-          retention-days: 1
+          path = Path("crates/control-plane-sqlite/src/snapshot_tests.rs")
+          text = path.read_text()
+          old = 'exact_rows(&[first.clone()], &[(1, first)]),'
+          new = 'exact_rows(std::slice::from_ref(&first), &[(1, first)]),'
+          if text.count(old) != 1:
+              raise SystemExit("expected exactly one cloned single-element slice")
+          path.write_text(text.replace(old, new))
+          PY
+          cargo fmt --all
 
-      - name: Preserve failure status
-        if: steps.clippy.outcome == 'failure'
-        run: exit 1
+      - name: Validate exact candidate
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Publish exact fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/control-plane-sqlite/src/snapshot_tests.rs
+          git commit -m "Satisfy strict Clippy in snapshot tests [skip ci]"
+          git push origin HEAD:agent/phase-b-state-snapshot-mapping
