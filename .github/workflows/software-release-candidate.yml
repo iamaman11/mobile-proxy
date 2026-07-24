@@ -1,0 +1,82 @@
+name: Software Release Candidate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: software-release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  immutable-sha-acceptance:
+    name: Immutable SHA Acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out candidate SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Verify immutable checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Enforce architecture and policy boundaries
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Prove process liveness and readiness
+        run: cargo test -p control-plane --test health_process -- --nocapture
+
+      - name: Prove SQLite backup and clean restore
+        run: cargo test -p control-plane --test state_backup_cli -- --nocapture
+
+      - name: Prove state migration and rollback compatibility
+        run: cargo test -p control-plane --test state_migration_cli -- --nocapture
+
+      - name: Prove QUIC fallback, protected surfaces and recovery
+        run: cargo test -p reverse-tunnel --test hybrid_transport_recovery -- --nocapture
+
+      - name: Run complete workspace acceptance
+        run: cargo test --workspace
+
+      - name: Write immutable candidate evidence
+        run: |
+          python3 scripts/write_release_candidate_evidence.py \
+            --output release-candidate-evidence.json
+          python3 -m json.tool release-candidate-evidence.json >/dev/null
+
+      - name: Upload immutable candidate evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: software-release-candidate-${{ env.CANDIDATE_SHA }}
+          path: release-candidate-evidence.json
+          if-no-files-found: error
+          retention-days: 90
