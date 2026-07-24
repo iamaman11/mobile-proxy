@@ -58,12 +58,17 @@ jobs:
           path.write_text(text.replace(old, new))
           PY
 
-      - name: Validate minimal locked candidate
-        run: |
-          cargo fmt --all -- --check
-          cargo check --workspace --all-targets --locked
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-          cargo test --workspace --locked
+      - name: Verify formatting
+        run: cargo fmt --all -- --check 2>&1 | tee rustfmt.log
+
+      - name: Check minimal locked candidate
+        run: cargo check --workspace --all-targets --locked 2>&1 | tee cargo-check.log
+
+      - name: Run strict locked Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee clippy.log
+
+      - name: Run locked workspace tests
+        run: cargo test --workspace --locked 2>&1 | tee tests.log
 
       - name: Publish minimal lockfile
         run: |
@@ -72,3 +77,16 @@ jobs:
           git add Cargo.lock
           git commit -m "Update snapshot dependency edges [skip ci]"
           git push origin HEAD:agent/phase-b-state-snapshot-mapping
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: phase-b-snapshot-locked-diagnostics
+          path: |
+            rustfmt.log
+            cargo-check.log
+            clippy.log
+            tests.log
+          if-no-files-found: ignore
+          retention-days: 2
