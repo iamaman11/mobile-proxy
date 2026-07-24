@@ -312,9 +312,7 @@ async fn handle_socks_proxy(stream: &mut TcpStream) -> Result<()> {
     if request[0..4] != [5, 1, 0, 1] {
         bail!("unexpected SOCKS5 connect request: {request:?}");
     }
-    stream
-        .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0])
-        .await?;
+    stream.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).await?;
     assert_ping_pong(stream).await
 }
 
@@ -327,9 +325,7 @@ async fn handle_http_proxy(stream: &mut TcpStream) -> Result<()> {
         assert_ping_pong(stream).await
     } else {
         stream
-            .write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nproxy-ok",
-            )
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nproxy-ok")
             .await?;
         stream.shutdown().await?;
         Ok(())
@@ -494,14 +490,9 @@ async fn wait_for_authenticated_heartbeat(
 ) {
     if timeout(Duration::from_secs(5), async {
         loop {
-            if state
-                .snapshot()
-                .await
-                .first()
-                .is_some_and(|session| {
-                    session.connected && session.last_heartbeat_sequence.is_some()
-                })
-            {
+            if state.snapshot().await.first().is_some_and(|session| {
+                session.connected && session.last_heartbeat_sequence.is_some()
+            }) {
                 return;
             }
             sleep(Duration::from_millis(10)).await;
