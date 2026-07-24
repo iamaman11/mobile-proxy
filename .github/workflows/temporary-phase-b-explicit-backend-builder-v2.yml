@@ -1,6 +1,9 @@
 name: Temporary Phase B Explicit Backend Builder V2
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - agent/phase-b-explicit-sqlite-backend
