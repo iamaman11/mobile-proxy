@@ -1,0 +1,41 @@
+name: Temporary Phase B Snapshot Builder
+
+on:
+  push:
+    branches:
+      - agent/phase-b-state-snapshot-mapping
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/phase-b-state-snapshot-mapping
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format and validate snapshot slice
+        run: |
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Commit generated outputs
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.lock crates/control-plane-sqlite
+          if ! git diff --cached --quiet; then
+            git commit -m "Apply generated snapshot build outputs [skip ci]"
+            git push origin HEAD:agent/phase-b-state-snapshot-mapping
+          fi
