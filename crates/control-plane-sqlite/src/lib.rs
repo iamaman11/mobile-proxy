@@ -279,7 +279,12 @@ impl WriteTransaction<'_> {
             "INSERT INTO pending_commands \
              (command_id, device_id, queue_position, command_json) \
              VALUES (?1, ?2, ?3, ?4)",
-            params![command_id, device_id, i64::from(queue_position), command_json],
+            params![
+                command_id,
+                device_id,
+                i64::from(queue_position),
+                command_json
+            ],
         )?;
         Ok(())
     }
@@ -370,9 +375,7 @@ mod tests {
 
     use rusqlite::Connection;
 
-    use super::{
-        BUSY_TIMEOUT, InventoryCounts, SCHEMA_VERSION, SqliteStore, StoreError,
-    };
+    use super::{BUSY_TIMEOUT, InventoryCounts, SCHEMA_VERSION, SqliteStore, StoreError};
 
     static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -546,11 +549,7 @@ mod tests {
                     "command-1",
                     r#"{"command_id":"command-1"}"#,
                 )?;
-                transaction.insert_idempotency_claim(
-                    "scope-1",
-                    "command-1",
-                    "b3:first-request",
-                )
+                transaction.insert_idempotency_claim("scope-1", "command-1", "b3:first-request")
             })
             .unwrap();
 
