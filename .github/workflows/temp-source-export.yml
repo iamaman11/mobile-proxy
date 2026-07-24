@@ -20,14 +20,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-      - name: Apply reviewed transformations
-        shell: bash
-        run: |
-          set -euo pipefail
-          python .tmp/retire_json.py
-          python .tmp/modify_process.py
-          python .tmp/update_docs.py
-          git diff --check
+      - name: Transform runtime ownership
+        run: python -u .tmp/retire_json.py
+      - name: Transform process acceptance
+        run: python -u .tmp/modify_process.py
+      - name: Transform documentation
+        run: python -u .tmp/update_docs.py
+      - name: Verify patch whitespace
+        run: git diff --check
       - name: Publish branch update
         shell: bash
         run: |
