@@ -28,7 +28,10 @@ jobs:
           cat \
             .agent/public-probe-files.tar.gz.b64.00 \
             .agent/public-probe-files.tar.gz.b64.01a \
-            .agent/public-probe-files.tar.gz.b64.01b \
+            .agent/public-probe-files.tar.gz.b64.01c0 \
+            .agent/public-probe-files.tar.gz.b64.01c1 \
+            .agent/public-probe-files.tar.gz.b64.01c2 \
+            .agent/public-probe-files.tar.gz.b64.01c3 \
             .agent/public-probe-files.tar.gz.b64.02 \
             .agent/public-probe-files.tar.gz.b64.03 \
             .agent/public-probe-files.tar.gz.b64.04 \
