@@ -18,6 +18,8 @@ The running control plane is not switched to SQLite by this change. JSON remains
 
 The boundary accepts and returns domain/application types. Raw SQL rows, generic connections and unvalidated JSON are not exposed to callers.
 
+Whole-snapshot replacement is approved only for migration, import and bounded parity/recovery workflows. It is not the per-request production mutation design and must not be used as a high-frequency runtime write path.
+
 ## Atomic replacement order
 
 The transaction deletes existing rows in foreign-key-safe order:
