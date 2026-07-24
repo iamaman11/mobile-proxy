@@ -50,7 +50,13 @@ fn main() -> Result<()> {
 }
 
 fn backup_state(sqlite: &Path, backup: &Path) -> Result<()> {
-    materialize_validated(sqlite, backup, "backup", "backup source", "backup candidate")
+    materialize_validated(
+        sqlite,
+        backup,
+        "backup",
+        "backup source",
+        "backup candidate",
+    )
 }
 
 fn restore_state(backup: &Path, sqlite: &Path) -> Result<()> {
@@ -99,8 +105,12 @@ fn materialize_validated(
 }
 
 fn materialize(source: &Path, target: &Path, operation: &str) -> Result<()> {
-    let store = SqliteStore::open_existing(source)
-        .with_context(|| format!("failed to open SQLite {operation} source {}", source.display()))?;
+    let store = SqliteStore::open_existing(source).with_context(|| {
+        format!(
+            "failed to open SQLite {operation} source {}",
+            source.display()
+        )
+    })?;
     store
         .vacuum_into(target)
         .with_context(|| format!("failed to materialize SQLite {operation} artifact"))
