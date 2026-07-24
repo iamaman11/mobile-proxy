@@ -28,4 +28,21 @@ new = r'''tunnel = replace_once(
 count = source.count(old)
 if count != 1:
     raise SystemExit(f"QUIC heartbeat transformation repair: expected one source block, found {count}")
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
+source = source.replace(old, new, 1)
+
+output_repair_source = Path(".agent/repair-exact-session-output.py").read_text(encoding="utf-8")
+Path("/tmp/repair-exact-session-output.py").write_text(output_repair_source, encoding="utf-8")
+source += r'''
+
+from pathlib import Path as _ExactSessionRepairPath
+_exact_session_repair_path = _ExactSessionRepairPath("/tmp/repair-exact-session-output.py")
+exec(
+    compile(
+        _exact_session_repair_path.read_text(encoding="utf-8"),
+        str(_exact_session_repair_path),
+        "exec",
+    )
+)
+'''
+
+path.write_text(source, encoding="utf-8")
