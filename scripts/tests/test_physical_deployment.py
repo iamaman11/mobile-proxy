@@ -43,6 +43,20 @@ class PhysicalDeploymentTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def write_host_config(self, root: pathlib.Path, owner: str) -> None:
+        reverse = owner == "first_party_reverse_tunnel"
+        path = root / "config" / "host-daemon.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "wireguard": {"enabled": not reverse, "owner": owner},
+                    "reverse_tunnel": {"enabled": reverse},
+                }
+            ),
+            encoding="utf-8",
+        )
+
     def test_inventory_and_device_metadata_are_bound_to_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -71,6 +85,27 @@ class PhysicalDeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.AcceptanceFailure, "differs"):
                 MODULE.verify_device_release_metadata(root, "b" * 40)
 
+    def test_release_owner_is_inferred_and_modes_are_exclusive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            self.write_host_config(root, "first_party_reverse_tunnel")
+            self.assertEqual(
+                MODULE.release_tunnel_owner(root),
+                "first_party_reverse_tunnel",
+            )
+
+            self.write_host_config(root, "stock_wireguard_bridge")
+            self.assertEqual(
+                MODULE.release_tunnel_owner(root),
+                "stock_wireguard_bridge",
+            )
+
+            config = json.loads((root / "config" / "host-daemon.json").read_text())
+            config["reverse_tunnel"]["enabled"] = True
+            (root / "config" / "host-daemon.json").write_text(json.dumps(config))
+            with self.assertRaisesRegex(MODULE.AcceptanceFailure, "leaves reverse tunnel enabled"):
+                MODULE.release_tunnel_owner(root)
+
     def test_inventory_rejects_path_escape_duplicate_and_size_drift(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -95,6 +130,17 @@ class PhysicalDeploymentTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest))
             with self.assertRaisesRegex(MODULE.AcceptanceFailure, "size differs"):
                 MODULE.load_release_inventory(root)
+
+    def test_android_vpn_owner_parsers_are_strict(self):
+        packages = "package:com.wireguard.android uid:10123\n"
+        self.assertEqual(
+            MODULE.parse_package_uid(packages, "com.wireguard.android"),
+            10123,
+        )
+        self.assertIsNone(MODULE.parse_package_uid(packages, "com.example.mobileproxy"))
+        connectivity = "NetworkAgentInfo Transports: VPN WIFI OwnerUid: 10123 Score: 60"
+        self.assertEqual(MODULE.parse_active_vpn_owner_uid(connectivity), 10123)
+        self.assertIsNone(MODULE.parse_active_vpn_owner_uid("Transports: WIFI OwnerUid: 10123"))
 
     def test_vm_digest_output_is_strict_and_complete(self):
         parsed = MODULE._parse_sha256sum(
