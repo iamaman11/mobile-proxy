@@ -31,11 +31,16 @@ _REQUIRED_SOFTWARE_CHECKS = {
     "tls_tcp_reserve",
     "quic_recovery",
     "mixed_proxy",
+    "mixed_proxy_socks5",
+    "mixed_proxy_http",
+    "mixed_proxy_connect",
     "socks5_proxy",
     "http_proxy",
     "http_connect",
     "wireguard_rollback_compatibility",
     "release_integrity_policy",
+    "deployed_release_identity_verifier",
+    "physical_report_set_verifier",
 }
 _TRANSPORT_BY_STAGE = {
     "online": "quic",
@@ -144,13 +149,15 @@ def prove_proxy_surfaces(
     proxy_host: str,
     http_probe_url: str,
     https_probe_url: str,
+    proxy_credentials: str,
 ) -> dict[str, bool]:
-    curl_proxy(["--socks5-hostname", f"{proxy_host}:1080", http_probe_url])
-    curl_proxy(["--proxy", f"http://{proxy_host}:1080", http_probe_url])
-    curl_proxy(["--proxy", f"http://{proxy_host}:1080", https_probe_url])
-    curl_proxy(["--socks5-hostname", f"{proxy_host}:1081", http_probe_url])
-    curl_proxy(["--proxy", f"http://{proxy_host}:3128", http_probe_url])
-    curl_proxy(["--proxy", f"http://{proxy_host}:3128", https_probe_url])
+    auth = ["--proxy-user", proxy_credentials]
+    curl_proxy([*auth, "--socks5-hostname", f"{proxy_host}:1080", http_probe_url])
+    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:1080", http_probe_url])
+    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:1080", https_probe_url])
+    curl_proxy([*auth, "--socks5-hostname", f"{proxy_host}:1081", http_probe_url])
+    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:3128", http_probe_url])
+    curl_proxy([*auth, "--proxy", f"http://{proxy_host}:3128", https_probe_url])
     return {
         "mixed_1080_socks5": True,
         "mixed_1080_http": True,
@@ -161,16 +168,23 @@ def prove_proxy_surfaces(
     }
 
 
+def _required_secret_env(name: str) -> str:
+    value = os.environ.get(name, "")
+    require(value != "", f"{name} is required")
+    require(len(value) <= 1024 and not any(ord(character) < 32 for character in value), f"{name} is invalid")
+    return value
+
+
 def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     evidence = read_json(args.evidence)
     candidate_sha = verify_candidate(evidence)
 
     host_base = args.host_api_base.rstrip("/")
     control_base = args.control_plane_base.rstrip("/")
-    host_token = os.environ.get(args.host_token_env, "")
-    control_token = os.environ.get(args.control_token_env, "")
-    require(host_token != "", f"{args.host_token_env} is required")
-    require(control_token != "", f"{args.control_token_env} is required")
+    host_token = _required_secret_env(args.host_token_env)
+    control_token = _required_secret_env(args.control_token_env)
+    proxy_username = _required_secret_env(args.proxy_username_env)
+    proxy_password = _required_secret_env(args.proxy_password_env)
 
     host_live = require_object(request_json(f"{host_base}/livez"), "host liveness")
     host_ready = require_object(request_json(f"{host_base}/readyz"), "host readiness")
@@ -196,19 +210,19 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
 
     devices = request_json(f"{control_base}/api/v1/devices", control_token)
     require(isinstance(devices, list) and devices, "restored device inventory is empty")
-    if args.device_id:
-        require(
-            any(
-                isinstance(device, dict) and device.get("node_id") == args.device_id
-                for device in devices
-            ),
-            "expected device is absent from restored inventory",
-        )
+    require(
+        any(
+            isinstance(device, dict) and device.get("node_id") == args.device_id
+            for device in devices
+        ),
+        "expected device is absent from restored inventory",
+    )
 
     proxies = prove_proxy_surfaces(
         args.proxy_host,
         args.http_probe_url,
         args.https_probe_url,
+        f"{proxy_username}:{proxy_password}",
     )
     return {
         "format_version": 1,
@@ -220,7 +234,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             "control_plane_ready": True,
         },
         "device_inventory_present": True,
-        "expected_device_present": bool(args.device_id),
+        "expected_device_present": True,
         "reverse_tunnel": {
             "connected": health.get("reverse_tunnel_connected"),
             "active_transport": health.get("reverse_tunnel_active_transport"),
@@ -248,6 +262,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device-id", required=True)
     parser.add_argument("--host-token-env", default="HOST_ADMIN_TOKEN")
     parser.add_argument("--control-token-env", default="CONTROL_PLANE_ADMIN_TOKEN")
+    parser.add_argument("--proxy-username-env", default="PROXY_USERNAME")
+    parser.add_argument("--proxy-password-env", default="PROXY_PASSWORD")
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
