@@ -19,9 +19,10 @@ use tracing::info;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+    let state_path = cli.resolved_state_path();
     let auth = AuthConfig::new(cli.admin_token, cli.device_token)?;
     let app = router(
-        AppState::load_with_backend(cli.state_path, cli.state_backend).await?,
+        AppState::load_with_backend(state_path, cli.state_backend).await?,
         auth,
     );
     let listener = TcpListener::bind(&cli.listen).await?;

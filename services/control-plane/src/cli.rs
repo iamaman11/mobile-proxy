@@ -1,12 +1,24 @@
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
+const JSON_STATE_PATH: &str = "/var/lib/mobile-relaycontrolpoint/control-plane-state.json";
+const SQLITE_STATE_PATH: &str = "/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3";
+
 #[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[value(rename_all = "snake_case")]
 pub enum StateBackend {
-    #[default]
     Json,
+    #[default]
     Sqlite,
+}
+
+impl StateBackend {
+    fn default_state_path(self) -> PathBuf {
+        match self {
+            Self::Json => PathBuf::from(JSON_STATE_PATH),
+            Self::Sqlite => PathBuf::from(SQLITE_STATE_PATH),
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -23,15 +35,19 @@ pub struct Cli {
         long,
         env = "CONTROL_PLANE_STATE_BACKEND",
         value_enum,
-        default_value = "json"
+        default_value = "sqlite"
     )]
     pub state_backend: StateBackend,
-    #[arg(
-        long,
-        env = "CONTROL_PLANE_STATE_PATH",
-        default_value = "/var/lib/mobile-relaycontrolpoint/control-plane-state.json"
-    )]
-    pub state_path: PathBuf,
+    #[arg(long, env = "CONTROL_PLANE_STATE_PATH")]
+    pub state_path: Option<PathBuf>,
+}
+
+impl Cli {
+    pub fn resolved_state_path(&self) -> PathBuf {
+        self.state_path
+            .clone()
+            .unwrap_or_else(|| self.state_backend.default_state_path())
+    }
 }
 
 #[cfg(test)]
