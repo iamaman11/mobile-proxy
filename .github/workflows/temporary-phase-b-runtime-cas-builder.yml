@@ -1,0 +1,56 @@
+name: Temporary Phase B Runtime CAS Builder
+
+on:
+  push:
+    branches:
+      - agent/phase-b-runtime-snapshot-cas
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: agent/phase-b-runtime-snapshot-cas
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Wire and format runtime CAS
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/control-plane-sqlite/src/lib.rs')
+          body = path.read_text()
+          if 'mod snapshot_compare_and_swap;' not in body:
+              body = body.replace('mod snapshot_error;', 'mod snapshot_compare_and_swap;\nmod snapshot_error;', 1)
+          export = '''pub use snapshot_compare_and_swap::{
+              SnapshotCompareAndSwapError, SnapshotRowChanges,
+          };
+          '''
+          if 'pub use snapshot_compare_and_swap::' not in body:
+              body = body.replace('pub use snapshot::{', export + '\npub use snapshot::{', 1)
+          path.write_text(body)
+          PY
+          cargo fmt --all
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/control-plane-sqlite/src/lib.rs crates/control-plane-sqlite/src/snapshot_compare_and_swap.rs crates/control-plane-sqlite/src/snapshot_compare_and_swap_tests.rs
+          if ! git diff --cached --quiet; then
+            git commit -m "Wire and format runtime snapshot CAS [skip ci]"
+            git push origin HEAD:agent/phase-b-runtime-snapshot-cas
+          fi
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --workspace
