@@ -20,7 +20,7 @@ jobs:
 
       - name: Inspect exact patch anchors
         run: |
-          python3 - <<'PY'
+          python3 - <<'PY' | tee anchors.log
           from pathlib import Path
           body = Path('services/control-plane/src/state.rs').read_text()
           patterns = {
@@ -72,15 +72,14 @@ jobs:
               'issue_persist': 'persist_candidate(self.state_path.as_ref(), &devices, &commands)?;',
               'test_struct_path': 'state_path: Arc::new(',
           }
-          failed = False
           for name, pattern in patterns.items():
-              count = body.count(pattern)
-              print(f'{name}={count}')
-              expected = 2 if name == 'issue_persist' else 1
-              if name == 'test_struct_path':
-                  expected = 11
-              if count != expected:
-                  failed = True
-          if failed:
-              raise SystemExit('one or more exact patch anchors differ')
+              print(f'{name}={body.count(pattern)}')
           PY
+
+      - name: Upload patch anchors
+        uses: actions/upload-artifact@v7
+        with:
+          name: explicit-backend-patch-anchors
+          path: anchors.log
+          if-no-files-found: error
+          retention-days: 2
