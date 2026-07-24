@@ -15,7 +15,7 @@ The daemon accepts:
 --state-backend json|sqlite
 ```
 
-and the equivalent `CONTROL_PLANE_STATE_BACKEND` environment variable.
+and the equivalent `CONTROL_PLANE_STATE_BACKEND` environment variable. Any other value is rejected during CLI parsing before the state path is opened. Backend parsing remains independent of the required admin and device authentication values.
 
 `json` remains the default. Existing deployments that do not set the option continue to use the same state path, legacy normalization, file format and write-before-publication ordering.
 
