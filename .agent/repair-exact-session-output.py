@@ -80,6 +80,10 @@ for signature, label in (
         "test-only timeout wrapper",
     ),
     (
+        "    async fn select_tcp_control(\n",
+        "test-only session-only TCP selector",
+    ),
+    (
         "    pub(crate) async fn register_tcp_control(\n",
         "test-only TCP control registration wrapper",
     ),
@@ -90,6 +94,10 @@ for signature, label in (
     (
         "    pub(crate) async fn register_session_liveness(&self, node_id: String, session_id: Uuid) {\n",
         "test-only liveness registration wrapper",
+    ),
+    (
+        "    pub(crate) async fn refresh_session_heartbeat(&self, node_id: &str, session_id: Uuid) -> bool {\n",
+        "test-only session-only heartbeat wrapper",
     ),
 ):
     replace_once(state_path, signature, "    #[cfg(test)]\n" + signature, label)
