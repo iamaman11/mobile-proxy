@@ -50,7 +50,6 @@ _TRANSPORT_BY_STAGE = {
     "recovered": "quic",
     "post-wireguard-recovered": "quic",
 }
-_REVERSE_STAGES = frozenset(_TRANSPORT_BY_STAGE)
 
 
 class AcceptanceFailure(RuntimeError):
@@ -192,7 +191,10 @@ def prove_proxy_surfaces(
 def _required_secret_env(name: str) -> str:
     value = os.environ.get(name, "")
     require(value != "", f"{name} is required")
-    require(len(value) <= 1024 and not any(ord(character) < 32 for character in value), f"{name} is invalid")
+    require(
+        len(value) <= 1024 and not any(ord(character) < 32 for character in value),
+        f"{name} is invalid",
+    )
     return value
 
 
@@ -246,6 +248,8 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     expected_transport = _TRANSPORT_BY_STAGE.get(args.stage)
     if expected_transport is not None:
         require(status.get("tunnel_owner") == "first_party_reverse_tunnel", "reverse stage tunnel owner differs")
+        require(status.get("wireguard_enabled") is False, "reverse stage unexpectedly enables WireGuard")
+        require(health.get("tun0_present") is not True, "reverse stage leaves tun0 active")
         require(health.get("reverse_tunnel_connected") is True, "reverse tunnel is disconnected")
         require(
             health.get("reverse_tunnel_active_transport") == expected_transport,
@@ -258,7 +262,10 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         require(status.get("tunnel_owner") == "stock_wireguard_bridge", "WireGuard tunnel owner differs")
         require(health.get("tun0_present") is True, "WireGuard tun0 is absent")
         require(health.get("wg_handshake_recent") is True, "WireGuard handshake is not recent")
-        require(health.get("reverse_tunnel_connected") is not True, "reverse tunnel remained active during WireGuard proof")
+        require(
+            health.get("reverse_tunnel_connected") is not True,
+            "reverse tunnel remained active during WireGuard proof",
+        )
 
     devices = request_json(f"{control_base}/api/v1/devices", control_token)
     require(isinstance(devices, list) and devices, "restored device inventory is empty")
