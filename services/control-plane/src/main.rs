@@ -1,6 +1,5 @@
 mod auth;
 mod cli;
-mod fingerprint_migration;
 mod projection;
 mod request_context;
 mod routes;
@@ -19,12 +18,8 @@ use tracing::info;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
-    let state_path = cli.resolved_state_path();
     let auth = AuthConfig::new(cli.admin_token, cli.device_token)?;
-    let app = router(
-        AppState::load_with_backend(state_path, cli.state_backend).await?,
-        auth,
-    );
+    let app = router(AppState::load(cli.state_path).await?, auth);
     let listener = TcpListener::bind(&cli.listen).await?;
     info!("control-plane listening on {}", cli.listen);
     axum::serve(listener, app).await?;

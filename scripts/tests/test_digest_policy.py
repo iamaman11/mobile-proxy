@@ -16,7 +16,7 @@ class DigestPolicyTests(unittest.TestCase):
         (crate / "src/main.rs").write_text(source, encoding="utf-8")
         return crate
 
-    def add_required_runtime_fingerprint_files(self, root: Path):
+    def add_required_fingerprint_enforcement_files(self, root: Path):
         fragments = {
             "crates/proxy-core/src/fingerprints.rs": [
                 'DigestDomain::new("mobile-proxy/host-daemon-nonsecret-config/v1")',
@@ -33,9 +33,11 @@ class DigestPolicyTests(unittest.TestCase):
                 "current_binary_fingerprint",
                 'Path::new("/proc/self/exe")',
             ],
-            "services/control-plane/src/fingerprint_migration.rs": [
-                "normalize_persisted_fingerprints",
-                "FingerprintMigrationStats",
+            "crates/control-plane-sqlite/src/legacy_json_import.rs": [
+                "LegacyJsonMigrationStats",
+                "ConfigFingerprintInput",
+                "BinaryFingerprintInput",
+                "fingerprint_stats",
             ],
         }
         for relative, required in fragments.items():
@@ -44,7 +46,7 @@ class DigestPolicyTests(unittest.TestCase):
             path.write_text("\n".join(required), encoding="utf-8")
 
     def check(self, root: Path):
-        self.add_required_runtime_fingerprint_files(root)
+        self.add_required_fingerprint_enforcement_files(root)
         return check_repository(root)
 
     def test_blake3_first_party_source_passes(self):

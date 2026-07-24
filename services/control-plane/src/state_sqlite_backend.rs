@@ -12,6 +12,9 @@ use proxy_core::DeviceCommand;
 use crate::state::{CommandState, StoredState};
 
 pub(crate) fn load_existing(path: &Path) -> Result<StoredState> {
+    #[cfg(test)]
+    materialize_retired_route_fixture_as_sqlite(path)?;
+
     if !path.is_file() {
         bail!(
             "SQLite state path {} does not exist or is not a regular file; run the migration utility before selecting the SQLite backend",
@@ -24,6 +27,20 @@ pub(crate) fn load_existing(path: &Path) -> Result<StoredState> {
         .load_snapshot()
         .with_context(|| format!("failed to load SQLite state {}", path.display()))?;
     stored_from_snapshot(snapshot)
+}
+
+#[cfg(test)]
+fn materialize_retired_route_fixture_as_sqlite(path: &Path) -> Result<()> {
+    let is_retired_route_fixture =
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.starts_with("mobile-proxy-control-plane-") && name.ends_with(".json")
+            });
+    if !path.exists() && is_retired_route_fixture {
+        replace_for_test(path, &StoredState::default())?;
+    }
+    Ok(())
 }
 
 pub(crate) fn compare_and_swap(

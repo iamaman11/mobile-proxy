@@ -17,8 +17,6 @@ use proxy_core::{
 };
 use serde_json::json;
 
-use crate::cli::StateBackend;
-
 use super::AppState;
 
 static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(1);
@@ -112,8 +110,7 @@ fn external_device(node_id: &str) -> DeviceRecord {
 #[tokio::test]
 async fn explicit_sqlite_backend_requires_an_existing_migrated_file() {
     let database = TempDatabase::new("missing-sqlite");
-    let error = match AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite).await
-    {
+    let error = match AppState::load(database.path.clone()).await {
         Ok(_) => panic!("missing SQLite state unexpectedly started"),
         Err(error) => error,
     };
@@ -125,9 +122,7 @@ async fn explicit_sqlite_backend_requires_an_existing_migrated_file() {
 async fn sqlite_backend_preserves_existing_mutation_outcomes_across_restart() {
     let database = TempDatabase::new("sqlite-restart");
     database.initialize();
-    let state = AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite)
-        .await
-        .unwrap();
+    let state = AppState::load(database.path.clone()).await.unwrap();
 
     assert_eq!(
         state
@@ -192,9 +187,7 @@ async fn sqlite_backend_preserves_existing_mutation_outcomes_across_restart() {
     );
     drop(state);
 
-    let restarted = AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite)
-        .await
-        .unwrap();
+    let restarted = AppState::load(database.path.clone()).await.unwrap();
     assert_eq!(
         restarted
             .issue_command(command_input("device-1", DesiredState::HealthyServing))
@@ -226,9 +219,7 @@ async fn sqlite_backend_preserves_existing_mutation_outcomes_across_restart() {
 async fn stale_external_sqlite_writer_prevents_in_memory_publication() {
     let database = TempDatabase::new("sqlite-stale-writer");
     database.initialize();
-    let state = AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite)
-        .await
-        .unwrap();
+    let state = AppState::load(database.path.clone()).await.unwrap();
 
     let external = ControlPlaneSnapshot::from_parts(
         BTreeMap::from([(
@@ -260,8 +251,7 @@ async fn explicit_sqlite_backend_rejects_an_unmigrated_existing_file() {
     let database = TempDatabase::new("unmigrated-sqlite");
     fs::write(&database.path, b"").unwrap();
 
-    let error = match AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite).await
-    {
+    let error = match AppState::load(database.path.clone()).await {
         Ok(_) => panic!("unmigrated SQLite state unexpectedly started"),
         Err(error) => error,
     };
@@ -275,9 +265,7 @@ async fn explicit_sqlite_backend_rejects_an_unmigrated_existing_file() {
 async fn sqlite_backend_does_not_recreate_a_removed_database() {
     let database = TempDatabase::new("removed-sqlite");
     database.initialize();
-    let state = AppState::load_with_backend(database.path.clone(), StateBackend::Sqlite)
-        .await
-        .unwrap();
+    let state = AppState::load(database.path.clone()).await.unwrap();
 
     fs::remove_file(&database.path).unwrap();
     let _ = fs::remove_file(sidecar_path(&database.path, "-wal"));

@@ -43,7 +43,9 @@ Current observed layout:
 - control plane binary:
   - `/opt/mobile-relaycontrolpoint/current/control-plane`
 - control plane state:
-  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.json`
+  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3` (canonical runtime)
+  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.json` (preserved migration input only)
+  - `/var/lib/mobile-relaycontrolpoint/control-plane-state-rollback.json` (operator-created current-state artifact consumed only by the previous accepted release during rollback)
 - relay gate binary:
   - `/opt/mobile-relaycontrolpoint/current/relay-gate`
 - public proxy backend:

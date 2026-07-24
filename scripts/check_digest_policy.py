@@ -18,7 +18,7 @@ LEGACY_RUNTIME_FINGERPRINT_ENV = "HOST_DAEMON_BINARY_FINGERPRINT"
 UNTYPED_RUNTIME_FINGERPRINT = re.compile(
     r"\b(?:config_fingerprint|binary_fingerprint)\s*:\s*(?:Option\s*<\s*)?String\s*>?"
 )
-REQUIRED_RUNTIME_FINGERPRINT_FRAGMENTS = {
+REQUIRED_FINGERPRINT_ENFORCEMENT_FRAGMENTS = {
     "crates/proxy-core/src/fingerprints.rs": (
         'DigestDomain::new("mobile-proxy/host-daemon-nonsecret-config/v1")',
         'DigestDomain::new("mobile-proxy/host-daemon-binary/v1")',
@@ -34,9 +34,11 @@ REQUIRED_RUNTIME_FINGERPRINT_FRAGMENTS = {
         "current_binary_fingerprint",
         'Path::new("/proc/self/exe")',
     ),
-    "services/control-plane/src/fingerprint_migration.rs": (
-        "normalize_persisted_fingerprints",
-        "FingerprintMigrationStats",
+    "crates/control-plane-sqlite/src/legacy_json_import.rs": (
+        "LegacyJsonMigrationStats",
+        "ConfigFingerprintInput",
+        "BinaryFingerprintInput",
+        "fingerprint_stats",
     ),
 }
 
@@ -111,15 +113,15 @@ def check_repository(root: Path) -> list[str]:
                     f"{path.relative_to(root)}: legacy environment-provided binary fingerprint is forbidden"
                 )
 
-    for relative, fragments in REQUIRED_RUNTIME_FINGERPRINT_FRAGMENTS.items():
+    for relative, fragments in REQUIRED_FINGERPRINT_ENFORCEMENT_FRAGMENTS.items():
         path = root / relative
         if not path.is_file():
-            errors.append(f"{relative}: missing runtime fingerprint enforcement file")
+            errors.append(f"{relative}: missing fingerprint enforcement file")
             continue
         body = path.read_text(encoding="utf-8")
         for fragment in fragments:
             if fragment not in body:
                 errors.append(
-                    f"{relative}: missing runtime fingerprint enforcement fragment {fragment!r}"
+                    f"{relative}: missing fingerprint enforcement fragment {fragment!r}"
                 )
     return errors
