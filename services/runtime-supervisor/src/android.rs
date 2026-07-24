@@ -43,24 +43,6 @@ pub fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
 }
 
 pub async fn kick_stock_wireguard_bridge() {
-    let _ = run_command(
-        "am",
-        &[
-            "broadcast",
-            "--user",
-            "0",
-            "--receiver-foreground",
-            "-a",
-            "com.example.mobileproxy.action.START_TUNNEL",
-            "-n",
-            "com.example.mobileproxy/.TunnelCommandReceiver",
-        ],
-    );
-    sleep(Duration::from_secs(1)).await;
-    if tun0_ready() {
-        return;
-    }
-
     let _ = run_shell("settings put secure always_on_vpn_app com.wireguard.android");
     let _ = run_shell("settings put secure always_on_vpn_lockdown 0");
     let _ = run_shell(
