@@ -1,0 +1,156 @@
+name: Agent Exact Session Binding Builder
+
+on:
+  push:
+    branches:
+      - agent/exact-session-binding-builder
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: agent-exact-session-binding-builder
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Validate and publish exact session binding
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out isolated builder inputs
+        uses: actions/checkout@v7
+        with:
+          ref: agent/exact-session-binding-builder
+
+      - name: Verify and decode bounded transformation
+        run: |
+          echo "2294f36be0ddc23a55555d60be016b7b5facc0ae73c77abcfe2beb5d7aca4af6  .agent/exact-session-binding.py.gz.b64" | sha256sum --check --strict
+          base64 --decode .agent/exact-session-binding.py.gz.b64 > /tmp/exact-session-binding.py.gz
+          echo "531978d8c221f0dfdbf1eb52b96017bb316ac3f9593b93e8977ed1e51c76b97e  /tmp/exact-session-binding.py.gz" | sha256sum --check --strict
+          gzip --decompress --stdout /tmp/exact-session-binding.py.gz > /tmp/exact-session-binding.py
+          echo "4171529656e149603c0655d5751f55b59249f2aea9b4a9d6d640c27c2ec15437  /tmp/exact-session-binding.py" | sha256sum --check --strict
+          python3 -m py_compile /tmp/exact-session-binding.py
+
+      - name: Check out current production baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags origin main
+          git checkout -B agent/phase-c-exact-session-binding origin/main
+
+      - name: Enforce delivery-order gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f docs/phase-c-pending-stream-lifecycle-audit.md ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          gh issue comment 51 \
+            --repo "$GITHUB_REPOSITORY" \
+            --body 'Builder is prepared and integrity-checked, but delivery item 9 remains gated because the item 8 audit is not yet present on `main`. No production source was changed.'
+
+      - name: Apply exact device and session authority slice
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          python3 /tmp/exact-session-binding.py
+          git diff --check
+
+      - name: Validate governance and Python regressions
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Capture Rust validation
+        if: steps.gate.outputs.ready == 'true'
+        id: rust
+        shell: bash
+        run: |
+          set +e
+          : > /tmp/exact-session-binding-rust.log
+          cargo fmt --all >> /tmp/exact-session-binding-rust.log 2>&1
+          fmt_status=$?
+          cargo fmt --all -- --check >> /tmp/exact-session-binding-rust.log 2>&1
+          fmt_check_status=$?
+          cargo clippy --quiet --workspace --all-targets --message-format=short -- -D warnings >> /tmp/exact-session-binding-rust.log 2>&1
+          clippy_status=$?
+          if [ "$clippy_status" -eq 0 ]; then
+            cargo test --quiet --workspace >> /tmp/exact-session-binding-rust.log 2>&1
+            test_status=$?
+          else
+            test_status=0
+          fi
+          status=0
+          for candidate in "$fmt_status" "$fmt_check_status" "$clippy_status" "$test_status"; do
+            if [ "$candidate" -ne 0 ]; then
+              status="$candidate"
+              break
+            fi
+          done
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload Rust diagnostic
+        if: steps.gate.outputs.ready == 'true' && steps.rust.outputs.status != '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: exact-session-binding-rust-diagnostic
+          path: /tmp/exact-session-binding-rust.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Record Rust validation failure
+        if: steps.gate.outputs.ready == 'true' && steps.rust.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'Exact-session binding validation failed. The bounded diagnostic tail is:'
+            echo
+            echo '```text'
+            tail -n 140 /tmp/exact-session-binding-rust.log
+            echo '```'
+          } > /tmp/exact-session-binding-failure.md
+          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-failure.md
+          exit 1
+
+      - name: Verify exact production scope
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          git diff --check
+          actual="$(git status --short | awk '{print $2}' | sort)"
+          expected="$(printf '%s\n' \
+            crates/reverse-tunnel/src/state.rs \
+            crates/reverse-tunnel/src/tunnel.rs \
+            docs/phase-c-exact-session-binding.md | sort)"
+          test "$actual" = "$expected"
+
+      - name: Commit and publish clean production branch
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            crates/reverse-tunnel/src/state.rs \
+            crates/reverse-tunnel/src/tunnel.rs \
+            docs/phase-c-exact-session-binding.md
+          git commit -m "Bind routing authority to exact device sessions"
+          git push --force-with-lease origin HEAD:agent/phase-c-exact-session-binding
+          source_sha="$(git rev-parse HEAD)"
+          gh issue comment 51 \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "Exact-session binding source published at \`${source_sha}\`. Architecture enforcement, Python regressions, rustfmt, strict Clippy and the complete workspace test suite passed on that immutable SHA."
