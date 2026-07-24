@@ -28,6 +28,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          status_body="Exact-session builder is running for builder commit \`${GITHUB_SHA}\`."
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$status_body"
           gh issue comment 51 \
             --repo "$GITHUB_REPOSITORY" \
             --body "Exact-session builder trigger received for builder commit \`${GITHUB_SHA}\`."
@@ -87,6 +89,7 @@ jobs:
             tail -n 100 /tmp/exact-session-binding-preparation.log
             echo '```'
           } > /tmp/exact-session-binding-preparation-failure.md
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-preparation-failure.md
           gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-preparation-failure.md
           exit 1
 
@@ -110,9 +113,9 @@ jobs:
             exit 0
           fi
           echo "ready=false" >> "$GITHUB_OUTPUT"
-          gh issue comment 51 \
-            --repo "$GITHUB_REPOSITORY" \
-            --body 'Builder is prepared and integrity-checked, but delivery item 9 remains gated because the item 8 audit is not yet present on `main`. No production source was changed.'
+          gate_body='Builder is prepared and integrity-checked, but delivery item 9 remains gated because the item 8 audit is not yet present on `main`. No production source was changed.'
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$gate_body"
+          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body "$gate_body"
 
       - name: Apply and validate complete bounded slice
         if: steps.preparation.outputs.status == '0' && steps.gate.outputs.ready == 'true'
@@ -196,6 +199,7 @@ jobs:
             tail -n 180 /tmp/exact-session-binding-validation.log
             echo '```'
           } > /tmp/exact-session-binding-failure.md
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-failure.md
           gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body-file /tmp/exact-session-binding-failure.md
           exit 1
 
@@ -213,6 +217,6 @@ jobs:
           git commit -m "Bind routing authority to exact device sessions"
           git push --force-with-lease origin HEAD:agent/phase-c-exact-session-binding
           source_sha="$(git rev-parse HEAD)"
-          gh issue comment 51 \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "Exact-session binding source published at \`${source_sha}\`. Architecture enforcement, Python regressions, rustfmt, strict Clippy and the complete workspace test suite passed on that immutable SHA."
+          success_body="Exact-session binding source published at \`${source_sha}\`. Architecture enforcement, Python regressions, rustfmt, strict Clippy and the complete workspace test suite passed on that immutable SHA."
+          gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body "$success_body"
+          gh issue comment 51 --repo "$GITHUB_REPOSITORY" --body "$success_body"
