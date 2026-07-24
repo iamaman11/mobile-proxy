@@ -224,6 +224,13 @@ impl SqliteStore {
         })
     }
 
+    pub fn vacuum_into(&self, target: impl AsRef<Path>) -> Result<(), StoreError> {
+        let target = target.as_ref().to_string_lossy();
+        self.connection
+            .execute("VACUUM main INTO ?1", params![target.as_ref()])?;
+        Ok(())
+    }
+
     pub fn write<T>(
         &mut self,
         operation: impl FnOnce(&WriteTransaction<'_>) -> Result<T, StoreError>,
