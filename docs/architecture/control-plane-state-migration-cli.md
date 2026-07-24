@@ -39,7 +39,7 @@ control-plane-state-migrate export \
   --diagnostic-json <canonical.json>
 ```
 
-The command loads and validates the complete SQLite snapshot, writes canonical JSON atomically and prints only bounded inventory counts. It is diagnostic output, not a second mutable source of truth.
+The command requires an existing regular SQLite source file, loads and validates its complete snapshot, writes canonical JSON atomically and prints only bounded inventory counts. A missing or non-file source fails closed without creating a new database or diagnostic document. The export is diagnostic output, not a second mutable source of truth.
 
 ## Atomic diagnostic publication
 
@@ -56,6 +56,7 @@ Integration tests invoke the compiled binary as separate operating-system proces
 - a later export process produces the same canonical bytes;
 - importing different state into a non-empty target fails without changing the database or prior diagnostic;
 - malformed or unsupported legacy input fails before the SQLite file is created;
+- a missing export source fails without creating a database or diagnostic document;
 - overlapping paths fail before any file is accessed.
 
 This is process-level migration and restart evidence, but it is not production runtime cutover evidence.
