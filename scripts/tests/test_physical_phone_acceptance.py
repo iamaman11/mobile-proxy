@@ -14,9 +14,13 @@ SPEC.loader.exec_module(MODULE)
 class PhysicalPhoneAcceptanceTests(unittest.TestCase):
     def evidence(self):
         return {
+            "format_version": 1,
+            "repository": "iamaman11/mobile-proxy",
+            "workflow": "Software Release Candidate",
             "candidate_sha": "a" * 40,
             "software_complete": True,
             "physical_phone_acceptance_required": True,
+            "accepted_checks": sorted(MODULE._REQUIRED_SOFTWARE_CHECKS),
         }
 
     @mock.patch.object(MODULE, "git_output")
@@ -29,24 +33,26 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
             MODULE.verify_candidate(self.evidence())
 
     @mock.patch.object(MODULE, "curl_proxy")
-    def test_proxy_sequence_covers_all_protected_surfaces(self, curl_proxy):
+    def test_proxy_sequence_covers_all_protocols_on_protected_surfaces(self, curl_proxy):
         result = MODULE.prove_proxy_surfaces(
             "proxy.example",
             "http://probe.example/",
             "https://probe.example/",
         )
-        self.assertEqual(curl_proxy.call_count, 4)
+        self.assertEqual(curl_proxy.call_count, 6)
         self.assertEqual(
             result,
             {
-                "mixed_1080": True,
+                "mixed_1080_socks5": True,
+                "mixed_1080_http": True,
+                "mixed_1080_connect": True,
                 "socks5_1081": True,
                 "http_3128": True,
                 "http_connect_3128": True,
             },
         )
 
-    def test_incomplete_or_invalid_evidence_fails_closed(self):
+    def test_incomplete_invalid_or_wrong_source_evidence_fails_closed(self):
         evidence = self.evidence()
         evidence["software_complete"] = False
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "not complete"):
@@ -56,6 +62,20 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
         evidence["candidate_sha"] = "not-a-sha"
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "invalid SHA"):
             MODULE.verify_candidate(evidence)
+
+        evidence = self.evidence()
+        evidence["repository"] = "someone/else"
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "repository differs"):
+            MODULE.verify_candidate(evidence)
+
+        evidence = self.evidence()
+        evidence["accepted_checks"].remove("quic_recovery")
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "missing required"):
+            MODULE.verify_candidate(evidence)
+
+    def test_non_object_health_response_is_rejected_cleanly(self):
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "response is invalid"):
+            MODULE.require_object([], "host readiness")
 
 
 if __name__ == "__main__":
