@@ -23,19 +23,41 @@ const DEFAULT_SESSION_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone, Copy)]
 pub(crate) struct SessionLiveness {
     session_id: Uuid,
+    authority_id: Uuid,
     last_seen_at: Instant,
 }
 
 #[derive(Clone)]
 pub(crate) struct TcpControlChannel {
     pub(crate) session_id: Uuid,
+    pub(crate) authority_id: Uuid,
     pub(crate) sender: mpsc::Sender<ServerFrame>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionBound<T> {
+    session_id: Uuid,
+    authority_id: Uuid,
+    value: T,
+}
+
+pub(crate) enum SessionAuthority {
+    Quic(quinn::Connection),
+    Tcp(mpsc::Sender<ServerFrame>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActiveSessionTarget {
+    pub(crate) node_id: String,
+    pub(crate) session_id: Uuid,
+    pub(crate) authority_id: Uuid,
 }
 
 pub(crate) struct PendingTcpProxyRequest {
     stream_id: Uuid,
     expected_node_id: String,
     expected_session_id: Uuid,
+    expected_authority_id: Uuid,
     created_at: Instant,
     deadline: Instant,
     response_sender: oneshot::Sender<TcpStream>,
@@ -82,7 +104,7 @@ impl Drop for PendingTcpCleanupGuard {
 #[derive(Clone)]
 pub struct ReverseTunnelServerState {
     pub(crate) sessions: Arc<Mutex<HashMap<String, ServerSessionSnapshot>>>,
-    pub(crate) connections: Arc<Mutex<HashMap<String, quinn::Connection>>>,
+    pub(crate) connections: Arc<Mutex<HashMap<String, SessionBound<quinn::Connection>>>>,
     pub(crate) tcp_controls: Arc<Mutex<HashMap<String, TcpControlChannel>>>,
     pub(crate) pending_tcp: Arc<StdMutex<PendingTcpMap>>,
     session_liveness: Arc<Mutex<HashMap<String, SessionLiveness>>>,
@@ -104,64 +126,140 @@ impl Default for ReverseTunnelServerState {
 
 impl ReverseTunnelServerState {
     pub async fn has_active_session(&self, node_id: Option<&str>) -> bool {
+        self.select_active_target(node_id).await.is_some()
+    }
+
+    pub(crate) async fn select_active_target(
+        &self,
+        node_id: Option<&str>,
+    ) -> Option<ActiveSessionTarget> {
         let now = Instant::now();
         let sessions = self.sessions.lock().await;
         let liveness = self.session_liveness.lock().await;
         let connections = self.connections.lock().await;
         let controls = self.tcp_controls.lock().await;
-        let mut stale = Vec::new();
-        let mut active = false;
+        let mut inactive = Vec::new();
+        let mut closed_connections = Vec::new();
+        let mut candidates = Vec::with_capacity(2);
 
         for session in sessions.values() {
             if !session.connected || node_id.is_some_and(|expected| session.node_id != expected) {
                 continue;
             }
-            if !session_is_fresh(
-                &liveness,
-                &session.node_id,
-                session.session_id,
-                now,
-                self.heartbeat_timeout,
-            ) {
-                stale.push((session.node_id.clone(), session.session_id));
+            let Some(live) = liveness.get(&session.node_id).filter(|live| {
+                live.session_id == session.session_id
+                    && now.saturating_duration_since(live.last_seen_at) <= self.heartbeat_timeout
+            }) else {
+                if let Some(live) = liveness.get(&session.node_id) {
+                    inactive.push((session.node_id.clone(), live.session_id, live.authority_id));
+                }
                 continue;
+            };
+            let quic = connections.get(&session.node_id).filter(|connection| {
+                connection.session_id == session.session_id
+                    && connection.authority_id == live.authority_id
+            });
+            let quic_active =
+                quic.is_some_and(|connection| connection.value.close_reason().is_none());
+            if quic.is_some_and(|connection| connection.value.close_reason().is_some()) {
+                closed_connections.push((
+                    session.node_id.clone(),
+                    session.session_id,
+                    live.authority_id,
+                ));
             }
-            let quic_active = connections
-                .get(&session.node_id)
-                .is_some_and(|connection| connection.close_reason().is_none());
             let tcp_active = controls.get(&session.node_id).is_some_and(|control| {
-                control.session_id == session.session_id && !control.sender.is_closed()
+                control.session_id == session.session_id
+                    && control.authority_id == live.authority_id
+                    && !control.sender.is_closed()
             });
             if quic_active || tcp_active {
-                active = true;
-                break;
+                candidates.push(ActiveSessionTarget {
+                    node_id: session.node_id.clone(),
+                    session_id: session.session_id,
+                    authority_id: live.authority_id,
+                });
+            } else {
+                inactive.push((
+                    session.node_id.clone(),
+                    session.session_id,
+                    live.authority_id,
+                ));
             }
         }
+
+        let selected = if node_id.is_some() {
+            candidates.into_iter().next()
+        } else {
+            let mut candidates = candidates.into_iter();
+            let first = candidates.next();
+            if first.is_some() && candidates.next().is_none() {
+                first
+            } else {
+                None
+            }
+        };
         drop(controls);
         drop(connections);
         drop(liveness);
         drop(sessions);
 
-        for (stale_node, stale_session) in stale {
-            self.expire_session(&stale_node, stale_session).await;
+        for (closed_node, closed_session, closed_authority) in closed_connections {
+            self.remove_quic_connection_for_authority(
+                &closed_node,
+                closed_session,
+                closed_authority,
+                b"QUIC connection closed",
+            )
+            .await;
         }
-        active
+        for (inactive_node, inactive_session, inactive_authority) in inactive {
+            self.expire_session(&inactive_node, inactive_session, inactive_authority)
+                .await;
+        }
+        selected
     }
 
+    #[cfg(test)]
     pub(crate) async fn open_tcp_proxy(&self, node_id: Option<&str>) -> Result<TcpStream> {
-        self.open_tcp_proxy_with_timeout(node_id, TCP_PROXY_STREAM_TIMEOUT)
+        let target = self
+            .select_active_target(node_id)
+            .await
+            .context("no unambiguous authenticated reverse tunnel is active")?;
+        self.open_tcp_proxy_for_target(&target).await
+    }
+
+    pub(crate) async fn open_tcp_proxy_for_target(
+        &self,
+        target: &ActiveSessionTarget,
+    ) -> Result<TcpStream> {
+        self.open_tcp_proxy_for_target_with_timeout(target, TCP_PROXY_STREAM_TIMEOUT)
             .await
     }
 
+    #[cfg(test)]
     async fn open_tcp_proxy_with_timeout(
         &self,
         node_id: Option<&str>,
         wait: Duration,
     ) -> Result<TcpStream> {
-        let (expected_node_id, expected_session_id, control) = self
-            .select_tcp_control(node_id)
+        let target = self
+            .select_active_target(node_id)
             .await
-            .context("no authenticated TCP reverse tunnel is active")?;
+            .context("no unambiguous authenticated reverse tunnel is active")?;
+        self.open_tcp_proxy_for_target_with_timeout(&target, wait)
+            .await
+    }
+
+    async fn open_tcp_proxy_for_target_with_timeout(
+        &self,
+        target: &ActiveSessionTarget,
+        wait: Duration,
+    ) -> Result<TcpStream> {
+        let control = self
+            .select_tcp_control_for_target(target)
+            .await
+            .context("no authenticated TCP reverse tunnel is active for selected session")?;
 
         let stream_id = Uuid::new_v4();
         let (tx, rx) = oneshot::channel();
@@ -174,7 +272,7 @@ impl ReverseTunnelServerState {
             }
             let pending_for_node = pending
                 .values()
-                .filter(|request| request.expected_node_id == expected_node_id)
+                .filter(|request| request.expected_node_id == target.node_id)
                 .count();
             if pending_for_node >= MAX_PENDING_TCP_STREAMS_PER_NODE {
                 bail!("TCP reverse tunnel per-device pending stream capacity reached");
@@ -183,8 +281,9 @@ impl ReverseTunnelServerState {
                 stream_id,
                 PendingTcpProxyRequest {
                     stream_id,
-                    expected_node_id: expected_node_id.clone(),
-                    expected_session_id,
+                    expected_node_id: target.node_id.clone(),
+                    expected_session_id: target.session_id,
+                    expected_authority_id: target.authority_id,
                     created_at,
                     deadline,
                     response_sender: tx,
@@ -201,9 +300,17 @@ impl ReverseTunnelServerState {
             .context("TCP reverse tunnel control send timed out")?
             .is_err()
         {
-            self.remove_tcp_control_for_session(&expected_node_id, expected_session_id)
-                .await;
-            self.cancel_pending_for_session(&expected_node_id, expected_session_id);
+            self.remove_tcp_control_for_authority(
+                &target.node_id,
+                target.session_id,
+                target.authority_id,
+            )
+            .await;
+            self.cancel_pending_for_authority(
+                &target.node_id,
+                target.session_id,
+                target.authority_id,
+            );
             bail!("TCP reverse tunnel control channel closed");
         }
 
@@ -213,73 +320,52 @@ impl ReverseTunnelServerState {
             .context("TCP reverse tunnel proxy stream was cancelled")
     }
 
+    #[cfg(test)]
     async fn select_tcp_control(
         &self,
         node_id: Option<&str>,
     ) -> Option<(String, Uuid, mpsc::Sender<ServerFrame>)> {
+        let target = self.select_active_target(node_id).await?;
+        let sender = self.select_tcp_control_for_target(&target).await?;
+        Some((target.node_id, target.session_id, sender))
+    }
+
+    async fn select_tcp_control_for_target(
+        &self,
+        target: &ActiveSessionTarget,
+    ) -> Option<mpsc::Sender<ServerFrame>> {
         let now = Instant::now();
         let sessions = self.sessions.lock().await;
         let liveness = self.session_liveness.lock().await;
         let controls = self.tcp_controls.lock().await;
-        let mut stale = Vec::new();
-
-        let selected = if let Some(expected_node_id) = node_id {
-            sessions
-                .get(expected_node_id)
-                .filter(|session| session.connected)
-                .and_then(|session| {
-                    if !session_is_fresh(
-                        &liveness,
-                        expected_node_id,
-                        session.session_id,
-                        now,
-                        self.heartbeat_timeout,
-                    ) {
-                        stale.push((expected_node_id.to_owned(), session.session_id));
-                        return None;
-                    }
-                    let control = controls
-                        .get(expected_node_id)
-                        .filter(|control| control.session_id == session.session_id)?;
-                    Some((
-                        expected_node_id.to_owned(),
-                        session.session_id,
-                        control.sender.clone(),
-                    ))
-                })
-        } else {
-            sessions.values().find_map(|session| {
-                if !session.connected {
-                    return None;
-                }
-                if !session_is_fresh(
-                    &liveness,
-                    &session.node_id,
-                    session.session_id,
-                    now,
-                    self.heartbeat_timeout,
-                ) {
-                    stale.push((session.node_id.clone(), session.session_id));
-                    return None;
-                }
-                let control = controls.get(&session.node_id)?;
-                (control.session_id == session.session_id && !control.sender.is_closed()).then(
-                    || {
-                        (
-                            session.node_id.clone(),
-                            session.session_id,
-                            control.sender.clone(),
-                        )
-                    },
-                )
+        let current = sessions
+            .get(&target.node_id)
+            .is_some_and(|session| session.connected && session.session_id == target.session_id);
+        let fresh = current
+            && session_is_fresh(
+                &liveness,
+                &target.node_id,
+                target.session_id,
+                target.authority_id,
+                now,
+                self.heartbeat_timeout,
+            );
+        let selected = fresh
+            .then(|| controls.get(&target.node_id))
+            .flatten()
+            .filter(|control| {
+                control.session_id == target.session_id
+                    && control.authority_id == target.authority_id
+                    && !control.sender.is_closed()
             })
-        };
+            .map(|control| control.sender.clone());
         drop(controls);
         drop(liveness);
         drop(sessions);
 
-        for (stale_node, stale_session) in stale {
-            self.expire_session(&stale_node, stale_session).await;
+        if current && !fresh {
+            self.expire_session(&target.node_id, target.session_id, target.authority_id)
+                .await;
         }
         selected
     }
@@ -292,7 +378,7 @@ impl ReverseTunnelServerState {
         stream: TcpStream,
     ) -> std::result::Result<(), TcpProxyStreamRejection> {
         let now = Instant::now();
-        let (stale_node, stale_session, expire_current) = {
+        let (stale_node, stale_session, stale_authority, expire_current) = {
             let sessions = self.sessions.lock().await;
             let liveness = self.session_liveness.lock().await;
             let controls = self.tcp_controls.lock().await;
@@ -318,18 +404,28 @@ impl ReverseTunnelServerState {
                 .is_some_and(|session| {
                     session.connected && session.session_id == request.expected_session_id
                 });
-            let session_fresh = session_current
+            let authority_current = session_current
+                && liveness
+                    .get(&request.expected_node_id)
+                    .is_some_and(|entry| {
+                        entry.session_id == request.expected_session_id
+                            && entry.authority_id == request.expected_authority_id
+                    });
+            let session_fresh = authority_current
                 && session_is_fresh(
                     &liveness,
                     &request.expected_node_id,
                     request.expected_session_id,
+                    request.expected_authority_id,
                     now,
                     self.heartbeat_timeout,
                 );
             let control_active = controls
                 .get(&request.expected_node_id)
                 .is_some_and(|control| {
-                    control.session_id == request.expected_session_id && !control.sender.is_closed()
+                    control.session_id == request.expected_session_id
+                        && control.authority_id == request.expected_authority_id
+                        && !control.sender.is_closed()
                 });
             if session_fresh && control_active {
                 let request = pending
@@ -343,29 +439,173 @@ impl ReverseTunnelServerState {
             let stale = (
                 request.expected_node_id.clone(),
                 request.expected_session_id,
-                session_current,
+                request.expected_authority_id,
+                authority_current,
             );
             pending.remove(&stream_id);
             stale
         };
         if expire_current {
-            self.expire_session(&stale_node, stale_session).await;
+            self.expire_session(&stale_node, stale_session, stale_authority)
+                .await;
         }
         Err(TcpProxyStreamRejection::SessionInactive)
     }
 
+    pub(crate) async fn replace_session_authority(
+        &self,
+        node_id: String,
+        session_id: Uuid,
+        authority: SessionAuthority,
+    ) -> Uuid {
+        let authority_id = Uuid::new_v4();
+        let displaced_connection = {
+            let mut sessions = self.sessions.lock().await;
+            let mut liveness = self.session_liveness.lock().await;
+            let mut connections = self.connections.lock().await;
+            let mut controls = self.tcp_controls.lock().await;
+            let mut pending = lock_pending(&self.pending_tcp);
+
+            let previous_session = sessions.get(&node_id).map(|session| session.session_id);
+            let previous_authority = liveness.get(&node_id).map(|entry| entry.authority_id);
+            let accepted_connections = sessions
+                .get(&node_id)
+                .map(|existing| existing.accepted_connections.saturating_add(1))
+                .unwrap_or(1);
+
+            if let Some(previous_session) = previous_session {
+                pending.retain(|_, request| {
+                    if request.expected_node_id != node_id
+                        || request.expected_session_id != previous_session
+                    {
+                        return true;
+                    }
+                    previous_authority
+                        .is_some_and(|previous| request.expected_authority_id != previous)
+                });
+            }
+
+            let displaced_connection = connections.remove(&node_id);
+            controls.remove(&node_id);
+            liveness.remove(&node_id);
+            sessions.insert(
+                node_id.clone(),
+                ServerSessionSnapshot {
+                    node_id: node_id.clone(),
+                    session_id,
+                    connected: true,
+                    accepted_connections,
+                    last_heartbeat_sequence: None,
+                },
+            );
+            liveness.insert(
+                node_id.clone(),
+                SessionLiveness {
+                    session_id,
+                    authority_id,
+                    last_seen_at: Instant::now(),
+                },
+            );
+            match authority {
+                SessionAuthority::Quic(connection) => {
+                    connections.insert(
+                        node_id,
+                        SessionBound {
+                            session_id,
+                            authority_id,
+                            value: connection,
+                        },
+                    );
+                }
+                SessionAuthority::Tcp(sender) => {
+                    controls.insert(
+                        node_id,
+                        TcpControlChannel {
+                            session_id,
+                            authority_id,
+                            sender,
+                        },
+                    );
+                }
+            }
+            displaced_connection
+        };
+
+        if let Some(connection) = displaced_connection {
+            connection
+                .value
+                .close(0_u32.into(), b"session authority replaced");
+        }
+        authority_id
+    }
+
+    pub(crate) async fn disconnect_session_authority(
+        &self,
+        node_id: &str,
+        session_id: Uuid,
+        authority_id: Uuid,
+        reason: &[u8],
+    ) -> bool {
+        let removed_connection = {
+            let mut sessions = self.sessions.lock().await;
+            let mut liveness = self.session_liveness.lock().await;
+            let mut connections = self.connections.lock().await;
+            let mut controls = self.tcp_controls.lock().await;
+            let mut pending = lock_pending(&self.pending_tcp);
+
+            let current_session = sessions
+                .get(node_id)
+                .is_some_and(|session| session.connected && session.session_id == session_id);
+            let current_authority = liveness.get(node_id).is_some_and(|entry| {
+                entry.session_id == session_id && entry.authority_id == authority_id
+            });
+            if !current_session || !current_authority {
+                return false;
+            }
+
+            if let Some(session) = sessions.get_mut(node_id) {
+                session.connected = false;
+            }
+            liveness.remove(node_id);
+            let removed_connection =
+                remove_session_bound(&mut connections, node_id, session_id, authority_id);
+            if controls.get(node_id).is_some_and(|control| {
+                control.session_id == session_id && control.authority_id == authority_id
+            }) {
+                controls.remove(node_id);
+            }
+            pending.retain(|_, request| {
+                request.expected_node_id != node_id
+                    || request.expected_session_id != session_id
+                    || request.expected_authority_id != authority_id
+            });
+            removed_connection
+        };
+
+        if let Some(connection) = removed_connection {
+            connection.value.close(0_u32.into(), reason);
+        }
+        true
+    }
+
+    #[cfg(test)]
     pub(crate) async fn register_tcp_control(
         &self,
         node_id: String,
         session_id: Uuid,
         sender: mpsc::Sender<ServerFrame>,
     ) {
-        self.tcp_controls
-            .lock()
-            .await
-            .insert(node_id, TcpControlChannel { session_id, sender });
+        self.tcp_controls.lock().await.insert(
+            node_id,
+            TcpControlChannel {
+                session_id,
+                authority_id: session_id,
+                sender,
+            },
+        );
     }
 
+    #[cfg(test)]
     pub(crate) async fn remove_tcp_control_for_session(&self, node_id: &str, session_id: Uuid) {
         let mut controls = self.tcp_controls.lock().await;
         if controls
@@ -376,42 +616,83 @@ impl ReverseTunnelServerState {
         }
     }
 
-    pub(crate) fn cancel_pending_for_session(&self, node_id: &str, session_id: Uuid) {
+    pub(crate) async fn remove_tcp_control_for_authority(
+        &self,
+        node_id: &str,
+        session_id: Uuid,
+        authority_id: Uuid,
+    ) {
+        let mut controls = self.tcp_controls.lock().await;
+        if controls.get(node_id).is_some_and(|control| {
+            control.session_id == session_id && control.authority_id == authority_id
+        }) {
+            controls.remove(node_id);
+        }
+    }
+
+    pub(crate) fn cancel_pending_for_authority(
+        &self,
+        node_id: &str,
+        session_id: Uuid,
+        authority_id: Uuid,
+    ) {
         lock_pending(&self.pending_tcp).retain(|_, request| {
-            request.expected_node_id != node_id || request.expected_session_id != session_id
+            request.expected_node_id != node_id
+                || request.expected_session_id != session_id
+                || request.expected_authority_id != authority_id
         });
     }
 
+    #[cfg(test)]
     pub(crate) async fn register_session_liveness(&self, node_id: String, session_id: Uuid) {
         self.session_liveness.lock().await.insert(
             node_id,
             SessionLiveness {
                 session_id,
+                authority_id: session_id,
                 last_seen_at: Instant::now(),
             },
         );
     }
 
+    #[cfg(test)]
     pub(crate) async fn refresh_session_heartbeat(&self, node_id: &str, session_id: Uuid) -> bool {
-        let quic_active = self
-            .connections
-            .lock()
+        self.refresh_session_heartbeat_for_authority(node_id, session_id, session_id)
             .await
+    }
+
+    pub(crate) async fn refresh_session_heartbeat_for_authority(
+        &self,
+        node_id: &str,
+        session_id: Uuid,
+        authority_id: Uuid,
+    ) -> bool {
+        let sessions = self.sessions.lock().await;
+        if !sessions
             .get(node_id)
-            .is_some_and(|connection| connection.close_reason().is_none());
-        let tcp_active = self
-            .tcp_controls
-            .lock()
-            .await
-            .get(node_id)
-            .is_some_and(|control| control.session_id == session_id && !control.sender.is_closed());
-        if !quic_active && !tcp_active {
+            .is_some_and(|session| session.connected && session.session_id == session_id)
+        {
             return false;
         }
         let mut liveness = self.session_liveness.lock().await;
+        let connections = self.connections.lock().await;
+        let controls = self.tcp_controls.lock().await;
+        let quic_active = connections.get(node_id).is_some_and(|connection| {
+            connection.session_id == session_id
+                && connection.authority_id == authority_id
+                && connection.value.close_reason().is_none()
+        });
+        let tcp_active = controls.get(node_id).is_some_and(|control| {
+            control.session_id == session_id
+                && control.authority_id == authority_id
+                && !control.sender.is_closed()
+        });
+        if !quic_active && !tcp_active {
+            return false;
+        }
         let Some(entry) = liveness
             .get_mut(node_id)
-            .filter(|entry| entry.session_id == session_id)
+            .filter(|entry| entry.session_id == session_id && entry.authority_id == authority_id)
         else {
             return false;
         };
@@ -429,24 +710,27 @@ impl ReverseTunnelServerState {
         }
     }
 
-    async fn expire_session(&self, node_id: &str, session_id: Uuid) {
-        {
-            let mut sessions = self.sessions.lock().await;
-            let Some(session) = sessions
-                .get_mut(node_id)
-                .filter(|session| session.session_id == session_id)
-            else {
-                return;
-            };
-            session.connected = false;
+    async fn remove_quic_connection_for_authority(
+        &self,
+        node_id: &str,
+        session_id: Uuid,
+        authority_id: Uuid,
+        reason: &[u8],
+    ) {
+        let connection = remove_session_bound(
+            &mut *self.connections.lock().await,
+            node_id,
+            session_id,
+            authority_id,
+        );
+        if let Some(connection) = connection {
+            connection.value.close(0_u32.into(), reason);
         }
-        self.remove_session_liveness(node_id, session_id).await;
-        if let Some(connection) = self.connections.lock().await.remove(node_id) {
-            connection.close(0_u32.into(), b"heartbeat stale");
-        }
-        self.remove_tcp_control_for_session(node_id, session_id)
+    }
+
+    async fn expire_session(&self, node_id: &str, session_id: Uuid, authority_id: Uuid) {
+        self.disconnect_session_authority(node_id, session_id, authority_id, b"heartbeat stale")
             .await;
-        self.cancel_pending_for_session(node_id, session_id);
     }
 
     pub(crate) async fn shutdown_tcp(&self) {
@@ -475,66 +759,69 @@ impl ReverseTunnelServerState {
     }
 
     pub async fn active_connection(&self, node_id: Option<&str>) -> Option<quinn::Connection> {
+        let target = self.select_active_target(node_id).await?;
+        self.active_connection_for_target(&target).await
+    }
+
+    pub(crate) async fn active_connection_for_target(
+        &self,
+        target: &ActiveSessionTarget,
+    ) -> Option<quinn::Connection> {
         let now = Instant::now();
         let sessions = self.sessions.lock().await;
         let liveness = self.session_liveness.lock().await;
         let connections = self.connections.lock().await;
         let controls = self.tcp_controls.lock().await;
-        let mut stale = Vec::new();
-        let mut closed_connections = Vec::new();
-
-        let selected = sessions.values().find_map(|session| {
-            if !session.connected || node_id.is_some_and(|expected| session.node_id != expected) {
-                return None;
-            }
-            if !session_is_fresh(
+        let current = sessions
+            .get(&target.node_id)
+            .is_some_and(|session| session.connected && session.session_id == target.session_id);
+        let fresh = current
+            && session_is_fresh(
                 &liveness,
-                &session.node_id,
-                session.session_id,
+                &target.node_id,
+                target.session_id,
+                target.authority_id,
                 now,
                 self.heartbeat_timeout,
-            ) {
-                stale.push((session.node_id.clone(), session.session_id));
-                return None;
-            }
-            let tcp_active = controls.get(&session.node_id).is_some_and(|control| {
-                control.session_id == session.session_id && !control.sender.is_closed()
-            });
-            let Some(connection) = connections.get(&session.node_id) else {
-                if !tcp_active {
-                    stale.push((session.node_id.clone(), session.session_id));
-                }
-                return None;
-            };
-            if connection.close_reason().is_none() {
-                return Some(connection.clone());
-            }
-            closed_connections.push(session.node_id.clone());
-            if !tcp_active {
-                stale.push((session.node_id.clone(), session.session_id));
-            }
-            None
+            );
+        let connection = fresh
+            .then(|| connections.get(&target.node_id))
+            .flatten()
+            .filter(|connection| {
+                connection.session_id == target.session_id
+                    && connection.authority_id == target.authority_id
+                    && connection.value.close_reason().is_none()
+            })
+            .map(|connection| connection.value.clone());
+        let closed = connections.get(&target.node_id).is_some_and(|connection| {
+            connection.session_id == target.session_id
+                && connection.authority_id == target.authority_id
+                && connection.value.close_reason().is_some()
+        });
+        let tcp_active = controls.get(&target.node_id).is_some_and(|control| {
+            control.session_id == target.session_id
+                && control.authority_id == target.authority_id
+                && !control.sender.is_closed()
         });
         drop(controls);
         drop(connections);
         drop(liveness);
         drop(sessions);
 
-        if !closed_connections.is_empty() {
-            let mut connections = self.connections.lock().await;
-            for closed_node in closed_connections {
-                if connections
-                    .get(&closed_node)
-                    .is_some_and(|connection| connection.close_reason().is_some())
-                {
-                    connections.remove(&closed_node);
-                }
-            }
+        if closed {
+            self.remove_quic_connection_for_authority(
+                &target.node_id,
+                target.session_id,
+                target.authority_id,
+                b"QUIC connection closed",
+            )
+            .await;
         }
-        for (stale_node, stale_session) in stale {
-            self.expire_session(&stale_node, stale_session).await;
+        if current && (!fresh || (connection.is_none() && !tcp_active)) {
+            self.expire_session(&target.node_id, target.session_id, target.authority_id)
+                .await;
         }
-        selected
+        connection
     }
 
     #[cfg(test)]
@@ -564,13 +851,31 @@ fn session_is_fresh(
     liveness: &HashMap<String, SessionLiveness>,
     node_id: &str,
     session_id: Uuid,
+    authority_id: Uuid,
     now: Instant,
     heartbeat_timeout: Duration,
 ) -> bool {
     liveness.get(node_id).is_some_and(|entry| {
         entry.session_id == session_id
+            && entry.authority_id == authority_id
             && now.saturating_duration_since(entry.last_seen_at) <= heartbeat_timeout
     })
+}
+
+fn remove_session_bound<T>(
+    entries: &mut HashMap<String, SessionBound<T>>,
+    node_id: &str,
+    session_id: Uuid,
+    authority_id: Uuid,
+) -> Option<SessionBound<T>> {
+    if entries
+        .get(node_id)
+        .is_some_and(|entry| entry.session_id == session_id && entry.authority_id == authority_id)
+    {
+        entries.remove(node_id)
+    } else {
+        None
+    }
 }
 
 fn lock_pending(pending: &StdMutex<PendingTcpMap>) -> MutexGuard<'_, PendingTcpMap> {
@@ -735,7 +1040,11 @@ mod tests {
             .open_tcp_proxy_with_timeout(Some("test-phone"), Duration::from_millis(100))
             .await
             .expect_err("closed control channel must fail");
-        assert!(error.to_string().contains("control channel closed"));
+        assert!(
+            error
+                .to_string()
+                .contains("no unambiguous authenticated reverse tunnel is active")
+        );
         assert_eq!(state.pending_tcp_len(), 0);
     }
 
@@ -844,7 +1153,11 @@ mod tests {
             .open_tcp_proxy_with_timeout(Some("phone-a"), Duration::from_millis(10))
             .await
             .expect_err("stale session must not receive a pending request");
-        assert!(error.to_string().contains("no authenticated"));
+        assert!(
+            error
+                .to_string()
+                .contains("no unambiguous authenticated reverse tunnel is active")
+        );
         assert_eq!(state.pending_tcp_len(), 0);
         assert!(state.tcp_controls.lock().await.is_empty());
     }
@@ -961,6 +1274,156 @@ mod tests {
         drop(duplicate_peer);
     }
 
+    #[test]
+    fn session_bound_removal_requires_exact_session_and_authority() {
+        let session_id = Uuid::new_v4();
+        let authority_id = Uuid::new_v4();
+        let mut entries = HashMap::from([(
+            "phone-a".to_owned(),
+            SessionBound {
+                session_id,
+                authority_id,
+                value: "current",
+            },
+        )]);
+
+        assert!(
+            remove_session_bound(&mut entries, "phone-a", Uuid::new_v4(), authority_id,).is_none()
+        );
+        assert!(
+            remove_session_bound(&mut entries, "phone-a", session_id, Uuid::new_v4(),).is_none()
+        );
+        assert_eq!(
+            entries.get("phone-a").map(|entry| entry.value),
+            Some("current")
+        );
+        assert_eq!(
+            remove_session_bound(&mut entries, "phone-a", session_id, authority_id)
+                .map(|entry| entry.value),
+            Some("current")
+        );
+        assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_target_selects_exactly_one_active_session() {
+        let state = ReverseTunnelServerState::default();
+        let session_id = Uuid::new_v4();
+        let mut control = register_session(&state, "phone-a", session_id).await;
+        let request_state = state.clone();
+        let request = tokio::spawn(async move {
+            request_state
+                .open_tcp_proxy_with_timeout(None, Duration::from_secs(1))
+                .await
+        });
+        let stream_id = open_stream_id(&mut control).await;
+        let (incoming, peer) = tcp_pair().await;
+        state
+            .accept_tcp_proxy_stream("phone-a", session_id, stream_id, incoming)
+            .await
+            .unwrap();
+        drop(request.await.unwrap().unwrap());
+        drop(peer);
+    }
+
+    #[tokio::test]
+    async fn missing_target_fails_closed_when_multiple_sessions_are_active() {
+        let state = ReverseTunnelServerState::default();
+        let mut control_a = register_session(&state, "phone-a", Uuid::new_v4()).await;
+        let mut control_b = register_session(&state, "phone-b", Uuid::new_v4()).await;
+
+        let error = state
+            .open_tcp_proxy_with_timeout(None, Duration::from_millis(20))
+            .await
+            .expect_err("ambiguous target must fail closed");
+        assert!(error.to_string().contains("unambiguous"));
+        assert_eq!(state.pending_tcp_len(), 0);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), control_a.recv())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), control_b.recv())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_target_never_falls_back_to_another_node() {
+        let state = ReverseTunnelServerState::default();
+        let session_a = Uuid::new_v4();
+        let session_b = Uuid::new_v4();
+        let mut control_a = register_session(&state, "phone-a", session_a).await;
+        let mut control_b = register_session(&state, "phone-b", session_b).await;
+        let request = spawn_request(&state, "phone-b").await;
+        let stream_id = open_stream_id(&mut control_b).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), control_a.recv())
+                .await
+                .is_err()
+        );
+        let (incoming, peer) = tcp_pair().await;
+        state
+            .accept_tcp_proxy_stream("phone-b", session_b, stream_id, incoming)
+            .await
+            .unwrap();
+        drop(request.await.unwrap().unwrap());
+        drop(peer);
+    }
+
+    #[tokio::test]
+    async fn old_authority_cannot_refresh_or_disconnect_replacement() {
+        let state = ReverseTunnelServerState::default();
+        let session_id = Uuid::new_v4();
+        let (old_sender, _old_receiver) = mpsc::channel(4);
+        let old_authority = state
+            .replace_session_authority(
+                "phone-a".to_owned(),
+                session_id,
+                SessionAuthority::Tcp(old_sender),
+            )
+            .await;
+        let (new_sender, _new_receiver) = mpsc::channel(4);
+        let new_authority = state
+            .replace_session_authority(
+                "phone-a".to_owned(),
+                session_id,
+                SessionAuthority::Tcp(new_sender),
+            )
+            .await;
+
+        assert_ne!(old_authority, new_authority);
+        assert!(
+            !state
+                .refresh_session_heartbeat_for_authority("phone-a", session_id, old_authority,)
+                .await
+        );
+        assert!(
+            state
+                .refresh_session_heartbeat_for_authority("phone-a", session_id, new_authority,)
+                .await
+        );
+        assert!(
+            !state
+                .disconnect_session_authority(
+                    "phone-a",
+                    session_id,
+                    old_authority,
+                    b"late disconnect",
+                )
+                .await
+        );
+        assert_eq!(
+            state
+                .select_active_target(Some("phone-a"))
+                .await
+                .map(|target| target.authority_id),
+            Some(new_authority)
+        );
+    }
+
     async fn register_session(
         state: &ReverseTunnelServerState,
         node_id: &str,
@@ -1022,6 +1485,7 @@ mod tests {
                 stream_id,
                 expected_node_id: node_id.to_owned(),
                 expected_session_id: session_id,
+                expected_authority_id: session_id,
                 created_at,
                 deadline: created_at + Duration::from_secs(60),
                 response_sender,

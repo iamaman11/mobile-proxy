@@ -18,7 +18,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::model::*;
-use crate::state::ReverseTunnelServerState;
+use crate::state::{ActiveSessionTarget, ReverseTunnelServerState, SessionAuthority};
 
 pub async fn run_client(
     config: ReverseTunnelClientConfig,
@@ -187,11 +187,11 @@ pub async fn run_quic_tcp_forward_listener(
                 let state = state.clone();
                 let target_node_id = target_node_id.clone();
                 tokio::spawn(async move {
-                    if !state.has_active_session(target_node_id.as_deref()).await {
+                    let Some(target) = state.select_active_target(target_node_id.as_deref()).await else {
                         reject_unavailable(&mut stream, protocol).await;
                         return;
-                    }
-                    if let Err(err) = forward_tcp_over_quic(stream, state, target_node_id.as_deref()).await {
+                    };
+                    if let Err(err) = forward_tcp_over_quic(stream, state, target).await {
                         warn!(error = %err, "reverse tunnel TCP forward failed");
                     }
                 });
@@ -224,14 +224,14 @@ async fn reject_unavailable(stream: &mut TcpStream, protocol: ProxyProtocol) {
 async fn forward_tcp_over_quic(
     mut tcp_stream: TcpStream,
     state: ReverseTunnelServerState,
-    target_node_id: Option<&str>,
+    target: ActiveSessionTarget,
 ) -> Result<()> {
-    let Some(connection) = state.active_connection(target_node_id).await else {
-        let mut upstream = state.open_tcp_proxy(target_node_id).await?;
+    let Some(connection) = state.active_connection_for_target(&target).await else {
+        let mut upstream = state.open_tcp_proxy_for_target(&target).await?;
         tokio::io::copy_bidirectional(&mut tcp_stream, &mut upstream).await?;
         return Ok(());
     };
-    debug!("opening reverse tunnel proxy stream");
+    debug!(node_id = %target.node_id, session_id = %target.session_id, "opening reverse tunnel proxy stream");
     let (mut quic_send, quic_recv) = connection
         .open_bi()
         .await
@@ -243,7 +243,7 @@ async fn forward_tcp_over_quic(
         },
     )
     .await?;
-    debug!("reverse tunnel proxy stream opened");
+    debug!(node_id = %target.node_id, session_id = %target.session_id, "reverse tunnel proxy stream opened");
     pipe_tcp_and_quic(tcp_stream, quic_send, quic_recv).await
 }
 
@@ -619,22 +619,22 @@ async fn handle_quic_control_stream(
         bail!("reverse tunnel authentication failed");
     }
     info!(node_id = %hello.node_id, session_id = %hello.session_id, "reverse tunnel authenticated");
-    mark_connected(&state, &hello, Some(connection)).await;
+    let authority_id = mark_connected(&state, &hello, SessionAuthority::Quic(connection)).await;
 
     loop {
         match read_optional_frame(&mut reader).await {
             Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
-                mark_heartbeat(&state, &heartbeat).await;
+                mark_heartbeat(&state, &heartbeat, authority_id).await;
             }
             Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
                 bail!("unexpected repeated hello on reverse tunnel session");
             }
             Ok(None) => {
-                mark_disconnected(&state, &hello).await;
+                mark_disconnected(&state, &hello, authority_id).await;
                 return Ok(());
             }
             Err(err) => {
-                mark_disconnected(&state, &hello).await;
+                mark_disconnected(&state, &hello, authority_id).await;
                 return Err(err);
             }
         }
@@ -772,10 +772,7 @@ async fn handle_server_connection(
     let mut reader = BufReader::new(reader);
     let (control_tx, mut control_rx) = mpsc::channel(256);
     info!(node_id = %hello.node_id, session_id = %hello.session_id, "TCP reverse tunnel authenticated");
-    mark_connected(&state, &hello, None).await;
-    state
-        .register_tcp_control(hello.node_id.clone(), hello.session_id, control_tx)
-        .await;
+    let authority_id = mark_connected(&state, &hello, SessionAuthority::Tcp(control_tx)).await;
 
     let result = loop {
         tokio::select! {
@@ -787,7 +784,7 @@ async fn handle_server_connection(
             }
             incoming = read_optional_frame(&mut reader) => match incoming {
                 Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
-                    mark_heartbeat(&state, &heartbeat).await;
+                    mark_heartbeat(&state, &heartbeat, authority_id).await;
                 }
                 Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
                     break Err(anyhow::anyhow!(
@@ -799,10 +796,7 @@ async fn handle_server_connection(
             }
         }
     };
-    state
-        .remove_tcp_control_for_session(&hello.node_id, hello.session_id)
-        .await;
-    mark_disconnected(&state, &hello).await;
+    mark_disconnected(&state, &hello, authority_id).await;
     result
 }
 
@@ -869,48 +863,24 @@ where
 async fn mark_connected(
     state: &ReverseTunnelServerState,
     hello: &TunnelHello,
-    connection: Option<quinn::Connection>,
-) {
+    authority: SessionAuthority,
+) -> Uuid {
     state
-        .register_session_liveness(hello.node_id.clone(), hello.session_id)
-        .await;
-    let mut sessions = state.sessions.lock().await;
-    let previous_session = sessions
-        .get(&hello.node_id)
-        .map(|session| session.session_id);
-    let accepted_connections = sessions
-        .get(&hello.node_id)
-        .map(|existing| existing.accepted_connections + 1)
-        .unwrap_or(1);
-    sessions.insert(
-        hello.node_id.clone(),
-        ServerSessionSnapshot {
-            node_id: hello.node_id.clone(),
-            session_id: hello.session_id,
-            connected: true,
-            accepted_connections,
-            last_heartbeat_sequence: None,
-        },
-    );
-    drop(sessions);
-    if let Some(previous_session) = previous_session {
-        state.cancel_pending_for_session(&hello.node_id, previous_session);
-        state
-            .remove_tcp_control_for_session(&hello.node_id, previous_session)
-            .await;
-    }
-    if let Some(connection) = connection {
-        state
-            .connections
-            .lock()
-            .await
-            .insert(hello.node_id.clone(), connection);
-    }
+        .replace_session_authority(hello.node_id.clone(), hello.session_id, authority)
+        .await
 }
 
-async fn mark_heartbeat(state: &ReverseTunnelServerState, heartbeat: &TunnelHeartbeat) {
+async fn mark_heartbeat(
+    state: &ReverseTunnelServerState,
+    heartbeat: &TunnelHeartbeat,
+    authority_id: Uuid,
+) {
     if !state
-        .refresh_session_heartbeat(&heartbeat.node_id, heartbeat.session_id)
+        .refresh_session_heartbeat_for_authority(
+            &heartbeat.node_id,
+            heartbeat.session_id,
+            authority_id,
+        )
         .await
     {
         return;
@@ -924,26 +894,19 @@ async fn mark_heartbeat(state: &ReverseTunnelServerState, heartbeat: &TunnelHear
     }
 }
 
-async fn mark_disconnected(state: &ReverseTunnelServerState, hello: &TunnelHello) {
-    let mut sessions = state.sessions.lock().await;
-    let mut remove_session_resources = false;
-    if let Some(session) = sessions.get_mut(&hello.node_id)
-        && session.session_id == hello.session_id
-    {
-        session.connected = false;
-        remove_session_resources = true;
-    }
-    drop(sessions);
-    if remove_session_resources {
-        state.connections.lock().await.remove(&hello.node_id);
-        state
-            .remove_tcp_control_for_session(&hello.node_id, hello.session_id)
-            .await;
-        state
-            .remove_session_liveness(&hello.node_id, hello.session_id)
-            .await;
-        state.cancel_pending_for_session(&hello.node_id, hello.session_id);
-    }
+async fn mark_disconnected(
+    state: &ReverseTunnelServerState,
+    hello: &TunnelHello,
+    authority_id: Uuid,
+) {
+    state
+        .disconnect_session_authority(
+            &hello.node_id,
+            hello.session_id,
+            authority_id,
+            b"reverse tunnel disconnected",
+        )
+        .await;
 }
 
 async fn read_optional_line<R>(reader: &mut R) -> Result<Option<String>>
@@ -1358,9 +1321,13 @@ mod tests {
             auth_token: "test-token".into(),
         };
 
-        mark_connected(&state, &old, None).await;
-        mark_connected(&state, &new, None).await;
-        mark_disconnected(&state, &old).await;
+        let (old_control_tx, _old_control_rx) = mpsc::channel(1);
+        let old_authority =
+            mark_connected(&state, &old, SessionAuthority::Tcp(old_control_tx)).await;
+        let (new_control_tx, _new_control_rx) = mpsc::channel(1);
+        let _new_authority =
+            mark_connected(&state, &new, SessionAuthority::Tcp(new_control_tx)).await;
+        mark_disconnected(&state, &old, old_authority).await;
 
         let sessions = state.snapshot().await;
         assert_eq!(sessions.len(), 1);
@@ -1377,11 +1344,8 @@ mod tests {
             protocol_version: 1,
             auth_token: "test-token".into(),
         };
-        mark_connected(&state, &old, None).await;
         let (control_tx, mut control_rx) = mpsc::channel(1);
-        state
-            .register_tcp_control(old.node_id.clone(), old.session_id, control_tx)
-            .await;
+        let _old_authority = mark_connected(&state, &old, SessionAuthority::Tcp(control_tx)).await;
 
         let request_state = state.clone();
         let request =
@@ -1397,7 +1361,9 @@ mod tests {
             protocol_version: 1,
             auth_token: "test-token".into(),
         };
-        mark_connected(&state, &new, None).await;
+        let (new_control_tx, _new_control_rx) = mpsc::channel(1);
+        let _new_authority =
+            mark_connected(&state, &new, SessionAuthority::Tcp(new_control_tx)).await;
 
         let error = timeout(Duration::from_secs(1), request)
             .await
