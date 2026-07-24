@@ -24,35 +24,75 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Wire and format importer
+      - name: Apply focused compile fix and format
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('crates/control-plane-sqlite/src/lib.rs')
+          path = Path('crates/control-plane-sqlite/src/legacy_json_import.rs')
           body = path.read_text()
-          if 'mod legacy_json_import;' not in body:
-              body = body.replace('mod snapshot_error;', 'mod legacy_json_import;\nmod snapshot_error;', 1)
-          export = '''pub use legacy_json_import::{
-              LegacyJsonImportError, LegacyJsonImportOutcome, LegacyJsonImportReport,
-              LegacyJsonMigrationStats, LegacyJsonViolation, parse_legacy_json,
-          };
+          old = '''    for (device_id, queue) in &commands.queues {
+              for command in queue {
+                  if command.device_id != *device_id {
+                      return Err(SnapshotViolation::PendingDeviceMismatch.into());
+                  }
+                  let canonical = canonical_scope(command);
+                  match commands.idempotency_results.get(&canonical) {
+                      Some(existing) if existing != command => {
+                          return Err(LegacyJsonViolation::ConflictingCommandResult.into());
+                      }
+                      Some(_) => {}
+                      None => {
+                          commands
+                              .idempotency_results
+                              .insert(canonical, command.clone());
+                          stats.recovered_command_results += 1;
+                      }
+                  }
+                  ensure_legacy_claim(commands, command, stats)?;
+              }
+          }
           '''
-          if 'pub use legacy_json_import::' not in body:
-              body = body.replace('pub use snapshot::{', export + '\npub use snapshot::{', 1)
-          if 'mod legacy_json_import_tests;' not in body:
-              body = body.replace(
-                  '#[cfg(test)]\nmod snapshot_store_tests;',
-                  '#[cfg(test)]\nmod legacy_json_import_tests;\n#[cfg(test)]\nmod snapshot_store_tests;',
-                  1,
-              )
-          path.write_text(body)
+          new = '''    let queued_commands = commands
+              .queues
+              .iter()
+              .flat_map(|(device_id, queue)| {
+                  queue
+                      .iter()
+                      .cloned()
+                      .map(|command| (device_id.clone(), command))
+                      .collect::<Vec<_>>()
+              })
+              .collect::<Vec<_>>();
+          for (device_id, command) in queued_commands {
+              if command.device_id != device_id {
+                  return Err(SnapshotViolation::PendingDeviceMismatch.into());
+              }
+              let canonical = canonical_scope(&command);
+              match commands.idempotency_results.get(&canonical) {
+                  Some(existing) if existing != &command => {
+                      return Err(LegacyJsonViolation::ConflictingCommandResult.into());
+                  }
+                  Some(_) => {}
+                  None => {
+                      commands
+                          .idempotency_results
+                          .insert(canonical, command.clone());
+                      stats.recovered_command_results += 1;
+                  }
+              }
+              ensure_legacy_claim(commands, &command, stats)?;
+          }
+          '''
+          if old not in body:
+              raise SystemExit('expected queue normalization block not found')
+          path.write_text(body.replace(old, new, 1))
           PY
           cargo fmt --all
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add crates/control-plane-sqlite/src/lib.rs crates/control-plane-sqlite/src/legacy_json_import.rs crates/control-plane-sqlite/src/legacy_json_import_tests.rs
+          git add crates/control-plane-sqlite/src/legacy_json_import.rs
           if ! git diff --cached --quiet; then
-            git commit -m "Wire and format legacy JSON importer [skip ci]"
+            git commit -m "Fix legacy queue normalization borrow [skip ci]"
             git push origin HEAD:agent/phase-b-legacy-json-import
           fi
 
