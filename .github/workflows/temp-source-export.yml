@@ -1,0 +1,24 @@
+name: Temporary Source Export
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/temp-source-export.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Package source
+        run: tar --exclude=.git -czf /tmp/mobile-proxy-source.tgz .
+      - name: Upload source
+        uses: actions/upload-artifact@v7
+        with:
+          name: temporary-source-snapshot
+          path: /tmp/mobile-proxy-source.tgz
+          retention-days: 1
