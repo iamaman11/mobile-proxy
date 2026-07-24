@@ -74,6 +74,9 @@ fn import(legacy_json: &Path, sqlite: &Path, diagnostic_json: &Path) -> Result<(
 
 fn export(sqlite: &Path, diagnostic_json: &Path) -> Result<()> {
     ensure_distinct(&[sqlite, diagnostic_json])?;
+    if !sqlite.is_file() {
+        bail!("SQLite diagnostic export source does not exist or is not a regular file");
+    }
     let mut store = SqliteStore::open(sqlite)
         .with_context(|| format!("failed to open SQLite source {}", sqlite.display()))?;
     let snapshot = store
