@@ -1,0 +1,40 @@
+name: Temporary Clippy Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - name: Capture strict Clippy diagnostic
+        id: clippy
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+
+      - name: Upload diagnostic
+        uses: actions/upload-artifact@v7
+        with:
+          name: strict-clippy-diagnostic
+          path: clippy.log
+          retention-days: 1
+
+      - name: Preserve failure status
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
