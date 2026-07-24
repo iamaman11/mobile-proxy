@@ -44,19 +44,19 @@ jobs:
               raise SystemExit("expected route-test import was not found exactly once")
           text = text.replace(old, new)
           old = '''        let path = std::env::temp_dir().join(format!(
-              "mobile-proxy-control-plane-{}.json",
-              Uuid::new_v4()
-          ));
-          router(
-              AppState::load(path).await.unwrap(),
+            "mobile-proxy-control-plane-{}.json",
+            Uuid::new_v4()
+        ));
+        router(
+            AppState::load(path).await.unwrap(),
 '''
           new = '''        let path = std::env::temp_dir().join(format!(
-              "mobile-proxy-control-plane-{}.sqlite3",
-              Uuid::new_v4()
-          ));
-          state_sqlite_backend::replace_for_test(&path, &StoredState::default()).unwrap();
-          router(
-              AppState::load(path).await.unwrap(),
+            "mobile-proxy-control-plane-{}.sqlite3",
+            Uuid::new_v4()
+        ));
+        state_sqlite_backend::replace_for_test(&path, &StoredState::default()).unwrap();
+        router(
+            AppState::load(path).await.unwrap(),
 '''
           if text.count(old) != 1:
               raise SystemExit("expected JSON-era route test helper was not found exactly once")
