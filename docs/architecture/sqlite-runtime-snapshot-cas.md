@@ -22,7 +22,7 @@ This slice adds a typed compare-and-swap persistence primitive. The application 
 7. reread the raw relations and require exact equality with `candidate`;
 8. commit and return bounded row-change counts.
 
-A stale expected state, SQL failure or post-write parity mismatch returns an error and drops the transaction. No candidate state is published partially.
+A stale expected state, SQL failure or post-write parity mismatch returns an error and drops the transaction. No candidate state is published partially. An exact no-op still acquires the write boundary and verifies current state before returning zero row changes.
 
 ## Ownership
 
@@ -58,6 +58,8 @@ Queue-position changes rewrite only the affected pending rows. An acknowledgemen
 ## Stale-writer and corruption behavior
 
 The current database is compared against the exact canonical relational representation of `expected`, including serialized typed JSON, digest text, command IDs, request fingerprints and queue positions. A concurrent or externally modified database therefore fails as stale rather than being overwritten.
+
+The comparison is deliberately byte-exact at the accepted relational boundary. Externally rewritten or non-canonical JSON text is not treated as semantically equivalent state, even if a permissive parser could produce the same typed value. Such drift must be diagnosed and repaired explicitly rather than silently accepted by a runtime mutation.
 
 After writes, the same exact comparison is repeated against `candidate`. Triggers or other database behavior that changes a row during the transaction cause a bounded parity failure and rollback.
 
