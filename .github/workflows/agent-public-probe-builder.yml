@@ -1,0 +1,96 @@
+name: Agent Public Probe Builder
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-public-probe-builder
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Validate and publish public-probe application port
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out isolated builder inputs
+        uses: actions/checkout@v7
+        with:
+          ref: agent/public-probe-application-port-builder
+
+      - name: Decode exact production files
+        run: |
+          cat .agent/public-probe-files.tar.gz.b64.* | tr -d '\n' | base64 --decode > /tmp/public-probe-files.tar.gz
+          test -s /tmp/public-probe-files.tar.gz
+          mkdir -p /tmp/public-probe-files
+          tar -xzf /tmp/public-probe-files.tar.gz -C /tmp/public-probe-files
+
+      - name: Check out exact production branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags origin agent/public-probe-application-port
+          git checkout -B agent/public-probe-application-port origin/agent/public-probe-application-port
+          test "$(git rev-parse HEAD)" = "4c48d08fc2f06f24c9bc23431547f425078d2eb7"
+
+      - name: Install bounded public-probe slice
+        run: |
+          mkdir -p crates/application/src docs/architecture services/control-plane/src contracts/governance
+          cp /tmp/public-probe-files/contracts/governance/invariant-enforcement.json contracts/governance/invariant-enforcement.json
+          cp /tmp/public-probe-files/crates/application/src/lib.rs crates/application/src/lib.rs
+          cp /tmp/public-probe-files/crates/application/src/public_probe.rs crates/application/src/public_probe.rs
+          cp /tmp/public-probe-files/docs/architecture/invariant-enforcement.md docs/architecture/invariant-enforcement.md
+          cp /tmp/public-probe-files/docs/architecture/public-probe-application-port.md docs/architecture/public-probe-application-port.md
+          cp /tmp/public-probe-files/services/control-plane/src/routes.rs services/control-plane/src/routes.rs
+          cp /tmp/public-probe-files/services/control-plane/src/state.rs services/control-plane/src/state.rs
+          git diff --check
+
+      - name: Validate governance and Python regressions
+        run: |
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Install stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format and validate Rust workspace
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo clippy --quiet --workspace --all-targets -- -D warnings
+          cargo test --quiet --workspace
+
+      - name: Verify exact production scope
+        run: |
+          git diff --check
+          test "$(git status --short | awk '{print $2}' | sort)" = "$(printf '%s\n' \
+            contracts/governance/invariant-enforcement.json \
+            crates/application/src/lib.rs \
+            crates/application/src/public_probe.rs \
+            docs/architecture/invariant-enforcement.md \
+            docs/architecture/public-probe-application-port.md \
+            services/control-plane/src/routes.rs \
+            services/control-plane/src/state.rs | sort)"
+
+      - name: Commit and push clean production branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            contracts/governance/invariant-enforcement.json \
+            crates/application/src/lib.rs \
+            crates/application/src/public_probe.rs \
+            docs/architecture/invariant-enforcement.md \
+            docs/architecture/public-probe-application-port.md \
+            services/control-plane/src/routes.rs \
+            services/control-plane/src/state.rs
+          git commit -m "Extract public-probe application port"
+          git push origin HEAD:agent/public-probe-application-port
