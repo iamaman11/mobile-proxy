@@ -21,6 +21,8 @@ and the equivalent `CONTROL_PLANE_STATE_BACKEND` environment variable.
 
 `sqlite` is opt-in. The selected state path must already be an existing regular SQLite file produced or validated by the migration utility. A missing path fails startup and is never initialized as an empty database implicitly.
 
+The production composition root always calls `load_with_backend` with the parsed selection. The legacy `AppState::load` wrapper is compiled only for tests so production startup cannot bypass backend selection accidentally.
+
 ## Shared application behavior
 
 Registration, heartbeat, public-probe updates, command issuance and successful acknowledgement continue to execute the same application-owned transition code. Each transition clones the current in-memory state into an expected snapshot and builds one candidate state.
