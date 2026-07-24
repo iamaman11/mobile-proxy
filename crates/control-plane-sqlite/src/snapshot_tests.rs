@@ -363,7 +363,7 @@ fn pending_identity_device_content_and_position_gaps_fail_closed() {
         SnapshotViolation::PendingReplayMismatch,
     );
     assert_violation(
-        exact_rows(&[first.clone()], &[(1, first)]),
+        exact_rows(std::slice::from_ref(&first), &[(1, first.clone())]),
         SnapshotViolation::NonContiguousQueuePosition,
     );
 }
