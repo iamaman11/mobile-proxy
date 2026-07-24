@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 jobs:
@@ -16,35 +17,26 @@ jobs:
       - name: Open audit pull request
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          if gh pr list \
-            --repo "$GITHUB_REPOSITORY" \
-            --head agent/phase-c-pending-stream-lifecycle-audit \
-            --base main \
-            --state open \
-            --json number \
-            --jq 'length' | grep -qx '0'; then
-            gh pr create \
-              --repo "$GITHUB_REPOSITORY" \
-              --base main \
-              --head agent/phase-c-pending-stream-lifecycle-audit \
-              --title 'Audit pending-stream lifecycle and bounds' \
-              --body-file - <<'EOF'
-          ## Decision
-
-          Delivery item 8 requires no new runtime implementation. The accepted reserve TLS/TCP registry already provides deterministic cleanup, bounded expiry, explicit global/per-device capacity and fail-closed exhaustion without eviction.
-
-          ## Scope
-
-          - records the current-code lifecycle and capacity audit;
-          - links each terminal cleanup path to the owning implementation and executable evidence;
-          - preserves all protected proxy, QUIC, TLS/TCP reserve and WireGuard compatibility behavior;
-          - explicitly leaves exact device/session routing authority to delivery item 9.
-
-          ## Validation
-
-          This branch is one documentation-only commit ahead of current `main` and zero commits behind. The audit cites the original accepted implementation and the latest successful Phase B closeout validation.
-
-          Closes #50
-          EOF
+          set -o pipefail
+          if [ "$(gh pr list --repo "$GITHUB_REPOSITORY" --head agent/phase-c-pending-stream-lifecycle-audit --base main --state open --json number --jq 'length')" != "0" ]; then
+            exit 0
           fi
+          body=$'## Decision\n\nDelivery item 8 requires no new runtime implementation. The accepted reserve TLS/TCP registry already provides deterministic cleanup, bounded expiry, explicit global/per-device capacity and fail-closed exhaustion without eviction.\n\n## Scope\n\n- records the current-code lifecycle and capacity audit;\n- links each terminal cleanup path to the owning implementation and executable evidence;\n- preserves all protected proxy, QUIC, TLS/TCP reserve and WireGuard compatibility behavior;\n- explicitly leaves exact device/session routing authority to delivery item 9.\n\n## Validation\n\nThis branch is one documentation-only commit ahead of current `main` and zero commits behind. The audit cites the original accepted implementation and the latest successful Phase B closeout validation.\n\nCloses #50'
+          set +e
+          output=$(gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/pulls" \
+            -f title='Audit pending-stream lifecycle and bounds' \
+            -f head='agent/phase-c-pending-stream-lifecycle-audit' \
+            -f base='main' \
+            -f body="$body" 2>&1)
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            printf 'One-shot PR opener failed:\n\n```text\n%s\n```\n' "$output" > /tmp/pr-opener-failure.md
+            gh issue comment 50 --repo "$GITHUB_REPOSITORY" --body-file /tmp/pr-opener-failure.md
+            exit "$status"
+          fi
+          gh issue comment 50 --repo "$GITHUB_REPOSITORY" --body 'The documentation-only acceptance PR was opened by the repository-scoped one-shot workflow after the connector create-PR endpoint returned an external 502.'
