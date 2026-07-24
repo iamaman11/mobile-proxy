@@ -21,6 +21,7 @@ _EXPECTED_TRANSPORT = {
     "post-reboot": "quic",
     "fallback": "tls_tcp",
     "recovered": "quic",
+    "post-wireguard-recovered": "quic",
 }
 _REQUIRED_PROXY_SURFACES = {
     "mixed_1080_socks5",
@@ -32,23 +33,37 @@ _REQUIRED_PROXY_SURFACES = {
 }
 
 
-def verify_deployment_report(report: dict[str, Any], candidate_sha: str) -> None:
-    require(report.get("format_version") == 1, "deployment report version is unsupported")
-    require(report.get("candidate_sha") == candidate_sha, "deployment report SHA differs")
-    require(report.get("accepted") is True, "deployment report is not accepted")
-    require(report.get("device_release_metadata_match") is True, "device release metadata differs")
-    require(report.get("device_deployment_match") is True, "device deployment differs")
-    require(report.get("vm_deployment_match") is True, "VM deployment differs")
+def verify_deployment_report(report: dict[str, Any], candidate_sha: str, label: str) -> None:
+    require(report.get("format_version") == 1, f"{label} deployment report version is unsupported")
+    require(report.get("candidate_sha") == candidate_sha, f"{label} deployment report SHA differs")
+    require(report.get("accepted") is True, f"{label} deployment report is not accepted")
+    require(report.get("device_release_metadata_match") is True, f"{label} device release metadata differs")
+    require(report.get("device_deployment_match") is True, f"{label} device deployment differs")
+    require(report.get("vm_deployment_match") is True, f"{label} VM deployment differs")
     require(
         isinstance(report.get("device_release_entries"), int)
         and 0 < report["device_release_entries"] <= 128,
-        "device deployment inventory is invalid",
+        f"{label} device deployment inventory is invalid",
     )
     require(
         isinstance(report.get("vm_release_entries"), int)
         and 0 < report["vm_release_entries"] <= 128,
-        "VM deployment inventory is invalid",
+        f"{label} VM deployment inventory is invalid",
     )
+
+
+def verify_switch_report(report: dict[str, Any], mode: str) -> None:
+    require(report.get("format_version") == 1, f"{mode} switch report version is unsupported")
+    require(report.get("mode") == mode, f"{mode} switch report mode differs")
+    require(report.get("accepted") is True, f"{mode} switch report is not accepted")
+    digest = report.get("config_sha256")
+    require(
+        isinstance(digest, str)
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest),
+        f"{mode} switch digest is invalid",
+    )
+    require(report.get("public_ports") == [1080, 1081, 3128], f"{mode} switch ports differ")
 
 
 def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) -> None:
@@ -70,6 +85,19 @@ def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) 
         f"{stage} process health is incomplete",
     )
 
+    device_state = report.get("device_state")
+    require(isinstance(device_state, dict), f"{stage} device state is invalid")
+    for field in [
+        "serving",
+        "heartbeat_present",
+        "cellular_route_ready",
+        "proxy_bind_ready",
+        "local_serving_ready",
+    ]:
+        require(device_state.get(field) is True, f"{stage} device state {field} is false")
+    require(device_state.get("availability") == "available", f"{stage} device is unavailable")
+    require(isinstance(device_state.get("node_id"), str), f"{stage} node_id is invalid")
+
     proxies = report.get("proxy_surfaces")
     require(isinstance(proxies, dict), f"{stage} proxy report is invalid")
     require(set(proxies) == _REQUIRED_PROXY_SURFACES, f"{stage} proxy report is incomplete")
@@ -77,8 +105,11 @@ def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) 
 
     reverse_tunnel = report.get("reverse_tunnel")
     require(isinstance(reverse_tunnel, dict), f"{stage} tunnel report is invalid")
+    wireguard = report.get("wireguard")
+    require(isinstance(wireguard, dict), f"{stage} WireGuard report is invalid")
     expected_transport = _EXPECTED_TRANSPORT.get(stage)
     if expected_transport is not None:
+        require(report.get("tunnel_owner") == "first_party_reverse_tunnel", f"{stage} tunnel owner differs")
         require(reverse_tunnel.get("connected") is True, f"{stage} tunnel is disconnected")
         require(
             reverse_tunnel.get("active_transport") == expected_transport,
@@ -86,18 +117,27 @@ def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) 
         )
         require(reverse_tunnel.get("freshness") == "fresh", f"{stage} tunnel is stale")
     if stage == "wireguard":
-        require(report.get("wireguard_enabled") is True, "WireGuard rollback report is not enabled")
+        require(report.get("tunnel_owner") == "stock_wireguard_bridge", "WireGuard tunnel owner differs")
+        require(wireguard.get("enabled") is True, "WireGuard rollback report is not enabled")
+        require(wireguard.get("tun0_present") is True, "WireGuard tun0 is absent")
+        require(wireguard.get("handshake_recent") is True, "WireGuard handshake is not recent")
+        require(reverse_tunnel.get("connected") is not True, "reverse tunnel remained active during WireGuard report")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--evidence", type=Path, required=True)
-    parser.add_argument("--deployment", type=Path, required=True)
+    parser.add_argument("--primary-deployment", type=Path, required=True)
+    parser.add_argument("--wireguard-deployment", type=Path, required=True)
+    parser.add_argument("--final-deployment", type=Path, required=True)
+    parser.add_argument("--wireguard-switch", type=Path, required=True)
+    parser.add_argument("--reverse-switch", type=Path, required=True)
     parser.add_argument("--online", type=Path, required=True)
     parser.add_argument("--post-reboot", type=Path, required=True)
     parser.add_argument("--fallback", type=Path, required=True)
     parser.add_argument("--recovered", type=Path, required=True)
     parser.add_argument("--wireguard", type=Path, required=True)
+    parser.add_argument("--post-wireguard-recovered", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -106,21 +146,34 @@ def main() -> int:
     args = parse_args()
     try:
         candidate_sha = verify_candidate(read_json(args.evidence))
-        deployment = read_json(args.deployment)
-        verify_deployment_report(deployment, candidate_sha)
+        deployments = {
+            "primary": read_json(args.primary_deployment),
+            "wireguard": read_json(args.wireguard_deployment),
+            "final": read_json(args.final_deployment),
+        }
+        for label, report in deployments.items():
+            verify_deployment_report(report, candidate_sha, label)
+        verify_switch_report(read_json(args.wireguard_switch), "wireguard")
+        verify_switch_report(read_json(args.reverse_switch), "reverse-tunnel")
         reports = {
             "online": read_json(args.online),
             "post-reboot": read_json(args.post_reboot),
             "fallback": read_json(args.fallback),
             "recovered": read_json(args.recovered),
             "wireguard": read_json(args.wireguard),
+            "post-wireguard-recovered": read_json(args.post_wireguard_recovered),
         }
+        node_ids = set()
         for stage, report in reports.items():
             verify_stage_report(report, candidate_sha, stage)
+            node_ids.add(report["device_state"]["node_id"])
+        require(len(node_ids) == 1, "physical stage reports use different device IDs")
         summary = {
             "format_version": 1,
             "candidate_sha": candidate_sha,
+            "device_id": node_ids.pop(),
             "deployment_integrity_accepted": True,
+            "transport_switches_accepted": True,
             "accepted_stages": list(reports),
             "physical_phone_acceptance_complete": True,
             "accepted": True,
