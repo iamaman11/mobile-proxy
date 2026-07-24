@@ -1,0 +1,138 @@
+name: Agent Fallback Recovery Builder
+
+on:
+  push:
+    branches:
+      - agent/fallback-recovery-builder
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: agent-fallback-recovery-builder
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/fallback-recovery-builder
+
+      - name: Preserve bounded transformation
+        run: |
+          cp .agent/apply-fallback-recovery.py /tmp/apply-fallback-recovery.py
+          python3 -m py_compile /tmp/apply-fallback-recovery.py
+
+      - name: Record builder trigger
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 55 --repo "$GITHUB_REPOSITORY" \
+            --body "Fallback/recovery builder running for builder commit \`${GITHUB_SHA}\`."
+
+      - name: Check out current production baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags origin main
+          git checkout -B agent/phase-c-fallback-recovery origin/main
+          test -f docs/phase-c-exact-session-binding.md
+
+      - name: Apply and validate controlled acceptance slice
+        id: validation
+        shell: bash
+        run: |
+          set +e
+          log=/tmp/fallback-recovery-validation.log
+          : > "$log"
+          status=0
+          stage=none
+
+          run_stage() {
+            local candidate_stage="$1"
+            shift
+            if [ "$status" -ne 0 ]; then
+              return
+            fi
+            stage="$candidate_stage"
+            {
+              echo
+              echo "=== $stage ==="
+              "$@"
+            } >> "$log" 2>&1
+            candidate_status=$?
+            if [ "$candidate_status" -ne 0 ]; then
+              status="$candidate_status"
+            fi
+          }
+
+          run_stage transformation python3 /tmp/apply-fallback-recovery.py
+          run_stage diff-check git diff --check
+          run_stage architecture python3 scripts/check_architecture_boundaries.py
+          run_stage python-regressions python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          run_stage rust-toolchain rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          run_stage rust-default rustup default stable
+          run_stage rustfmt cargo fmt --all
+          run_stage rustfmt-check cargo fmt --all -- --check
+          run_stage focused-test cargo test --quiet -p reverse-tunnel hybrid_fallback_and_quic_recovery_preserve_proxy_surfaces -- --nocapture
+          run_stage clippy cargo clippy --quiet --workspace --all-targets --message-format=short -- -D warnings
+          run_stage workspace-tests cargo test --quiet --workspace
+
+          if [ "$status" -eq 0 ]; then
+            git checkout -- Cargo.lock
+            stage=scope-check
+            actual="$(git status --short | awk '{print $2}' | sort)"
+            expected="$(printf '%s\n' \
+              apps/operator-cli/src/vm.rs \
+              crates/reverse-tunnel/src/tunnel.rs \
+              docs/phase-c-fallback-recovery-proof.md | sort)"
+            {
+              echo
+              echo "=== scope-check ==="
+              printf 'actual:\n%s\nexpected:\n%s\n' "$actual" "$expected"
+            } >> "$log"
+            if [ "$actual" != "$expected" ]; then
+              status=1
+            fi
+          fi
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Record validation failure
+        if: steps.validation.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Fallback/recovery validation failed during \`${{ steps.validation.outputs.stage }}\`:"
+            echo
+            echo '```text'
+            tail -n 220 /tmp/fallback-recovery-validation.log
+            echo '```'
+          } > /tmp/fallback-recovery-failure.md
+          gh issue comment 55 --repo "$GITHUB_REPOSITORY" --body-file /tmp/fallback-recovery-failure.md
+          exit 1
+
+      - name: Publish clean production branch
+        if: steps.validation.outputs.status == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/operator-cli/src/vm.rs \
+            crates/reverse-tunnel/src/tunnel.rs \
+            docs/phase-c-fallback-recovery-proof.md
+          git commit -m "Prove forced tunnel fallback and recovery"
+          git push --force-with-lease origin HEAD:agent/phase-c-fallback-recovery
+          source_sha="$(git rev-parse HEAD)"
+          gh issue comment 55 --repo "$GITHUB_REPOSITORY" \
+            --body "Controlled fallback/recovery source published at \`${source_sha}\`. Forced QUIC blocking, pinned TLS/TCP reserve, protected proxy conversations, QUIC recovery, architecture checks, strict Clippy and the complete workspace suite passed on that immutable SHA."
