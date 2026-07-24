@@ -1,15 +1,20 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 use mobile_proxy_application::{idempotency_scope_key, request_fingerprint};
-use mobile_proxy_foundation::ContentDigest;
+use mobile_proxy_foundation::{CommandId, ContentDigest};
 use proxy_core::{DeviceCommand, DeviceRecord, IssueCommandRequest};
-use serde::{Deserialize, Serialize};
+use rusqlite::{Connection, TransactionBehavior, params};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::snapshot_error::{SnapshotError, SnapshotViolation};
 use crate::snapshot_rows::{
     CommandResultRow, DeviceRow, IdempotencyClaimRow, PendingCommandRow, SnapshotRows,
 };
 use crate::snapshot_validation::validate_rows;
+use crate::{SqliteStore, StoreError};
 
 pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
 
@@ -227,6 +232,291 @@ impl Default for ControlPlaneSnapshot {
     }
 }
 
+#[derive(Debug)]
+pub enum SnapshotStoreError {
+    Store(StoreError),
+    Json {
+        field: &'static str,
+        source: serde_json::Error,
+    },
+    InvalidField {
+        field: &'static str,
+    },
+    InvalidSnapshot(SnapshotViolation),
+}
+
+impl Display for SnapshotStoreError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Store(_) => formatter.write_str("SQLite snapshot store operation failed"),
+            Self::Json { field, .. } => write!(formatter, "invalid typed JSON in {field}"),
+            Self::InvalidField { field } => write!(formatter, "invalid typed SQLite field: {field}"),
+            Self::InvalidSnapshot(error) => write!(formatter, "invalid control-plane snapshot: {error}"),
+        }
+    }
+}
+
+impl Error for SnapshotStoreError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error),
+            Self::Json { source, .. } => Some(source),
+            Self::InvalidField { .. } => None,
+            Self::InvalidSnapshot(error) => Some(error),
+        }
+    }
+}
+
+impl From<StoreError> for SnapshotStoreError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl From<rusqlite::Error> for SnapshotStoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Store(StoreError::from(error))
+    }
+}
+
+impl From<SnapshotViolation> for SnapshotStoreError {
+    fn from(error: SnapshotViolation) -> Self {
+        Self::InvalidSnapshot(error)
+    }
+}
+
+impl SqliteStore {
+    pub fn replace_snapshot(
+        &mut self,
+        snapshot: &ControlPlaneSnapshot,
+    ) -> Result<(), SnapshotStoreError> {
+        snapshot.validate()?;
+        let rows = snapshot.rows();
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        replace_snapshot_rows(&transaction, &rows)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn load_snapshot(&self) -> Result<ControlPlaneSnapshot, SnapshotStoreError> {
+        let rows = load_snapshot_rows(&self.connection)?;
+        ControlPlaneSnapshot::from_rows(rows).map_err(Into::into)
+    }
+}
+
+fn replace_snapshot_rows(
+    connection: &Connection,
+    rows: &SnapshotRows,
+) -> Result<(), SnapshotStoreError> {
+    connection.execute_batch(
+        "DELETE FROM pending_commands;\n\
+         DELETE FROM idempotency_claims;\n\
+         DELETE FROM command_results;\n\
+         DELETE FROM devices;",
+    )?;
+
+    for row in rows.devices() {
+        let record_json = encode_json("devices.record_json", row.record())?;
+        connection.execute(
+            "INSERT INTO devices (node_id, record_json) VALUES (?1, ?2)",
+            params![row.node_id(), record_json],
+        )?;
+    }
+
+    for row in rows.command_results() {
+        let result_json = encode_json("command_results.result_json", row.result())?;
+        connection.execute(
+            "INSERT INTO command_results (scope_key, command_id, result_json) \
+             VALUES (?1, ?2, ?3)",
+            params![
+                row.scope_key().to_string(),
+                row.command_id().to_string(),
+                result_json
+            ],
+        )?;
+    }
+
+    for row in rows.idempotency_claims() {
+        connection.execute(
+            "INSERT INTO idempotency_claims \
+             (scope_key, command_id, request_fingerprint) VALUES (?1, ?2, ?3)",
+            params![
+                row.scope_key().to_string(),
+                row.command_id().to_string(),
+                row.request_fingerprint().to_string()
+            ],
+        )?;
+    }
+
+    for row in rows.pending_commands() {
+        let command_json = encode_json("pending_commands.command_json", row.command())?;
+        connection.execute(
+            "INSERT INTO pending_commands \
+             (command_id, device_id, queue_position, command_json) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                row.command_id().to_string(),
+                row.device_id(),
+                i64::from(row.queue_position()),
+                command_json
+            ],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn load_snapshot_rows(connection: &Connection) -> Result<SnapshotRows, SnapshotStoreError> {
+    Ok(SnapshotRows::new(
+        load_device_rows(connection)?,
+        load_command_result_rows(connection)?,
+        load_idempotency_claim_rows(connection)?,
+        load_pending_command_rows(connection)?,
+    ))
+}
+
+fn load_device_rows(connection: &Connection) -> Result<Vec<DeviceRow>, SnapshotStoreError> {
+    let mut statement = connection.prepare(
+        "SELECT node_id, record_json FROM devices ORDER BY node_id",
+    )?;
+    let raw_rows = statement
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    raw_rows
+        .into_iter()
+        .map(|(node_id, record_json)| {
+            Ok(DeviceRow::new(
+                node_id,
+                decode_json("devices.record_json", &record_json)?,
+            ))
+        })
+        .collect()
+}
+
+fn load_command_result_rows(
+    connection: &Connection,
+) -> Result<Vec<CommandResultRow>, SnapshotStoreError> {
+    let mut statement = connection.prepare(
+        "SELECT scope_key, command_id, result_json \
+         FROM command_results ORDER BY scope_key",
+    )?;
+    let raw_rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    raw_rows
+        .into_iter()
+        .map(|(scope_key, command_id, result_json)| {
+            Ok(CommandResultRow::new(
+                parse_digest("command_results.scope_key", &scope_key)?,
+                parse_command_id("command_results.command_id", &command_id)?,
+                decode_json("command_results.result_json", &result_json)?,
+            ))
+        })
+        .collect()
+}
+
+fn load_idempotency_claim_rows(
+    connection: &Connection,
+) -> Result<Vec<IdempotencyClaimRow>, SnapshotStoreError> {
+    let mut statement = connection.prepare(
+        "SELECT scope_key, command_id, request_fingerprint \
+         FROM idempotency_claims ORDER BY scope_key",
+    )?;
+    let raw_rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    raw_rows
+        .into_iter()
+        .map(|(scope_key, command_id, request_fingerprint)| {
+            Ok(IdempotencyClaimRow::new(
+                parse_digest("idempotency_claims.scope_key", &scope_key)?,
+                parse_command_id("idempotency_claims.command_id", &command_id)?,
+                parse_digest(
+                    "idempotency_claims.request_fingerprint",
+                    &request_fingerprint,
+                )?,
+            ))
+        })
+        .collect()
+}
+
+fn load_pending_command_rows(
+    connection: &Connection,
+) -> Result<Vec<PendingCommandRow>, SnapshotStoreError> {
+    let mut statement = connection.prepare(
+        "SELECT command_id, device_id, queue_position, command_json \
+         FROM pending_commands ORDER BY device_id, queue_position",
+    )?;
+    let raw_rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    raw_rows
+        .into_iter()
+        .map(|(command_id, device_id, queue_position, command_json)| {
+            Ok(PendingCommandRow::new(
+                parse_command_id("pending_commands.command_id", &command_id)?,
+                device_id,
+                u32::try_from(queue_position).map_err(|_| SnapshotStoreError::InvalidField {
+                    field: "pending_commands.queue_position",
+                })?,
+                decode_json("pending_commands.command_json", &command_json)?,
+            ))
+        })
+        .collect()
+}
+
+fn encode_json<T: Serialize + ?Sized>(
+    field: &'static str,
+    value: &T,
+) -> Result<String, SnapshotStoreError> {
+    serde_json::to_string(value).map_err(|source| SnapshotStoreError::Json { field, source })
+}
+
+fn decode_json<T: DeserializeOwned>(
+    field: &'static str,
+    value: &str,
+) -> Result<T, SnapshotStoreError> {
+    serde_json::from_str(value).map_err(|source| SnapshotStoreError::Json { field, source })
+}
+
+fn parse_digest(
+    field: &'static str,
+    value: &str,
+) -> Result<ContentDigest, SnapshotStoreError> {
+    ContentDigest::from_str(value).map_err(|_| SnapshotStoreError::InvalidField { field })
+}
+
+fn parse_command_id(
+    field: &'static str,
+    value: &str,
+) -> Result<CommandId, SnapshotStoreError> {
+    CommandId::from_str(value).map_err(|_| SnapshotStoreError::InvalidField { field })
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SnapshotDocument {
@@ -267,3 +557,7 @@ fn request_for(command: &DeviceCommand) -> IssueCommandRequest {
         idempotency_key: command.idempotency_key.clone(),
     }
 }
+
+#[cfg(test)]
+#[path = "snapshot_store_tests.rs"]
+mod store_tests;
