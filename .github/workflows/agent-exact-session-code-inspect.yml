@@ -45,21 +45,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo 'Transformed helper and call-site context:'
+            echo 'Transformed source around Clippy dead-code diagnostics:'
             echo
-            echo '### SessionBound and removal helper'
+            echo '### state.rs 200-265'
             echo '```rust'
-            grep -n -B 12 -A 30 -E 'struct SessionBound|fn remove_session_bound' crates/reverse-tunnel/src/state.rs
+            sed -n '200,265p' crates/reverse-tunnel/src/state.rs
             echo '```'
             echo
-            echo '### SessionAuthority and mark functions'
+            echo '### state.rs 590-650'
             echo '```rust'
-            grep -n -B 18 -A 80 -E 'enum SessionAuthority|async fn mark_connected|async fn mark_disconnected' crates/reverse-tunnel/src/tunnel.rs
+            sed -n '590,650p' crates/reverse-tunnel/src/state.rs
             echo '```'
             echo
-            echo '### Failing legacy test call sites'
-            echo '```rust'
-            sed -n '1300,1375p' crates/reverse-tunnel/src/tunnel.rs
+            echo '### references'
+            echo '```text'
+            grep -R -n -E 'register_tcp_control|remove_tcp_control_for_session|cancel_pending_for_session' crates/reverse-tunnel/src || true
             echo '```'
           } > /tmp/context.md
           gh issue edit 53 --repo "$GITHUB_REPOSITORY" --body-file /tmp/context.md
