@@ -207,7 +207,7 @@ fn invalid_digest_text_fails_closed_before_relation_validation() {
             "INSERT INTO command_results (scope_key, command_id, result_json) \
              VALUES (?1, ?2, ?3)",
             params![
-                "sha256:not-a-supported-digest",
+                "not-a-supported-digest",
                 value.command_id.to_string(),
                 serde_json::to_string(&value).unwrap()
             ],
