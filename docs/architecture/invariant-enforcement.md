@@ -65,8 +65,8 @@ This list is not a claim that every rule in ADR-001 or the Production Baseline P
 
 The highest-impact active gaps remain explicit in the matrix:
 
-- the remaining public-probe application port and its durable mutation ordering;
-- thin transport handlers for the remaining baseline routes, plus prohibition of SQL or business transitions in HTTP handlers;
+- Phase A closeout review confirming the current mutating route inventory and documenting the stop-and-reassess decision;
+- review-backed prohibition of SQL or business transitions in HTTP handlers without adding an unjustified AST framework;
 - the closed SQLite baseline inventory, transaction boundaries, JSON migration and exercised rollback;
 - repository-wide typed status/error taxonomies where current baseline behavior still uses raw strings;
 - application-specific canonical-field detection;
@@ -75,7 +75,7 @@ The highest-impact active gaps remain explicit in the matrix:
 - removal of runtime fingerprint legacy readers after the accepted compatibility window;
 - health-surface separation, backup/restore and physical reserve-tunnel acceptance on one immutable SHA.
 
-## Command lifecycle, registration and heartbeat application-port enforcement
+## Command lifecycle, registration, heartbeat and public-probe application-port enforcement
 
 The existing command issue, poll, acknowledgement and device-registration capabilities now have bounded clean-dependency slices:
 
@@ -94,9 +94,13 @@ The existing command issue, poll, acknowledgement and device-registration capabi
 - a failed write returns `state_persistence_failed` and does not publish a new device in memory;
 - heartbeat replaces one exact device runtime projection through a typed application port while preserving the last public-probe fields;
 - heartbeat persists the complete candidate before publishing it in memory or returning `{ "accepted": true }`;
-- failed heartbeat persistence leaves the prior projection unchanged, and new heartbeat-created devices respect the 10,000-device bound.
+- failed heartbeat persistence leaves the prior projection unchanged, and new heartbeat-created devices respect the 10,000-device bound;
+- public probe uses a typed updated-or-device-not-found outcome while preserving the existing `{ "accepted": true }` compatibility shape;
+- public-probe reports for existing devices are fsynced before in-memory publication, and failed writes leave the prior projection unchanged;
+- the server keeps authoritative probe time instead of trusting the compatibility timestamp supplied by the caller;
+- all current mutating control-plane handlers now enter through typed application ports, so `ARCH-004` and `ARCH-005` are enforced for the current route inventory.
 
-Public probe remains transitional and keeps `ARCH-004` and `ARCH-005` at `partially_enforced`.
+`ARCH-006` remains partially enforced: current handlers contain no persistence ordering or canonical mutation, but this is deliberately protected by focused code evidence and review rather than a new generic AST framework.
 
 ## Runtime fingerprint enforcement
 

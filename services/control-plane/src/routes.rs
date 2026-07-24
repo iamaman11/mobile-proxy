@@ -1,5 +1,5 @@
 use crate::auth::{AuthConfig, require_admin, require_device};
-use crate::projection::{apply_public_probe, now_unix_secs};
+use crate::projection::now_unix_secs;
 use crate::{request_context::attach_request_context, state::AppState};
 use axum::{
     Json, Router,
@@ -11,8 +11,8 @@ use axum::{
 use mobile_proxy_application::{
     AcknowledgeCommandError, AcknowledgeCommandInput, AcknowledgeCommandPort, HeartbeatError,
     HeartbeatInput, HeartbeatPort, IssueCommandError, IssueCommandInput, IssueCommandPort,
-    PollCommandError, PollCommandInput, PollCommandPort, RegisterDeviceError, RegisterDeviceInput,
-    RegisterDevicePort,
+    PollCommandError, PollCommandInput, PollCommandPort, PublicProbeError, PublicProbeInput,
+    PublicProbePort, RegisterDeviceError, RegisterDeviceInput, RegisterDevicePort,
 };
 use mobile_proxy_foundation::{CommandId, RequestContext};
 use proxy_core::{
@@ -199,16 +199,54 @@ async fn heartbeat(
 
 async fn public_probe(
     State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
     Path(id): Path<String>,
     Json(req): Json<PublicProbeReport>,
-) -> Json<serde_json::Value> {
-    let mut devices = state.devices.lock().await;
-    if let Some(device) = devices.get_mut(&id) {
-        apply_public_probe(device, req);
+) -> Result<Json<serde_json::Value>, ControlPlaneRouteError> {
+    match state
+        .record_public_probe(PublicProbeInput {
+            device_id: id.clone(),
+            report: req,
+        })
+        .await
+    {
+        Ok(outcome) => {
+            tracing::info!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                classification = outcome.classification(),
+                "public probe processed"
+            );
+            Ok(Json(serde_json::json!({ "accepted": outcome.accepted() })))
+        }
+        Err(PublicProbeError::StateConflict) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                error_code = "device_state_conflict",
+                "public probe failed"
+            );
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "device_state_conflict" })),
+            ))
+        }
+        Err(PublicProbeError::Persistence) => {
+            tracing::error!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                device_id = %id,
+                error_code = "state_persistence_failed",
+                "public probe failed"
+            );
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "state_persistence_failed" })),
+            ))
+        }
     }
-    drop(devices);
-    let _ = state.persist().await;
-    Json(serde_json::json!({ "accepted": true }))
 }
 
 type ControlPlaneRouteError = (StatusCode, Json<serde_json::Value>);

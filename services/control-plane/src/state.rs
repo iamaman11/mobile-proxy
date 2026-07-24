@@ -11,7 +11,8 @@ use mobile_proxy_application::{
     HeartbeatInput, HeartbeatOutcome, HeartbeatPort, IssueCommandError, IssueCommandFuture,
     IssueCommandInput, IssueCommandOutcome, IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE,
     MAX_IDEMPOTENCY_RESULTS, MAX_PENDING_COMMANDS, MAX_REGISTERED_DEVICES, PollCommandError,
-    PollCommandFuture, PollCommandInput, PollCommandOutcome, PollCommandPort, RegisterDeviceError,
+    PollCommandFuture, PollCommandInput, PollCommandOutcome, PollCommandPort, PublicProbeError,
+    PublicProbeFuture, PublicProbeInput, PublicProbeOutcome, PublicProbePort, RegisterDeviceError,
     RegisterDeviceFuture, RegisterDeviceInput, RegisterDeviceOutcome, RegisterDevicePort,
     classify_existing, idempotency_scope_key,
 };
@@ -22,7 +23,9 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::fingerprint_migration::normalize_persisted_fingerprints;
-use crate::projection::{build_heartbeat_device, build_registered_device, now_unix_secs};
+use crate::projection::{
+    apply_public_probe, build_heartbeat_device, build_registered_device, now_unix_secs,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -111,7 +114,8 @@ impl AppState {
         })
     }
 
-    pub async fn persist(&self) -> Result<()> {
+    #[cfg(test)]
+    async fn persist_for_test(&self) -> Result<()> {
         let devices = self.devices.lock().await;
         let commands = self.commands.lock().await;
         let stored = StoredState {
@@ -216,6 +220,38 @@ impl AppState {
             legacy_config_fingerprint,
             legacy_binary_fingerprint,
         ))
+    }
+
+    async fn public_probe_transaction(
+        &self,
+        input: PublicProbeInput,
+    ) -> Result<PublicProbeOutcome, PublicProbeError> {
+        let mut devices_guard = self.devices.lock().await;
+        let Some(existing) = devices_guard.get(&input.device_id) else {
+            return Ok(PublicProbeOutcome::DeviceNotFound);
+        };
+        if existing.node_id != input.device_id {
+            return Err(PublicProbeError::StateConflict);
+        }
+
+        let commands_guard = self.commands.lock().await;
+        let mut devices = devices_guard.clone();
+        let device = devices
+            .get_mut(&input.device_id)
+            .ok_or(PublicProbeError::StateConflict)?;
+        apply_public_probe(device, input.report);
+        if device.node_id != input.device_id {
+            return Err(PublicProbeError::StateConflict);
+        }
+
+        let stored = StoredState {
+            devices: devices.clone(),
+            commands: commands_guard.clone(),
+        };
+        write_stored_state(self.state_path.as_ref(), &stored)
+            .map_err(|_| PublicProbeError::Persistence)?;
+        *devices_guard = devices;
+        Ok(PublicProbeOutcome::Updated)
     }
 
     async fn issue_command_transaction(
@@ -371,6 +407,12 @@ impl RegisterDevicePort for AppState {
 impl HeartbeatPort for AppState {
     fn record_heartbeat(&self, input: HeartbeatInput) -> HeartbeatFuture<'_> {
         Box::pin(async move { self.heartbeat_transaction(input).await })
+    }
+}
+
+impl PublicProbePort for AppState {
+    fn record_public_probe(&self, input: PublicProbeInput) -> PublicProbeFuture<'_> {
+        Box::pin(async move { self.public_probe_transaction(input).await })
     }
 }
 
@@ -585,13 +627,14 @@ mod tests {
         AcknowledgeCommandPort, HeartbeatError, HeartbeatInput, HeartbeatPort, IssueCommandError,
         IssueCommandInput, IssueCommandOutcome, IssueCommandPort, MAX_COMMAND_QUEUE_PER_DEVICE,
         MAX_PENDING_COMMANDS, MAX_REGISTERED_DEVICES, PollCommandError, PollCommandInput,
-        PollCommandOutcome, PollCommandPort, RegisterDeviceError, RegisterDeviceInput,
+        PollCommandOutcome, PollCommandPort, PublicProbeError, PublicProbeInput,
+        PublicProbeOutcome, PublicProbePort, RegisterDeviceError, RegisterDeviceInput,
         RegisterDeviceOutcome, RegisterDevicePort, idempotency_scope_key,
     };
     use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey};
     use proxy_core::{
         CommandAckRequest, DesiredState, DeviceCommand, HeartbeatRequest, IssueCommandRequest,
-        RecoveryIntent, RegisterDeviceRequest,
+        PublicProbeReport, RecoveryIntent, RegisterDeviceRequest,
     };
     use serde_json::json;
     use tokio::sync::Mutex;
@@ -637,11 +680,22 @@ mod tests {
             request: serde_json::from_value::<HeartbeatRequest>(json!({
                 "node_id": node_id,
                 "node_name": node_name,
-                "readiness_state": "ready",
+                "readiness_state": "healthy",
                 "serving": true,
                 "proxy_status": "running"
             }))
             .unwrap(),
+        }
+    }
+
+    fn public_probe(device_id: &str, publicly_serving: bool) -> PublicProbeInput {
+        PublicProbeInput {
+            device_id: device_id.into(),
+            report: PublicProbeReport {
+                publicly_serving,
+                public_probe_error: (!publicly_serving).then(|| "backend probe failed".into()),
+                public_probe_at: "untrusted-client-time".into(),
+            },
         }
     }
 
@@ -725,7 +779,7 @@ mod tests {
             .unwrap();
         let (_, original) = first.into_parts();
         state.commands.lock().await.queues.clear();
-        state.persist().await.unwrap();
+        state.persist_for_test().await.unwrap();
 
         let duplicate = state
             .issue_command(command_input(DesiredState::HealthyServing))
@@ -771,7 +825,7 @@ mod tests {
             commands.idempotency_results.clear();
             commands.idempotency_order.clear();
         }
-        state.persist().await.unwrap();
+        state.persist_for_test().await.unwrap();
         drop(state);
 
         let restarted = AppState::load(path.clone()).await.unwrap();
@@ -1066,7 +1120,7 @@ mod tests {
             device.public_probe_error = Some("bounded_probe_error".into());
             device.public_probe_at = Some("123".into());
         }
-        state.persist().await.unwrap();
+        state.persist_for_test().await.unwrap();
 
         let outcome = state
             .record_heartbeat(heartbeat("device-1", "heartbeat-name"))
@@ -1195,6 +1249,118 @@ mod tests {
                 .record_heartbeat(heartbeat("device-1", "heartbeat-name"))
                 .await,
             Err(HeartbeatError::StateConflict)
+        );
+    }
+
+    #[tokio::test]
+    async fn public_probe_is_durable_and_uses_an_authoritative_timestamp() {
+        let path = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-public-probe-{}.json",
+            Uuid::new_v4()
+        ));
+        let state = AppState::load(path.clone()).await.unwrap();
+        state
+            .record_heartbeat(heartbeat("device-1", "heartbeat-name"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            state
+                .record_public_probe(public_probe("device-1", true))
+                .await
+                .unwrap(),
+            PublicProbeOutcome::Updated
+        );
+        let device = state.devices.lock().await.get("device-1").unwrap().clone();
+        assert!(device.publicly_serving);
+        assert_eq!(device.public_probe_error, None);
+        assert!(device.public_probe_at.is_some());
+        assert_ne!(
+            device.public_probe_at.as_deref(),
+            Some("untrusted-client-time")
+        );
+        assert_eq!(device.availability, "ready");
+        drop(state);
+
+        let restarted = AppState::load(path.clone()).await.unwrap();
+        let device = restarted
+            .devices
+            .lock()
+            .await
+            .get("device-1")
+            .unwrap()
+            .clone();
+        assert!(device.publicly_serving);
+        assert_eq!(device.availability, "ready");
+        assert_ne!(
+            device.public_probe_at.as_deref(),
+            Some("untrusted-client-time")
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn missing_public_probe_device_preserves_the_existing_accepted_no_op() {
+        let state = AppState {
+            devices: Arc::new(Mutex::new(HashMap::new())),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(std::path::PathBuf::from("unused")),
+        };
+
+        assert_eq!(
+            state
+                .record_public_probe(public_probe("missing-device", true))
+                .await
+                .unwrap(),
+            PublicProbeOutcome::DeviceNotFound
+        );
+        assert!(state.devices.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_public_probe_persistence_does_not_publish_a_new_projection() {
+        let blocking_parent = std::env::temp_dir().join(format!(
+            "mobile-proxy-control-plane-public-probe-persistence-{}",
+            Uuid::new_v4()
+        ));
+        fs::write(&blocking_parent, b"not a directory").unwrap();
+        let existing = build_registered_device(registration("device-1", "registered-name").request);
+        let mut devices = HashMap::new();
+        devices.insert("device-1".into(), existing);
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(blocking_parent.join("state.json")),
+        };
+
+        assert_eq!(
+            state
+                .record_public_probe(public_probe("device-1", true))
+                .await,
+            Err(PublicProbeError::Persistence)
+        );
+        let device = state.devices.lock().await.get("device-1").unwrap().clone();
+        assert!(!device.publicly_serving);
+        assert_eq!(device.public_probe_at, None);
+        let _ = fs::remove_file(blocking_parent);
+    }
+
+    #[tokio::test]
+    async fn public_probe_fails_closed_on_a_mismatched_stored_device() {
+        let mismatched = build_registered_device(registration("device-2", "node").request);
+        let mut devices = HashMap::new();
+        devices.insert("device-1".into(), mismatched);
+        let state = AppState {
+            devices: Arc::new(Mutex::new(devices)),
+            commands: Arc::new(Mutex::new(CommandState::default())),
+            state_path: Arc::new(std::path::PathBuf::from("unused")),
+        };
+
+        assert_eq!(
+            state
+                .record_public_probe(public_probe("device-1", true))
+                .await,
+            Err(PublicProbeError::StateConflict)
         );
     }
 
