@@ -7,6 +7,7 @@ mod fingerprints;
 mod health;
 mod reverse_tunnel;
 mod rotation;
+mod service_health;
 mod state;
 mod tunnel_counters;
 
@@ -23,6 +24,7 @@ use crate::config::load_runtime_config;
 use crate::control_plane::run_control_plane_sync;
 use crate::health::run_health_probe;
 use crate::reverse_tunnel::spawn_reverse_tunnel;
+use crate::service_health::router as service_health_router;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -56,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    let app = router(state);
+    let app = router(state.clone()).merge(service_health_router(state));
     let listener = TcpListener::bind(&loaded.listen).await?;
     info!("host-daemon listening on {}", loaded.listen);
     axum::serve(listener, app).await?;
