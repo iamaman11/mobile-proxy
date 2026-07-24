@@ -297,7 +297,9 @@ fn retired_state_backend_option_is_rejected_before_state_access() {
 
     assert!(!output.status.success());
     assert!(!missing.exists());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--state-backend'"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--state-backend'")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
