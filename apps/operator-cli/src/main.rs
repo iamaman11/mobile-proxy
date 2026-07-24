@@ -13,12 +13,14 @@ mod vm;
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::env;
+use std::path::Path;
 use std::time::Duration;
 
 use crate::cli::{Cli, Command};
 use crate::commands::{run_airplane_study, run_metrics, run_proxy, run_rotate, run_status};
 use crate::device::{install_device_release, rollback_device, verify_device};
 use crate::provision::package_device_release;
+use crate::release_integrity::verify_integrity_manifest;
 use crate::vm::{delete_vm, provision_vm};
 
 #[tokio::main]
@@ -54,6 +56,17 @@ async fn main() -> Result<()> {
         Command::InstallDeviceStack(args) => device_stack::install_device_stack(&args).await?,
         Command::PackageDeviceRelease(args) => package_device_release(&args)?,
         Command::InstallDeviceRelease(args) => install_device_release(&args).await?,
+        Command::VerifyReleaseIntegrity(args) => {
+            verify_integrity_manifest(Path::new(&args.root))?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "format_version": 1,
+                    "release_root": args.root,
+                    "integrity_valid": true
+                })
+            );
+        }
         Command::VerifyDevice(args) => verify_device(&args).await?,
         Command::RollbackDevice(args) => rollback_device(&args).await?,
         Command::GenerateReverseTunnelIdentity(args) => {
