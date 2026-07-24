@@ -73,21 +73,48 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Format and validate Rust workspace
+      - name: Capture Rust validation
+        id: rust
+        shell: bash
         run: |
-          cargo fmt --all
-          cargo fmt --all -- --check
-          if ! cargo clippy --quiet --workspace --all-targets --message-format=short -- -D warnings > /tmp/clippy.log 2>&1; then
-            echo 'strict Clippy failed'
-            grep -E 'error(\[|:)|warning:' /tmp/clippy.log | tail -n 120 || true
-            tail -n 80 /tmp/clippy.log
-            exit 1
+          set +e
+          : > /tmp/rust-diagnostic.log
+          cargo fmt --all >> /tmp/rust-diagnostic.log 2>&1
+          fmt_status=$?
+          cargo fmt --all -- --check >> /tmp/rust-diagnostic.log 2>&1
+          fmt_check_status=$?
+          cargo clippy --quiet --workspace --all-targets --message-format=short -- -D warnings >> /tmp/rust-diagnostic.log 2>&1
+          clippy_status=$?
+          if [ "$clippy_status" -eq 0 ]; then
+            cargo test --quiet --workspace >> /tmp/rust-diagnostic.log 2>&1
+            test_status=$?
+          else
+            test_status=0
           fi
-          if ! cargo test --quiet --workspace > /tmp/tests.log 2>&1; then
-            echo 'workspace tests failed'
-            tail -n 160 /tmp/tests.log
-            exit 1
-          fi
+          status=0
+          for candidate in "$fmt_status" "$fmt_check_status" "$clippy_status" "$test_status"; do
+            if [ "$candidate" -ne 0 ]; then
+              status="$candidate"
+              break
+            fi
+          done
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload Rust diagnostic
+        if: steps.rust.outputs.status != '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: public-probe-rust-diagnostic
+          path: /tmp/rust-diagnostic.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail on Rust validation error
+        if: steps.rust.outputs.status != '0'
+        run: |
+          tail -n 160 /tmp/rust-diagnostic.log
+          exit 1
 
       - name: Verify exact production scope
         run: |
