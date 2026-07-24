@@ -1,3 +1,17 @@
+mod snapshot_error;
+mod snapshot_rows;
+mod snapshot_validation;
+
+pub mod snapshot;
+
+pub use snapshot::{
+    CommandQueues, ControlPlaneSnapshot, DeviceMap, ReplayRecord, SNAPSHOT_FORMAT_VERSION,
+};
+pub use snapshot_error::{SnapshotError, SnapshotViolation};
+pub use snapshot_rows::{
+    CommandResultRow, DeviceRow, IdempotencyClaimRow, PendingCommandRow, SnapshotRows,
+};
+
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -368,5 +382,7 @@ fn require_nonempty(value: &str, field: &'static str) -> Result<(), StoreError> 
     Ok(())
 }
 
+#[cfg(test)]
+mod snapshot_tests;
 #[cfg(test)]
 mod tests;
