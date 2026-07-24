@@ -15,6 +15,28 @@ from pathlib import Path
 from typing import Any
 
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_EXPECTED_REPOSITORY = "iamaman11/mobile-proxy"
+_EXPECTED_WORKFLOW = "Software Release Candidate"
+_REQUIRED_SOFTWARE_CHECKS = {
+    "architecture_boundaries",
+    "digest_policy",
+    "python_regressions",
+    "rustfmt",
+    "strict_clippy",
+    "workspace_tests",
+    "process_liveness_readiness",
+    "sqlite_backup_restore",
+    "sqlite_clean_environment_restore",
+    "quic_forced_fallback",
+    "tls_tcp_reserve",
+    "quic_recovery",
+    "mixed_proxy",
+    "socks5_proxy",
+    "http_proxy",
+    "http_connect",
+    "wireguard_rollback_compatibility",
+    "release_integrity_policy",
+}
 _TRANSPORT_BY_STAGE = {
     "online": "quic",
     "post-reboot": "quic",
@@ -54,6 +76,9 @@ def git_output(*arguments: str) -> str:
 
 
 def verify_candidate(evidence: dict[str, Any]) -> str:
+    require(evidence.get("format_version") == 1, "candidate evidence version is unsupported")
+    require(evidence.get("repository") == _EXPECTED_REPOSITORY, "candidate evidence repository differs")
+    require(evidence.get("workflow") == _EXPECTED_WORKFLOW, "candidate evidence workflow differs")
     candidate_sha = evidence.get("candidate_sha")
     require(
         isinstance(candidate_sha, str) and _SHA_PATTERN.fullmatch(candidate_sha) is not None,
@@ -63,6 +88,16 @@ def verify_candidate(evidence: dict[str, Any]) -> str:
     require(
         evidence.get("physical_phone_acceptance_required") is True,
         "candidate evidence does not require the physical gate",
+    )
+    accepted_checks = evidence.get("accepted_checks")
+    require(isinstance(accepted_checks, list), "candidate evidence checks are invalid")
+    require(
+        all(isinstance(check, str) and len(check) <= 64 for check in accepted_checks),
+        "candidate evidence checks are invalid",
+    )
+    require(
+        _REQUIRED_SOFTWARE_CHECKS.issubset(set(accepted_checks)),
+        "candidate evidence is missing required software checks",
     )
     require(git_output("rev-parse", "HEAD") == candidate_sha, "checkout SHA differs from candidate")
     require(not git_output("status", "--porcelain"), "candidate checkout is not clean")
@@ -81,6 +116,11 @@ def request_json(url: str, token: str | None = None) -> dict[str, Any] | list[An
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
         raise AcceptanceFailure("health API request failed") from error
     require(isinstance(value, (dict, list)), "health API returned an invalid JSON value")
+    return value
+
+
+def require_object(value: dict[str, Any] | list[Any], name: str) -> dict[str, Any]:
+    require(isinstance(value, dict), f"{name} response is invalid")
     return value
 
 
@@ -106,11 +146,15 @@ def prove_proxy_surfaces(
     https_probe_url: str,
 ) -> dict[str, bool]:
     curl_proxy(["--socks5-hostname", f"{proxy_host}:1080", http_probe_url])
+    curl_proxy(["--proxy", f"http://{proxy_host}:1080", http_probe_url])
+    curl_proxy(["--proxy", f"http://{proxy_host}:1080", https_probe_url])
     curl_proxy(["--socks5-hostname", f"{proxy_host}:1081", http_probe_url])
     curl_proxy(["--proxy", f"http://{proxy_host}:3128", http_probe_url])
     curl_proxy(["--proxy", f"http://{proxy_host}:3128", https_probe_url])
     return {
-        "mixed_1080": True,
+        "mixed_1080_socks5": True,
+        "mixed_1080_http": True,
+        "mixed_1080_connect": True,
         "socks5_1081": True,
         "http_3128": True,
         "http_connect_3128": True,
@@ -128,17 +172,15 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
     require(host_token != "", f"{args.host_token_env} is required")
     require(control_token != "", f"{args.control_token_env} is required")
 
-    host_live = request_json(f"{host_base}/livez")
-    host_ready = request_json(f"{host_base}/readyz")
-    control_ready = request_json(f"{control_base}/readyz")
+    host_live = require_object(request_json(f"{host_base}/livez"), "host liveness")
+    host_ready = require_object(request_json(f"{host_base}/readyz"), "host readiness")
+    control_ready = require_object(request_json(f"{control_base}/readyz"), "control-plane readiness")
     require(host_live.get("status") == "live", "host process is not live")
     require(host_ready.get("status") == "ready", "host process is not ready")
     require(control_ready.get("status") == "ready", "control plane is not ready")
 
-    health = request_json(f"{host_base}/v1/health", host_token)
-    status = request_json(f"{host_base}/v1/status", host_token)
-    require(isinstance(health, dict), "host health response is invalid")
-    require(isinstance(status, dict), "host status response is invalid")
+    health = require_object(request_json(f"{host_base}/v1/health", host_token), "host health")
+    status = require_object(request_json(f"{host_base}/v1/status", host_token), "host status")
 
     expected_transport = _TRANSPORT_BY_STAGE.get(args.stage)
     if expected_transport is not None:
@@ -178,6 +220,7 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
             "control_plane_ready": True,
         },
         "device_inventory_present": True,
+        "expected_device_present": bool(args.device_id),
         "reverse_tunnel": {
             "connected": health.get("reverse_tunnel_connected"),
             "active_transport": health.get("reverse_tunnel_active_transport"),
@@ -202,7 +245,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--proxy-host", required=True)
     parser.add_argument("--http-probe-url", required=True)
     parser.add_argument("--https-probe-url", required=True)
-    parser.add_argument("--device-id")
+    parser.add_argument("--device-id", required=True)
     parser.add_argument("--host-token-env", default="HOST_ADMIN_TOKEN")
     parser.add_argument("--control-token-env", default="CONTROL_PLANE_ADMIN_TOKEN")
     parser.add_argument("--output", type=Path, required=True)
