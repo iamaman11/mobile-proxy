@@ -58,7 +58,9 @@ jobs:
             echo "ce50b4fbc0524894d58f2e3ffbd0d6faa66c299aaceb7f3f9764497f1487edb0  /tmp/exact-session-binding.py.gz" | sha256sum --check --strict
             gzip --decompress --stdout /tmp/exact-session-binding.py.gz > /tmp/exact-session-binding.py
             echo "eab13b291cf5037ba1236942cc8937292505032084b2de227677cc7993780b20  /tmp/exact-session-binding.py" | sha256sum --check --strict
+            python3 .agent/repair-exact-session-transform.py /tmp/exact-session-binding.py
             python3 -m py_compile /tmp/exact-session-binding.py
+            sha256sum /tmp/exact-session-binding.py
           } >> "$log" 2>&1
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
