@@ -42,7 +42,8 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(curl_proxy.call_count, 6)
         for call in curl_proxy.call_args_list:
-            self.assertEqual(call.args[0][0:2], ["--proxy-user", "user:password"])
+            self.assertEqual(call.args[1], "user:password")
+            self.assertNotIn("--proxy-user", call.args[0])
         self.assertEqual(
             result,
             {
@@ -54,6 +55,17 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
                 "http_connect_3128": True,
             },
         )
+
+    @mock.patch.object(MODULE.subprocess, "run")
+    def test_curl_uses_stdin_credentials_and_disables_no_proxy(self, run):
+        MODULE.curl_proxy(["--proxy", "http://proxy.example:3128", "https://probe/"], "u:p")
+        command = run.call_args.args[0]
+        self.assertNotIn("u:p", command)
+        self.assertIn("--noproxy", command)
+        self.assertIn("--config", command)
+        self.assertIn('proxy-user = "u:p"', run.call_args.kwargs["input"])
+        self.assertEqual(run.call_args.kwargs["env"]["NO_PROXY"], "")
+        self.assertEqual(run.call_args.kwargs["env"]["no_proxy"], "")
 
     def test_incomplete_invalid_or_wrong_source_evidence_fails_closed(self):
         evidence = self.evidence()
