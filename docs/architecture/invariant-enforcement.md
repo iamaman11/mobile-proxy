@@ -1,7 +1,7 @@
 # Invariant enforcement audit
 
 Status: normative governance companion  
-Baseline `main`: `dd49efd7d90c85ecd6f9a05ab99744b137ff6042`
+Baseline `main`: `d49a9208f5a586a5d51017547b2e17f9470bb2e8`
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -10,7 +10,7 @@ Architecture documents define required behavior, but prose alone is not enforcem
 
 The matrix covers the normative requirements extracted from:
 
-- `docs/ULTIMATE_IMPLEMENTATION_PLAN.md`;
+- `docs/PRODUCTION_BASELINE_PLAN.md`;
 - `docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md`;
 - `docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md`;
 - `docs/architecture/foundation-primitives.md`;
@@ -33,13 +33,15 @@ The audit contains 67 grouped invariant IDs:
 
 | Status | Count |
 | --- | ---: |
-| `enforced` | 26 |
-| `partially_enforced` | 21 |
-| `planned` | 13 |
-| `not_applicable_yet` | 7 |
+| `enforced` | 27 |
+| `partially_enforced` | 20 |
+| `planned` | 12 |
+| `not_applicable_yet` | 8 |
 | `review_only` | 0 |
 
 Grouping is deliberate: one ID may cover a coherent normative rule repeated in several sections, but its source anchor and scope must remain specific enough to review. The validator carries an independent required-ID set, so deleting a row and deleting it from the JSON catalog does not silently pass.
+
+The matrix now pins the canonical Production Baseline Plan directly. The temporary compatibility-pointer waiver has been removed, and future-only concepts are recorded only as inactive activation conditions rather than active implementation commitments.
 
 ## What is currently machine-enforced
 
@@ -57,23 +59,21 @@ The permanent `Rust Quality` workflow proves only the controls referenced by mat
 - bounded and expiring reverse-tunnel pending streams, device/session binding and heartbeat freshness;
 - the currently implemented formatting, strict Clippy and workspace test suite.
 
-This list is not a claim that every rule in ADR-001 or the Ultimate Plan is enforced.
+This list is not a claim that every rule in ADR-001 or the Production Baseline Plan is enforced.
 
 ## Material open gaps
 
 The highest-impact active gaps remain explicit in the matrix:
 
-- single owner per aggregate and application ports for the remaining mutation routes;
-- thin transport handlers beyond the extracted command lifecycle and device-registration routes, plus prohibition of SQL or business transitions in all HTTP routes;
-- durable SQLite canonical state, durable acknowledgement history, transactional audit/outbox semantics and JSON migration;
-- repository-wide typed status/error taxonomies;
+- explicit ownership for current mutable state and application ports for heartbeat and public-probe mutations;
+- thin transport handlers for the remaining baseline routes, plus prohibition of SQL or business transitions in HTTP handlers;
+- the closed SQLite baseline inventory, transaction boundaries, JSON migration and exercised rollback;
+- repository-wide typed status/error taxonomies where current baseline behavior still uses raw strings;
 - application-specific canonical-field detection;
 - repository-wide bounded queue/map/task enforcement;
 - secret-bearing `Debug` and log detection;
-- generated protobuf isolation and future `buf` gates;
-- generic migration/rollback governance for future digest contracts;
 - removal of runtime fingerprint legacy readers after the accepted compatibility window;
-- physical reserve-tunnel acceptance on one immutable SHA.
+- health-surface separation, backup/restore and physical reserve-tunnel acceptance on one immutable SHA.
 
 ## Command lifecycle and device-registration application-port enforcement
 

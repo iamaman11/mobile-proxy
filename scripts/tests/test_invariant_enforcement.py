@@ -30,22 +30,14 @@ class InvariantEnforcementTests(unittest.TestCase):
         id_column = matrix["columns"].index("id")
         return next(row for row in matrix["invariants"] if row[id_column] == invariant_id)
 
-    def test_repository_matrix_passes_except_superseded_roadmap_blob(self):
-        pointer = REPO_ROOT / "docs/ULTIMATE_IMPLEMENTATION_PLAN.md"
-        body = pointer.read_text(encoding="utf-8")
-        for marker in (
-            "stable compatibility entry point",
-            "Production Baseline Plan",
-            "future/ULTIMATE_IMPLEMENTATION_PLAN.md",
-            "not an active backlog",
-        ):
-            self.assertIn(marker, body)
-        errors = [
-            error
-            for error in MODULE.validate_repository(REPO_ROOT)
-            if not error.startswith("source U changed without invariant re-audit:")
-        ]
-        self.assertEqual(errors, [])
+    def test_repository_matrix_passes_with_canonical_baseline_pin(self):
+        matrix = self.load_matrix()
+        self.assertEqual(
+            matrix["sources"]["P"]["path"],
+            "docs/PRODUCTION_BASELINE_PLAN.md",
+        )
+        self.assertNotIn("U", matrix["sources"])
+        self.assertEqual(MODULE.validate_repository(REPO_ROOT), [])
 
     def test_missing_row_is_rejected(self):
         def change(matrix):
