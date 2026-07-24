@@ -920,7 +920,12 @@ dependencies = [
 name = "mobile-proxy-control-plane-sqlite"
 version = "0.1.0"
 dependencies = [
+ "mobile-proxy-application",
+ "mobile-proxy-foundation",
+ "proxy-core",
  "rusqlite",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
