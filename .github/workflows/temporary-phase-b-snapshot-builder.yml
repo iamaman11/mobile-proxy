@@ -1,6 +1,9 @@
 name: Temporary Phase B Snapshot Builder
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - agent/phase-b-state-snapshot-mapping
@@ -24,20 +27,12 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
           rustup default stable
 
-      - name: Publish canonical formatting
-        run: |
-          cargo fmt --all
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add crates/control-plane-sqlite
-          if ! git diff --cached --quiet; then
-            git commit -m "Apply canonical snapshot formatting [skip ci]"
-            git push origin HEAD:agent/phase-b-state-snapshot-mapping
-          fi
-
       - name: Resolve existing lockfile and validate
         run: |
+          cargo fmt --all -- --check
           cargo check --workspace --all-targets
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Cargo.lock
           if ! git diff --cached --quiet; then
             git commit -m "Update snapshot path dependencies [skip ci]"
