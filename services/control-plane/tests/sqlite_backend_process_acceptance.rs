@@ -250,7 +250,10 @@ async fn sqlite_restart_replay_and_json_rollback_work_through_real_daemon() {
         let devices = list_devices(&client, &daemon).await;
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].node_id, DEVICE_ID);
-        assert_eq!(next_command(&client, &daemon).await, Some(original_command.clone()));
+        assert_eq!(
+            next_command(&client, &daemon).await,
+            Some(original_command.clone())
+        );
 
         let acknowledgement = client
             .post(format!(
