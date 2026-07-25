@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Verify that the phone and VM contain the exact locally packaged candidate files."""
+"""Verify exact candidate deployment without creating new internal digest contracts."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -26,7 +28,6 @@ _MAX_ENTRIES = 128
 _STOCK_WIREGUARD_PACKAGE = "com.wireguard.android"
 _SUPPORTED_DEVICE_OWNERS = {"first_party_reverse_tunnel", "stock_wireguard_bridge"}
 _DYNAMIC_VM_RELEASE_PATHS = {"nginx/mobile-public-proxy.conf"}
-
 _VM_REMOTE_PATHS = {
     "bin/control-plane": "/opt/mobile-relaycontrolpoint/current/control-plane",
     "bin/relay-gate": "/opt/mobile-relaycontrolpoint/current/relay-gate",
@@ -45,18 +46,6 @@ _VM_REMOTE_PATHS = {
 }
 
 
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _safe_relative_path(raw: Any) -> str:
     require(isinstance(raw, str) and 0 < len(raw) <= 256, "release path is invalid")
     path = PurePosixPath(raw)
@@ -64,6 +53,14 @@ def _safe_relative_path(raw: Any) -> str:
     require(".." not in path.parts and "." not in path.parts, "release path escapes its root")
     require(all(part and part not in {"/", "\\"} for part in path.parts), "release path is invalid")
     return path.as_posix()
+
+
+def _run_bytes(command: list[str], failure: str) -> bytes:
+    try:
+        result = subprocess.run(command, check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise AcceptanceFailure(failure) from error
+    return result.stdout
 
 
 def verify_local_release_integrity(root: Path) -> None:
@@ -85,12 +82,10 @@ def verify_local_release_integrity(root: Path) -> None:
 
 
 def load_release_inventory(root: Path) -> list[str]:
-    manifest_path = root / _MANIFEST_NAME
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads((root / _MANIFEST_NAME).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise AcceptanceFailure("release integrity manifest is unreadable") from error
-
     require(isinstance(manifest, dict), "release integrity manifest must be an object")
     require(manifest.get("format_version") == 1, "release manifest version is unsupported")
     require(manifest.get("algorithm") == _EXPECTED_ALGORITHM, "release digest algorithm is unsupported")
@@ -107,19 +102,25 @@ def load_release_inventory(root: Path) -> list[str]:
         seen.add(relative)
         digest = entry.get("digest")
         size = entry.get("size_bytes")
-        require(isinstance(digest, str) and 1 <= len(digest) <= 128, "release digest is invalid")
+        require(
+            isinstance(digest, str)
+            and digest.startswith("b3:")
+            and len(digest) == 67
+            and all(character in "0123456789abcdef" for character in digest[3:]),
+            "release digest is invalid",
+        )
         require(isinstance(size, int) and 0 <= size <= 2**63 - 1, "release size is invalid")
         local = root / relative
         require(local.is_file(), "release inventory file is missing")
         require(local.stat().st_size == size, "release inventory size differs from the packaged file")
         paths.append(relative)
+    require(paths == sorted(paths), "release inventory is not path-sorted")
     return paths
 
 
 def verify_device_release_metadata(root: Path, candidate_sha: str) -> None:
-    metadata_path = root / "release-metadata.json"
     try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata = json.loads((root / "release-metadata.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise AcceptanceFailure("device release metadata is unreadable") from error
     require(isinstance(metadata, dict), "device release metadata must be an object")
@@ -129,18 +130,17 @@ def verify_device_release_metadata(root: Path, candidate_sha: str) -> None:
 
 
 def release_tunnel_owner(root: Path) -> str:
-    path = root / "config" / "host-daemon.json"
     try:
-        config = json.loads(path.read_text(encoding="utf-8"))
+        config = json.loads((root / "config/host-daemon.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise AcceptanceFailure("device host configuration is unreadable") from error
     require(isinstance(config, dict), "device host configuration is invalid")
     wireguard = config.get("wireguard")
+    reverse = config.get("reverse_tunnel")
     require(isinstance(wireguard, dict), "device WireGuard configuration is invalid")
+    require(isinstance(reverse, dict), "device reverse-tunnel configuration is invalid")
     owner = wireguard.get("owner")
     require(owner in _SUPPORTED_DEVICE_OWNERS, "device release tunnel owner is unsupported")
-    reverse = config.get("reverse_tunnel")
-    require(isinstance(reverse, dict), "device reverse-tunnel configuration is invalid")
     if owner == "first_party_reverse_tunnel":
         require(wireguard.get("enabled") is False, "reverse release unexpectedly enables WireGuard")
         require(reverse.get("enabled") is True, "reverse release disables reverse tunnel")
@@ -150,19 +150,8 @@ def release_tunnel_owner(root: Path) -> str:
     return owner
 
 
-def _run_bytes(command: list[str], failure: str) -> bytes:
-    try:
-        result = subprocess.run(command, check=True, capture_output=True)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise AcceptanceFailure(failure) from error
-    return result.stdout
-
-
 def _adb_prefix(serial: str | None) -> list[str]:
-    prefix = ["adb"]
-    if serial:
-        prefix += ["-s", serial]
-    return prefix
+    return ["adb", *( ["-s", serial] if serial else [] )]
 
 
 def _adb_text(serial: str | None, arguments: list[str], failure: str) -> str:
@@ -205,7 +194,6 @@ def verify_android_vpn_owner(serial: str | None, expected_owner: str) -> None:
     if expected_owner == "first_party_reverse_tunnel":
         require(active_uid is None, "Android VPN remained active during reverse-tunnel deployment")
         return
-
     packages = _adb_text(
         serial,
         ["shell", "cmd", "package", "list", "packages", "-U", _STOCK_WIREGUARD_PACKAGE],
@@ -224,49 +212,64 @@ def verify_device_files(root: Path, paths: list[str], serial: str | None, device
             [*prefix, "exec-out", "su", "0", "cat", remote],
             "failed to read deployed device release file",
         )
-        local = root / relative
-        require(len(remote_bytes) == local.stat().st_size, "deployed device file size differs")
-        require(_sha256_bytes(remote_bytes) == _sha256_file(local), "deployed device file differs")
+        require(remote_bytes == (root / relative).read_bytes(), "deployed device file differs")
 
 
-def _parse_sha256sum(output: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in output.splitlines():
-        parts = line.strip().split(maxsplit=1)
-        require(len(parts) == 2 and len(parts[0]) == 64, "VM digest output is invalid")
-        digest, path = parts
-        path = path.lstrip("*")
-        require(all(character in "0123456789abcdef" for character in digest), "VM digest is invalid")
-        require(path not in result, "VM digest output contains duplicate paths")
-        result[path] = digest
-    return result
+def _write_verification_archive(root: Path, paths: list[str]) -> Path:
+    handle = tempfile.NamedTemporaryFile(prefix="mobile-proxy-vm-verify-", suffix=".tar", delete=False)
+    handle.close()
+    archive = Path(handle.name)
+    try:
+        with tarfile.open(archive, "w") as bundle:
+            for relative in paths:
+                bundle.add(root / relative, arcname=relative, recursive=False)
+    except Exception:
+        archive.unlink(missing_ok=True)
+        raise
+    return archive
 
 
-def verify_vm_files(args: argparse.Namespace, root: Path, paths: list[str]) -> None:
+def verify_vm_files(args: argparse.Namespace, root: Path, paths: list[str], candidate_sha: str) -> None:
     expected_inventory = set(_VM_REMOTE_PATHS) | _DYNAMIC_VM_RELEASE_PATHS
     require(set(paths) == expected_inventory, "VM release inventory does not match the supported deployment map")
-    remote_paths = list(_VM_REMOTE_PATHS.values())
-    remote_command = "sudo sha256sum -- " + " ".join(shlex.quote(path) for path in remote_paths)
-    command = [
-        "gcloud",
-        "compute",
-        "ssh",
-        f"{args.vm_ssh_user}@{args.vm_instance}",
-        "--project",
-        args.vm_project,
-        "--zone",
-        args.vm_zone,
-        "--ssh-key-file",
-        args.vm_ssh_key,
+    static_paths = sorted(_VM_REMOTE_PATHS)
+    archive = _write_verification_archive(root, static_paths)
+    remote_base = f"/tmp/mobile-proxy-verify-{candidate_sha[:12]}-{os.getpid()}"
+    remote_archive = f"{remote_base}.tar"
+    target = f"{args.vm_ssh_user}@{args.vm_instance}"
+    common = [
+        "--project", args.vm_project,
+        "--zone", args.vm_zone,
+        "--ssh-key-file", args.vm_ssh_key,
         "--tunnel-through-iap",
-        "--command",
-        remote_command,
     ]
-    output = _run_bytes(command, "failed to read deployed VM release digests").decode("utf-8", "strict")
-    remote_hashes = _parse_sha256sum(output)
-    require(set(remote_hashes) == set(remote_paths), "VM digest output is incomplete")
-    for relative, remote in _VM_REMOTE_PATHS.items():
-        require(remote_hashes[remote] == _sha256_file(root / relative), "deployed VM file differs")
+    try:
+        _run_bytes(
+            ["gcloud", "compute", "scp", *common, str(archive), f"{target}:{remote_archive}"],
+            "failed to upload exact VM verification payload",
+        )
+        comparisons = "\n".join(
+            f"cmp -s -- {shlex.quote(remote_base + '/' + relative)} {shlex.quote(remote)}"
+            for relative, remote in sorted(_VM_REMOTE_PATHS.items())
+        )
+        command = f"""set -eu
+TMP={shlex.quote(remote_base)}
+ARCHIVE={shlex.quote(remote_archive)}
+cleanup() {{ sudo rm -rf \"$TMP\" \"$ARCHIVE\"; }}
+trap cleanup EXIT
+sudo rm -rf \"$TMP\"
+sudo mkdir -p \"$TMP\"
+sudo tar -xf \"$ARCHIVE\" -C \"$TMP\"
+{comparisons}
+printf 'exact-byte-match\\n'
+"""
+        output = _run_bytes(
+            ["gcloud", "compute", "ssh", target, *common, "--command", command],
+            "deployed VM file differs from the immutable package",
+        ).decode("utf-8", "strict")
+        require(output.strip().endswith("exact-byte-match"), "VM exact-byte comparison did not complete")
+    finally:
+        archive.unlink(missing_ok=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -275,11 +278,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device-release-root", type=Path, required=True)
     parser.add_argument("--device-root", default="/data/adb/mobile-proxy-node")
     parser.add_argument("--device-serial")
-    parser.add_argument(
-        "--expected-tunnel-owner",
-        choices=sorted(_SUPPORTED_DEVICE_OWNERS),
-        help="Optional assertion; the authoritative owner is read from the packaged host config",
-    )
+    parser.add_argument("--expected-tunnel-owner", choices=sorted(_SUPPORTED_DEVICE_OWNERS))
     parser.add_argument("--vm-release-root", type=Path, required=True)
     parser.add_argument("--vm-project", required=True)
     parser.add_argument("--vm-zone", required=True)
@@ -302,14 +301,9 @@ def main() -> int:
         if args.expected_tunnel_owner is not None:
             require(args.expected_tunnel_owner == expected_owner, "requested tunnel owner differs from package")
         vm_paths = load_release_inventory(args.vm_release_root)
-        verify_device_files(
-            args.device_release_root,
-            device_paths,
-            args.device_serial,
-            args.device_root,
-        )
+        verify_device_files(args.device_release_root, device_paths, args.device_serial, args.device_root)
         verify_android_vpn_owner(args.device_serial, expected_owner)
-        verify_vm_files(args, args.vm_release_root, vm_paths)
+        verify_vm_files(args, args.vm_release_root, vm_paths, candidate_sha)
         report = {
             "format_version": 1,
             "candidate_sha": candidate_sha,
@@ -321,10 +315,11 @@ def main() -> int:
             "device_deployment_match": True,
             "android_vpn_owner_match": True,
             "vm_deployment_match": True,
+            "comparison_contract": "exact-bytes",
             "accepted": True,
         }
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    except (AcceptanceFailure, UnicodeError) as error:
+    except (AcceptanceFailure, UnicodeError, OSError, tarfile.TarError) as error:
         print(f"physical deployment verification failed: {error}", file=sys.stderr)
         return 1
     return 0
