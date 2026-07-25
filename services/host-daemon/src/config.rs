@@ -20,6 +20,7 @@ use crate::state::{RotationCommands, RuntimeState};
 
 const PRIMARY_OWNER: &str = "first_party_reverse_tunnel";
 const ROLLBACK_OWNER: &str = "stock_wireguard_bridge";
+const APP_OWNED_OWNER: &str = "first_party_vpn_service";
 const MAX_SECRET_LENGTH: usize = 4096;
 const MAX_URLS: usize = 8;
 
@@ -360,9 +361,9 @@ fn reverse_tunnel_config(
     tunnel_owner: &str,
 ) -> Result<Option<ReverseTunnelClientConfig>> {
     let config = file_config.reverse_tunnel.as_ref();
-    if tunnel_owner == ROLLBACK_OWNER {
+    if matches!(tunnel_owner, ROLLBACK_OWNER | APP_OWNED_OWNER) {
         if config.is_some_and(|value| value.enabled.unwrap_or(false)) {
-            bail!("stock WireGuard rollback must not enable the reverse tunnel")
+            bail!("WireGuard tunnel owners must not enable the reverse tunnel")
         }
         return Ok(None);
     }
@@ -484,9 +485,10 @@ fn load_file_config(path: Option<&str>) -> Result<(Option<FileConfig>, Option<Co
 
 fn validate_owner_flags(owner: &str, wireguard_enabled: bool) -> Result<()> {
     match (owner, wireguard_enabled) {
-        (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
+        (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) | (APP_OWNED_OWNER, true) => Ok(()),
         (PRIMARY_OWNER, true) => bail!("native reverse-tunnel owner must disable WireGuard"),
         (ROLLBACK_OWNER, false) => bail!("stock rollback owner must enable WireGuard"),
+        (APP_OWNED_OWNER, false) => bail!("first-party VPN owner must enable WireGuard"),
         _ => bail!("unsupported tunnel owner"),
     }
 }

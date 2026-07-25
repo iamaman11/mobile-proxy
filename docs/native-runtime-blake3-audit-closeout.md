@@ -20,12 +20,13 @@ The normal phone runtime is rooted and native:
 - no active Android VPN;
 - no `tun0` dependency.
 
-The only production tunnel-owner values are:
+The supported tunnel-owner values are:
 
 - `first_party_reverse_tunnel` — default and primary;
-- `stock_wireguard_bridge` — explicit rollback compatibility.
+- `stock_wireguard_bridge` — explicit stock WireGuard rollback compatibility;
+- `first_party_vpn_service` — app-owned Android `VpnService` compatibility mode.
 
-`first_party_vpn_service` is removed from packaging, installation, verification, runtime ownership and recovery. The optional Android project remains independently build-tested but is not part of the production device stack.
+`first_party_vpn_service` is not the primary production transport. It remains an explicitly selected compatibility owner that packages app-owned WireGuard configuration, verifies the actual `com.example.mobileproxy` VPN owner UID and reuses the same rooted runtime supervision contract.
 
 ## Corrected findings
 
@@ -34,10 +35,11 @@ The only production tunnel-owner values are:
 - package, install-stack, install-release and verify default to native reverse tunnel;
 - missing, unknown or contradictory owner configuration fails closed;
 - owner and `wireguard.enabled` must agree;
-- normal installation never installs the Android APK;
+- normal native reverse-tunnel installation never installs or requires the Android APK;
 - normal verification requires no active Android VPN;
 - stock rollback verifies the actual `com.wireguard.android` owner UID;
-- native startup stops stock always-on VPN state before serving.
+- app-owned compatibility verifies the actual `com.example.mobileproxy` owner UID;
+- native startup stops incompatible stock or app-owned Android VPN state before serving.
 
 ### Device deployment safety
 
@@ -93,6 +95,7 @@ Evidence v2 explicitly records:
 - native reverse-tunnel primary;
 - no Android VPN requirement for primary runtime;
 - stock WireGuard rollback;
+- app-owned WireGuard compatibility path available for controlled physical testing;
 - `software_10_of_10_ready=true`;
 - `physical_phone_acceptance_required=true`;
 - `baseline_complete=false`.

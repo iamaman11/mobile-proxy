@@ -15,7 +15,9 @@ use tokio::time::sleep;
 
 pub(crate) const PRIMARY_TUNNEL_OWNER: &str = "first_party_reverse_tunnel";
 pub(crate) const STOCK_WIREGUARD_OWNER: &str = "stock_wireguard_bridge";
+pub(crate) const APP_OWNED_TUNNEL_OWNER: &str = "first_party_vpn_service";
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
+const APP_OWNED_TUNNEL_PACKAGE: &str = "com.example.mobileproxy";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DeviceManifest {
@@ -67,9 +69,9 @@ pub(crate) fn release_root(output_dir: &str, release_id: &str) -> Result<PathBuf
 
 pub(crate) fn validate_tunnel_owner(value: &str) -> Result<()> {
     match value {
-        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER => Ok(()),
+        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER | APP_OWNED_TUNNEL_OWNER => Ok(()),
         other => bail!(
-            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER} or {STOCK_WIREGUARD_OWNER}"
+            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER}, {STOCK_WIREGUARD_OWNER}, or {APP_OWNED_TUNNEL_OWNER}"
         ),
     }
 }
@@ -323,6 +325,19 @@ pub(crate) fn assert_active_vpn_owner(
                 )
             }
         }
+        APP_OWNED_TUNNEL_OWNER => {
+            let expected_uid = package_uid(device_serial, APP_OWNED_TUNNEL_PACKAGE)?;
+            let actual_uid =
+                active_vpn_owner_uid.context("active Android VPN owner uid was not found")?;
+            if actual_uid != expected_uid {
+                bail!(
+                    "active Android VPN owner mismatch: expected_package={} expected_uid={} actual_owner_uid={}",
+                    APP_OWNED_TUNNEL_PACKAGE,
+                    expected_uid,
+                    actual_uid
+                )
+            }
+        }
         other => bail!("unsupported required tunnel owner {other}"),
     }
     Ok(())
@@ -494,8 +509,9 @@ fn detect_tool(candidates: &[String], tool_name: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PRIMARY_TUNNEL_OWNER, is_ipv4, parse_active_vpn_owner_uid, parse_package_uid,
-        shell_quote_validated, validate_device_path, validate_release_id, validate_tunnel_owner,
+        APP_OWNED_TUNNEL_OWNER, PRIMARY_TUNNEL_OWNER, is_ipv4, parse_active_vpn_owner_uid,
+        parse_package_uid, shell_quote_validated, validate_device_path, validate_release_id,
+        validate_tunnel_owner,
     };
 
     #[test]
@@ -513,7 +529,7 @@ mod tests {
             None
         );
         assert!(validate_tunnel_owner(PRIMARY_TUNNEL_OWNER).is_ok());
-        assert!(validate_tunnel_owner("first_party_vpn_service").is_err());
+        assert!(validate_tunnel_owner(APP_OWNED_TUNNEL_OWNER).is_ok());
         assert!(validate_release_id("candidate-1.0").is_ok());
         assert!(validate_release_id("../candidate").is_err());
         assert!(validate_device_path("/data/adb/mobile-proxy-node", "root").is_ok());

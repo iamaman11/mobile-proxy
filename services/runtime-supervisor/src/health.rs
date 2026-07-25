@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::android::{
     bootstrap_cellular_data, bounce_mobile_data, ensure_cellular_default_route,
-    kick_stock_wireguard_bridge, tun0_ready,
+    kick_first_party_vpn_service, kick_stock_wireguard_bridge, tun0_ready,
 };
 use crate::config::{SupervisorConfig, TunnelOwner};
 use crate::runtime_adapter::{legacy_readiness_from_state, state_from_legacy_readiness};
@@ -80,10 +80,18 @@ pub async fn reconcile_wireguard(config: &SupervisorConfig) {
 
     warn!(
         tunnel_owner = config.tunnel_owner.as_str(),
-        "stock WireGuard rollback is enabled but tun0 is absent; attempting tunnel kick"
+        "WireGuard tunnel owner is enabled but tun0 is absent; attempting tunnel kick"
     );
-    if config.tunnel_owner == TunnelOwner::StockWireguardBridge {
-        kick_stock_wireguard_bridge().await;
+    match config.tunnel_owner {
+        TunnelOwner::StockWireguardBridge => kick_stock_wireguard_bridge().await,
+        TunnelOwner::FirstPartyVpnService => {
+            if let Some(path) = config.app_tunnel_config.as_ref()
+                && let Err(error) = kick_first_party_vpn_service(path).await
+            {
+                warn!("first-party VPN tunnel kick failed: {error:#}");
+            }
+        }
+        TunnelOwner::FirstPartyReverseTunnel => {}
     }
 }
 
@@ -100,11 +108,22 @@ pub async fn reconcile_health(
             "runtime lifecycle projection changed"
         );
     }
-    if config.tunnel_owner == TunnelOwner::StockWireguardBridge
-        && health.wg_handshake_recent == Some(false)
-    {
-        warn!("stock WireGuard gateway is unreachable; attempting tunnel kick");
-        kick_stock_wireguard_bridge().await;
+    if health.wg_handshake_recent == Some(false) {
+        match config.tunnel_owner {
+            TunnelOwner::StockWireguardBridge => {
+                warn!("stock WireGuard gateway is unreachable; attempting tunnel kick");
+                kick_stock_wireguard_bridge().await;
+            }
+            TunnelOwner::FirstPartyVpnService => {
+                warn!("first-party VPN gateway is unreachable; attempting tunnel kick");
+                if let Some(path) = config.app_tunnel_config.as_ref()
+                    && let Err(error) = kick_first_party_vpn_service(path).await
+                {
+                    warn!("first-party VPN tunnel kick failed: {error:#}");
+                }
+            }
+            TunnelOwner::FirstPartyReverseTunnel => {}
+        }
     }
 
     if health.cellular_route_ready != Some(false) {

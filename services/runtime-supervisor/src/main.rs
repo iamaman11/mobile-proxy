@@ -35,10 +35,10 @@ async fn main() -> Result<()> {
     let mut state = SupervisorState::new();
 
     cleanup_stale_runtime_processes();
-    if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel
+    if config.tunnel_owner != TunnelOwner::StockWireguardBridge
         && let Err(error) = stop_compatibility_vpns()
     {
-        warn!("failed to stop compatibility VPNs before reverse-tunnel startup: {error:#}");
+        warn!("failed to stop compatibility VPNs before startup: {error:#}");
     }
     reconcile_startup_cellular_bootstrap(&config, &mut state);
 

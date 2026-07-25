@@ -41,6 +41,7 @@ pub struct SupervisorConfig {
     pub proxy_working_dir: PathBuf,
     pub wireguard_enabled: bool,
     pub tunnel_owner: TunnelOwner,
+    pub app_tunnel_config: Option<PathBuf>,
     pub poll_secs: u64,
     pub repair_cooldown_secs: u64,
     pub data_bounce_down_secs: u64,
@@ -51,6 +52,7 @@ pub struct SupervisorConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TunnelOwner {
     StockWireguardBridge,
+    FirstPartyVpnService,
     FirstPartyReverseTunnel,
 }
 
@@ -58,9 +60,10 @@ impl TunnelOwner {
     pub fn parse(raw: &str) -> Result<Self> {
         match raw {
             "stock_wireguard_bridge" => Ok(Self::StockWireguardBridge),
+            "first_party_vpn_service" => Ok(Self::FirstPartyVpnService),
             "first_party_reverse_tunnel" => Ok(Self::FirstPartyReverseTunnel),
             other => bail!(
-                "unsupported tunnel owner {other}; expected stock_wireguard_bridge or first_party_reverse_tunnel"
+                "unsupported tunnel owner {other}; expected stock_wireguard_bridge, first_party_vpn_service, or first_party_reverse_tunnel"
             ),
         }
     }
@@ -68,18 +71,24 @@ impl TunnelOwner {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::StockWireguardBridge => "stock_wireguard_bridge",
+            Self::FirstPartyVpnService => "first_party_vpn_service",
             Self::FirstPartyReverseTunnel => "first_party_reverse_tunnel",
         }
     }
 
     fn validate_wireguard_flag(self, enabled: bool) -> Result<()> {
         match (self, enabled) {
-            (Self::FirstPartyReverseTunnel, false) | (Self::StockWireguardBridge, true) => Ok(()),
+            (Self::FirstPartyReverseTunnel, false)
+            | (Self::StockWireguardBridge, true)
+            | (Self::FirstPartyVpnService, true) => Ok(()),
             (Self::FirstPartyReverseTunnel, true) => {
                 bail!("first_party_reverse_tunnel must not enable WireGuard")
             }
             (Self::StockWireguardBridge, false) => {
                 bail!("stock WireGuard rollback owner requires wireguard.enabled=true")
+            }
+            (Self::FirstPartyVpnService, false) => {
+                bail!("first_party_vpn_service requires wireguard.enabled=true")
             }
         }
     }
@@ -107,6 +116,15 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
     let proxy_config = proxy_config_path(&runtime_root, &proxy_args);
     let tunnel_owner = TunnelOwner::parse(&file.wireguard.owner)?;
     tunnel_owner.validate_wireguard_flag(file.wireguard.enabled)?;
+    let app_tunnel_config = if tunnel_owner == TunnelOwner::FirstPartyVpnService {
+        let path = runtime_root.join("config/app-wireguard.conf");
+        if !path.is_file() {
+            bail!("missing first-party VPN tunnel config: {}", path.display())
+        }
+        Some(path)
+    } else {
+        None
+    };
 
     Ok(SupervisorConfig {
         host_binary: runtime_root.join("bin/host-daemon"),
@@ -119,6 +137,7 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         proxy_working_dir,
         wireguard_enabled: file.wireguard.enabled,
         tunnel_owner,
+        app_tunnel_config,
         poll_secs: cli.poll_secs,
         repair_cooldown_secs: cli.repair_cooldown_secs,
         data_bounce_down_secs: cli.data_bounce_down_secs,
@@ -159,7 +178,10 @@ mod tests {
     fn tunnel_owner_is_explicit_and_fail_closed() {
         assert!(TunnelOwner::parse("").is_err());
         assert!(TunnelOwner::parse("unknown").is_err());
-        assert!(TunnelOwner::parse("first_party_vpn_service").is_err());
+        assert_eq!(
+            TunnelOwner::parse("first_party_vpn_service").unwrap(),
+            TunnelOwner::FirstPartyVpnService
+        );
         assert_eq!(
             TunnelOwner::parse("stock_wireguard_bridge").unwrap(),
             TunnelOwner::StockWireguardBridge
@@ -188,7 +210,17 @@ mod tests {
                 .is_ok()
         );
         assert!(
+            TunnelOwner::FirstPartyVpnService
+                .validate_wireguard_flag(true)
+                .is_ok()
+        );
+        assert!(
             TunnelOwner::StockWireguardBridge
+                .validate_wireguard_flag(false)
+                .is_err()
+        );
+        assert!(
+            TunnelOwner::FirstPartyVpnService
                 .validate_wireguard_flag(false)
                 .is_err()
         );
