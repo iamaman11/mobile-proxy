@@ -1,201 +1,189 @@
 # Mobile Proxy
 
-Reconstructed source tree for the live mobile relay, rebuilt as a Rust-first workspace instead of trying to recreate the lost monorepo byte-for-byte.
+Rust-first mobile relay for exposing authenticated proxy services through a rooted Android device and its cellular connection.
 
-## Purpose
+## Production architecture
 
-- keep a local source-of-truth that matches the current production architecture closely enough to rebuild and evolve it
-- prioritize reliability and operability over historical fidelity
-- keep runtime policy in Rust while moving Android VPN ownership into the first-party app
+The normal device runtime does **not** use Android `VpnService`.
 
-## Layout
-
-- `crates/` - shared Rust crates and future domain/infra libraries
-- `apps/` - operator-facing and user-facing executable applications
-- `services/` - long-running backend and device services
-- `deploy/` - deployable runtime bundles, templates, and device manifests
-- `config/` - example environment files and local configuration inputs
-- root `*.md` documents - architecture map, plan, runtime layout, and operator reference
-- `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` - required reliability drill matrix for reproducible `10/10` acceptance
-
-Current primary entrypoints:
-
-- `crates/proxy-core` - shared Rust models, runtime defaults, and proxy metadata
-- `crates/runtime-domain` - transport-neutral pure runtime lifecycle domain with enforced dependency boundaries
-- `apps/operator-cli` - Rust CLI for status, rotation, airplane timing study, device packaging/install/verify/rollback, and future VM provisioning
-- `services/host-daemon` - phone-local API, rotation executor, health probe, and control-plane sync
-- `services/control-plane` - registry and readiness service baseline
-- `services/relay-gate` - VM-side readiness gate baseline
-- `services/runtime-supervisor` - phone-side owner for process lifecycle and runtime recovery
-- `apps/android-app` - first-party Android VPN lifecycle owner scaffold
-
-## Reality Check
-
-- this repo is a clean reconstruction, not a recovered copy of the original source tree
-- live phone and VM runtimes are the current production reference
-- Rust services here are intentionally simpler than the live stack, but they track the same roles and interfaces
-
-## Security Model
-
-- the control plane requires two different bearer tokens: an admin token for operator/readiness routes and a device token for heartbeat and command-consumer routes
-- control-plane deployment binds to `127.0.0.1:8080`; phones reach it through the certificate-pinned TLS ingress on `8443`, and provisioning removes the legacy public `8080` firewall rule
-- the phone authenticates its QUIC reverse-tunnel session independently with the device token and pins the relay certificate
-- reverse tunnel transport is hybrid: certificate-pinned QUIC/UDP is always attempted first; certificate-pinned TLS/TCP is used only when the mobile network blocks QUIC, and reconnects retry QUIC
-- public proxy ports remain reachable, but return an explicit protocol-level unavailable response when no authenticated phone session is active
-- cellular readiness requires Android `VALIDATED` connectivity and rejects captive-portal/walled-garden sessions even when an `rmnet` default route exists
-- `.secrets/` is ignored by git; generated secret files are written with mode `0600`
-
-## Build
-
-Rust workspace:
-
-```powershell
-cd \\wsl.localhost\Ubuntu\home\bose\projects\mobile-proxy
-cargo build
-cargo test
+```text
+root/Magisk boot service
+  -> runtime-supervisor
+      -> host-daemon
+      -> sing-box on loopback
+          -> certificate-pinned QUIC reverse tunnel
+          -> certificate-pinned TLS/TCP reserve
+              -> relay VM public proxy ports
 ```
 
-Android app:
+The primary tunnel owner is always `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. `stock_wireguard_bridge` is retained only as an explicitly selected rollback compatibility mode. Unknown, missing or contradictory tunnel ownership fails closed.
+
+The Android project under `apps/android-app` is an optional, non-production scaffold/tool. It is not installed by `install-device-stack`, is not a supported runtime tunnel owner and is not required to package, install or verify the rooted production runtime.
+
+## Public compatibility surface
+
+The relay preserves:
+
+- mixed SOCKS5/HTTP proxy on `1080`;
+- SOCKS5 proxy on `1081`;
+- HTTP proxy including CONNECT on `3128`;
+- QUIC as primary reverse transport;
+- certificate-pinned TLS/TCP as automatic reserve;
+- explicit stock WireGuard rollback.
+
+All public proxy paths require authentication. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
+
+## Repository layout
+
+- `crates/foundation` — bounded identifiers and the typed internal BLAKE3 contract;
+- `crates/application` — transport-independent application ports;
+- `crates/control-plane-sqlite` — canonical durable SQLite state and migrations;
+- `crates/reverse-tunnel` — QUIC/TLS transport and proxy forwarding;
+- `apps/operator-cli` — packaging, deployment, verification, rotation and rollback;
+- `services/runtime-supervisor` — rooted phone process and recovery owner;
+- `services/host-daemon` — phone-local health, rotation and control-plane synchronization;
+- `services/control-plane` — durable device/command control plane;
+- `services/reverse-tunnel-server` — relay-side reverse-tunnel endpoint;
+- `services/relay-gate` — relay readiness gate;
+- `deploy` — reproducible runtime templates and manifests;
+- `scripts` — permanent architecture, digest and acceptance gates.
+
+## Cryptographic policy
+
+Project-owned internal content and fingerprint digests use typed BLAKE3-256:
+
+```text
+b3:<64 lowercase hexadecimal characters>
+```
+
+They are derived through `mobile-proxy-foundation::ContentDigest` with a versioned static domain and length framing for every input part. Direct untyped BLAKE3 and new first-party SHA-256 contracts are rejected across production Rust, Python, shell and Kotlin source.
+
+SHA-256 remains only where an external standard requires it, such as TLS/certificate fingerprints, Cargo registry checksums, GitHub artifact digests, OCI/SBOM/signature formats or other interoperability contracts. Passwords are not content-hashed; protocol KDF/MAC/signature/encryption algorithms are not replaced with BLAKE3.
+
+Release roots contain a sorted `integrity-manifest.json` covering every packaged file with typed BLAKE3 and exact sizes. Deployment acceptance first verifies that manifest, then compares active phone and VM files byte-for-byte with the immutable local package.
+
+## Prerequisites
+
+For the primary device runtime:
+
+- rooted Android device;
+- ADB access with `adb shell su 0 sh -c id` returning `uid=0`;
+- architecture-correct `runtime-supervisor`, `host-daemon` and `sing-box` binaries prepared under `deploy/device-runtime/bin`;
+- device and relay manifests;
+- required secrets provided only through environment variables;
+- generated reverse-tunnel certificate identity and phone certificate pin.
+
+The Android APK and stock WireGuard are not primary-runtime prerequisites. Stock WireGuard is needed only to exercise the documented rollback gate.
+
+## Build and quality
 
 ```bash
-cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE
+cargo fmt --all -- --check
+python3 scripts/check_architecture_boundaries.py
+python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
-The Windows Android SDK is used only for Windows builds and device installation. WSL quality checks use a native Linux SDK (by default `$HOME/Android/Sdk`); never point Linux Gradle at the Windows SDK because its build tools are `.exe` files. `operator-cli install-android-app` still copies `apps/android-app` to a Windows-path build directory, runs `gradlew.bat`, and installs the APK with `adb.exe`.
+The mandatory GitHub quality workflows additionally run:
 
-The quality gate deliberately removes inherited WSL proxy variables for Gradle. The local proxy can terminate Maven TLS handshakes; dependency downloads must use the direct HTTPS path. Use `curl --noproxy '*'` for direct control-plane diagnostics for the same reason.
+- RustSec advisory audit;
+- cargo-deny advisories, licenses, bans and sources checks;
+- Android scaffold unit tests;
+- Android lint with warnings as errors;
+- Android debug assembly;
+- process-level liveness/readiness tests;
+- SQLite migration, backup and clean restore drills;
+- forced QUIC failure, pinned TLS/TCP reserve and QUIC recovery;
+- mixed `1080`, SOCKS5 `1081`, HTTP and CONNECT proxy coverage.
 
-## Device Runtime Rollout
-
-Target phone prerequisites:
-
-- rooted device with `adb shell su 0 sh -c "id"` returning `uid=0`
-- first-party Android app installed through `cargo run -p operator-cli -- install-android-app`
-
-Temporary live bridge prerequisites until the app-owned tunnel engine replaces stock WireGuard:
-
-- WireGuard Android app installed (`com.wireguard.android`)
-- WireGuard tunnel named `WiGandroid` configured and valid
-- WireGuard set as always-on VPN:
-  - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
-  - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
-- screen unlock available for first tunnel bootstrap
-
-1. Set required secrets in the shell:
-
-```powershell
-$env:MOBILE_PROXY_ADMIN_TOKEN='replace_admin_token'
-$env:MOBILE_PROXY_DEVICE_TOKEN='replace_device_token'
-$env:MOBILE_PROXY_RELAY_USER='replace_relay_user'
-$env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
-```
-
-2. Install a release to a phone:
-
-```bash
-cargo run -p operator-cli -- install-device-stack \
-  --manifest-path deploy/manifests/devices/example-device.json \
-  --release-id 2026.06.01 \
-  --device-serial R58T10QKGBE
-```
-
-This installs the first-party Android `VpnService` APK and then installs the Rust runtime release. Use `install-device-release` only when the Android app is already installed and you intentionally want to update only the rooted runtime.
-
-2a. Or package the device release locally through Rust before pushing it to a phone:
-
-```bash
-cargo run -p operator-cli -- package-device-release \
-  --manifest-path deploy/manifests/devices/example-device.json \
-  --release-id 2026.06.01
-```
-
-3. Verify health and public proxy:
-
-```bash
-cargo run -p operator-cli -- verify-device \
-  --manifest-path deploy/manifests/devices/example-device.json
-```
-
-For the final no-compromise gate, require the app-owned tunnel owner explicitly:
-
-```bash
-cargo run -p operator-cli -- verify-device \
-  --manifest-path deploy/manifests/devices/example-device.json \
-  --device-serial R58T10QKGBE \
-  --required-tunnel-owner first_party_vpn_service
-```
-
-The current live bridge should be verified with `--required-tunnel-owner stock_wireguard_bridge`; it is healthy but not the final `10/10` tunnel architecture.
-
-4. Perform managed IP rotation (auto-heals route/runtimes if airplane bounce stalls):
-
-```bash
-cargo run -p operator-cli -- rotate \
-  --strategy airplane_bounce \
-  --require-public-ip-change true
-```
-
-5. Roll back if needed:
-
-```bash
-cargo run -p operator-cli -- rollback-device \
-  --manifest-path deploy/manifests/devices/example-device.json
-```
-
-6. Check fleet status through the control-plane API:
-
-```bash
-curl --noproxy '*' http://34.118.88.54:8080/api/v1/devices
-```
-
-## Reproducible Provisioning
-
-Prepare runtime binaries that are intentionally not tracked in git:
+## Prepare runtime binaries
 
 ```bash
 cargo run -p operator-cli -- prepare-runtime-binaries
 ```
 
-Provision or re-provision a GCP relay VM from the repo:
+Generated runtime binaries are intentionally not committed. The packaging command verifies the expected Android ARM ELF architecture before creating a release.
+
+## Generate reverse-tunnel identity
 
 ```bash
-cargo run -p operator-cli -- provision-vm \
+cargo run -p operator-cli -- generate-reverse-tunnel-identity \
+  --output-env-file .secrets/reverse-tunnel.env
+```
+
+`.secrets/` is ignored by Git. Secret files are local-only and permission-restricted.
+
+## Package and install the primary device runtime
+
+`first_party_reverse_tunnel` is the default; passing it explicitly is optional but useful in runbooks:
+
+```bash
+cargo run --release -p operator-cli -- package-device-release \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --release-id candidate-native \
+  --tunnel-owner first_party_reverse_tunnel
+
+cargo run --release -p operator-cli -- install-device-stack \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --release-id candidate-native \
+  --device-serial <adb-serial> \
+  --tunnel-owner first_party_reverse_tunnel
+```
+
+Packaging requires a clean Git worktree, validates and JSON-escapes all template values, rejects unresolved placeholders, writes exact Git SHA metadata and verifies the finished BLAKE3 manifest. Installation validates root-shell inputs, copies the release, restarts the rooted runtime and compares deployed files byte-for-byte.
+
+## Verify the primary runtime
+
+```bash
+cargo run --release -p operator-cli -- verify-device \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --device-serial <adb-serial> \
+  --required-tunnel-owner first_party_reverse_tunnel
+```
+
+Verification requires healthy serving state, the exact native owner, no active Android VPN and a successful authenticated public proxy smoke test unless explicitly skipped for a bounded diagnostic reason.
+
+## Provision the relay VM
+
+```bash
+cargo run --release -p operator-cli -- provision-vm \
   --manifest-path deploy/manifests/vms/example-gcp-relay.json \
-  --release-id 2026.06.03 \
-  --ssh-user bose \
-  --ssh-key ~/.ssh/google_compute_engine
+  --release-id candidate-vm \
+  --ssh-user <vm-user> \
+  --ssh-key <absolute-key-path>
 ```
 
-Delete a VM from a manifest:
+The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional stock WireGuard rollback backend.
+
+## Rotate cellular identity
 
 ```bash
-cargo run -p operator-cli -- delete-vm \
-  --manifest-path deploy/manifests/vms/example-gcp-relay.json \
-  --delete-firewall-rules
+cargo run --release -p operator-cli -- rotate \
+  --strategy airplane_bounce \
+  --require-public-ip-change true
 ```
 
-## Notes
+A rotation is successful only when the public IP changes as required and the native reverse tunnel returns fresh and serving. A healthy phone-local process alone is insufficient.
 
-- the control and operations path is Rust-first through `apps/operator-cli`
-- legacy PowerShell operator scripts were removed after Rust CLI parity became the source of truth
-- live phone testing on `2026-06-02` proved that `airplane_bounce` can change public IP while the old shell-owned runtime stayed in `waiting_cellular`; the repo now has Rust-owned recovery and policy-routing-aware health, but it still requires live phone validation
-- live migration on `2026-06-03` created `mobile-relaycontrolpoint-v2` as an `e2-micro` GCP relay, migrated the phone to `34.118.88.54`, verified control-plane health and public HTTP proxy serving, then deleted the old VM
-- the Android project now owns the `VpnService` lifecycle surface; the real embedded tunnel engine is still the next required step before removing stock WireGuard from production
-- docs and manifests use placeholders for secrets; do not store live credentials in repo-tracked files
+## Rollback
 
-## Validation Gate
-
-Before a release, all of the following must pass:
+Release rollback performs a full runtime restart rather than only changing a symlink:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo audit
-cargo deny check advisories licenses bans sources
-
-# Complete Rust + Android quality gate
-./scripts/quality-gate.sh
+cargo run --release -p operator-cli -- rollback-device \
+  --manifest-path deploy/manifests/devices/example-device.json \
+  --device-serial <adb-serial> \
+  --release-id <installed-release-id>
 ```
 
-Android validation must run through the Windows-native SDK used by `operator-cli`; the WSL-visible SDK alone is not a valid Linux SDK because it contains Windows build-tool executables. Final acceptance additionally requires `verify-device`, an authenticated public proxy smoke test, reboot recovery, and an airplane-mode rotation on the physical phone.
+Stock WireGuard rollback is exercised only through the immutable physical acceptance runbook. After that stage, the same already-installed native release must be reactivated without rebuilding, `tun0` must disappear and fresh QUIC service must return.
+
+## Release status terminology
+
+- **Software 10/10-ready** means every source-controlled, process-testable, dependency, Android build and immutable-SHA acceptance gate has passed on one exact commit.
+- **Baseline complete / 10/10 accepted** additionally requires the real-phone sequence, repeated recovery drills and soak thresholds in `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`.
+
+Software evidence must never claim the baseline is complete. A source change invalidates the candidate and requires all software evidence to be regenerated before physical testing.
+
+The canonical implementation scope is `docs/PRODUCTION_BASELINE_PLAN.md`. The executable device procedure is `docs/physical-phone-acceptance-runbook.md`.
