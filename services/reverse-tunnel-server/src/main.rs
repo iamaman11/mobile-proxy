@@ -126,14 +126,12 @@ fn validate_cli(cli: &Cli) -> Result<ValidatedCli> {
     }
 
     let public_proxy_listens = parse_public_proxy_listens(&cli.public_proxy_listen)?;
-    let target_node_id = cli
-        .target_node_id
-        .as_deref()
-        .map(|value| {
-            validate_identifier("target node ID", value, 64)?;
-            Ok(value.to_string())
-        })
-        .transpose()?;
+    let target_node_id = if let Some(value) = cli.target_node_id.as_deref() {
+        validate_identifier("target node ID", value, 64)?;
+        Some(value.to_string())
+    } else {
+        None
+    };
 
     Ok(ValidatedCli {
         quic_listen,
