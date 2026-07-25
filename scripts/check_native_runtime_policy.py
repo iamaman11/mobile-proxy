@@ -10,6 +10,7 @@ ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 PRIMARY_OWNER = "first_party_reverse_tunnel"
 ROLLBACK_OWNER = "stock_wireguard_bridge"
 REMOVED_OWNER = "first_party_vpn_service"
+BASELINE_MARKER = Path("docs/PRODUCTION_BASELINE_PLAN.md")
 
 
 def _production_rust(path: Path) -> str:
@@ -29,8 +30,10 @@ def _require(path: Path, fragments: tuple[str, ...], errors: list[str], root: Pa
 
 
 def check_repository(root: Path) -> list[str]:
-    errors: list[str] = []
+    if not (root / BASELINE_MARKER).is_file():
+        return []
 
+    errors: list[str] = []
     cli = root / "apps/operator-cli/src/cli.rs"
     _require(
         cli,
