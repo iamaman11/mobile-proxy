@@ -326,6 +326,7 @@ fn validate_json(body: &str, label: &str) -> Result<Value> {
 
 fn validate_host_config(body: &str, expected_owner: &str) -> Result<()> {
     let config = validate_json(body, "host-daemon configuration")?;
+    validate_proxy_shape(&config)?;
     let owner = config
         .pointer("/wireguard/owner")
         .and_then(Value::as_str)
@@ -346,6 +347,24 @@ fn validate_host_config(body: &str, expected_owner: &str) -> Result<()> {
         STOCK_WIREGUARD_OWNER if wireguard_enabled && !reverse_enabled => Ok(()),
         _ => bail!("host-daemon tunnel enable flags contradict requested owner"),
     }
+}
+
+fn validate_proxy_shape(config: &Value) -> Result<()> {
+    let proxy = config
+        .get("proxy")
+        .and_then(Value::as_object)
+        .context("host-daemon proxy configuration is missing")?;
+    for required in ["listen_address", "username", "password"] {
+        if !proxy.contains_key(required) {
+            bail!("host-daemon proxy.{required} is missing");
+        }
+    }
+    for key in proxy.keys() {
+        if !matches!(key.as_str(), "listen_address" | "username" | "password") {
+            bail!("host-daemon proxy contains unsupported field {key}");
+        }
+    }
+    Ok(())
 }
 
 fn write_release_metadata(root: &Path, release_root: &Path, release_id: &str) -> Result<()> {
@@ -556,9 +575,15 @@ mod tests {
 
     #[test]
     fn host_config_owner_and_flags_must_agree() {
-        let reverse = r#"{"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
+        let reverse = r#"{"proxy":{"listen_address":"127.0.0.1:1080","username":"user","password":"pass"},"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
         assert!(validate_host_config(reverse, "first_party_reverse_tunnel").is_ok());
         assert!(validate_host_config(reverse, "stock_wireguard_bridge").is_err());
+    }
+
+    #[test]
+    fn host_config_rejects_unsupported_proxy_fields() {
+        let invalid = r#"{"proxy":{"listen_address":"127.0.0.1:1080","username":"user","password":"pass","binary":"/bin/sing-box"},"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
+        assert!(validate_host_config(invalid, "first_party_reverse_tunnel").is_err());
     }
 
     #[test]
