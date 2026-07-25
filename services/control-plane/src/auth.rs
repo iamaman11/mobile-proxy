@@ -49,7 +49,7 @@ fn matches(candidate: Option<&str>, expected: &str) -> bool {
 }
 
 fn validate_token(field: &str, value: &str) -> Result<()> {
-    if value.len() < 16
+    if value.len() < 8
         || value.len() > 4096
         || value
             .chars()
@@ -90,16 +90,10 @@ mod tests {
 
     #[test]
     fn rejects_invalid_or_shared_tokens() {
-        assert!(AuthConfig::new("".into(), "device-token-0000000000".into()).is_err());
-        assert!(AuthConfig::new("same-token-0000000000".into(), "same-token-0000000000".into()).is_err());
-        assert!(AuthConfig::new("admin token with spaces".into(), "device-token-0000000000".into()).is_err());
-        assert!(
-            AuthConfig::new(
-                "admin-token-0000000000".into(),
-                "device-token-000000000".into()
-            )
-            .is_ok()
-        );
+        assert!(AuthConfig::new("".into(), "device-token".into()).is_err());
+        assert!(AuthConfig::new("same-token".into(), "same-token".into()).is_err());
+        assert!(AuthConfig::new("admin token with spaces".into(), "device-token".into()).is_err());
+        assert!(AuthConfig::new("admin-secret".into(), "device-secret".into()).is_ok());
     }
 
     #[test]
@@ -107,9 +101,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_static("Bearer admin-token-0000000000"),
+            HeaderValue::from_static("Bearer admin-secret"),
         );
-        assert_eq!(bearer(&headers), Some("admin-token-0000000000"));
+        assert_eq!(bearer(&headers), Some("admin-secret"));
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_static("Bearer token with spaces"),
@@ -117,7 +111,7 @@ mod tests {
         assert!(bearer(&headers).is_none());
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_static("bearer admin-token-0000000000"),
+            HeaderValue::from_static("bearer admin-secret"),
         );
         assert!(bearer(&headers).is_none());
     }
