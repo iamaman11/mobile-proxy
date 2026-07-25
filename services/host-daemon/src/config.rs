@@ -1,6 +1,6 @@
 use std::{env, fs, net::SocketAddr, path::PathBuf, time::Duration};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use proxy_core::{
     BinaryFingerprintInput, ConfigFingerprint, ConfigFingerprintInput, HealthRecord,
     RuntimeReadiness,
@@ -13,7 +13,13 @@ use crate::control_plane::ControlPlaneSyncConfig;
 use crate::fingerprints::{config_source_fingerprint, current_binary_fingerprint};
 use crate::state::{RotationCommands, RuntimeState};
 
+const PRIMARY_OWNER: &str = "first_party_reverse_tunnel";
+const ROLLBACK_OWNER: &str = "stock_wireguard_bridge";
+const MAX_SECRET_LENGTH: usize = 4096;
+const MAX_URLS: usize = 8;
+
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct FileConfig {
     node_id: Option<String>,
     node_name: Option<String>,
@@ -29,11 +35,13 @@ pub struct FileConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct FileOperatorProfiles {
     default_profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct FileProxyConfig {
     listen_address: Option<String>,
     username: Option<String>,
@@ -41,12 +49,14 @@ struct FileProxyConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct FileWireguardConfig {
     enabled: Option<bool>,
     owner: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct FileReverseTunnelConfig {
     enabled: Option<bool>,
     transport: Option<String>,
@@ -64,6 +74,7 @@ struct FileReverseTunnelConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct FileControlPlaneConfig {
     base_url: Option<String>,
     device_token: Option<String>,
@@ -75,6 +86,7 @@ struct FileControlPlaneConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct FileRotationConfig {
     data_reconnect: Option<FileRotationStrategyConfig>,
     airplane_bounce: Option<FileRotationStrategyConfig>,
@@ -83,6 +95,7 @@ struct FileRotationConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 struct FileRotationStrategyConfig {
     command: Option<String>,
 }
@@ -109,133 +122,110 @@ pub struct ProbeConfig {
 
 pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     let (file_config, config_fingerprint) = load_file_config(cli.config.as_deref())?;
+    let file_config = file_config.context("host-daemon requires an explicit configuration file")?;
+
     let listen = cli
         .listen
         .clone()
-        .or_else(|| file_config.as_ref().and_then(|c| c.listen.clone()))
+        .or_else(|| file_config.listen.clone())
         .unwrap_or_else(|| "127.0.0.1:8088".into());
+    let listen_addr: SocketAddr = listen.parse().context("host-daemon listen address is invalid")?;
+    if !listen_addr.ip().is_loopback() {
+        bail!("host-daemon API must bind to a loopback address")
+    }
+
     let admin_token = cli
         .admin_token
         .clone()
-        .or_else(|| file_config.as_ref().and_then(|c| c.admin_token.clone()))
-        .ok_or_else(|| {
-            anyhow::anyhow!("admin_token is required (set it via command line or config file)")
-        })?;
+        .or_else(|| file_config.admin_token.clone())
+        .context("admin_token is required")?;
+    validate_secret("admin_token", &admin_token)?;
+
     let node_id = file_config
-        .as_ref()
-        .and_then(|c| c.node_id.clone())
+        .node_id
+        .clone()
         .or_else(|| env::var("HOST_DAEMON_NODE_ID").ok())
         .unwrap_or_else(|| proxy_core::DEVICE_ID.to_string());
+    validate_identifier("node_id", &node_id, 64)?;
     let node_name = file_config
-        .as_ref()
-        .and_then(|c| c.node_name.clone())
+        .node_name
+        .clone()
         .or_else(|| env::var("HOST_DAEMON_NODE_NAME").ok())
         .unwrap_or_else(|| proxy_core::NODE_NAME.to_string());
+    validate_identifier("node_name", &node_name, 128)?;
+
     let active_profile = file_config
+        .operator_profiles
         .as_ref()
-        .and_then(|c| c.operator_profiles.as_ref())
-        .and_then(|p| p.default_profile.clone())
-        .unwrap_or_else(|| "mts_by".into());
-    let wireguard_enabled = file_config
+        .and_then(|profiles| profiles.default_profile.clone())
+        .unwrap_or_else(|| "default".into());
+    validate_identifier("operator profile", &active_profile, 64)?;
+
+    let wireguard = file_config
+        .wireguard
         .as_ref()
-        .and_then(|c| c.wireguard.as_ref())
-        .and_then(|w| w.enabled)
-        .unwrap_or(false);
-    let tunnel_owner = file_config
+        .context("wireguard owner configuration is required")?;
+    let wireguard_enabled = wireguard.enabled.context("wireguard.enabled is required")?;
+    let tunnel_owner = wireguard
+        .owner
+        .clone()
+        .context("wireguard.owner is required")?;
+    validate_owner_flags(&tunnel_owner, wireguard_enabled)?;
+
+    let proxy = file_config
+        .proxy
         .as_ref()
-        .and_then(|c| c.wireguard.as_ref())
-        .and_then(|w| w.owner.clone());
-    let proxy_listen_address = file_config
-        .as_ref()
-        .and_then(|c| c.proxy.as_ref())
-        .and_then(|p| p.listen_address.clone())
-        .unwrap_or_else(|| "10.66.66.2:1080".into());
-    let proxy_username = file_config
-        .as_ref()
-        .and_then(|c| c.proxy.as_ref())
-        .and_then(|p| p.username.clone())
-        .unwrap_or_default();
-    let proxy_password = file_config
-        .as_ref()
-        .and_then(|c| c.proxy.as_ref())
-        .and_then(|p| p.password.clone())
-        .unwrap_or_default();
+        .context("proxy configuration is required")?;
+    let proxy_listen_address = proxy
+        .listen_address
+        .clone()
+        .context("proxy.listen_address is required")?;
+    let proxy_addr: SocketAddr = proxy_listen_address
+        .parse()
+        .context("proxy.listen_address is invalid")?;
+    if tunnel_owner == PRIMARY_OWNER && !proxy_addr.ip().is_loopback() {
+        bail!("native reverse-tunnel proxy must bind to loopback")
+    }
+    let proxy_username = proxy
+        .username
+        .clone()
+        .context("proxy.username is required")?;
+    let proxy_password = proxy
+        .password
+        .clone()
+        .context("proxy.password is required")?;
+    validate_secret("proxy.username", &proxy_username)?;
+    validate_secret("proxy.password", &proxy_password)?;
+
     let observer_urls = file_config
-        .as_ref()
-        .and_then(|c| c.observer_urls.clone())
+        .observer_urls
+        .clone()
         .unwrap_or_else(|| vec!["https://api.ipify.org?format=json".into()]);
+    validate_observer_urls(&observer_urls)?;
+
     let rotation_commands = RotationCommands {
-        data_reconnect: rotation_command(file_config.as_ref(), |r| r.data_reconnect.as_ref()),
-        airplane_bounce: rotation_command(file_config.as_ref(), |r| r.airplane_bounce.as_ref()),
-        network_mode_bounce: rotation_command(file_config.as_ref(), |r| {
-            r.network_mode_bounce.as_ref()
-        }),
-        ril_bounce: rotation_command(file_config.as_ref(), |r| r.ril_bounce.as_ref()),
+        data_reconnect: rotation_command(&file_config, |rotation| rotation.data_reconnect.as_ref())?,
+        airplane_bounce: rotation_command(&file_config, |rotation| rotation.airplane_bounce.as_ref())?,
+        network_mode_bounce: rotation_command(&file_config, |rotation| {
+            rotation.network_mode_bounce.as_ref()
+        })?,
+        ril_bounce: rotation_command(&file_config, |rotation| rotation.ril_bounce.as_ref())?,
     };
-    let control_plane_base_url = file_config
-        .as_ref()
-        .and_then(|c| c.control_plane.as_ref())
-        .and_then(|cp| cp.base_url.clone())
-        .or_else(|| env::var("HOST_DAEMON_CONTROL_PLANE_URL").ok());
-    let control_plane_sync = control_plane_base_url
-        .map(|base_url| -> Result<_> {
-            let device_token = file_config
-                .as_ref()
-                .and_then(|c| c.control_plane.as_ref())
-                .and_then(|cp| cp.device_token.clone())
-                .or_else(|| env::var("HOST_DAEMON_DEVICE_TOKEN").ok())
-                .filter(|token| !token.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("control_plane.device_token is required"))?;
-            Ok(ControlPlaneSyncConfig {
-                base_url,
-                device_token,
-                server_name: file_config
-                    .as_ref()
-                    .and_then(|c| c.control_plane.as_ref())
-                    .and_then(|cp| cp.server_name.clone()),
-                server_addr: file_config
-                    .as_ref()
-                    .and_then(|c| c.control_plane.as_ref())
-                    .and_then(|cp| cp.server_addr),
-                server_cert_der: file_config
-                    .as_ref()
-                    .and_then(|c| c.control_plane.as_ref())
-                    .and_then(|cp| cp.server_cert_der_b64.as_deref())
-                    .map(decode_der_base64)
-                    .transpose()?,
-                heartbeat_interval_secs: file_config
-                    .as_ref()
-                    .and_then(|c| c.control_plane.as_ref())
-                    .and_then(|cp| cp.heartbeat_interval_secs)
-                    .or_else(|| {
-                        env::var("HOST_DAEMON_HEARTBEAT_INTERVAL_SECS")
-                            .ok()
-                            .and_then(|value| value.parse::<u64>().ok())
-                    })
-                    .unwrap_or(2),
-                poll_interval_secs: file_config
-                    .as_ref()
-                    .and_then(|c| c.control_plane.as_ref())
-                    .and_then(|cp| cp.poll_interval_secs)
-                    .or_else(|| {
-                        env::var("HOST_DAEMON_COMMAND_POLL_INTERVAL_SECS")
-                            .ok()
-                            .and_then(|value| value.parse::<u64>().ok())
-                    })
-                    .unwrap_or(5),
-            })
-        })
-        .transpose()?;
-    let reverse_tunnel = reverse_tunnel_config(file_config.as_ref(), &node_id)?;
+
+    let control_plane_sync = control_plane_config(&file_config)?;
+    let reverse_tunnel = reverse_tunnel_config(&file_config, &node_id, &tunnel_owner)?;
     let reverse_tunnel_counter_state_path = reverse_tunnel.as_ref().map(|_| {
         file_config
+            .reverse_tunnel
             .as_ref()
-            .and_then(|config| config.reverse_tunnel.as_ref())
             .and_then(|config| config.counter_state_path.clone())
             .or_else(|| env::var("HOST_DAEMON_REVERSE_TUNNEL_COUNTER_STATE_PATH").ok())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("state/reverse-tunnel-counters-v1.json"))
     });
+    if let Some(path) = reverse_tunnel_counter_state_path.as_ref() {
+        validate_state_path(path)?;
+    }
 
     let health = HealthRecord {
         node_id,
@@ -247,7 +237,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         proxy_status: "starting".into(),
         last_public_ip: None,
         active_operator_profile: Some(active_profile),
-        active_operator_plmn: Some("25702".into()),
+        active_operator_plmn: None,
         last_proxy_error: None,
         serving_failure_reason: None,
         degradation_reason_code: None,
@@ -261,7 +251,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         reverse_tunnel_active_transport: None,
         reverse_tunnel_freshness: None,
         reverse_tunnel_failover_reason: None,
-        tunnel_owner: tunnel_owner.clone(),
+        tunnel_owner: Some(tunnel_owner.clone()),
     };
 
     Ok(LoadedConfig {
@@ -273,7 +263,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         runtime_state: RuntimeState::new(
             health,
             wireguard_enabled,
-            tunnel_owner.clone(),
+            Some(tunnel_owner.clone()),
             proxy_listen_address.clone(),
             rotation_commands,
             observer_urls.clone(),
@@ -284,100 +274,262 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
             proxy_username,
             proxy_password,
             wireguard_enabled,
-            tunnel_owner,
+            tunnel_owner: Some(tunnel_owner),
         },
     })
 }
 
-fn reverse_tunnel_config(
-    file_config: Option<&FileConfig>,
-    node_id: &str,
-) -> Result<Option<ReverseTunnelClientConfig>> {
-    let Some(config) = file_config.and_then(|c| c.reverse_tunnel.as_ref()) else {
+fn control_plane_config(file_config: &FileConfig) -> Result<Option<ControlPlaneSyncConfig>> {
+    let Some(config) = file_config.control_plane.as_ref() else {
         return Ok(None);
     };
-    if !config.enabled.unwrap_or(false) {
+    let base_url = config
+        .base_url
+        .clone()
+        .or_else(|| env::var("HOST_DAEMON_CONTROL_PLANE_URL").ok())
+        .context("control_plane.base_url is required")?;
+    let parsed = reqwest::Url::parse(&base_url).context("control_plane.base_url is invalid")?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        bail!("control_plane.base_url must be an absolute HTTPS URL")
+    }
+    let device_token = config
+        .device_token
+        .clone()
+        .or_else(|| env::var("HOST_DAEMON_DEVICE_TOKEN").ok())
+        .context("control_plane.device_token is required")?;
+    validate_secret("control_plane.device_token", &device_token)?;
+    let server_name = config
+        .server_name
+        .clone()
+        .context("control_plane.server_name is required")?;
+    validate_identifier("control_plane.server_name", &server_name, 253)?;
+    let server_addr = config
+        .server_addr
+        .context("control_plane.server_addr is required")?;
+    let server_cert_der = decode_der_base64(
+        config
+            .server_cert_der_b64
+            .as_deref()
+            .context("control_plane.server_cert_der_b64 is required")?,
+    )?;
+    let heartbeat_interval_secs = bounded_interval(
+        "control_plane.heartbeat_interval_secs",
+        config.heartbeat_interval_secs.unwrap_or(2),
+        1,
+        300,
+    )?;
+    let poll_interval_secs = bounded_interval(
+        "control_plane.poll_interval_secs",
+        config.poll_interval_secs.unwrap_or(5),
+        1,
+        300,
+    )?;
+    Ok(Some(ControlPlaneSyncConfig {
+        base_url,
+        device_token,
+        server_name: Some(server_name),
+        server_addr: Some(server_addr),
+        server_cert_der: Some(server_cert_der),
+        heartbeat_interval_secs,
+        poll_interval_secs,
+    }))
+}
+
+fn reverse_tunnel_config(
+    file_config: &FileConfig,
+    node_id: &str,
+    tunnel_owner: &str,
+) -> Result<Option<ReverseTunnelClientConfig>> {
+    let config = file_config.reverse_tunnel.as_ref();
+    if tunnel_owner == ROLLBACK_OWNER {
+        if config.is_some_and(|value| value.enabled.unwrap_or(false)) {
+            bail!("stock WireGuard rollback must not enable the reverse tunnel")
+        }
         return Ok(None);
+    }
+    let config = config.context("native owner requires reverse_tunnel configuration")?;
+    if config.enabled != Some(true) {
+        bail!("native owner requires reverse_tunnel.enabled=true")
+    }
+    if config.transport.as_deref().unwrap_or("hybrid") != "hybrid" {
+        bail!("production reverse tunnel transport must be hybrid; plaintext tcp is forbidden")
     }
     let server_addr: SocketAddr = config
         .server_addr
         .as_deref()
-        .unwrap_or("127.0.0.1:18090")
-        .parse()?;
-    let Some(auth_token) = config.auth_token.clone().filter(|token| !token.is_empty()) else {
-        bail!("reverse_tunnel.auth_token is required when reverse_tunnel.enabled=true");
-    };
+        .context("reverse_tunnel.server_addr is required")?
+        .parse()
+        .context("reverse_tunnel.server_addr is invalid")?;
+    let tcp_fallback_addr: SocketAddr = config
+        .tcp_fallback_addr
+        .as_deref()
+        .context("reverse_tunnel.tcp_fallback_addr is required")?
+        .parse()
+        .context("reverse_tunnel.tcp_fallback_addr is invalid")?;
     let local_proxy_addr: SocketAddr = config
         .local_proxy_addr
         .as_deref()
-        .unwrap_or("127.0.0.1:1080")
-        .parse()?;
-    let build_secure_transport = |hybrid: bool| -> Result<TunnelTransport> {
-        let server_name = config
-            .server_name
-            .clone()
-            .unwrap_or_else(|| "mobile-proxy-relay".into());
-        let server_cert_der =
-            decode_der_base64(config.server_cert_der_b64.as_deref().ok_or_else(|| {
-                anyhow::anyhow!("reverse_tunnel.server_cert_der_b64 is required")
-            })?)?;
-        Ok(if hybrid {
-            TunnelTransport::Hybrid {
-                server_name,
-                server_cert_der,
-                server_key_der: None,
-            }
-        } else {
-            TunnelTransport::Quic {
-                server_name,
-                server_cert_der,
-                server_key_der: None,
-            }
-        })
-    };
-    let transport = match config.transport.as_deref().unwrap_or("hybrid") {
-        "tcp" => TunnelTransport::Tcp,
-        "quic" => build_secure_transport(false)?,
-        "hybrid" => build_secure_transport(true)?,
-        other => bail!("unsupported reverse_tunnel.transport: {other}"),
-    };
+        .context("reverse_tunnel.local_proxy_addr is required")?
+        .parse()
+        .context("reverse_tunnel.local_proxy_addr is invalid")?;
+    if !local_proxy_addr.ip().is_loopback() {
+        bail!("reverse_tunnel.local_proxy_addr must be loopback")
+    }
+    let auth_token = config
+        .auth_token
+        .clone()
+        .context("reverse_tunnel.auth_token is required")?;
+    validate_secret("reverse_tunnel.auth_token", &auth_token)?;
+    let server_name = config
+        .server_name
+        .clone()
+        .context("reverse_tunnel.server_name is required")?;
+    validate_identifier("reverse_tunnel.server_name", &server_name, 253)?;
+    let server_cert_der = decode_der_base64(
+        config
+            .server_cert_der_b64
+            .as_deref()
+            .context("reverse_tunnel.server_cert_der_b64 is required")?,
+    )?;
+
+    let connect_timeout_ms = bounded_interval(
+        "reverse_tunnel.connect_timeout_ms",
+        config.connect_timeout_ms.unwrap_or(2_000),
+        100,
+        60_000,
+    )?;
+    let heartbeat_interval_ms = bounded_interval(
+        "reverse_tunnel.heartbeat_interval_ms",
+        config.heartbeat_interval_ms.unwrap_or(2_000),
+        100,
+        60_000,
+    )?;
+    let reconnect_floor_ms = bounded_interval(
+        "reverse_tunnel.reconnect_floor_ms",
+        config.reconnect_floor_ms.unwrap_or(1_000),
+        100,
+        60_000,
+    )?;
+    let reconnect_ceiling_ms = bounded_interval(
+        "reverse_tunnel.reconnect_ceiling_ms",
+        config.reconnect_ceiling_ms.unwrap_or(30_000),
+        reconnect_floor_ms,
+        300_000,
+    )?;
+
     Ok(Some(ReverseTunnelClientConfig {
         node_id: node_id.to_string(),
         server_addr,
-        tcp_fallback_addr: config
-            .tcp_fallback_addr
-            .as_deref()
-            .map(str::parse)
-            .transpose()?,
+        tcp_fallback_addr: Some(tcp_fallback_addr),
         local_proxy_addr,
         auth_token,
-        transport,
-        connect_timeout: Duration::from_millis(config.connect_timeout_ms.unwrap_or(2_000)),
-        heartbeat_interval: Duration::from_millis(config.heartbeat_interval_ms.unwrap_or(2_000)),
-        reconnect_floor: Duration::from_millis(config.reconnect_floor_ms.unwrap_or(1_000)),
-        reconnect_ceiling: Duration::from_millis(config.reconnect_ceiling_ms.unwrap_or(30_000)),
+        transport: TunnelTransport::Hybrid {
+            server_name,
+            server_cert_der,
+            server_key_der: None,
+        },
+        connect_timeout: Duration::from_millis(connect_timeout_ms),
+        heartbeat_interval: Duration::from_millis(heartbeat_interval_ms),
+        reconnect_floor: Duration::from_millis(reconnect_floor_ms),
+        reconnect_ceiling: Duration::from_millis(reconnect_ceiling_ms),
     }))
 }
 
 fn rotation_command(
-    file_config: Option<&FileConfig>,
+    file_config: &FileConfig,
     selector: impl Fn(&FileRotationConfig) -> Option<&FileRotationStrategyConfig>,
-) -> Option<String> {
-    file_config
-        .and_then(|c| c.rotation.as_ref())
+) -> Result<Option<String>> {
+    let command = file_config
+        .rotation
+        .as_ref()
         .and_then(selector)
-        .and_then(|s| s.command.clone())
+        .and_then(|strategy| strategy.command.clone());
+    if let Some(value) = command.as_deref() {
+        validate_bounded_text("rotation command", value, 2_048)?;
+    }
+    Ok(command)
 }
 
 fn load_file_config(path: Option<&str>) -> Result<(Option<FileConfig>, Option<ConfigFingerprint>)> {
-    if let Some(path) = path {
-        let body = fs::read(path)?;
-        let fingerprint = config_source_fingerprint(&body)?;
-        let config = serde_json::from_slice::<FileConfig>(&body)?;
-        Ok((Some(config), Some(fingerprint)))
-    } else {
-        Ok((None, None))
+    let Some(path) = path else {
+        return Ok((None, None));
+    };
+    let body = fs::read(path)?;
+    if body.is_empty() || body.len() > 1_048_576 {
+        bail!("host-daemon configuration size is invalid")
     }
+    let fingerprint = config_source_fingerprint(&body)?;
+    let config = serde_json::from_slice::<FileConfig>(&body)?;
+    Ok((Some(config), Some(fingerprint)))
+}
+
+fn validate_owner_flags(owner: &str, wireguard_enabled: bool) -> Result<()> {
+    match (owner, wireguard_enabled) {
+        (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
+        (PRIMARY_OWNER, true) => bail!("native reverse-tunnel owner must disable WireGuard"),
+        (ROLLBACK_OWNER, false) => bail!("stock rollback owner must enable WireGuard"),
+        _ => bail!("unsupported tunnel owner"),
+    }
+}
+
+fn validate_observer_urls(urls: &[String]) -> Result<()> {
+    if urls.is_empty() || urls.len() > MAX_URLS {
+        bail!("observer URL inventory is invalid")
+    }
+    for raw in urls {
+        let url = reqwest::Url::parse(raw).context("observer URL is invalid")?;
+        if url.scheme() != "https" || url.host_str().is_none() || url.username() != "" || url.password().is_some() {
+            bail!("observer URLs must be credential-free absolute HTTPS URLs")
+        }
+    }
+    Ok(())
+}
+
+fn validate_secret(field: &str, value: &str) -> Result<()> {
+    if value.len() < 16
+        || value.len() > MAX_SECRET_LENGTH
+        || value.chars().any(char::is_control)
+    {
+        bail!("{field} is invalid")
+    }
+    Ok(())
+}
+
+fn validate_identifier(field: &str, value: &str, maximum: usize) -> Result<()> {
+    if value.is_empty()
+        || value.len() > maximum
+        || !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+        })
+    {
+        bail!("{field} is invalid")
+    }
+    Ok(())
+}
+
+fn validate_bounded_text(field: &str, value: &str, maximum: usize) -> Result<()> {
+    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
+        bail!("{field} is invalid")
+    }
+    Ok(())
+}
+
+fn bounded_interval(field: &str, value: u64, minimum: u64, maximum: u64) -> Result<u64> {
+    if !(minimum..=maximum).contains(&value) {
+        bail!("{field} is outside the supported range")
+    }
+    Ok(value)
+}
+
+fn validate_state_path(path: &PathBuf) -> Result<()> {
+    if path.as_os_str().is_empty()
+        || path.components().any(|component| {
+            matches!(component, std::path::Component::ParentDir | std::path::Component::Prefix(_))
+        })
+    {
+        bail!("reverse-tunnel counter state path is invalid")
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -389,6 +541,37 @@ mod tests {
     use super::load_runtime_config;
     use crate::cli::Cli;
 
+    fn valid_config() -> String {
+        serde_json::json!({
+            "admin_token": "admin-token-0000000000000000000000000001",
+            "node_id": "device-1",
+            "node_name": "phone-1",
+            "observer_urls": ["https://api.ipify.org?format=json"],
+            "operator_profiles": {"default_profile": "default"},
+            "proxy": {
+                "listen_address": "127.0.0.1:1080",
+                "username": "proxy-user-0000000000000000000000000001",
+                "password": "proxy-pass-0000000000000000000000000001"
+            },
+            "wireguard": {"enabled": false, "owner": "first_party_reverse_tunnel"},
+            "reverse_tunnel": {
+                "enabled": true,
+                "transport": "hybrid",
+                "server_addr": "127.0.0.1:18090",
+                "tcp_fallback_addr": "127.0.0.1:443",
+                "local_proxy_addr": "127.0.0.1:1080",
+                "server_name": "mobile-proxy-relay",
+                "server_cert_der_b64": "MAA=",
+                "auth_token": "reverse-token-00000000000000000000000001",
+                "connect_timeout_ms": 2000,
+                "heartbeat_interval_ms": 2000,
+                "reconnect_floor_ms": 1000,
+                "reconnect_ceiling_ms": 30000
+            }
+        })
+        .to_string()
+    }
+
     #[test]
     fn runtime_config_produces_typed_source_and_binary_fingerprints() {
         let root = std::env::temp_dir().join(format!(
@@ -397,7 +580,7 @@ mod tests {
         ));
         fs::create_dir_all(&root).unwrap();
         let path = root.join("host-daemon.json");
-        fs::write(&path, r#"{"admin_token":"secret","node_name":"phone"}"#).unwrap();
+        fs::write(&path, valid_config()).unwrap();
         let loaded = load_runtime_config(&Cli {
             listen: None,
             admin_token: None,
@@ -405,6 +588,11 @@ mod tests {
         })
         .unwrap();
         assert!(loaded.runtime_state.health.config_fingerprint.is_some());
+        assert_eq!(
+            loaded.runtime_state.health.tunnel_owner.as_deref(),
+            Some("first_party_reverse_tunnel")
+        );
+        assert!(loaded.reverse_tunnel.is_some());
         assert!(
             loaded
                 .runtime_state
@@ -415,6 +603,38 @@ mod tests {
                 .to_string()
                 .starts_with("b3:")
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plaintext_unknown_and_owner_mismatch_fail_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "mobile-proxy-host-config-fail-closed-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("host-daemon.json");
+        let cli = |path: &std::path::Path| Cli {
+            listen: None,
+            admin_token: None,
+            config: Some(path.to_string_lossy().into_owned()),
+        };
+
+        let mut value: serde_json::Value = serde_json::from_str(&valid_config()).unwrap();
+        value["reverse_tunnel"]["transport"] = "tcp".into();
+        fs::write(&path, value.to_string()).unwrap();
+        assert!(load_runtime_config(&cli(&path)).is_err());
+
+        let mut value: serde_json::Value = serde_json::from_str(&valid_config()).unwrap();
+        value["wireguard"]["owner"] = "unknown".into();
+        fs::write(&path, value.to_string()).unwrap();
+        assert!(load_runtime_config(&cli(&path)).is_err());
+
+        let mut value: serde_json::Value = serde_json::from_str(&valid_config()).unwrap();
+        value["wireguard"]["enabled"] = true.into();
+        fs::write(&path, value.to_string()).unwrap();
+        assert!(load_runtime_config(&cli(&path)).is_err());
+
         let _ = fs::remove_dir_all(root);
     }
 }
