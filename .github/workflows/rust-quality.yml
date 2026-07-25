@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: rust-quality-${{ github.workflow }}-${{ github.ref }}
@@ -15,9 +16,9 @@ concurrency:
 
 jobs:
   rust-quality:
-    name: Format, Clippy, Test
+    name: Format, Clippy, Test, Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Check out source
@@ -81,3 +82,34 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --workspace
+
+      - name: Audit RustSec advisories
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enforce dependency licenses, bans and sources
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: advisories licenses bans sources
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: apps/android-app/*.gradle*
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Run optional Android scaffold quality gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy NO_PROXY no_proxy || true
+          cd apps/android-app
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
