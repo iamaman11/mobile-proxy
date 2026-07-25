@@ -3,6 +3,7 @@ import json
 import pathlib
 import sys
 import tempfile
+import tarfile
 import unittest
 
 
@@ -19,7 +20,7 @@ SPEC.loader.exec_module(MODULE)
 class PhysicalDeploymentTests(unittest.TestCase):
     def write_release(self, root: pathlib.Path, paths: list[str]) -> None:
         entries = []
-        for relative in paths:
+        for relative in sorted(paths):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             payload = f"payload:{relative}".encode()
@@ -27,7 +28,7 @@ class PhysicalDeploymentTests(unittest.TestCase):
             entries.append(
                 {
                     "path": relative,
-                    "digest": "blake3:placeholder",
+                    "digest": "b3:" + "a" * 64,
                     "size_bytes": len(payload),
                 }
             )
@@ -89,16 +90,10 @@ class PhysicalDeploymentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             self.write_host_config(root, "first_party_reverse_tunnel")
-            self.assertEqual(
-                MODULE.release_tunnel_owner(root),
-                "first_party_reverse_tunnel",
-            )
+            self.assertEqual(MODULE.release_tunnel_owner(root), "first_party_reverse_tunnel")
 
             self.write_host_config(root, "stock_wireguard_bridge")
-            self.assertEqual(
-                MODULE.release_tunnel_owner(root),
-                "stock_wireguard_bridge",
-            )
+            self.assertEqual(MODULE.release_tunnel_owner(root), "stock_wireguard_bridge")
 
             config = json.loads((root / "config" / "host-daemon.json").read_text())
             config["reverse_tunnel"]["enabled"] = True
@@ -106,7 +101,7 @@ class PhysicalDeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.AcceptanceFailure, "leaves reverse tunnel enabled"):
                 MODULE.release_tunnel_owner(root)
 
-    def test_inventory_rejects_path_escape_duplicate_and_size_drift(self):
+    def test_inventory_rejects_path_escape_duplicate_unsorted_and_size_drift(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             self.write_release(root, ["bin/host-daemon"])
@@ -124,6 +119,13 @@ class PhysicalDeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.AcceptanceFailure, "duplicate"):
                 MODULE.load_release_inventory(root)
 
+            self.write_release(root, ["z", "a"])
+            manifest = json.loads(manifest_path.read_text())
+            manifest["entries"].reverse()
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(MODULE.AcceptanceFailure, "path-sorted"):
+                MODULE.load_release_inventory(root)
+
             self.write_release(root, ["bin/host-daemon"])
             manifest = json.loads(manifest_path.read_text())
             manifest["entries"][0]["size_bytes"] += 1
@@ -133,22 +135,23 @@ class PhysicalDeploymentTests(unittest.TestCase):
 
     def test_android_vpn_owner_parsers_are_strict(self):
         packages = "package:com.wireguard.android uid:10123\n"
-        self.assertEqual(
-            MODULE.parse_package_uid(packages, "com.wireguard.android"),
-            10123,
-        )
+        self.assertEqual(MODULE.parse_package_uid(packages, "com.wireguard.android"), 10123)
         self.assertIsNone(MODULE.parse_package_uid(packages, "com.example.mobileproxy"))
         connectivity = "NetworkAgentInfo Transports: VPN WIFI OwnerUid: 10123 Score: 60"
         self.assertEqual(MODULE.parse_active_vpn_owner_uid(connectivity), 10123)
         self.assertIsNone(MODULE.parse_active_vpn_owner_uid("Transports: WIFI OwnerUid: 10123"))
 
-    def test_vm_digest_output_is_strict_and_complete(self):
-        parsed = MODULE._parse_sha256sum(
-            f"{'a' * 64}  /opt/a\n{'b' * 64} */opt/b\n"
-        )
-        self.assertEqual(parsed, {"/opt/a": "a" * 64, "/opt/b": "b" * 64})
-        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "invalid"):
-            MODULE._parse_sha256sum("not-a-digest /opt/a")
+    def test_vm_verification_archive_contains_exact_static_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            self.write_release(root, ["bin/a", "config/b"])
+            archive = MODULE._write_verification_archive(root, ["bin/a", "config/b"])
+            try:
+                with tarfile.open(archive, "r") as bundle:
+                    self.assertEqual(sorted(bundle.getnames()), ["bin/a", "config/b"])
+                    self.assertEqual(bundle.extractfile("bin/a").read(), b"payload:bin/a")
+            finally:
+                archive.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
