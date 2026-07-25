@@ -14,13 +14,14 @@ cargo audit
 cargo deny check advisories licenses bans sources
 git diff --check
 
-if [[ ! -x "$android_sdk/build-tools/34.0.0/aapt" ]]; then
-    echo "Linux Android SDK is missing build-tools; set ANDROID_SDK_ROOT" >&2
+if [[ ! -d "$android_sdk" ]]; then
+    echo "Linux Android SDK directory is missing; set ANDROID_SDK_ROOT" >&2
     exit 1
 fi
 
 cd "$repo_root/apps/android-app"
-env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
-    -u http_proxy -u https_proxy -u all_proxy \
-    ANDROID_SDK_ROOT="$android_sdk" ./gradlew --no-daemon \
-    testDebugUnitTest lintDebug assembleDebug
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY \
+    -u http_proxy -u https_proxy -u all_proxy -u no_proxy \
+    ANDROID_SDK_ROOT="$android_sdk" \
+    ANDROID_HOME="$android_sdk" \
+    ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
