@@ -1,5 +1,7 @@
 use std::env;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -8,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use proxy_core::HealthRecord;
 use reqwest::Proxy;
 use serde::Deserialize;
+use serde_json::Value;
 use tokio::time::sleep;
 
 use crate::cli::{
@@ -16,9 +19,12 @@ use crate::cli::{
 use crate::provision::package_device_release;
 
 const FIRST_PARTY_ANDROID_PACKAGE: &str = "com.example.mobileproxy";
-const FIRST_PARTY_VPN_SERVICE: &str = "GoBackend$VpnService";
+const FIRST_PARTY_VPN_SERVICE: &str = "MobileProxyVpnService";
 const FIRST_PARTY_TUNNEL_RECEIVER: &str = "TunnelCommandReceiver";
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
+const PRIMARY_TUNNEL_OWNER: &str = "first_party_reverse_tunnel";
+const STOCK_WIREGUARD_OWNER: &str = "stock_wireguard_bridge";
+const FIRST_PARTY_VPN_OWNER: &str = "first_party_vpn_service";
 
 #[derive(Debug, Deserialize)]
 struct DeviceManifest {
@@ -46,6 +52,11 @@ struct ManifestRelay {
 }
 
 pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<()> {
+    validate_release_id(&args.release_id)?;
+    validate_device_path(&args.device_root, "device_root")?;
+    validate_device_path(&args.temp_root, "temp_root")?;
+    validate_tunnel_owner(&args.tunnel_owner)?;
+
     package_device_release(&PackageDeviceReleaseArgs {
         manifest_path: args.manifest_path.clone(),
         release_id: args.release_id.clone(),
@@ -60,14 +71,14 @@ pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<(
     let release_root = repo_root()?.join(&args.output_dir).join(&args.release_id);
 
     ensure_root_access(args.device_serial.as_deref())?;
+    let remote_staging = format!("{}/{}", args.temp_root, args.release_id);
     adb(
         args.device_serial.as_deref(),
-        &[
-            "shell",
-            "mkdir",
-            "-p",
-            &format!("{}/{}", args.temp_root, args.release_id),
-        ],
+        &["shell", "rm", "-rf", &remote_staging],
+    )?;
+    adb(
+        args.device_serial.as_deref(),
+        &["shell", "mkdir", "-p", &args.temp_root],
     )?;
     adb(
         args.device_serial.as_deref(),
@@ -78,31 +89,37 @@ pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<(
         ],
     )?;
 
+    let root = shell_quote(&args.device_root);
+    let release = shell_quote(&args.release_id);
+    let staging = shell_quote(&remote_staging);
     let apply_script = format!(
-        "set -eu\nROOT='{device_root}'\nREL='{release_id}'\nTMP='{temp_root}/{release_id}'\nBOOT='/data/adb/service.d/99-mobile-proxy-runtime.sh'\nTARGET=\"$ROOT/releases/$REL\"\nmkdir -p \"$ROOT/releases\" \"$ROOT/logs\" /data/adb/service.d\nif command -v pkill >/dev/null 2>&1; then\n  pkill -f mobile-proxy-runtime-watchdog || true\n  pkill -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.sh || true\n  pkill -f \"$ROOT/.*/bin/runtime-supervisor\" || true\n  pkill -f \"$ROOT/.*/bin/host-daemon\" || true\n  pkill -f \"$ROOT/.*/bin/sing-box\" || true\nfi\nfor pid in $(pidof runtime-supervisor host-daemon sing-box 2>/dev/null || true); do\n  kill \"$pid\" || true\ndone\nrm -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.pid\nsleep 1\nrm -rf \"$TARGET\"\nmkdir -p \"$TARGET\"\ncp -R \"$TMP/\"* \"$TARGET/\"\nchmod +x \"$TARGET/service.sh\" \"$TARGET/bin/runtime-supervisor\" \"$TARGET/bin/host-daemon\" \"$TARGET/bin/sing-box\" \"$TARGET/bin/curl\"\nln -sfn \"$TARGET\" \"$ROOT/current\"\nrm -f /data/adb/service.d/99-mobile-proxy-routefix.sh\ncat > \"$BOOT\" <<'MOBILE_PROXY_BOOT'\n#!/system/bin/sh\nROOT='/data/adb/mobile-proxy-node'\nLOG_DIR='/data/local/tmp/mobile-proxy-logs'\nBOOT_LOG=\"$LOG_DIR/boot-service.log\"\nmkdir -p \"$LOG_DIR\"\ntimestamp() {{\n  date '+%Y-%m-%dT%H:%M:%S%z'\n}}\nlog_boot() {{\n  echo \"$(timestamp) $*\" >> \"$BOOT_LOG\"\n}}\nlog_boot \"boot_hook_started\"\ni=0\nwhile [ \"$i\" -lt 30 ]; do\n  if [ -x \"$ROOT/current/service.sh\" ]; then\n    log_boot \"boot_hook_starting_release target=$ROOT/current/service.sh attempt=$i\"\n    sh \"$ROOT/current/service.sh\" >> \"$BOOT_LOG\" 2>&1\n    code=\"$?\"\n    log_boot \"boot_hook_service_returned code=$code\"\n    exit \"$code\"\n  fi\n  i=$((i + 1))\n  sleep 1\ndone\nlog_boot \"missing $ROOT/current/service.sh\"\nexit 1\nMOBILE_PROXY_BOOT\nchmod 0700 \"$BOOT\"\nsh \"$ROOT/current/service.sh\"\n",
-        device_root = args.device_root,
-        release_id = args.release_id,
-        temp_root = args.temp_root,
+        "set -eu\nROOT={root}\nREL={release}\nTMP={staging}\nBOOT='/data/adb/service.d/99-mobile-proxy-runtime.sh'\nTARGET=\"$ROOT/releases/$REL\"\nmkdir -p \"$ROOT/releases\" \"$ROOT/logs\" /data/adb/service.d\nif command -v pkill >/dev/null 2>&1; then\n  pkill -f mobile-proxy-runtime-watchdog || true\n  pkill -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.sh || true\n  pkill -f \"$ROOT/.*/bin/runtime-supervisor\" || true\n  pkill -f \"$ROOT/.*/bin/host-daemon\" || true\n  pkill -f \"$ROOT/.*/bin/sing-box\" || true\nfi\nfor pid in $(pidof runtime-supervisor host-daemon sing-box 2>/dev/null || true); do kill \"$pid\" || true; done\nrm -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.pid\nsleep 1\nrm -rf \"$TARGET\"\nmkdir -p \"$TARGET\"\ncp -R \"$TMP/\"* \"$TARGET/\"\nchmod 0700 \"$TARGET/service.sh\" \"$TARGET/bin/runtime-supervisor\" \"$TARGET/bin/host-daemon\" \"$TARGET/bin/sing-box\" \"$TARGET/bin/curl\"\nln -sfn \"$TARGET\" \"$ROOT/current\"\nrm -f /data/adb/service.d/99-mobile-proxy-routefix.sh\ncat > \"$BOOT\" <<'MOBILE_PROXY_BOOT'\n#!/system/bin/sh\nset -eu\numask 077\nROOT='/data/adb/mobile-proxy-node'\nLOG_DIR='/data/local/tmp/mobile-proxy-logs'\nBOOT_LOG=\"$LOG_DIR/boot-service.log\"\nmkdir -p \"$LOG_DIR\"\ntimestamp() {{ date '+%Y-%m-%dT%H:%M:%S%z'; }}\nlog_boot() {{ echo \"$(timestamp) $*\" >> \"$BOOT_LOG\"; }}\nlog_boot \"boot_hook_started\"\ni=0\nwhile [ \"$i\" -lt 30 ]; do\n  if [ -x \"$ROOT/current/service.sh\" ]; then\n    log_boot \"boot_hook_starting_release attempt=$i\"\n    sh \"$ROOT/current/service.sh\" >> \"$BOOT_LOG\" 2>&1\n    code=\"$?\"\n    log_boot \"boot_hook_service_returned code=$code\"\n    exit \"$code\"\n  fi\n  i=$((i + 1))\n  sleep 1\ndone\nlog_boot \"active release service is missing\"\nexit 1\nMOBILE_PROXY_BOOT\nchmod 0700 \"$BOOT\"\nsh \"$ROOT/current/service.sh\"\n"
     );
-    let apply_path = write_temp_file("mobile-proxy-apply.sh", &apply_script)?;
+    let apply_path = write_temp_file("mobile-proxy-apply", &apply_script)?;
+    let remote_apply = format!("{}/apply-{}.sh", args.temp_root, std::process::id());
     adb(
         args.device_serial.as_deref(),
         &[
             "push",
             apply_path.to_str().context("invalid apply script path")?,
-            &format!("{}/apply.sh", args.temp_root),
+            &remote_apply,
         ],
     )?;
+    let apply_command = format!(
+        "sh {}; code=$?; rm -f {}; exit $code",
+        shell_quote(&remote_apply),
+        shell_quote(&remote_apply)
+    );
     adb(
         args.device_serial.as_deref(),
-        &[
-            "shell",
-            "su",
-            "0",
-            "sh",
-            "-c",
-            &format!("sh {}/apply.sh", args.temp_root),
-        ],
+        &["shell", "su", "0", "sh", "-c", &apply_command],
+    )?;
+    let _ = fs::remove_file(&apply_path);
+
+    verify_installed_release_files(
+        &release_root,
+        args.device_serial.as_deref(),
+        &args.device_root,
     )?;
 
     let health = wait_for_health(
@@ -114,19 +131,25 @@ pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<(
     )
     .await?;
     assert_healthy(&health)?;
+    assert_tunnel_owner(&health, &args.tunnel_owner)?;
+    assert_active_vpn_owner(args.device_serial.as_deref(), &args.tunnel_owner)?;
+    if args.tunnel_owner == FIRST_PARTY_VPN_OWNER {
+        assert_first_party_android_surface(args.device_serial.as_deref())?;
+    }
 
     if !args.skip_proxy_smoke {
         proxy_smoke(&manifest).await?;
     }
 
     println!(
-        "Device runtime installed: release={} device={} readiness={}",
-        args.release_id, manifest.device_id, health.readiness_state
+        "Device runtime installed: release={} device={} owner={} readiness={}",
+        args.release_id, manifest.device_id, args.tunnel_owner, health.readiness_state
     );
     Ok(())
 }
 
 pub async fn verify_device(args: &VerifyDeviceArgs) -> Result<()> {
+    validate_tunnel_owner(&args.required_tunnel_owner)?;
     let manifest = load_manifest(&args.manifest_path)?;
     let admin_token = required_env(&manifest.tokens.admin_token_env)?;
     let health = fetch_device_health(
@@ -135,79 +158,80 @@ pub async fn verify_device(args: &VerifyDeviceArgs) -> Result<()> {
         &admin_token,
     )
     .await?;
-    if let Some(required) = &args.required_tunnel_owner
-        && health.tunnel_owner.as_deref() != Some(required.as_str())
-    {
-        bail!(
-            "device tunnel owner mismatch: expected={} actual={:?}",
-            required,
-            health.tunnel_owner
-        );
-    }
-    if let Some(required) = &args.required_tunnel_owner {
-        assert_active_vpn_owner(args.device_serial.as_deref(), required)?;
-    }
-    let packages = adb(
-        args.device_serial.as_deref(),
-        &[
-            "shell",
-            "pm",
-            "list",
-            "packages",
-            FIRST_PARTY_ANDROID_PACKAGE,
-        ],
-    )?;
-    let app_installed = packages.contains(FIRST_PARTY_ANDROID_PACKAGE);
     assert_healthy(&health)?;
-    if !app_installed {
-        bail!(
-            "device health is healthy, but first-party Android package {} is missing",
-            FIRST_PARTY_ANDROID_PACKAGE
-        );
-    }
-    let package_dump = adb(
-        args.device_serial.as_deref(),
-        &["shell", "dumpsys", "package", FIRST_PARTY_ANDROID_PACKAGE],
-    )?;
-    if !package_dump.contains(FIRST_PARTY_VPN_SERVICE)
-        || !package_dump.contains(FIRST_PARTY_TUNNEL_RECEIVER)
-    {
-        bail!(
-            "first-party Android package {} is installed, but required VPN service/receiver entries are missing",
-            FIRST_PARTY_ANDROID_PACKAGE
-        );
+    assert_tunnel_owner(&health, &args.required_tunnel_owner)?;
+    assert_active_vpn_owner(args.device_serial.as_deref(), &args.required_tunnel_owner)?;
+    if args.required_tunnel_owner == FIRST_PARTY_VPN_OWNER {
+        assert_first_party_android_surface(args.device_serial.as_deref())?;
     }
     if !args.skip_proxy_smoke {
         proxy_smoke(&manifest).await?;
     }
     println!(
-        "Device verify passed: node={} ip={:?}",
-        health.node_id, health.last_public_ip
+        "Device verify passed: node={} owner={} ip={:?}",
+        health.node_id, args.required_tunnel_owner, health.last_public_ip
     );
     Ok(())
 }
 
-fn assert_active_vpn_owner(device_serial: Option<&str>, required_tunnel_owner: &str) -> Result<()> {
-    let expected_package = match required_tunnel_owner {
-        "first_party_vpn_service" => FIRST_PARTY_ANDROID_PACKAGE,
-        "stock_wireguard_bridge" => STOCK_WIREGUARD_PACKAGE,
-        "first_party_reverse_tunnel" => return Ok(()),
-        other => bail!(
-            "unsupported required tunnel owner {}; expected first_party_vpn_service, first_party_reverse_tunnel, or stock_wireguard_bridge",
-            other
-        ),
-    };
+fn assert_tunnel_owner(health: &HealthRecord, required: &str) -> Result<()> {
+    if health.tunnel_owner.as_deref() == Some(required) {
+        Ok(())
+    } else {
+        bail!(
+            "device tunnel owner mismatch: expected={} actual={:?}",
+            required,
+            health.tunnel_owner
+        )
+    }
+}
 
-    let expected_uid = package_uid(device_serial, expected_package)?;
+fn assert_first_party_android_surface(device_serial: Option<&str>) -> Result<()> {
+    let packages = adb(
+        device_serial,
+        &["shell", "pm", "list", "packages", FIRST_PARTY_ANDROID_PACKAGE],
+    )?;
+    if !packages.contains(FIRST_PARTY_ANDROID_PACKAGE) {
+        bail!("first-party Android compatibility package is missing")
+    }
+    let package_dump = adb(
+        device_serial,
+        &["shell", "dumpsys", "package", FIRST_PARTY_ANDROID_PACKAGE],
+    )?;
+    if !package_dump.contains(FIRST_PARTY_VPN_SERVICE)
+        || !package_dump.contains(FIRST_PARTY_TUNNEL_RECEIVER)
+    {
+        bail!("first-party Android compatibility package surface is incomplete")
+    }
+    Ok(())
+}
+
+fn assert_active_vpn_owner(device_serial: Option<&str>, required_tunnel_owner: &str) -> Result<()> {
     let connectivity_dump = adb(device_serial, &["shell", "dumpsys", "connectivity"])?;
-    let active_vpn_owner_uid = parse_active_vpn_owner_uid(&connectivity_dump)
-        .context("active Android VPN owner uid was not found in dumpsys connectivity")?;
-    if active_vpn_owner_uid != expected_uid {
+    let active_vpn_owner_uid = parse_active_vpn_owner_uid(&connectivity_dump);
+    if required_tunnel_owner == PRIMARY_TUNNEL_OWNER {
+        if let Some(actual_owner_uid) = active_vpn_owner_uid {
+            bail!(
+                "native reverse tunnel requires no active Android VPN, but owner uid {} is active",
+                actual_owner_uid
+            );
+        }
+        return Ok(());
+    }
+
+    let expected_package = match required_tunnel_owner {
+        FIRST_PARTY_VPN_OWNER => FIRST_PARTY_ANDROID_PACKAGE,
+        STOCK_WIREGUARD_OWNER => STOCK_WIREGUARD_PACKAGE,
+        other => bail!("unsupported required tunnel owner {other}"),
+    };
+    let expected_uid = package_uid(device_serial, expected_package)?;
+    let actual_uid = active_vpn_owner_uid.context("active Android VPN owner uid was not found")?;
+    if actual_uid != expected_uid {
         bail!(
             "active Android VPN owner mismatch: expected_package={} expected_uid={} actual_owner_uid={}",
             expected_package,
             expected_uid,
-            active_vpn_owner_uid
+            actual_uid
         );
     }
     Ok(())
@@ -255,10 +279,12 @@ fn parse_active_vpn_owner_uid(connectivity_dump: &str) -> Option<u32> {
 }
 
 pub async fn rollback_device(args: &RollbackDeviceArgs) -> Result<()> {
+    validate_device_path(&args.device_root, "device_root")?;
     let manifest = load_manifest(&args.manifest_path)?;
     let admin_token = required_env(&manifest.tokens.admin_token_env)?;
     ensure_root_access(args.device_serial.as_deref())?;
 
+    let root = shell_quote(&args.device_root);
     let current = adb(
         args.device_serial.as_deref(),
         &[
@@ -267,7 +293,7 @@ pub async fn rollback_device(args: &RollbackDeviceArgs) -> Result<()> {
             "0",
             "sh",
             "-c",
-            &format!("readlink {}/current", args.device_root),
+            &format!("readlink {root}/current"),
         ],
     )?;
     let current_release = Path::new(current.trim())
@@ -283,7 +309,7 @@ pub async fn rollback_device(args: &RollbackDeviceArgs) -> Result<()> {
             "0",
             "sh",
             "-c",
-            &format!("ls -1t {}/releases", args.device_root),
+            &format!("ls -1t {root}/releases"),
         ],
     )?;
     let target_release = args.release_id.clone().or_else(|| {
@@ -294,21 +320,15 @@ pub async fn rollback_device(args: &RollbackDeviceArgs) -> Result<()> {
             .map(ToOwned::to_owned)
     });
     let target_release = target_release.context("could not select rollback target release")?;
+    validate_release_id(&target_release)?;
 
+    let release = shell_quote(&target_release);
+    let command = format!(
+        "set -eu; ROOT={root}; REL={release}; TARGET=\"$ROOT/releases/$REL\"; test -x \"$TARGET/service.sh\"; if command -v pkill >/dev/null 2>&1; then pkill -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.sh || true; pkill -f \"$ROOT/.*/bin/runtime-supervisor\" || true; pkill -f \"$ROOT/.*/bin/host-daemon\" || true; pkill -f \"$ROOT/.*/bin/sing-box\" || true; fi; for pid in $(pidof runtime-supervisor host-daemon sing-box 2>/dev/null || true); do kill \"$pid\" || true; done; rm -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.pid; sleep 1; ln -sfn \"$TARGET\" \"$ROOT/current\"; sh \"$ROOT/current/service.sh\"; test \"$(readlink \"$ROOT/current\")\" = \"$TARGET\""
+    );
     adb(
         args.device_serial.as_deref(),
-        &[
-            "shell",
-            "su",
-            "0",
-            "sh",
-            "-c",
-            &format!(
-                "set -eu; ln -sfn {root}/releases/{release} {root}/current; sh {root}/current/service.sh",
-                root = args.device_root,
-                release = target_release
-            ),
-        ],
+        &["shell", "su", "0", "sh", "-c", &command],
     )?;
 
     let health = wait_for_health(
@@ -321,9 +341,60 @@ pub async fn rollback_device(args: &RollbackDeviceArgs) -> Result<()> {
     .await?;
     assert_healthy(&health)?;
     println!(
-        "Rollback applied: current={} readiness={}",
+        "Rollback applied with full runtime restart: current={} readiness={}",
         target_release, health.readiness_state
     );
+    Ok(())
+}
+
+fn verify_installed_release_files(
+    release_root: &Path,
+    device_serial: Option<&str>,
+    device_root: &str,
+) -> Result<()> {
+    let manifest_path = release_root.join("integrity-manifest.json");
+    let manifest: Value = serde_json::from_slice(
+        &fs::read(&manifest_path)
+            .with_context(|| format!("failed to read {}", manifest_path.display()))?,
+    )?;
+    let entries = manifest["entries"]
+        .as_array()
+        .context("release integrity manifest entries are missing")?;
+    for entry in entries {
+        let relative = entry["path"]
+            .as_str()
+            .context("release integrity path is invalid")?;
+        validate_relative_release_path(relative)?;
+        let local = fs::read(release_root.join(relative))
+            .with_context(|| format!("failed to read packaged release file {relative}"))?;
+        let remote = format!("{}/current/{}", device_root.trim_end_matches('/'), relative);
+        let deployed = adb_bytes(
+            device_serial,
+            &["exec-out", "su", "0", "cat", &remote],
+        )?;
+        if local != deployed {
+            bail!("deployed device release file differs: {relative}")
+        }
+    }
+    Ok(())
+}
+
+fn validate_relative_release_path(value: &str) -> Result<()> {
+    let path = Path::new(value);
+    if value.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::CurDir
+                    | std::path::Component::Prefix(_)
+                    | std::path::Component::RootDir
+            )
+        })
+    {
+        bail!("invalid release-relative path")
+    }
     Ok(())
 }
 
@@ -336,11 +407,21 @@ async fn fetch_device_health(
         device_serial,
         &["forward", &format!("tcp:{health_port}"), "tcp:8088"],
     )?;
-    let raw = windows_curl(
-        &format!("http://127.0.0.1:{health_port}/v1/health"),
-        admin_token,
-    )?;
-    serde_json::from_str(&raw).context("failed to parse health payload")
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("failed to build local health client")?;
+    client
+        .get(format!("http://127.0.0.1:{health_port}/v1/health"))
+        .bearer_auth(admin_token)
+        .send()
+        .await
+        .context("failed to query forwarded device health")?
+        .error_for_status()
+        .context("forwarded device health returned an error")?
+        .json::<HealthRecord>()
+        .await
+        .context("failed to parse health payload")
 }
 
 async fn wait_for_health(
@@ -368,7 +449,7 @@ async fn wait_for_health(
                     health.degradation_reason_code
                 ));
             }
-            Err(err) => last_error = Some(err.to_string()),
+            Err(err) => last_error = Some(format!("{err:#}")),
         }
         sleep(Duration::from_secs(poll_secs.max(1))).await;
     }
@@ -395,15 +476,14 @@ fn assert_healthy(health: &HealthRecord) -> Result<()> {
 async fn proxy_smoke(manifest: &DeviceManifest) -> Result<()> {
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
-    let proxy_url = format!(
-        "http://{}:{}@{}:{}",
-        relay_user,
-        relay_password,
+    let proxy = Proxy::http(format!(
+        "http://{}:{}",
         manifest.relay.host,
         manifest.relay.http_port.unwrap_or(3128)
-    );
+    ))?
+    .basic_auth(&relay_user, &relay_password);
     let client = reqwest::Client::builder()
-        .proxy(Proxy::http(&proxy_url)?)
+        .proxy(proxy)
         .timeout(Duration::from_secs(15))
         .build()
         .context("failed to build proxy smoke client")?;
@@ -413,7 +493,10 @@ async fn proxy_smoke(manifest: &DeviceManifest) -> Result<()> {
             Ok(response) => match response.error_for_status() {
                 Ok(response) => match response.text().await {
                     Ok(body) if is_ipv4(body.trim()) => return Ok(()),
-                    Ok(body) => last_error = Some(format!("invalid proxy IP body: {body:?}")),
+                    Ok(body) => {
+                        let bounded: String = body.chars().take(64).collect();
+                        last_error = Some(format!("invalid bounded proxy IP body: {bounded:?}"));
+                    }
                     Err(err) => last_error = Some(err.to_string()),
                 },
                 Err(err) => last_error = Some(err.to_string()),
@@ -454,6 +537,15 @@ fn parse_ipv4_octet(value: &str) -> Option<u8> {
 }
 
 fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> {
+    let output = adb_output(device_serial, args)?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn adb_bytes(device_serial: Option<&str>, args: &[&str]) -> Result<Vec<u8>> {
+    Ok(adb_output(device_serial, args)?.stdout)
+}
+
+fn adb_output(device_serial: Option<&str>, args: &[&str]) -> Result<std::process::Output> {
     let adb_path = detect_adb()?;
     let mut command = Command::new(&adb_path);
     if let Some(serial) = device_serial {
@@ -464,11 +556,10 @@ fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> {
         .output()
         .with_context(|| format!("failed to start adb at {}", adb_path.display()))?;
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        Ok(output)
     } else {
         bail!(
-            "adb {} failed: {}",
-            args.join(" "),
+            "adb command failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         )
     }
@@ -479,29 +570,7 @@ fn ensure_root_access(device_serial: Option<&str>) -> Result<()> {
     if root_check.contains("uid=0") {
         Ok(())
     } else {
-        bail!("root access is required on device, but 'su 0 sh -c id' did not return uid=0")
-    }
-}
-
-fn windows_curl(url: &str, admin_token: &str) -> Result<String> {
-    let curl_path = detect_windows_curl()?;
-    let output = Command::new(curl_path)
-        .arg("--silent")
-        .arg("--show-error")
-        .arg("--fail")
-        .arg("-H")
-        .arg(format!("Authorization: Bearer {admin_token}"))
-        .arg(url)
-        .output()
-        .context("failed to start curl.exe")?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        bail!(
-            "curl.exe {} failed: {}",
-            url,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )
+        bail!("root access is required on device")
     }
 }
 
@@ -532,63 +601,34 @@ fn resolve_repo_path(raw: &str) -> Result<PathBuf> {
 }
 
 fn required_env(name: &str) -> Result<String> {
-    env::var(name).with_context(|| format!("missing required environment variable: {name}"))
+    let value = env::var(name).with_context(|| format!("missing required environment variable: {name}"))?;
+    if value.is_empty() || value.len() > 4096 || value.chars().any(char::is_control) {
+        bail!("required environment variable {name} is invalid")
+    }
+    Ok(value)
 }
 
 fn detect_adb() -> Result<PathBuf> {
     let user = env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .unwrap_or_else(|_| "Bose".to_string());
-
-    #[cfg(windows)]
-    let (path_custom_tools, path_sdk) = (
-        format!("C:\\Users\\{}\\tools\\platform-tools\\adb.exe", user),
-        format!(
-            "C:\\Users\\{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
-            user
-        ),
-    );
-
-    #[cfg(not(windows))]
-    let (path_custom_tools, path_sdk) = (
-        format!("/mnt/c/Users/{}/tools/platform-tools/adb.exe", user),
-        format!(
-            "/mnt/c/Users/{}/AppData/Local/Android/Sdk/platform-tools/adb.exe",
-            user
-        ),
-    );
-
     #[cfg(windows)]
     let candidates = [
-        path_custom_tools.as_str(),
-        path_sdk.as_str(),
-        "C:\\Users\\Bose\\tools\\platform-tools\\adb.exe",
-        "C:\\Users\\Bose\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
-        "adb",
+        format!("C:\\Users\\{user}\\tools\\platform-tools\\adb.exe"),
+        format!("C:\\Users\\{user}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"),
+        "adb".into(),
     ];
-
     #[cfg(not(windows))]
     let candidates = [
-        path_custom_tools.as_str(),
-        path_sdk.as_str(),
-        "/mnt/c/Users/Bose/tools/platform-tools/adb.exe",
-        "/mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe",
-        "/usr/bin/adb",
-        "adb",
+        format!("/mnt/c/Users/{user}/tools/platform-tools/adb.exe"),
+        format!("/mnt/c/Users/{user}/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
+        "/usr/bin/adb".into(),
+        "adb".into(),
     ];
-
     detect_tool(&candidates, "adb")
 }
 
-fn detect_windows_curl() -> Result<PathBuf> {
-    #[cfg(windows)]
-    let candidates = ["C:\\Windows\\System32\\curl.exe", "curl.exe"];
-    #[cfg(not(windows))]
-    let candidates = ["/mnt/c/Windows/System32/curl.exe", "curl.exe"];
-    detect_tool(&candidates, "curl.exe")
-}
-
-fn detect_tool(candidates: &[&str], tool_name: &str) -> Result<PathBuf> {
+fn detect_tool(candidates: &[String], tool_name: &str) -> Result<PathBuf> {
     for candidate in candidates {
         let path = Path::new(candidate);
         if path.is_absolute() && path.exists() {
@@ -598,39 +638,84 @@ fn detect_tool(candidates: &[&str], tool_name: &str) -> Result<PathBuf> {
             return Ok(path.to_path_buf());
         }
     }
-    bail!("failed to locate {}", tool_name)
+    bail!("failed to locate {tool_name}")
 }
 
-fn write_temp_file(name: &str, body: &str) -> Result<PathBuf> {
-    let path = env::temp_dir().join(name);
+fn write_temp_file(stem: &str, body: &str) -> Result<PathBuf> {
+    let path = env::temp_dir().join(format!("{stem}-{}.sh", std::process::id()));
     fs::write(&path, body).with_context(|| format!("failed to write {}", path.display()))?;
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
     Ok(path)
+}
+
+fn validate_tunnel_owner(value: &str) -> Result<()> {
+    match value {
+        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER | FIRST_PARTY_VPN_OWNER => Ok(()),
+        other => bail!("unsupported tunnel owner {other}"),
+    }
+}
+
+fn validate_release_id(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+    {
+        bail!("release_id is invalid")
+    }
+    Ok(())
+}
+
+fn validate_device_path(value: &str, field: &str) -> Result<()> {
+    if !value.starts_with('/')
+        || value.len() > 256
+        || value
+            .chars()
+            .any(|character| !(character.is_ascii_alphanumeric() || matches!(character, '/' | '-' | '_' | '.')))
+        || value.split('/').any(|part| part == "..")
+    {
+        bail!("{field} is invalid")
+    }
+    Ok(())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\\'', "'\\''"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_ipv4, parse_active_vpn_owner_uid, parse_package_uid};
+    use super::{
+        PRIMARY_TUNNEL_OWNER, is_ipv4, parse_active_vpn_owner_uid, parse_package_uid,
+        shell_quote, validate_device_path, validate_release_id, validate_tunnel_owner,
+    };
 
     #[test]
-    fn parses_package_uid() {
+    fn parses_package_and_active_vpn_owner() {
         let output = "package:com.example.mobileproxy uid:10209\n";
-        assert_eq!(
-            parse_package_uid(output, "com.example.mobileproxy"),
-            Some(10209)
-        );
+        assert_eq!(parse_package_uid(output, "com.example.mobileproxy"), Some(10209));
         assert_eq!(parse_package_uid(output, "com.wireguard.android"), None);
-    }
-
-    #[test]
-    fn parses_active_vpn_owner_uid() {
         let dump = "NetworkAgentInfo{ nc{[ Transports: CELLULAR|VPN Capabilities: INTERNET OwnerUid: 10212 RequestorUid: -1 ]} }\n";
         assert_eq!(parse_active_vpn_owner_uid(dump), Some(10212));
+        assert_eq!(
+            parse_active_vpn_owner_uid(
+                "NetworkAgentInfo{ nc{[ Transports: CELLULAR Capabilities: INTERNET OwnerUid: 1000 ]} }\n"
+            ),
+            None
+        );
     }
 
     #[test]
-    fn ignores_non_vpn_network_owner_uid() {
-        let dump = "NetworkAgentInfo{ nc{[ Transports: CELLULAR Capabilities: INTERNET OwnerUid: 1000 ]} }\n";
-        assert_eq!(parse_active_vpn_owner_uid(dump), None);
+    fn native_owner_and_shell_inputs_fail_closed() {
+        assert!(validate_tunnel_owner(PRIMARY_TUNNEL_OWNER).is_ok());
+        assert!(validate_tunnel_owner("unknown").is_err());
+        assert!(validate_release_id("candidate-1.0").is_ok());
+        assert!(validate_release_id("../candidate").is_err());
+        assert!(validate_device_path("/data/adb/mobile-proxy-node", "root").is_ok());
+        assert!(validate_device_path("/data/../secret", "root").is_err());
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
     }
 
     #[test]
