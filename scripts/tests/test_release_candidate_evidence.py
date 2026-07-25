@@ -22,9 +22,10 @@ class ReleaseCandidateEvidenceTests(unittest.TestCase):
         }
 
     def test_evidence_is_bounded_native_and_bound_to_checked_out_sha(self):
-        evidence = MODULE.build_evidence(self.environment(), "a" * 40)
+        evidence = MODULE.build_evidence(self.environment(), "a" * 40, True)
         self.assertEqual(evidence["format_version"], 2)
         self.assertEqual(evidence["candidate_sha"], "a" * 40)
+        self.assertTrue(evidence["git_worktree_clean"])
         self.assertEqual(evidence["primary_runtime"], "first_party_reverse_tunnel")
         self.assertFalse(evidence["primary_runtime_requires_android_vpn"])
         self.assertEqual(evidence["rollback_runtime"], "stock_wireguard_bridge")
@@ -49,29 +50,33 @@ class ReleaseCandidateEvidenceTests(unittest.TestCase):
 
     def test_mismatched_checkout_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "does not match"):
-            MODULE.build_evidence(self.environment(), "b" * 40)
+            MODULE.build_evidence(self.environment(), "b" * 40, True)
+
+    def test_dirty_checkout_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "not clean"):
+            MODULE.build_evidence(self.environment(), "a" * 40, False)
 
     def test_unaccepted_event_or_unbounded_workflow_is_rejected(self):
         environment = self.environment()
         environment["GITHUB_EVENT_NAME"] = "schedule"
         with self.assertRaisesRegex(ValueError, "not accepted"):
-            MODULE.build_evidence(environment, "a" * 40)
+            MODULE.build_evidence(environment, "a" * 40, True)
 
         environment = self.environment()
         environment["GITHUB_WORKFLOW"] = "x" * 129
         with self.assertRaisesRegex(ValueError, "GITHUB_WORKFLOW"):
-            MODULE.build_evidence(environment, "a" * 40)
+            MODULE.build_evidence(environment, "a" * 40, True)
 
     def test_sha_and_repository_identifiers_are_strict(self):
         environment = self.environment()
         environment["CANDIDATE_SHA"] = "A" * 40
         with self.assertRaisesRegex(ValueError, "lowercase"):
-            MODULE.build_evidence(environment, "A" * 40)
+            MODULE.build_evidence(environment, "A" * 40, True)
 
         environment = self.environment()
         environment["GITHUB_REPOSITORY"] = "invalid repository"
         with self.assertRaisesRegex(ValueError, "invalid"):
-            MODULE.build_evidence(environment, "a" * 40)
+            MODULE.build_evidence(environment, "a" * 40, True)
 
 
 if __name__ == "__main__":

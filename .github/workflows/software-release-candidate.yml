@@ -69,27 +69,30 @@ jobs:
       - name: Verify formatting
         run: cargo fmt --all -- --check
 
+      - name: Verify lockfile reproducibility
+        run: cargo metadata --format-version 1 --locked > /dev/null
+
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Prove process liveness and readiness
-        run: cargo test -p control-plane --test health_process -- --nocapture
+        run: cargo test -p control-plane --locked --test health_process -- --nocapture
 
       - name: Prove SQLite backup and clean restore
-        run: cargo test -p control-plane --test state_backup_cli -- --nocapture
+        run: cargo test -p control-plane --locked --test state_backup_cli -- --nocapture
 
       - name: Prove state migration and rollback compatibility
-        run: cargo test -p control-plane --test state_migration_cli -- --nocapture
+        run: cargo test -p control-plane --locked --test state_migration_cli -- --nocapture
 
       - name: Prove QUIC fallback, protected surfaces and recovery
         run: |
-          cargo test -p reverse-tunnel \
+          cargo test -p reverse-tunnel --locked \
             --test hybrid_transport_recovery \
             --test hybrid_mixed_protocol_recovery \
             -- --nocapture
 
       - name: Run complete workspace acceptance
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Audit RustSec advisories
         uses: rustsec/audit-check@v2.0.0
@@ -139,6 +142,13 @@ jobs:
           cd apps/android-app
           chmod +x gradlew
           ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+
+      - name: Verify candidate stayed immutable through acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
 
       - name: Write immutable candidate evidence
         run: |
