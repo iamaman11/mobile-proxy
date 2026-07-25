@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: software-release-candidate-${{ github.ref }}
@@ -21,7 +22,7 @@ jobs:
   immutable-sha-acceptance:
     name: Immutable SHA Acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
       - name: Check out candidate SHA
@@ -89,6 +90,37 @@ jobs:
 
       - name: Run complete workspace acceptance
         run: cargo test --workspace
+
+      - name: Audit RustSec advisories
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enforce dependency licenses, bans and sources
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: advisories licenses bans sources
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: apps/android-app/*.gradle*
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prove optional Android scaffold unit, lint and build quality
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy NO_PROXY no_proxy || true
+          cd apps/android-app
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
       - name: Write immutable candidate evidence
         run: |
