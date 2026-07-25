@@ -32,42 +32,41 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
         for port in [11080, 11081, 13128]:
             self.assertIn(str(port), wireguard)
             self.assertNotIn(str(port), reverse)
-        self.assertNotEqual(
-            MODULE.config_digest("reverse-tunnel"),
-            MODULE.config_digest("wireguard"),
-        )
+        self.assertNotEqual(reverse, wireguard)
 
-    def test_remote_command_is_atomic_validated_and_reversible_on_any_failure(self):
+    def test_remote_command_is_atomic_exact_and_reversible_on_any_failure(self):
         command = MODULE.remote_command("wireguard")
         self.assertIn(".candidate.$", command)
+        self.assertIn(".expected.$", command)
         self.assertIn(".backup.$", command)
         self.assertIn("COMMITTED=0", command)
         self.assertIn("trap cleanup EXIT", command)
-        self.assertIn("sudo cp \"$CONFIG\" \"$BACKUP\"", command)
-        self.assertIn("sudo cp \"$BACKUP\" \"$CONFIG\"", command)
+        self.assertIn('sudo cp "$CONFIG" "$BACKUP"', command)
+        self.assertIn('sudo cp "$BACKUP" "$CONFIG"', command)
         self.assertIn("sudo nginx -t", command)
         self.assertIn("systemctl reload nginx", command)
         self.assertIn("wg-quick@wg0.service", command)
         self.assertIn("mobile-public-proxy.service", command)
-        self.assertIn("sha256sum", command)
+        self.assertIn('sudo cmp -s -- "$CONFIG" "$EXPECTED"', command)
+        self.assertNotIn("sha256", command.lower())
         self.assertIn("COMMITTED=1", command)
 
     @mock.patch.object(MODULE.subprocess, "run")
-    def test_switch_requires_exact_remote_config_digest(self, run):
-        expected = MODULE.config_digest("reverse-tunnel")
-        run.return_value.stdout = f"active\n{expected}  {MODULE._REMOTE_CONFIG}\n"
+    def test_switch_requires_exact_remote_marker(self, run):
+        run.return_value.stdout = f"active\n{MODULE._SUCCESS_MARKER}\n"
         report = MODULE.switch(self.args("reverse-tunnel"))
         self.assertTrue(report["accepted"])
-        self.assertEqual(report["config_sha256"], expected)
-        self.assertNotIn(expected, run.call_args.args[0])
+        self.assertTrue(report["exact_config_match"])
+        self.assertEqual(report["config_contract"], "mobile-public-proxy/v1")
+        self.assertNotIn("config_sha256", report)
 
-        run.return_value.stdout = f"{'0' * 64}  {MODULE._REMOTE_CONFIG}\n"
-        with self.assertRaisesRegex(MODULE.SwitchFailure, "differs"):
+        run.return_value.stdout = "active\n"
+        with self.assertRaisesRegex(MODULE.SwitchFailure, "byte-for-byte"):
             MODULE.switch(self.args("reverse-tunnel"))
 
-    def test_invalid_digest_output_fails_closed(self):
-        with self.assertRaisesRegex(MODULE.SwitchFailure, "invalid"):
-            MODULE.parse_remote_digest("active\nnot-a-digest file\n")
+    def test_exact_marker_parser_is_strict(self):
+        self.assertTrue(MODULE.exact_match_returned("active\nexact-config-match\n"))
+        self.assertFalse(MODULE.exact_match_returned("active\nexact-config-match-extra\n"))
 
 
 if __name__ == "__main__":
