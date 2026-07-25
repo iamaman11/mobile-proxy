@@ -147,7 +147,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-          test -z "$(git status --porcelain)"
+          if ! test -z "$(git status --porcelain)"; then
+            git status --porcelain
+            git diff --name-only
+            exit 1
+          fi
 
       - name: Write immutable candidate evidence
         run: |
