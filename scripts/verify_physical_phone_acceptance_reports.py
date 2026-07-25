@@ -43,6 +43,8 @@ def verify_deployment_report(
     require(report.get("candidate_sha") == candidate_sha, f"{label} deployment report SHA differs")
     require(report.get("accepted") is True, f"{label} deployment report is not accepted")
     require(report.get("expected_tunnel_owner") == expected_owner, f"{label} deployment tunnel owner differs")
+    require(report.get("local_release_integrity_match") is True, f"{label} local BLAKE3 integrity differs")
+    require(report.get("comparison_contract") == "exact-bytes", f"{label} deployment comparison is not exact")
     require(report.get("device_release_metadata_match") is True, f"{label} device release metadata differs")
     require(report.get("device_deployment_match") is True, f"{label} device deployment differs")
     require(report.get("android_vpn_owner_match") is True, f"{label} Android VPN owner differs")
@@ -63,13 +65,12 @@ def verify_switch_report(report: dict[str, Any], mode: str, label: str) -> None:
     require(report.get("format_version") == 1, f"{label} switch report version is unsupported")
     require(report.get("mode") == mode, f"{label} switch report mode differs")
     require(report.get("accepted") is True, f"{label} switch report is not accepted")
-    digest = report.get("config_sha256")
     require(
-        isinstance(digest, str)
-        and len(digest) == 64
-        and all(character in "0123456789abcdef" for character in digest),
-        f"{label} switch digest is invalid",
+        report.get("config_contract") == "mobile-public-proxy/v1",
+        f"{label} switch config contract differs",
     )
+    require(report.get("config_version") == 1, f"{label} switch config version differs")
+    require(report.get("exact_config_match") is True, f"{label} switch config is not an exact match")
     require(report.get("public_ports") == [1080, 1081, 3128], f"{label} switch ports differ")
 
 
@@ -98,7 +99,8 @@ def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) 
     process_health = report.get("process_health")
     require(isinstance(process_health, dict), f"{stage} process health is invalid")
     require(
-        process_health == {
+        process_health
+        == {
             "host_live": True,
             "host_ready": True,
             "control_plane_ready": True,
@@ -125,17 +127,14 @@ def verify_stage_report(report: dict[str, Any], candidate_sha: str, stage: str) 
     require(all(value is True for value in proxies.values()), f"{stage} proxy surface failed")
 
     reverse_tunnel = report.get("reverse_tunnel")
-    require(isinstance(reverse_tunnel, dict), f"{stage} tunnel report is invalid")
     wireguard = report.get("wireguard")
+    require(isinstance(reverse_tunnel, dict), f"{stage} tunnel report is invalid")
     require(isinstance(wireguard, dict), f"{stage} WireGuard report is invalid")
     expected_transport = _EXPECTED_TRANSPORT.get(stage)
     if expected_transport is not None:
         require(report.get("tunnel_owner") == "first_party_reverse_tunnel", f"{stage} tunnel owner differs")
         require(reverse_tunnel.get("connected") is True, f"{stage} tunnel is disconnected")
-        require(
-            reverse_tunnel.get("active_transport") == expected_transport,
-            f"{stage} tunnel transport differs",
-        )
+        require(reverse_tunnel.get("active_transport") == expected_transport, f"{stage} tunnel transport differs")
         require(reverse_tunnel.get("freshness") == "fresh", f"{stage} tunnel is stale")
         require(wireguard.get("enabled") is False, f"{stage} unexpectedly enables WireGuard")
         require(wireguard.get("tun0_present") is not True, f"{stage} leaves tun0 active")
