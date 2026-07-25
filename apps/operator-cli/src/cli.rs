@@ -1,6 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use proxy_core::LOCAL_API;
 
+pub const PRIMARY_TUNNEL_OWNER: &str = "first_party_reverse_tunnel";
+
 #[derive(Parser)]
 #[command(name = "operator-cli")]
 #[command(about = "Rust-first operator client for the mobile relay")]
@@ -77,7 +79,7 @@ pub struct InstallDeviceStackArgs {
     pub health_port: u16,
     #[arg(long, default_value_t = false)]
     pub skip_proxy_smoke: bool,
-    #[arg(long, default_value = "stock_wireguard_bridge")]
+    #[arg(long, default_value = PRIMARY_TUNNEL_OWNER)]
     pub tunnel_owner: String,
     #[arg(long, default_value = "apps/android-app")]
     pub android_project_dir: String,
@@ -187,7 +189,7 @@ pub struct PackageDeviceReleaseArgs {
     pub host_daemon_config_path: Option<String>,
     #[arg(long)]
     pub sing_box_config_path: Option<String>,
-    #[arg(long, default_value = "stock_wireguard_bridge")]
+    #[arg(long, default_value = PRIMARY_TUNNEL_OWNER)]
     pub tunnel_owner: String,
 }
 
@@ -213,7 +215,7 @@ pub struct InstallDeviceReleaseArgs {
     pub health_port: u16,
     #[arg(long, default_value_t = false)]
     pub skip_proxy_smoke: bool,
-    #[arg(long, default_value = "stock_wireguard_bridge")]
+    #[arg(long, default_value = PRIMARY_TUNNEL_OWNER)]
     pub tunnel_owner: String,
 }
 
@@ -233,8 +235,8 @@ pub struct VerifyDeviceArgs {
     pub health_port: u16,
     #[arg(long, default_value_t = false)]
     pub skip_proxy_smoke: bool,
-    #[arg(long)]
-    pub required_tunnel_owner: Option<String>,
+    #[arg(long, default_value = PRIMARY_TUNNEL_OWNER)]
+    pub required_tunnel_owner: String,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -255,7 +257,7 @@ pub struct RollbackDeviceArgs {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Command, StatusFormat};
+    use super::{Cli, Command, PRIMARY_TUNNEL_OWNER, StatusFormat};
 
     #[test]
     fn status_preserves_json_as_the_default_output() {
@@ -276,6 +278,49 @@ mod tests {
 
         let metrics = Cli::try_parse_from(["operator-cli", "metrics"]).unwrap();
         assert!(matches!(metrics.command, Command::Metrics));
+    }
+
+    #[test]
+    fn native_reverse_tunnel_is_the_default_for_all_device_operations() {
+        let package = Cli::try_parse_from([
+            "operator-cli",
+            "package-device-release",
+            "--manifest-path",
+            "device.json",
+            "--release-id",
+            "candidate",
+        ])
+        .unwrap();
+        let Command::PackageDeviceRelease(package) = package.command else {
+            panic!("package-device-release must parse");
+        };
+        assert_eq!(package.tunnel_owner, PRIMARY_TUNNEL_OWNER);
+
+        let install = Cli::try_parse_from([
+            "operator-cli",
+            "install-device-release",
+            "--manifest-path",
+            "device.json",
+            "--release-id",
+            "candidate",
+        ])
+        .unwrap();
+        let Command::InstallDeviceRelease(install) = install.command else {
+            panic!("install-device-release must parse");
+        };
+        assert_eq!(install.tunnel_owner, PRIMARY_TUNNEL_OWNER);
+
+        let verify = Cli::try_parse_from([
+            "operator-cli",
+            "verify-device",
+            "--manifest-path",
+            "device.json",
+        ])
+        .unwrap();
+        let Command::VerifyDevice(verify) = verify.command else {
+            panic!("verify-device must parse");
+        };
+        assert_eq!(verify.required_tunnel_owner, PRIMARY_TUNNEL_OWNER);
     }
 
     #[test]
