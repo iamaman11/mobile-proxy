@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Atomically switch VM public proxy ports between reverse tunnel and WireGuard."""
+"""Atomically switch VM public proxy ports and verify exact configuration bytes."""
 
 from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import json
 import shlex
 import subprocess
@@ -17,6 +16,7 @@ class SwitchFailure(RuntimeError):
     pass
 
 
+_CONFIG_VERSION = 1
 _CONFIGS = {
     "reverse-tunnel": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
@@ -28,10 +28,7 @@ server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:13128; }
 """,
 }
 _REMOTE_CONFIG = "/etc/nginx/stream-available/mobile-public-proxy.conf"
-
-
-def config_digest(mode: str) -> str:
-    return hashlib.sha256(_CONFIGS[mode].encode()).hexdigest()
+_SUCCESS_MARKER = "exact-config-match"
 
 
 def remote_command(mode: str) -> str:
@@ -42,10 +39,12 @@ def remote_command(mode: str) -> str:
         else "mobile-reverse-tunnel-server.service"
     )
     temporary = f"{_REMOTE_CONFIG}.candidate.$$"
+    expected = f"{_REMOTE_CONFIG}.expected.$$"
     backup = f"{_REMOTE_CONFIG}.backup.$$"
     return f"""set -eu
 CONFIG={shlex.quote(_REMOTE_CONFIG)}
 TEMP={shlex.quote(temporary)}
+EXPECTED={shlex.quote(expected)}
 BACKUP={shlex.quote(backup)}
 COMMITTED=0
 cleanup() {{
@@ -55,33 +54,26 @@ cleanup() {{
       sudo systemctl reload nginx || true
     fi
   fi
-  sudo rm -f "$TEMP" "$BACKUP"
+  sudo rm -f "$TEMP" "$EXPECTED" "$BACKUP"
 }}
 trap cleanup EXIT
 sudo cp "$CONFIG" "$BACKUP"
 printf %s {shlex.quote(encoded)} | base64 -d | sudo tee "$TEMP" >/dev/null
-sudo chmod 0644 "$TEMP"
+sudo cp "$TEMP" "$EXPECTED"
+sudo chmod 0644 "$TEMP" "$EXPECTED"
 sudo mv "$TEMP" "$CONFIG"
 sudo nginx -t
 sudo systemctl reload nginx
 sudo systemctl is-active {required_services}
 sudo ss -lnt | grep -E ':(1080|1081|3128) '
-sudo sha256sum -- "$CONFIG"
+sudo cmp -s -- "$CONFIG" "$EXPECTED"
+printf '{_SUCCESS_MARKER}\\n'
 COMMITTED=1
 """
 
 
-def parse_remote_digest(output: str) -> str:
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    if not lines:
-        raise SwitchFailure("VM transport switch did not return a config digest")
-    parts = lines[-1].split(maxsplit=1)
-    if len(parts) != 2 or len(parts[0]) != 64:
-        raise SwitchFailure("VM transport switch returned an invalid config digest")
-    digest = parts[0]
-    if any(character not in "0123456789abcdef" for character in digest):
-        raise SwitchFailure("VM transport switch returned an invalid config digest")
-    return digest
+def exact_match_returned(output: str) -> bool:
+    return any(line.strip() == _SUCCESS_MARKER for line in output.splitlines())
 
 
 def switch(args: argparse.Namespace) -> dict[str, object]:
@@ -104,14 +96,14 @@ def switch(args: argparse.Namespace) -> dict[str, object]:
         completed = subprocess.run(command, check=True, capture_output=True, text=True)
     except (OSError, subprocess.CalledProcessError) as error:
         raise SwitchFailure("VM public proxy transport switch failed") from error
-    actual = parse_remote_digest(completed.stdout)
-    expected = config_digest(args.mode)
-    if actual != expected:
-        raise SwitchFailure("VM public proxy transport config differs after reload")
+    if not exact_match_returned(completed.stdout):
+        raise SwitchFailure("VM public proxy transport config was not verified byte-for-byte")
     return {
         "format_version": 1,
         "mode": args.mode,
-        "config_sha256": expected,
+        "config_contract": "mobile-public-proxy/v1",
+        "config_version": _CONFIG_VERSION,
+        "exact_config_match": True,
         "public_ports": [1080, 1081, 3128],
         "accepted": True,
     }
