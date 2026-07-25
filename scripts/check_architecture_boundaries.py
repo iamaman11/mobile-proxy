@@ -14,6 +14,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from check_digest_policy import check_repository as check_digest_policy
 from check_invariant_enforcement import validate_repository as check_invariant_enforcement
+from check_native_runtime_policy import check_repository as check_native_runtime_policy
 
 INFRASTRUCTURE_SOURCE_TOKENS = (
     "wireguard",
@@ -63,7 +64,6 @@ def dependency_tables(node: object, path: tuple[str, ...] = ()):
             yield from dependency_tables(value, next_path)
 
 
-
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     for relative, (allowed_dependencies, forbidden_tokens) in PURE_CRATES.items():
@@ -96,6 +96,7 @@ def check_repository(root: Path) -> list[str]:
                     )
     errors.extend(check_digest_policy(root))
     errors.extend(check_invariant_enforcement(root))
+    errors.extend(check_native_runtime_policy(root))
     return errors
 
 
