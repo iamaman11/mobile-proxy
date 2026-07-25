@@ -10,10 +10,6 @@ permissions:
   contents: read
   checks: write
 
-env:
-  ARCHITECTURE_VALIDATION_LOG: ${{ runner.temp }}/architecture-validation.log
-  CARGO_DENY_LOG: ${{ runner.temp }}/cargo-deny.log
-
 concurrency:
   group: rust-quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -33,6 +29,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
+          ARCHITECTURE_VALIDATION_LOG="${RUNNER_TEMP}/architecture-validation.log"
           set -o pipefail
           {
             python3 scripts/check_architecture_boundaries.py
@@ -44,7 +41,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: architecture-validation-${{ github.sha }}
-          path: ${{ env.ARCHITECTURE_VALIDATION_LOG }}
+          path: ${{ runner.temp }}/architecture-validation.log
           if-no-files-found: error
           retention-days: 7
 
@@ -118,6 +115,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
+          CARGO_DENY_LOG="${RUNNER_TEMP}/cargo-deny.log"
           set -o pipefail
           cargo deny check advisories licenses bans sources 2>&1 | tee "$CARGO_DENY_LOG"
 
@@ -126,7 +124,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cargo-deny-diagnostics-${{ github.sha }}
-          path: ${{ env.CARGO_DENY_LOG }}
+          path: ${{ runner.temp }}/cargo-deny.log
           if-no-files-found: error
           retention-days: 7
 
