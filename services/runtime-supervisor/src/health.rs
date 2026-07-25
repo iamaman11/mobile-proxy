@@ -17,6 +17,7 @@ pub struct SupervisorState {
     lifecycle_state: RuntimeState,
     last_route_repair: Option<Instant>,
     last_proxy_restart: Option<Instant>,
+    last_tun0_ready: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,7 @@ impl SupervisorState {
             lifecycle_state: RuntimeState::Booting,
             last_route_repair: None,
             last_proxy_restart: None,
+            last_tun0_ready: None,
         }
     }
 
@@ -56,6 +58,20 @@ impl SupervisorState {
         }
         self.last_proxy_restart = Some(Instant::now());
         true
+    }
+
+    pub fn observe_wireguard_tunnel_ready(
+        &mut self,
+        wireguard_enabled: bool,
+        tun0_ready: bool,
+    ) -> bool {
+        if !wireguard_enabled {
+            self.last_tun0_ready = None;
+            return false;
+        }
+
+        let previous = self.last_tun0_ready.replace(tun0_ready);
+        matches!(previous, Some(false)) && tun0_ready
     }
 }
 
@@ -230,5 +246,25 @@ mod tests {
         let transition = state.observe_readiness("raw-provider-error").unwrap();
         assert_eq!(transition.to, RuntimeState::Recovering);
         assert_eq!(state.lifecycle_state, RuntimeState::Recovering);
+    }
+
+    #[test]
+    fn tunnel_ready_transition_only_fires_after_observed_absence() {
+        let mut state = SupervisorState::new();
+
+        assert!(!state.observe_wireguard_tunnel_ready(true, false));
+        assert!(state.observe_wireguard_tunnel_ready(true, true));
+        assert!(!state.observe_wireguard_tunnel_ready(true, true));
+        assert!(!state.observe_wireguard_tunnel_ready(true, false));
+        assert!(state.observe_wireguard_tunnel_ready(true, true));
+    }
+
+    #[test]
+    fn first_observation_of_ready_tunnel_does_not_force_restart() {
+        let mut state = SupervisorState::new();
+
+        assert!(!state.observe_wireguard_tunnel_ready(true, true));
+        assert!(!state.observe_wireguard_tunnel_ready(false, false));
+        assert!(!state.observe_wireguard_tunnel_ready(true, true));
     }
 }
