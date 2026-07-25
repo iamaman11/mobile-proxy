@@ -17,6 +17,8 @@ concurrency:
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  ARCHITECTURE_VALIDATION_LOG: ${{ runner.temp }}/architecture-validation.log
+  CARGO_DENY_LOG: ${{ runner.temp }}/cargo-deny.log
 
 jobs:
   immutable-sha-acceptance:
@@ -46,14 +48,14 @@ jobs:
           {
             python3 scripts/check_architecture_boundaries.py
             python3 -m unittest discover -s scripts/tests -p 'test_*.py'
-          } 2>&1 | tee architecture-validation.log
+          } 2>&1 | tee "$ARCHITECTURE_VALIDATION_LOG"
 
       - name: Upload architecture diagnostics
         if: steps.architecture.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: architecture-validation-${{ env.CANDIDATE_SHA }}
-          path: architecture-validation.log
+          path: ${{ env.ARCHITECTURE_VALIDATION_LOG }}
           if-no-files-found: error
           retention-days: 7
 
@@ -108,14 +110,14 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo deny check advisories licenses bans sources 2>&1 | tee cargo-deny.log
+          cargo deny check advisories licenses bans sources 2>&1 | tee "$CARGO_DENY_LOG"
 
       - name: Upload cargo-deny diagnostics
         if: steps.cargo_deny.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: cargo-deny-diagnostics-${{ env.CANDIDATE_SHA }}
-          path: cargo-deny.log
+          path: ${{ env.CARGO_DENY_LOG }}
           if-no-files-found: error
           retention-days: 7
 
