@@ -4,6 +4,7 @@ mod cli;
 mod commands;
 mod device;
 mod device_stack;
+mod device_support;
 mod http;
 mod provision;
 mod release_integrity;
