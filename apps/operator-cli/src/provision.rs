@@ -155,10 +155,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     .with_context(|| format!("failed to parse manifest {}", manifest_path.display()))?;
     validate_manifest(&manifest)?;
 
-    let profile_name = manifest
-        .operator_profile
-        .as_deref()
-        .unwrap_or("default");
+    let profile_name = manifest.operator_profile.as_deref().unwrap_or("default");
     validate_profile_name(profile_name)?;
     let profile_path = root
         .join("deploy/device-runtime/profiles")
@@ -212,9 +209,8 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
         validate_host_config(&body, &args.tunnel_owner)?;
         body
     } else {
-        let template = fs::read_to_string(
-            root.join("deploy/device-runtime/templates/host-daemon.base.json"),
-        )?;
+        let template =
+            fs::read_to_string(root.join("deploy/device-runtime/templates/host-daemon.base.json"))?;
         let relay_host = manifest
             .relay
             .as_ref()
@@ -232,8 +228,14 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ("DEVICE_TOKEN", device_token.as_str()),
             ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
             ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
-            ("PROXY_LISTEN_ADDRESS", proxy_listen_address(&args.tunnel_owner)),
-            ("REVERSE_TUNNEL_ADDR", &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?),
+            (
+                "PROXY_LISTEN_ADDRESS",
+                proxy_listen_address(&args.tunnel_owner),
+            ),
+            (
+                "REVERSE_TUNNEL_ADDR",
+                &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?,
+            ),
             (
                 "REVERSE_TUNNEL_TCP_ADDR",
                 &reverse_tunnel_tcp_addr(&manifest, &args.tunnel_owner)?,
@@ -250,7 +252,10 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 "REVERSE_TUNNEL_ENABLED",
                 bool_literal(args.tunnel_owner == PRIMARY_TUNNEL_OWNER),
             ),
-            ("AIRPLANE_HOLD_SECS", &profile.airplane_hold_secs.to_string()),
+            (
+                "AIRPLANE_HOLD_SECS",
+                &profile.airplane_hold_secs.to_string(),
+            ),
         ];
         let body = render_json_template(&template, &strings, &raw)?;
         validate_host_config(&body, &args.tunnel_owner)?;
@@ -262,15 +267,17 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
         validate_json(&body, "sing-box configuration")?;
         body
     } else {
-        let template = fs::read_to_string(
-            root.join("deploy/device-runtime/templates/sing-box.base.json"),
-        )?;
+        let template =
+            fs::read_to_string(root.join("deploy/device-runtime/templates/sing-box.base.json"))?;
         render_json_template(
             &template,
             &[
                 ("RELAY_USER", relay_user.as_str()),
                 ("RELAY_PASSWORD", relay_password.as_str()),
-                ("SING_BOX_LISTEN_HOST", sing_box_listen_host(&args.tunnel_owner)),
+                (
+                    "SING_BOX_LISTEN_HOST",
+                    sing_box_listen_host(&args.tunnel_owner),
+                ),
             ],
             &[],
         )?
@@ -488,8 +495,8 @@ fn resolve_path(root: &Path, raw: &str) -> PathBuf {
 
 fn required_env(name: &str) -> Result<String> {
     validate_bounded_text("environment variable name", name, 128)?;
-    let value = env::var(name)
-        .with_context(|| format!("missing required environment variable: {name}"))?;
+    let value =
+        env::var(name).with_context(|| format!("missing required environment variable: {name}"))?;
     validate_bounded_text(name, &value, 4096)?;
     Ok(value)
 }

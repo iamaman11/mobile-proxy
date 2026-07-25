@@ -124,9 +124,8 @@ sh "$ROOT/current/service.sh"
             ],
         )?;
         let remote_apply_quoted = shell_quote_validated(&remote_apply);
-        let apply_command = format!(
-            "sh {remote_apply_quoted}; code=$?; rm -f {remote_apply_quoted}; exit $code"
-        );
+        let apply_command =
+            format!("sh {remote_apply_quoted}; code=$?; rm -f {remote_apply_quoted}; exit $code");
         adb(
             args.device_serial.as_deref(),
             &["shell", "su", "0", "sh", "-c", &apply_command],

@@ -81,9 +81,9 @@ pub(crate) fn validate_release_id(value: &str) -> Result<()> {
         || value.len() > 64
         || !first.is_some_and(|character| character.is_ascii_alphanumeric())
         || !last.is_some_and(|character| character.is_ascii_alphanumeric())
-        || !value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+        || !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
     {
         bail!("release_id is invalid")
     }
@@ -97,9 +97,9 @@ pub(crate) fn validate_device_path(value: &str, field: &str) -> Result<()> {
         || !matches!(components.next(), Some(Component::RootDir))
         || components.clone().next().is_none()
         || components.any(|component| !matches!(component, Component::Normal(_)))
-        || value
-            .chars()
-            .any(|character| !(character.is_ascii_alphanumeric() || matches!(character, '/' | '-' | '_' | '.')))
+        || value.chars().any(|character| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '/' | '-' | '_' | '.'))
+        })
     {
         bail!("{field} is invalid")
     }
@@ -187,10 +187,7 @@ pub(crate) fn verify_installed_release_files(
         let local = fs::read(root.join(relative))
             .with_context(|| format!("failed to read packaged release file {relative}"))?;
         let remote = format!("{}/current/{}", device_root.trim_end_matches('/'), relative);
-        let deployed = adb_bytes(
-            device_serial,
-            &["exec-out", "su", "0", "cat", &remote],
-        )?;
+        let deployed = adb_bytes(device_serial, &["exec-out", "su", "0", "cat", &remote])?;
         if local != deployed {
             bail!("deployed device release file differs: {relative}")
         }
@@ -315,7 +312,8 @@ pub(crate) fn assert_active_vpn_owner(
         }
         STOCK_WIREGUARD_OWNER => {
             let expected_uid = package_uid(device_serial, STOCK_WIREGUARD_PACKAGE)?;
-            let actual_uid = active_vpn_owner_uid.context("active Android VPN owner uid was not found")?;
+            let actual_uid =
+                active_vpn_owner_uid.context("active Android VPN owner uid was not found")?;
             if actual_uid != expected_uid {
                 bail!(
                     "active Android VPN owner mismatch: expected_package={} expected_uid={} actual_owner_uid={}",
@@ -435,8 +433,8 @@ fn parse_ipv4_octet(value: &str) -> Option<u8> {
 }
 
 fn required_env(name: &str) -> Result<String> {
-    let value = env::var(name)
-        .with_context(|| format!("missing required environment variable: {name}"))?;
+    let value =
+        env::var(name).with_context(|| format!("missing required environment variable: {name}"))?;
     if value.is_empty() || value.len() > 4096 || value.chars().any(char::is_control) {
         bail!("required environment variable {name} is invalid")
     }
@@ -503,11 +501,17 @@ mod tests {
     #[test]
     fn parsers_and_inputs_fail_closed() {
         let output = "package:com.wireguard.android uid:10209\n";
-        assert_eq!(parse_package_uid(output, "com.wireguard.android"), Some(10209));
+        assert_eq!(
+            parse_package_uid(output, "com.wireguard.android"),
+            Some(10209)
+        );
         assert_eq!(parse_package_uid(output, "com.example.mobileproxy"), None);
         let dump = "NetworkAgentInfo Transports: CELLULAR|VPN OwnerUid: 10212";
         assert_eq!(parse_active_vpn_owner_uid(dump), Some(10212));
-        assert_eq!(parse_active_vpn_owner_uid("Transports: CELLULAR OwnerUid: 1000"), None);
+        assert_eq!(
+            parse_active_vpn_owner_uid("Transports: CELLULAR OwnerUid: 1000"),
+            None
+        );
         assert!(validate_tunnel_owner(PRIMARY_TUNNEL_OWNER).is_ok());
         assert!(validate_tunnel_owner("first_party_vpn_service").is_err());
         assert!(validate_release_id("candidate-1.0").is_ok());
