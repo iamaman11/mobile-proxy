@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::cli::Cli;
@@ -11,7 +11,7 @@ struct RuntimeConfig {
     listen: Option<String>,
     admin_token: String,
     proxy: ProxyConfig,
-    wireguard: Option<WireguardConfig>,
+    wireguard: WireguardConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,8 +23,8 @@ struct ProxyConfig {
 
 #[derive(Debug, Deserialize)]
 struct WireguardConfig {
-    enabled: Option<bool>,
-    owner: Option<String>,
+    enabled: bool,
+    owner: String,
 }
 
 #[derive(Debug)]
@@ -55,11 +55,14 @@ pub enum TunnelOwner {
 }
 
 impl TunnelOwner {
-    pub fn parse(raw: Option<String>) -> Self {
-        match raw.as_deref() {
-            Some("first_party_vpn_service") => Self::FirstPartyVpnService,
-            Some("first_party_reverse_tunnel") => Self::FirstPartyReverseTunnel,
-            _ => Self::StockWireguardBridge,
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw {
+            "stock_wireguard_bridge" => Ok(Self::StockWireguardBridge),
+            "first_party_vpn_service" => Ok(Self::FirstPartyVpnService),
+            "first_party_reverse_tunnel" => Ok(Self::FirstPartyReverseTunnel),
+            other => bail!(
+                "unsupported tunnel owner {other}; expected stock_wireguard_bridge, first_party_vpn_service, or first_party_reverse_tunnel"
+            ),
         }
     }
 
@@ -68,6 +71,20 @@ impl TunnelOwner {
             Self::StockWireguardBridge => "stock_wireguard_bridge",
             Self::FirstPartyVpnService => "first_party_vpn_service",
             Self::FirstPartyReverseTunnel => "first_party_reverse_tunnel",
+        }
+    }
+
+    fn validate_wireguard_flag(self, enabled: bool) -> Result<()> {
+        match (self, enabled) {
+            (Self::FirstPartyReverseTunnel, false)
+            | (Self::StockWireguardBridge, true)
+            | (Self::FirstPartyVpnService, true) => Ok(()),
+            (Self::FirstPartyReverseTunnel, true) => {
+                bail!("first_party_reverse_tunnel must not enable WireGuard")
+            }
+            (Self::StockWireguardBridge | Self::FirstPartyVpnService, false) => {
+                bail!("WireGuard compatibility owner requires wireguard.enabled=true")
+            }
         }
     }
 }
@@ -87,6 +104,8 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         .map(PathBuf::from)
         .unwrap_or_else(|| runtime_root.clone());
     let proxy_config = proxy_config_path(&runtime_root, &file.proxy.args);
+    let tunnel_owner = TunnelOwner::parse(&file.wireguard.owner)?;
+    tunnel_owner.validate_wireguard_flag(file.wireguard.enabled)?;
 
     Ok(SupervisorConfig {
         host_binary: runtime_root.join("bin/host-daemon"),
@@ -97,12 +116,8 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         proxy_config,
         proxy_args: file.proxy.args,
         proxy_working_dir,
-        wireguard_enabled: file
-            .wireguard
-            .as_ref()
-            .and_then(|w| w.enabled)
-            .unwrap_or(false),
-        tunnel_owner: TunnelOwner::parse(file.wireguard.and_then(|w| w.owner)),
+        wireguard_enabled: file.wireguard.enabled,
+        tunnel_owner,
         app_tunnel_config: runtime_root.join("config/app-wireguard.conf"),
         poll_secs: cli.poll_secs,
         repair_cooldown_secs: cli.repair_cooldown_secs,
@@ -124,35 +139,44 @@ mod tests {
     use super::TunnelOwner;
 
     #[test]
-    fn tunnel_owner_defaults_to_explicit_stock_bridge() {
-        assert_eq!(TunnelOwner::parse(None), TunnelOwner::StockWireguardBridge);
+    fn tunnel_owner_is_explicit_and_fail_closed() {
+        assert!(TunnelOwner::parse("").is_err());
+        assert!(TunnelOwner::parse("unknown").is_err());
         assert_eq!(
-            TunnelOwner::parse(Some("stock_wireguard_bridge".into())),
+            TunnelOwner::parse("stock_wireguard_bridge").unwrap(),
             TunnelOwner::StockWireguardBridge
         );
-    }
-
-    #[test]
-    fn tunnel_owner_accepts_first_party_mode() {
         assert_eq!(
-            TunnelOwner::parse(Some("first_party_vpn_service".into())),
+            TunnelOwner::parse("first_party_vpn_service").unwrap(),
             TunnelOwner::FirstPartyVpnService
         );
         assert_eq!(
-            TunnelOwner::FirstPartyVpnService.as_str(),
-            "first_party_vpn_service"
+            TunnelOwner::parse("first_party_reverse_tunnel").unwrap(),
+            TunnelOwner::FirstPartyReverseTunnel
         );
     }
 
     #[test]
-    fn tunnel_owner_accepts_reverse_tunnel_mode() {
-        assert_eq!(
-            TunnelOwner::parse(Some("first_party_reverse_tunnel".into())),
+    fn owner_and_wireguard_flag_must_agree() {
+        assert!(
             TunnelOwner::FirstPartyReverseTunnel
+                .validate_wireguard_flag(false)
+                .is_ok()
         );
-        assert_eq!(
-            TunnelOwner::FirstPartyReverseTunnel.as_str(),
-            "first_party_reverse_tunnel"
+        assert!(
+            TunnelOwner::FirstPartyReverseTunnel
+                .validate_wireguard_flag(true)
+                .is_err()
+        );
+        assert!(
+            TunnelOwner::StockWireguardBridge
+                .validate_wireguard_flag(true)
+                .is_ok()
+        );
+        assert!(
+            TunnelOwner::StockWireguardBridge
+                .validate_wireguard_flag(false)
+                .is_err()
         );
     }
 }
