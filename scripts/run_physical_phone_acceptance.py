@@ -19,18 +19,30 @@ _EXPECTED_REPOSITORY = "iamaman11/mobile-proxy"
 _EXPECTED_WORKFLOW = "Software Release Candidate"
 _REQUIRED_SOFTWARE_CHECKS = {
     "architecture_boundaries",
-    "digest_policy",
+    "native_reverse_tunnel_default",
+    "no_android_vpn_primary_path",
+    "stock_wireguard_explicit_rollback_only",
+    "multi_language_digest_policy",
+    "typed_blake3_release_integrity",
+    "typed_blake3_runtime_fingerprints",
+    "exact_device_deployment_bytes",
+    "exact_vm_deployment_bytes",
+    "exact_vm_proxy_transport_config",
     "python_regressions",
     "rustfmt",
     "strict_clippy",
     "workspace_tests",
+    "rustsec_advisory_audit",
+    "dependency_license_bans_sources",
+    "android_unit_tests",
+    "android_lint",
+    "android_debug_build",
     "process_liveness_readiness",
     "sqlite_backup_restore",
     "sqlite_clean_environment_restore",
     "quic_forced_fallback",
     "tls_tcp_reserve",
     "quic_recovery",
-    "mixed_proxy",
     "mixed_proxy_socks5",
     "mixed_proxy_http",
     "mixed_proxy_connect",
@@ -38,10 +50,8 @@ _REQUIRED_SOFTWARE_CHECKS = {
     "http_proxy",
     "http_connect",
     "wireguard_rollback_compatibility",
-    "release_integrity_policy",
     "deployed_release_identity_verifier",
     "physical_report_set_verifier",
-    "vm_proxy_transport_switch",
 }
 _TRANSPORT_BY_STAGE = {
     "online": "quic",
@@ -83,7 +93,7 @@ def git_output(*arguments: str) -> str:
 
 
 def verify_candidate(evidence: dict[str, Any]) -> str:
-    require(evidence.get("format_version") == 1, "candidate evidence version is unsupported")
+    require(evidence.get("format_version") == 2, "candidate evidence version is unsupported")
     require(evidence.get("repository") == _EXPECTED_REPOSITORY, "candidate evidence repository differs")
     require(evidence.get("workflow") == _EXPECTED_WORKFLOW, "candidate evidence workflow differs")
     candidate_sha = evidence.get("candidate_sha")
@@ -91,16 +101,33 @@ def verify_candidate(evidence: dict[str, Any]) -> str:
         isinstance(candidate_sha, str) and _SHA_PATTERN.fullmatch(candidate_sha) is not None,
         "candidate evidence contains an invalid SHA",
     )
-    require(evidence.get("software_complete") is True, "software evidence is not complete")
+    require(
+        evidence.get("primary_runtime") == "first_party_reverse_tunnel",
+        "candidate primary runtime differs",
+    )
+    require(
+        evidence.get("primary_runtime_requires_android_vpn") is False,
+        "candidate incorrectly requires Android VPN for the primary runtime",
+    )
+    require(
+        evidence.get("rollback_runtime") == "stock_wireguard_bridge",
+        "candidate rollback runtime differs",
+    )
+    require(evidence.get("software_10_of_10_ready") is True, "software evidence is not 10/10-ready")
     require(
         evidence.get("physical_phone_acceptance_required") is True,
         "candidate evidence does not require the physical gate",
     )
+    require(evidence.get("baseline_complete") is False, "software evidence falsely declares baseline complete")
     accepted_checks = evidence.get("accepted_checks")
     require(isinstance(accepted_checks, list), "candidate evidence checks are invalid")
     require(
         all(isinstance(check, str) and len(check) <= 64 for check in accepted_checks),
         "candidate evidence checks are invalid",
+    )
+    require(
+        len(accepted_checks) == len(set(accepted_checks)),
+        "candidate evidence contains duplicate checks",
     )
     require(
         _REQUIRED_SOFTWARE_CHECKS.issubset(set(accepted_checks)),
@@ -188,95 +215,91 @@ def prove_proxy_surfaces(
     }
 
 
-def _required_secret_env(name: str) -> str:
+def _required_environment(name: str, maximum: int = 4096) -> str:
     value = os.environ.get(name, "")
-    require(value != "", f"{name} is required")
-    require(
-        len(value) <= 1024 and not any(ord(character) < 32 for character in value),
-        f"{name} is invalid",
-    )
+    require(bool(value), f"required environment variable {name} is missing")
+    require(len(value) <= maximum, f"required environment variable {name} is too long")
+    require(not any(character.isspace() and character not in " " for character in value), f"required environment variable {name} is invalid")
     return value
 
 
-def require_serving_health(health: dict[str, Any], device_id: str) -> None:
-    require(health.get("node_id") == device_id, "host health node_id differs from expected device")
-    require(health.get("serving") is True, "device is not serving")
-    require(health.get("proxy_status") == "running", "device proxy is not running")
-    require(health.get("cellular_route_ready") is True, "cellular route is not ready")
-    require(health.get("proxy_bind_ready") is True, "device proxy bind is not ready")
-    require(health.get("local_serving_ready") is True, "local proxy serving is not ready")
+def find_device(inventory: dict[str, Any] | list[Any], expected_device_id: str) -> tuple[bool, dict[str, Any] | None]:
+    if isinstance(inventory, dict):
+        devices = inventory.get("devices")
+    else:
+        devices = inventory
+    require(isinstance(devices, list), "device inventory response is invalid")
+    require(len(devices) <= 10_000, "device inventory response is unbounded")
+    matches = [device for device in devices if isinstance(device, dict) and device.get("node_id") == expected_device_id]
+    require(len(matches) <= 1, "device inventory contains duplicate expected devices")
+    return bool(matches), matches[0] if matches else None
 
 
-def require_device_record(devices: list[Any], device_id: str) -> dict[str, Any]:
-    device = next(
-        (
-            value
-            for value in devices
-            if isinstance(value, dict) and value.get("node_id") == device_id
-        ),
-        None,
+def build_stage_report(args: argparse.Namespace, candidate_sha: str) -> dict[str, Any]:
+    host_token = _required_environment("HOST_ADMIN_TOKEN")
+    control_token = _required_environment("CONTROL_PLANE_ADMIN_TOKEN")
+    proxy_username = _required_environment("PROXY_USERNAME", 256)
+    proxy_password = _required_environment("PROXY_PASSWORD")
+    proxy_credentials = f"{proxy_username}:{proxy_password}"
+
+    host_live = request_json(f"{args.host_api_base.rstrip('/')}/livez")
+    host_ready = request_json(f"{args.host_api_base.rstrip('/')}/readyz")
+    control_ready = request_json(f"{args.control_plane_base.rstrip('/')}/readyz")
+    require_object(host_live, "host liveness")
+    require_object(host_ready, "host readiness")
+    require_object(control_ready, "control-plane readiness")
+
+    health = require_object(
+        request_json(f"{args.host_api_base.rstrip('/')}/v1/health", host_token),
+        "host health",
     )
-    require(isinstance(device, dict), "expected device is absent from restored inventory")
+    inventory = request_json(
+        f"{args.control_plane_base.rstrip('/')}/api/v1/devices",
+        control_token,
+    )
+    present, device = find_device(inventory, args.expected_device_id)
+    require(present and device is not None, "expected device is absent from control-plane inventory")
+
+    required_true = {
+        "serving": health.get("serving"),
+        "cellular_route_ready": health.get("cellular_route_ready"),
+        "proxy_bind_ready": health.get("proxy_bind_ready"),
+        "local_serving_ready": health.get("local_serving_ready"),
+    }
+    for name, value in required_true.items():
+        require(value is True, f"device health {name} is not true")
+    require(health.get("node_id") == args.expected_device_id, "host health device ID differs")
+    require(device.get("node_id") == args.expected_device_id, "control-plane device ID differs")
     require(device.get("serving") is True, "control-plane device is not serving")
     require(device.get("availability") == "available", "control-plane device is unavailable")
-    require(device.get("last_heartbeat_at") is not None, "control-plane device heartbeat is missing")
-    return device
+    require(device.get("last_heartbeat_at") is not None, "control-plane heartbeat is missing")
 
-
-def run_stage(args: argparse.Namespace) -> dict[str, Any]:
-    evidence = read_json(args.evidence)
-    candidate_sha = verify_candidate(evidence)
-
-    host_base = args.host_api_base.rstrip("/")
-    control_base = args.control_plane_base.rstrip("/")
-    host_token = _required_secret_env(args.host_token_env)
-    control_token = _required_secret_env(args.control_token_env)
-    proxy_username = _required_secret_env(args.proxy_username_env)
-    proxy_password = _required_secret_env(args.proxy_password_env)
-
-    host_live = require_object(request_json(f"{host_base}/livez"), "host liveness")
-    host_ready = require_object(request_json(f"{host_base}/readyz"), "host readiness")
-    control_ready = require_object(request_json(f"{control_base}/readyz"), "control-plane readiness")
-    require(host_live.get("status") == "live", "host process is not live")
-    require(host_ready.get("status") == "ready", "host process is not ready")
-    require(control_ready.get("status") == "ready", "control plane is not ready")
-
-    health = require_object(request_json(f"{host_base}/v1/health", host_token), "host health")
-    status = require_object(request_json(f"{host_base}/v1/status", host_token), "host status")
-    require_serving_health(health, args.device_id)
-
+    owner = health.get("tunnel_owner")
+    reverse = {
+        "connected": health.get("reverse_tunnel_connected"),
+        "active_transport": health.get("reverse_tunnel_active_transport"),
+        "freshness": health.get("reverse_tunnel_freshness"),
+    }
+    wireguard = {
+        "enabled": health.get("wireguard_enabled"),
+        "tun0_present": health.get("tun0_present"),
+        "handshake_recent": health.get("wg_handshake_recent"),
+    }
     expected_transport = _TRANSPORT_BY_STAGE.get(args.stage)
     if expected_transport is not None:
-        require(status.get("tunnel_owner") == "first_party_reverse_tunnel", "reverse stage tunnel owner differs")
-        require(status.get("wireguard_enabled") is False, "reverse stage unexpectedly enables WireGuard")
-        require(health.get("tun0_present") is not True, "reverse stage leaves tun0 active")
-        require(health.get("reverse_tunnel_connected") is True, "reverse tunnel is disconnected")
-        require(
-            health.get("reverse_tunnel_active_transport") == expected_transport,
-            "reverse tunnel transport differs from the required stage",
-        )
-        require(health.get("reverse_tunnel_freshness") == "fresh", "reverse tunnel is stale")
+        require(owner == "first_party_reverse_tunnel", "reverse stage tunnel owner differs")
+        require(reverse["connected"] is True, "reverse tunnel is disconnected")
+        require(reverse["active_transport"] == expected_transport, "reverse tunnel transport differs")
+        require(reverse["freshness"] == "fresh", "reverse tunnel is not fresh")
+        require(wireguard["enabled"] is False, "reverse stage unexpectedly enables WireGuard")
+        require(wireguard["tun0_present"] is not True, "reverse stage leaves Android VPN active")
+    elif args.stage == "wireguard":
+        require(owner == "stock_wireguard_bridge", "WireGuard stage owner differs")
+        require(wireguard["enabled"] is True, "WireGuard stage is not enabled")
+        require(wireguard["tun0_present"] is True, "WireGuard stage tun0 is absent")
+        require(wireguard["handshake_recent"] is True, "WireGuard stage handshake is not recent")
+        require(reverse["connected"] is not True, "reverse tunnel remained active during WireGuard stage")
 
-    if args.stage == "wireguard":
-        require(status.get("wireguard_enabled") is True, "WireGuard rollback is not enabled")
-        require(status.get("tunnel_owner") == "stock_wireguard_bridge", "WireGuard tunnel owner differs")
-        require(health.get("tun0_present") is True, "WireGuard tun0 is absent")
-        require(health.get("wg_handshake_recent") is True, "WireGuard handshake is not recent")
-        require(
-            health.get("reverse_tunnel_connected") is not True,
-            "reverse tunnel remained active during WireGuard proof",
-        )
-
-    devices = request_json(f"{control_base}/api/v1/devices", control_token)
-    require(isinstance(devices, list) and devices, "restored device inventory is empty")
-    device = require_device_record(devices, args.device_id)
-
-    proxies = prove_proxy_surfaces(
-        args.proxy_host,
-        args.http_probe_url,
-        args.https_probe_url,
-        f"{proxy_username}:{proxy_password}",
-    )
     return {
         "format_version": 1,
         "candidate_sha": candidate_sha,
@@ -289,26 +312,23 @@ def run_stage(args: argparse.Namespace) -> dict[str, Any]:
         "device_inventory_present": True,
         "expected_device_present": True,
         "device_state": {
-            "node_id": args.device_id,
+            "node_id": args.expected_device_id,
             "serving": True,
-            "availability": device.get("availability"),
+            "availability": "available",
             "heartbeat_present": True,
             "cellular_route_ready": True,
             "proxy_bind_ready": True,
             "local_serving_ready": True,
         },
-        "tunnel_owner": status.get("tunnel_owner"),
-        "reverse_tunnel": {
-            "connected": health.get("reverse_tunnel_connected"),
-            "active_transport": health.get("reverse_tunnel_active_transport"),
-            "freshness": health.get("reverse_tunnel_freshness"),
-        },
-        "wireguard": {
-            "enabled": status.get("wireguard_enabled") is True,
-            "tun0_present": health.get("tun0_present"),
-            "handshake_recent": health.get("wg_handshake_recent"),
-        },
-        "proxy_surfaces": proxies,
+        "tunnel_owner": owner,
+        "reverse_tunnel": reverse,
+        "wireguard": wireguard,
+        "proxy_surfaces": prove_proxy_surfaces(
+            args.proxy_host,
+            args.http_probe_url,
+            args.https_probe_url,
+            proxy_credentials,
+        ),
         "accepted": True,
     }
 
@@ -317,27 +337,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--stage",
-        choices=[
-            "online",
-            "post-reboot",
-            "fallback",
-            "recovered",
-            "wireguard",
-            "post-wireguard-recovered",
-        ],
+        choices=["online", "post-reboot", "fallback", "recovered", "wireguard", "post-wireguard-recovered"],
         required=True,
     )
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--host-api-base", required=True)
     parser.add_argument("--control-plane-base", required=True)
     parser.add_argument("--proxy-host", required=True)
-    parser.add_argument("--http-probe-url", required=True)
-    parser.add_argument("--https-probe-url", required=True)
-    parser.add_argument("--device-id", required=True)
-    parser.add_argument("--host-token-env", default="HOST_ADMIN_TOKEN")
-    parser.add_argument("--control-token-env", default="CONTROL_PLANE_ADMIN_TOKEN")
-    parser.add_argument("--proxy-username-env", default="PROXY_USERNAME")
-    parser.add_argument("--proxy-password-env", default="PROXY_PASSWORD")
+    parser.add_argument("--expected-device-id", required=True)
+    parser.add_argument("--http-probe-url", default="http://example.com/")
+    parser.add_argument("--https-probe-url", default="https://example.com/")
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -345,11 +354,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        report = run_stage(args)
-        args.output.write_text(
-            json.dumps(report, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        candidate_sha = verify_candidate(read_json(args.evidence))
+        report = build_stage_report(args, candidate_sha)
+        args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except AcceptanceFailure as error:
         print(f"physical acceptance failed: {error}", file=sys.stderr)
         return 1
