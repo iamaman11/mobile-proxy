@@ -1,4 +1,9 @@
-use std::{env, fs, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    env, fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::{Context, Result, bail};
 use proxy_core::{
@@ -528,7 +533,7 @@ fn bounded_interval(field: &str, value: u64, minimum: u64, maximum: u64) -> Resu
     Ok(value)
 }
 
-fn validate_state_path(path: &PathBuf) -> Result<()> {
+fn validate_state_path(path: &Path) -> Result<()> {
     if path.as_os_str().is_empty()
         || path.components().any(|component| {
             matches!(
