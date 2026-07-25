@@ -17,7 +17,7 @@ object TunnelState {
         storageContext(context).getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun setDesired(context: Context, desired: Boolean) {
-        prefs(context).edit {
+        prefs(context).edit(commit = true) {
             putBoolean(DESIRED, desired)
         }
     }
@@ -27,7 +27,7 @@ object TunnelState {
             .getBoolean(DESIRED, false)
 
     fun setConfig(context: Context, config: String) {
-        prefs(context).edit {
+        prefs(context).edit(commit = true) {
             putString(CONFIG, config)
         }
     }
@@ -37,13 +37,13 @@ object TunnelState {
             .getString(CONFIG, null)
 
     fun setLastState(context: Context, state: String) {
-        prefs(context).edit {
+        prefs(context).edit(commit = true) {
             putString(LAST_STATE, state)
         }
     }
 
     fun setLastError(context: Context, error: String?) {
-        prefs(context).edit {
+        prefs(context).edit(commit = true) {
             putString(LAST_ERROR, error)
         }
     }

@@ -4,7 +4,6 @@ use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use base64::Engine;
 use tokio::time::sleep;
 
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
@@ -226,12 +225,11 @@ fn push_first_party_tunnel_config(config_path: &Path) -> Result<()> {
     let Some(uid) = package_uid(APP_OWNED_PACKAGE)? else {
         bail!("first-party VPN package is not installed")
     };
-    let config_b64 = base64::engine::general_purpose::STANDARD.encode(config.as_bytes());
     run_as_uid(
         uid,
         &format!(
-            "am broadcast --user 0 -n com.example.mobileproxy/.TunnelCommandReceiver -a com.example.mobileproxy.action.SET_TUNNEL_CONFIG --es config_b64 '{}'",
-            config_b64
+            "am broadcast --user 0 -n com.example.mobileproxy/.TunnelCommandReceiver -a com.example.mobileproxy.action.SET_TUNNEL_CONFIG --es config {}",
+            shell_single_quote(&config)
         ),
     )?;
     Ok(())
@@ -252,9 +250,13 @@ fn parse_package_uid(output: &str, package_name: &str) -> Option<u32> {
     })
 }
 
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_cellular_dev, parse_package_uid, parse_route_line};
+    use super::{is_cellular_dev, parse_package_uid, parse_route_line, shell_single_quote};
 
     #[test]
     fn extracts_cellular_route_hint() {
@@ -280,5 +282,10 @@ mod tests {
             Some(10209)
         );
         assert_eq!(parse_package_uid(output, "com.wireguard.android"), None);
+    }
+
+    #[test]
+    fn shell_quote_handles_single_quotes() {
+        assert_eq!(shell_single_quote("a'b"), "'a'\\''b'");
     }
 }
