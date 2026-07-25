@@ -22,6 +22,8 @@ class PhysicalReportVerifierTests(unittest.TestCase):
             "expected_tunnel_owner": owner,
             "device_release_entries": 10,
             "vm_release_entries": 15,
+            "local_release_integrity_match": True,
+            "comparison_contract": "exact-bytes",
             "device_release_metadata_match": True,
             "device_deployment_match": True,
             "android_vpn_owner_match": True,
@@ -33,7 +35,9 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         return {
             "format_version": 1,
             "mode": mode,
-            "config_sha256": "a" * 64,
+            "config_contract": "mobile-public-proxy/v1",
+            "config_version": 1,
+            "exact_config_match": True,
             "public_ports": [1080, 1081, 3128],
             "accepted": True,
         }
@@ -121,7 +125,7 @@ class PhysicalReportVerifierTests(unittest.TestCase):
         ]:
             MODULE.verify_stage_report(self.stage(stage), "a" * 40, stage)
 
-    def test_wrong_sha_owner_missing_mixed_protocol_or_stale_tunnel_fails(self):
+    def test_wrong_sha_owner_comparison_missing_protocol_or_stale_tunnel_fails(self):
         deployment = self.deployment()
         deployment["candidate_sha"] = "b" * 40
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "SHA differs"):
@@ -131,6 +135,13 @@ class PhysicalReportVerifierTests(unittest.TestCase):
 
         deployment = self.deployment("stock_wireguard_bridge")
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "tunnel owner differs"):
+            MODULE.verify_deployment_report(
+                deployment, "a" * 40, "primary", "first_party_reverse_tunnel"
+            )
+
+        deployment = self.deployment()
+        deployment["comparison_contract"] = "digest-only"
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "not exact"):
             MODULE.verify_deployment_report(
                 deployment, "a" * 40, "primary", "first_party_reverse_tunnel"
             )
@@ -162,6 +173,11 @@ class PhysicalReportVerifierTests(unittest.TestCase):
             MODULE.verify_stage_report(report, "a" * 40, "wireguard")
 
     def test_switch_and_activation_reports_fail_closed(self):
+        report = self.switch("wireguard")
+        report["exact_config_match"] = False
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "not an exact match"):
+            MODULE.verify_switch_report(report, "wireguard", "wireguard")
+
         report = self.switch("wireguard")
         report["public_ports"] = [1080]
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "ports differ"):
