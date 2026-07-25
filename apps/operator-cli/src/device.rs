@@ -64,6 +64,7 @@ TMP={staging}
 BOOT='/data/adb/service.d/99-mobile-proxy-runtime.sh'
 TARGET="$ROOT/releases/$REL"
 mkdir -p "$ROOT/releases" "$ROOT/logs" /data/adb/service.d
+chmod 0700 "$ROOT" "$ROOT/releases" "$ROOT/logs"
 if command -v pkill >/dev/null 2>&1; then
   pkill -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.sh || true
   pkill -f "$ROOT/.*/bin/runtime-supervisor" || true
@@ -79,6 +80,8 @@ rm -rf "$TARGET"
 mkdir -p "$TARGET"
 cp -R "$TMP/." "$TARGET/"
 rm -rf "$TMP"
+find "$TARGET" -type d -exec chmod 0700 {{}} +
+find "$TARGET" -type f -exec chmod 0600 {{}} +
 chmod 0700 "$TARGET/service.sh" "$TARGET/bin/runtime-supervisor" "$TARGET/bin/host-daemon" "$TARGET/bin/sing-box" "$TARGET/bin/curl"
 ln -sfn "$TARGET" "$ROOT/current"
 rm -f /data/adb/service.d/99-mobile-proxy-routefix.sh
@@ -90,6 +93,7 @@ ROOT='/data/adb/mobile-proxy-node'
 LOG_DIR='/data/local/tmp/mobile-proxy-logs'
 BOOT_LOG="$LOG_DIR/boot-service.log"
 mkdir -p "$LOG_DIR"
+chmod 0700 "$LOG_DIR"
 timestamp() {{ date '+%Y-%m-%dT%H:%M:%S%z'; }}
 log_boot() {{ echo "$(timestamp) $*" >> "$BOOT_LOG"; }}
 log_boot "boot_hook_started"
