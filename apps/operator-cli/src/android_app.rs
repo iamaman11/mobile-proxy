@@ -94,7 +94,15 @@ fn is_ignored_dir(name: &OsStr) -> bool {
 }
 
 fn run_windows_gradle(build_dir: &Path, windows_build_dir_cmd: &str) -> Result<()> {
-    let cmd = format!("cd /d {windows_build_dir_cmd} && gradlew.bat clean :app:assembleDebug");
+    let mut command_prefix = String::new();
+    if let Some(java_home) = detect_windows_java_home()? {
+        let java_home = java_home.replace('"', "");
+        command_prefix =
+            format!("set \"JAVA_HOME={java_home}\" && set \"PATH=%JAVA_HOME%\\\\bin;%PATH%\" && ");
+    }
+    let cmd = format!(
+        "{command_prefix}cd /d {windows_build_dir_cmd} && gradlew.bat clean :app:assembleDebug"
+    );
     let status = Command::new("/mnt/c/Windows/System32/cmd.exe")
         .args(["/C", &cmd])
         .current_dir(build_dir)
@@ -199,6 +207,46 @@ fn detect_adb() -> Result<PathBuf> {
     bail!("adb.exe not found")
 }
 
+fn detect_windows_java_home() -> Result<Option<String>> {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "Bose".to_string());
+    for base in [
+        format!("/mnt/c/Users/{user}/mobile-proxy-windows-jdk21"),
+        "/mnt/c/Users/Bose/mobile-proxy-windows-jdk21".to_string(),
+    ] {
+        if let Some(found) = find_windows_java_home(Path::new(&base))? {
+            return Ok(Some(found));
+        }
+    }
+    Ok(None)
+}
+
+fn find_windows_java_home(base: &Path) -> Result<Option<String>> {
+    if !base.is_dir() {
+        return Ok(None);
+    }
+    for entry in fs::read_dir(base).with_context(|| format!("failed to read {}", base.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() || !path.join("bin/java.exe").is_file() {
+            continue;
+        }
+        if let Some(windows) = windows_path_from_wsl_mount(&path) {
+            return Ok(Some(windows));
+        }
+    }
+    Ok(None)
+}
+
+fn windows_path_from_wsl_mount(path: &Path) -> Option<String> {
+    let windows = path.to_str()?.replace('/', "\\");
+    if windows.len() >= 7 && windows.starts_with(r"\mnt\c\") {
+        return Some(format!("C:{}", &windows[6..]));
+    }
+    None
+}
+
 fn repo_root() -> Result<PathBuf> {
     Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -210,8 +258,9 @@ fn repo_root() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::path::Path;
 
-    use super::{is_ignored_dir, write_local_properties};
+    use super::{is_ignored_dir, windows_path_from_wsl_mount, write_local_properties};
 
     #[test]
     fn android_copy_skips_build_outputs() {
@@ -235,5 +284,17 @@ mod tests {
         assert!(content.starts_with("sdk.dir="));
 
         std::fs::remove_dir_all(build_dir).expect("cleanup temp build dir");
+    }
+
+    #[test]
+    fn converts_mnt_c_path_to_windows_java_home() {
+        let detected = windows_path_from_wsl_mount(Path::new(
+            "/mnt/c/Users/Bose/mobile-proxy-windows-jdk21/jdk-21.0.11+10",
+        ))
+        .expect("convert WSL mount path");
+        assert_eq!(
+            detected,
+            r"C:\Users\Bose\mobile-proxy-windows-jdk21\jdk-21.0.11+10"
+        );
     }
 }
