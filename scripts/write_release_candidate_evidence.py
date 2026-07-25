@@ -16,18 +16,30 @@ _REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _ALLOWED_EVENTS = {"pull_request", "push", "workflow_dispatch"}
 _ACCEPTED_CHECKS = (
     "architecture_boundaries",
-    "digest_policy",
+    "native_reverse_tunnel_default",
+    "no_android_vpn_primary_path",
+    "stock_wireguard_explicit_rollback_only",
+    "multi_language_digest_policy",
+    "typed_blake3_release_integrity",
+    "typed_blake3_runtime_fingerprints",
+    "exact_device_deployment_bytes",
+    "exact_vm_deployment_bytes",
+    "exact_vm_proxy_transport_config",
     "python_regressions",
     "rustfmt",
     "strict_clippy",
     "workspace_tests",
+    "rustsec_advisory_audit",
+    "dependency_license_bans_sources",
+    "android_unit_tests",
+    "android_lint",
+    "android_debug_build",
     "process_liveness_readiness",
     "sqlite_backup_restore",
     "sqlite_clean_environment_restore",
     "quic_forced_fallback",
     "tls_tcp_reserve",
     "quic_recovery",
-    "mixed_proxy",
     "mixed_proxy_socks5",
     "mixed_proxy_http",
     "mixed_proxy_connect",
@@ -35,10 +47,8 @@ _ACCEPTED_CHECKS = (
     "http_proxy",
     "http_connect",
     "wireguard_rollback_compatibility",
-    "release_integrity_policy",
     "deployed_release_identity_verifier",
     "physical_report_set_verifier",
-    "vm_proxy_transport_switch",
 )
 
 
@@ -71,7 +81,7 @@ def build_evidence(env: Mapping[str, str], checked_out_sha: str) -> dict[str, ob
         raise ValueError("workflow run identity must be numeric")
 
     return {
-        "format_version": 1,
+        "format_version": 2,
         "candidate_sha": candidate_sha,
         "repository": repository,
         "workflow": workflow,
@@ -79,8 +89,12 @@ def build_evidence(env: Mapping[str, str], checked_out_sha: str) -> dict[str, ob
         "workflow_run_attempt": run_attempt,
         "workflow_event": event_name,
         "workflow_url": f"https://github.com/{repository}/actions/runs/{run_id}",
-        "software_complete": True,
+        "primary_runtime": "first_party_reverse_tunnel",
+        "primary_runtime_requires_android_vpn": False,
+        "rollback_runtime": "stock_wireguard_bridge",
+        "software_10_of_10_ready": True,
         "physical_phone_acceptance_required": True,
+        "baseline_complete": False,
         "accepted_checks": list(_ACCEPTED_CHECKS),
     }
 
