@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::android::{
     bootstrap_cellular_data, bounce_mobile_data, ensure_cellular_default_route,
-    kick_first_party_vpn_service, kick_stock_wireguard_bridge, tun0_ready,
+    kick_stock_wireguard_bridge, tun0_ready,
 };
 use crate::config::{SupervisorConfig, TunnelOwner};
 use crate::runtime_adapter::{legacy_readiness_from_state, state_from_legacy_readiness};
@@ -74,18 +74,17 @@ pub async fn fetch_health(
 }
 
 pub async fn reconcile_wireguard(config: &SupervisorConfig) {
-    if !config.wireguard_enabled {
-        return;
-    }
-    if tun0_ready() {
+    if !config.wireguard_enabled || tun0_ready() {
         return;
     }
 
     warn!(
         tunnel_owner = config.tunnel_owner.as_str(),
-        "wireguard enabled but tun0 is absent; attempting tunnel kick"
+        "stock WireGuard rollback is enabled but tun0 is absent; attempting tunnel kick"
     );
-    kick_tunnel(config).await;
+    if config.tunnel_owner == TunnelOwner::StockWireguardBridge {
+        kick_stock_wireguard_bridge().await;
+    }
 }
 
 pub async fn reconcile_health(
@@ -101,12 +100,11 @@ pub async fn reconcile_health(
             "runtime lifecycle projection changed"
         );
     }
-    if config.wireguard_enabled && health.wg_handshake_recent == Some(false) {
-        warn!(
-            tunnel_owner = config.tunnel_owner.as_str(),
-            "WireGuard gateway is unreachable; attempting tunnel kick"
-        );
-        kick_tunnel(config).await;
+    if config.tunnel_owner == TunnelOwner::StockWireguardBridge
+        && health.wg_handshake_recent == Some(false)
+    {
+        warn!("stock WireGuard gateway is unreachable; attempting tunnel kick");
+        kick_stock_wireguard_bridge().await;
     }
 
     if health.cellular_route_ready != Some(false) {
@@ -176,18 +174,6 @@ fn reconcile_reverse_tunnel_cellular_bootstrap(
     );
     if let Err(err) = bootstrap_cellular_data() {
         warn!("cellular bootstrap failed: {err:#}");
-    }
-}
-
-async fn kick_tunnel(config: &SupervisorConfig) {
-    match config.tunnel_owner {
-        TunnelOwner::FirstPartyVpnService => {
-            if let Err(err) = kick_first_party_vpn_service(&config.app_tunnel_config) {
-                warn!("first-party VPN kick failed: {err:#}");
-            }
-        }
-        TunnelOwner::FirstPartyReverseTunnel => {}
-        TunnelOwner::StockWireguardBridge => kick_stock_wireguard_bridge().await,
     }
 }
 
