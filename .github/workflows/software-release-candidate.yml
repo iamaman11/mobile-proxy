@@ -37,9 +37,28 @@ jobs:
           test -z "$(git status --porcelain)"
 
       - name: Enforce architecture and policy boundaries
+        id: architecture
+        continue-on-error: true
+        shell: bash
         run: |
-          python3 scripts/check_architecture_boundaries.py
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          set -o pipefail
+          {
+            python3 scripts/check_architecture_boundaries.py
+            python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          } 2>&1 | tee architecture-validation.log
+
+      - name: Upload architecture diagnostics
+        if: steps.architecture.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: architecture-validation-${{ env.CANDIDATE_SHA }}
+          path: architecture-validation.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce architecture result
+        if: steps.architecture.outcome == 'failure'
+        run: exit 1
 
       - name: Install stable Rust toolchain
         run: |
