@@ -73,7 +73,7 @@ def check_repository(root: Path) -> list[str]:
         PRIMARY_OWNER,
         ROLLBACK_OWNER,
         "native reverse tunnel requires no active Android VPN",
-        "remote_bytes == (root / relative).read_bytes()",
+        "if local != deployed",
     ]:
         if required not in support_body:
             errors.append(f"{support.relative_to(root)}: missing native device invariant {required!r}")
