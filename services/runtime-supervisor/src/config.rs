@@ -16,7 +16,9 @@ struct RuntimeConfig {
 
 #[derive(Debug, Deserialize)]
 struct ProxyConfig {
-    binary: String,
+    #[serde(default)]
+    binary: Option<String>,
+    #[serde(default)]
     args: Vec<String>,
     working_dir: Option<String>,
 }
@@ -91,13 +93,18 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
     let file: RuntimeConfig = serde_json::from_str(&config_body)
         .with_context(|| format!("failed to parse {}", host_config.display()))?;
     let host_listen = file.listen.unwrap_or_else(|| "127.0.0.1:8088".into());
-    let proxy_binary = PathBuf::from(file.proxy.binary);
+    let proxy_binary = file
+        .proxy
+        .binary
+        .map(PathBuf::from)
+        .unwrap_or_else(|| runtime_root.join("bin/sing-box"));
     let proxy_working_dir = file
         .proxy
         .working_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| runtime_root.clone());
-    let proxy_config = proxy_config_path(&runtime_root, &file.proxy.args);
+    let proxy_args = default_proxy_args(&runtime_root, file.proxy.args);
+    let proxy_config = proxy_config_path(&runtime_root, &proxy_args);
     let tunnel_owner = TunnelOwner::parse(&file.wireguard.owner)?;
     tunnel_owner.validate_wireguard_flag(file.wireguard.enabled)?;
 
@@ -108,7 +115,7 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         admin_token: file.admin_token,
         proxy_binary,
         proxy_config,
-        proxy_args: file.proxy.args,
+        proxy_args,
         proxy_working_dir,
         wireguard_enabled: file.wireguard.enabled,
         tunnel_owner,
@@ -120,6 +127,20 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
     })
 }
 
+fn default_proxy_args(runtime_root: &std::path::Path, args: Vec<String>) -> Vec<String> {
+    if !args.is_empty() {
+        return args;
+    }
+    vec![
+        "run".into(),
+        "-c".into(),
+        runtime_root
+            .join("config/sing-box.json")
+            .to_string_lossy()
+            .into_owned(),
+    ]
+}
+
 fn proxy_config_path(runtime_root: &std::path::Path, args: &[String]) -> PathBuf {
     args.windows(2)
         .find(|parts| parts[0] == "-c" || parts[0] == "--config")
@@ -129,7 +150,10 @@ fn proxy_config_path(runtime_root: &std::path::Path, args: &[String]) -> PathBuf
 
 #[cfg(test)]
 mod tests {
-    use super::TunnelOwner;
+    use std::fs;
+
+    use super::{TunnelOwner, load_config};
+    use crate::cli::Cli;
 
     #[test]
     fn tunnel_owner_is_explicit_and_fail_closed() {
@@ -168,5 +192,59 @@ mod tests {
                 .validate_wireguard_flag(false)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn supervisor_defaults_proxy_launcher_from_runtime_root() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("mobile-proxy-runtime-supervisor-config-{unique}"));
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(
+            root.join("config/host-daemon.json"),
+            serde_json::json!({
+                "listen": "127.0.0.1:8088",
+                "admin_token": "admin-token-0000000000000000000000000001",
+                "proxy": {
+                    "listen_address": "127.0.0.1:1080",
+                    "username": "proxy-user-0000000000000000000000000001",
+                    "password": "proxy-pass-0000000000000000000000000001"
+                },
+                "wireguard": {
+                    "enabled": false,
+                    "owner": "first_party_reverse_tunnel"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let loaded = load_config(Cli {
+            runtime_root: root.to_string_lossy().into_owned(),
+            poll_secs: 1,
+            repair_cooldown_secs: 15,
+            data_bounce_down_secs: 2,
+            data_bounce_settle_secs: 8,
+            once: false,
+        })
+        .unwrap();
+
+        assert_eq!(loaded.proxy_binary, root.join("bin/sing-box"));
+        assert_eq!(
+            loaded.proxy_args,
+            vec![
+                "run".to_string(),
+                "-c".to_string(),
+                root.join("config/sing-box.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            ]
+        );
+        assert_eq!(loaded.proxy_config, root.join("config/sing-box.json"));
+
+        let _ = fs::remove_dir_all(root);
     }
 }

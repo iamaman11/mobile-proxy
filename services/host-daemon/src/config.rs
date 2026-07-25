@@ -24,7 +24,6 @@ const MAX_SECRET_LENGTH: usize = 4096;
 const MAX_URLS: usize = 8;
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 pub struct FileConfig {
     node_id: Option<String>,
     node_name: Option<String>,
@@ -40,28 +39,36 @@ pub struct FileConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileOperatorProfiles {
     default_profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileProxyConfig {
     listen_address: Option<String>,
     username: Option<String>,
     password: Option<String>,
+    #[allow(dead_code)]
+    binary: Option<String>,
+    #[allow(dead_code)]
+    args: Option<Vec<String>>,
+    #[allow(dead_code)]
+    working_dir: Option<String>,
+    #[allow(dead_code)]
+    env: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileWireguardConfig {
     enabled: Option<bool>,
     owner: Option<String>,
+    #[allow(dead_code)]
+    up_command: Option<String>,
+    #[allow(dead_code)]
+    down_command: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileReverseTunnelConfig {
     enabled: Option<bool>,
     transport: Option<String>,
@@ -79,7 +86,6 @@ struct FileReverseTunnelConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileControlPlaneConfig {
     base_url: Option<String>,
     device_token: Option<String>,
@@ -91,18 +97,20 @@ struct FileControlPlaneConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileRotationConfig {
     data_reconnect: Option<FileRotationStrategyConfig>,
     airplane_bounce: Option<FileRotationStrategyConfig>,
     network_mode_bounce: Option<FileRotationStrategyConfig>,
     ril_bounce: Option<FileRotationStrategyConfig>,
+    #[allow(dead_code)]
+    drain_delay_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileRotationStrategyConfig {
     command: Option<String>,
+    #[allow(dead_code)]
+    enabled: Option<bool>,
 }
 
 pub struct LoadedConfig {
@@ -649,6 +657,55 @@ mod tests {
         value["wireguard"]["enabled"] = true.into();
         fs::write(&path, value.to_string()).unwrap();
         assert!(load_runtime_config(&cli(&path)).is_err());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn shared_runtime_template_fields_are_tolerated() {
+        let root = std::env::temp_dir().join(format!(
+            "mobile-proxy-host-config-shared-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("host-daemon.json");
+        let mut value: serde_json::Value = serde_json::from_str(&valid_config()).unwrap();
+        value["proxy"]["binary"] = "/data/adb/mobile-proxy-node/current/bin/sing-box".into();
+        value["proxy"]["args"] = serde_json::json!([
+            "run",
+            "-c",
+            "/data/adb/mobile-proxy-node/current/config/sing-box.json"
+        ]);
+        value["proxy"]["working_dir"] = "/data/adb/mobile-proxy-node/current".into();
+        value["proxy"]["env"] = serde_json::json!({});
+        value["wireguard"]["up_command"] = "true".into();
+        value["wireguard"]["down_command"] = "true".into();
+        value["rotation"]["drain_delay_secs"] = 2.into();
+        value["rotation"]["data_reconnect"]["enabled"] = true.into();
+        value["network"] = serde_json::json!({
+            "cellular_only": true
+        });
+        value["reliability"] = serde_json::json!({
+            "max_restart_attempts": 5
+        });
+        value["operator_detection"] = serde_json::json!({
+            "command": "getprop gsm.operator.numeric"
+        });
+        value["operator_profiles"]["profiles"] = serde_json::json!({
+            "default": {
+                "preferred_rotation_strategy": "data_reconnect"
+            }
+        });
+        fs::write(&path, value.to_string()).unwrap();
+
+        assert!(
+            load_runtime_config(&Cli {
+                listen: None,
+                admin_token: None,
+                config: Some(path.to_string_lossy().into_owned()),
+            })
+            .is_ok()
+        );
 
         let _ = fs::remove_dir_all(root);
     }

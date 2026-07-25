@@ -360,7 +360,10 @@ fn validate_proxy_shape(config: &Value) -> Result<()> {
         }
     }
     for key in proxy.keys() {
-        if !matches!(key.as_str(), "listen_address" | "username" | "password") {
+        if !matches!(
+            key.as_str(),
+            "listen_address" | "username" | "password" | "binary" | "args" | "working_dir" | "env"
+        ) {
             bail!("host-daemon proxy contains unsupported field {key}");
         }
     }
@@ -581,9 +584,9 @@ mod tests {
     }
 
     #[test]
-    fn host_config_rejects_unsupported_proxy_fields() {
-        let invalid = r#"{"proxy":{"listen_address":"127.0.0.1:1080","username":"user","password":"pass","binary":"/bin/sing-box"},"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
-        assert!(validate_host_config(invalid, "first_party_reverse_tunnel").is_err());
+    fn host_config_accepts_shared_proxy_launcher_fields() {
+        let valid = r#"{"proxy":{"listen_address":"127.0.0.1:1080","username":"user","password":"pass","binary":"/bin/sing-box","args":["run","-c","/tmp/sing-box.json"],"working_dir":"/tmp","env":{}},"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
+        assert!(validate_host_config(valid, "first_party_reverse_tunnel").is_ok());
     }
 
     #[test]
