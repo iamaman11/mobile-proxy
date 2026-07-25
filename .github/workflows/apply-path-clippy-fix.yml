@@ -1,0 +1,53 @@
+name: Apply Path Clippy Fix
+
+on:
+  push:
+    branches:
+      - agent/native-runtime-blake3-audit
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-path-clippy-fix
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/native-runtime-blake3-audit
+          fetch-depth: 0
+      - name: Apply exact fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('services/host-daemon/src/config.rs')
+          body = path.read_text()
+          body = body.replace(
+              'use std::{env, fs, net::SocketAddr, path::PathBuf, time::Duration};',
+              'use std::{env, fs, net::SocketAddr, path::{Path, PathBuf}, time::Duration};',
+          )
+          body = body.replace(
+              'fn validate_state_path(path: &PathBuf) -> Result<()> {',
+              'fn validate_state_path(path: &Path) -> Result<()> {',
+          )
+          path.write_text(body)
+          PY
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          cargo fmt --all
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add services/host-daemon/src/config.rs
+          git commit -m 'Use Path for state path validation'
+          git push origin HEAD:agent/native-runtime-blake3-audit
