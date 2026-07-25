@@ -129,7 +129,9 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .clone()
         .or_else(|| file_config.listen.clone())
         .unwrap_or_else(|| "127.0.0.1:8088".into());
-    let listen_addr: SocketAddr = listen.parse().context("host-daemon listen address is invalid")?;
+    let listen_addr: SocketAddr = listen
+        .parse()
+        .context("host-daemon listen address is invalid")?;
     if !listen_addr.ip().is_loopback() {
         bail!("host-daemon API must bind to a loopback address")
     }
@@ -204,8 +206,12 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     validate_observer_urls(&observer_urls)?;
 
     let rotation_commands = RotationCommands {
-        data_reconnect: rotation_command(&file_config, |rotation| rotation.data_reconnect.as_ref())?,
-        airplane_bounce: rotation_command(&file_config, |rotation| rotation.airplane_bounce.as_ref())?,
+        data_reconnect: rotation_command(&file_config, |rotation| {
+            rotation.data_reconnect.as_ref()
+        })?,
+        airplane_bounce: rotation_command(&file_config, |rotation| {
+            rotation.airplane_bounce.as_ref()
+        })?,
         network_mode_bounce: rotation_command(&file_config, |rotation| {
             rotation.network_mode_bounce.as_ref()
         })?,
@@ -478,7 +484,11 @@ fn validate_observer_urls(urls: &[String]) -> Result<()> {
     }
     for raw in urls {
         let url = reqwest::Url::parse(raw).context("observer URL is invalid")?;
-        if url.scheme() != "https" || url.host_str().is_none() || url.username() != "" || url.password().is_some() {
+        if url.scheme() != "https"
+            || url.host_str().is_none()
+            || url.username() != ""
+            || url.password().is_some()
+        {
             bail!("observer URLs must be credential-free absolute HTTPS URLs")
         }
     }
@@ -486,10 +496,7 @@ fn validate_observer_urls(urls: &[String]) -> Result<()> {
 }
 
 fn validate_secret(field: &str, value: &str) -> Result<()> {
-    if value.len() < 16
-        || value.len() > MAX_SECRET_LENGTH
-        || value.chars().any(char::is_control)
-    {
+    if value.len() < 16 || value.len() > MAX_SECRET_LENGTH || value.chars().any(char::is_control) {
         bail!("{field} is invalid")
     }
     Ok(())
@@ -524,7 +531,10 @@ fn bounded_interval(field: &str, value: u64, minimum: u64, maximum: u64) -> Resu
 fn validate_state_path(path: &PathBuf) -> Result<()> {
     if path.as_os_str().is_empty()
         || path.components().any(|component| {
-            matches!(component, std::path::Component::ParentDir | std::path::Component::Prefix(_))
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
         })
     {
         bail!("reverse-tunnel counter state path is invalid")

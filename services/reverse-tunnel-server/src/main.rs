@@ -108,7 +108,10 @@ fn validate_cli(cli: &Cli) -> Result<ValidatedCli> {
         bail!("reverse tunnel private key value is invalid")
     }
 
-    let quic_listen: SocketAddr = cli.listen.parse().context("QUIC listen address is invalid")?;
+    let quic_listen: SocketAddr = cli
+        .listen
+        .parse()
+        .context("QUIC listen address is invalid")?;
     if quic_listen.ip().is_loopback() || quic_listen.ip().is_unspecified() {
         // An unspecified address is intentional for the public QUIC ingress.
     } else if quic_listen.ip().is_multicast() {
@@ -152,7 +155,9 @@ fn parse_public_proxy_listens(raw: &str) -> Result<Vec<SocketAddr>> {
     let mut unique = HashSet::new();
     let mut parsed = Vec::with_capacity(values.len());
     for value in values {
-        let listen: SocketAddr = value.parse().context("public proxy listen address is invalid")?;
+        let listen: SocketAddr = value
+            .parse()
+            .context("public proxy listen address is invalid")?;
         if !listen.ip().is_loopback() {
             bail!("reverse-tunnel public proxy backends must bind to loopback")
         }
@@ -190,10 +195,7 @@ mod tests {
     #[test]
     fn public_proxy_backends_are_bounded_unique_and_loopback_only() {
         assert!(
-            parse_public_proxy_listens(
-                "127.0.0.1:14080,127.0.0.1:14081,127.0.0.1:14128"
-            )
-            .is_ok()
+            parse_public_proxy_listens("127.0.0.1:14080,127.0.0.1:14081,127.0.0.1:14128").is_ok()
         );
         assert!(parse_public_proxy_listens("0.0.0.0:14080").is_err());
         assert!(parse_public_proxy_listens("127.0.0.1:14080,127.0.0.1:14080").is_err());
