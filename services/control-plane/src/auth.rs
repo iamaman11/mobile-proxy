@@ -15,11 +15,10 @@ pub struct AuthConfig {
 
 impl AuthConfig {
     pub fn new(admin_token: String, device_token: String) -> Result<Self> {
-        if admin_token.trim().is_empty() || device_token.trim().is_empty() {
-            bail!("control-plane admin and device tokens must be non-empty");
-        }
+        validate_token("control-plane admin token", &admin_token)?;
+        validate_token("control-plane device token", &device_token)?;
         if bool::from(admin_token.as_bytes().ct_eq(device_token.as_bytes())) {
-            bail!("control-plane admin and device tokens must be different");
+            bail!("control-plane admin and device tokens must be different")
         }
         Ok(Self {
             admin_token,
@@ -29,15 +28,36 @@ impl AuthConfig {
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
+    let candidate = headers
         .get(AUTHORIZATION)?
         .to_str()
         .ok()?
-        .strip_prefix("Bearer ")
+        .strip_prefix("Bearer ")?;
+    if candidate.is_empty()
+        || candidate.len() > 4096
+        || candidate
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return None;
+    }
+    Some(candidate)
 }
 
 fn matches(candidate: Option<&str>, expected: &str) -> bool {
     candidate.is_some_and(|value| bool::from(value.as_bytes().ct_eq(expected.as_bytes())))
+}
+
+fn validate_token(field: &str, value: &str) -> Result<()> {
+    if value.len() < 16
+        || value.len() > 4096
+        || value
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        bail!("{field} is invalid")
+    }
+    Ok(())
 }
 
 pub async fn require_admin(
@@ -64,12 +84,41 @@ pub async fn require_device(
 
 #[cfg(test)]
 mod tests {
-    use super::AuthConfig;
+    use axum::http::{HeaderMap, HeaderValue, header::AUTHORIZATION};
+
+    use super::{AuthConfig, bearer};
 
     #[test]
-    fn rejects_empty_or_shared_tokens() {
-        assert!(AuthConfig::new("".into(), "device".into()).is_err());
-        assert!(AuthConfig::new("same".into(), "same".into()).is_err());
-        assert!(AuthConfig::new("admin".into(), "device".into()).is_ok());
+    fn rejects_invalid_or_shared_tokens() {
+        assert!(AuthConfig::new("".into(), "device-token-0000000000".into()).is_err());
+        assert!(AuthConfig::new("same-token-0000000000".into(), "same-token-0000000000".into()).is_err());
+        assert!(AuthConfig::new("admin token with spaces".into(), "device-token-0000000000".into()).is_err());
+        assert!(
+            AuthConfig::new(
+                "admin-token-0000000000".into(),
+                "device-token-000000000".into()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn bearer_syntax_is_exact_and_bounded() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer admin-token-0000000000"),
+        );
+        assert_eq!(bearer(&headers), Some("admin-token-0000000000"));
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer token with spaces"),
+        );
+        assert!(bearer(&headers).is_none());
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("bearer admin-token-0000000000"),
+        );
+        assert!(bearer(&headers).is_none());
     }
 }
