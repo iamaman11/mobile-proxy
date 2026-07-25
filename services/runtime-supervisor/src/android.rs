@@ -1,46 +1,8 @@
 use std::process::Command;
 use std::time::Duration;
-use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
-use base64::Engine;
 use tokio::time::sleep;
-
-pub fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
-    let config = fs::read_to_string(config_path)
-        .with_context(|| format!("failed to read {}", config_path.display()))?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(config.as_bytes());
-    run_command(
-        "am",
-        &[
-            "broadcast",
-            "--user",
-            "0",
-            "--receiver-foreground",
-            "-a",
-            "com.example.mobileproxy.action.SET_TUNNEL_CONFIG",
-            "-n",
-            "com.example.mobileproxy/.TunnelCommandReceiver",
-            "--es",
-            "config_b64",
-            &encoded,
-        ],
-    )?;
-    run_command(
-        "am",
-        &[
-            "broadcast",
-            "--user",
-            "0",
-            "--receiver-foreground",
-            "-a",
-            "com.example.mobileproxy.action.START_TUNNEL",
-            "-n",
-            "com.example.mobileproxy/.TunnelCommandReceiver",
-        ],
-    )?;
-    Ok(())
-}
 
 pub async fn kick_stock_wireguard_bridge() {
     let _ = run_shell("settings put secure always_on_vpn_app com.wireguard.android");
@@ -58,13 +20,12 @@ pub async fn kick_stock_wireguard_bridge() {
 pub fn stop_compatibility_vpns() -> Result<()> {
     let mut failures = Vec::new();
     for command in [
-        "am broadcast --user 0 --receiver-foreground -a com.example.mobileproxy.action.STOP_TUNNEL -n com.example.mobileproxy/.TunnelCommandReceiver",
         "am broadcast --user 0 --receiver-foreground -a com.wireguard.android.action.SET_TUNNEL_DOWN --es tunnel WiGandroid",
         "settings delete secure always_on_vpn_app",
         "settings put secure always_on_vpn_lockdown 0",
     ] {
         if let Err(error) = run_shell(command) {
-            failures.push(format!("{command}: {error:#}"));
+            failures.push(format!("compatibility VPN cleanup failed: {error:#}"));
         }
     }
     if failures.is_empty() {
@@ -96,8 +57,8 @@ pub fn bootstrap_cellular_data() -> Result<()> {
         "settings put global mobile_data 1",
         "svc data enable",
     ] {
-        if let Err(err) = run_shell(command) {
-            failures.push(format!("{command}: {err:#}"));
+        if let Err(error) = run_shell(command) {
+            failures.push(format!("cellular bootstrap command failed: {error:#}"));
         }
     }
 
@@ -144,10 +105,10 @@ fn parse_route_line(line: &str) -> Option<(String, Option<String>)> {
     let mut dev = None;
     let mut via = None;
     let parts: Vec<_> = line.split_whitespace().collect();
-    for idx in 0..parts.len().saturating_sub(1) {
-        match parts[idx] {
-            "dev" => dev = Some(parts[idx + 1].to_string()),
-            "via" => via = Some(parts[idx + 1].to_string()),
+    for index in 0..parts.len().saturating_sub(1) {
+        match parts[index] {
+            "dev" => dev = Some(parts[index + 1].to_string()),
+            "via" => via = Some(parts[index + 1].to_string()),
             _ => {}
         }
     }
@@ -178,14 +139,12 @@ fn run_command(binary: &str, args: &[&str]) -> Result<String> {
     let output = Command::new(binary)
         .args(args)
         .output()
-        .with_context(|| format!("failed to start {} {:?}", binary, args))?;
+        .with_context(|| format!("failed to start {binary}"))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
         bail!(
-            "{} {:?} failed: {}",
-            binary,
-            args,
+            "{binary} command failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         )
     }
