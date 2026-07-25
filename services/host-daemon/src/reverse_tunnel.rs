@@ -66,11 +66,11 @@ pub async fn spawn_reverse_tunnel(
                     info!("reverse tunnel restart requested");
                     let _ = shutdown_tx.send(true);
                     let _ = client.await;
-                    "restart requested"
+                    "restart_requested"
                 }
                 _ = &mut client => {
                     warn!("reverse tunnel client exited; restarting manager generation");
-                    "reverse tunnel client exited"
+                    "client_exited"
                 }
             };
 
@@ -105,15 +105,18 @@ async fn project_snapshot(
         .persist_if_changed(&snapshot.event_counters)
     {
         Ok(_) => true,
-        Err(error) => {
-            warn!(error = %error, "failed to persist reverse tunnel counters");
+        Err(_) => {
+            warn!("failed to persist reverse tunnel counters");
             false
         }
     };
+    let bounded_error = bounded_snapshot_error(&snapshot);
+    let mut safe_snapshot = snapshot.clone();
+    safe_snapshot.last_error = bounded_error.clone();
     {
         let mut runtime = runtime_arc.lock().await;
         runtime.health.reverse_tunnel_connected = Some(snapshot.connected);
-        runtime.health.reverse_tunnel_last_error = snapshot.last_error.clone();
+        runtime.health.reverse_tunnel_last_error = bounded_error.clone();
         runtime.health.reverse_tunnel_active_transport = snapshot
             .active_transport
             .map(|transport| transport.as_str().to_string());
@@ -123,7 +126,7 @@ async fn project_snapshot(
             .map(|reason| reason.as_str().to_string());
         runtime.reverse_tunnel_counters = snapshot.event_counters.clone();
         runtime.reverse_tunnel_counter_persistence_healthy = persistence_healthy;
-        runtime.reverse_tunnel = Some(snapshot.clone());
+        runtime.reverse_tunnel = Some(safe_snapshot);
     }
     if snapshot.connected {
         info!(
@@ -135,16 +138,29 @@ async fn project_snapshot(
             failover_reason = snapshot.last_failover_reason.map(|value| value.as_str()).unwrap_or("none"),
             "reverse tunnel connected"
         );
-    } else if let Some(error) = snapshot.last_error {
+    } else if let Some(error) = bounded_error {
         warn!(
             session_id = %snapshot.session_id,
             attempts = snapshot.attempts,
             freshness = snapshot.freshness.as_str(),
             failover_reason = snapshot.last_failover_reason.map(|value| value.as_str()).unwrap_or("none"),
-            error = %error,
+            error_class = %error,
             "reverse tunnel disconnected"
         );
     }
+}
+
+fn bounded_snapshot_error(snapshot: &ClientSnapshot) -> Option<String> {
+    if snapshot.connected || snapshot.last_error.is_none() {
+        return None;
+    }
+    Some(
+        snapshot
+            .last_failover_reason
+            .map(|reason| reason.as_str())
+            .unwrap_or("session_error")
+            .to_string(),
+    )
 }
 
 async fn mark_disconnected(runtime_arc: SharedRuntime, reason: &str) {
@@ -164,5 +180,34 @@ async fn mark_disconnected(runtime_arc: SharedRuntime, reason: &str) {
         snapshot.active_transport = None;
         snapshot.freshness = TunnelFreshness::Stale;
         snapshot.last_error = Some(reason.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reverse_tunnel::{
+        ClientSnapshot, TunnelEventCounters, TunnelFailoverReason, TunnelFreshness,
+    };
+    use uuid::Uuid;
+
+    use super::bounded_snapshot_error;
+
+    #[test]
+    fn raw_tunnel_error_is_never_projected() {
+        let snapshot = ClientSnapshot {
+            session_id: Uuid::nil(),
+            connected: false,
+            attempts: 1,
+            sent_heartbeats: 0,
+            last_error: Some("token=secret socket detail".into()),
+            active_transport: None,
+            freshness: TunnelFreshness::Unknown,
+            last_failover_reason: Some(TunnelFailoverReason::AuthenticationFailed),
+            event_counters: TunnelEventCounters::default(),
+        };
+        assert_eq!(
+            bounded_snapshot_error(&snapshot).as_deref(),
+            Some("authentication_failed")
+        );
     }
 }
