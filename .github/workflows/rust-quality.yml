@@ -147,5 +147,4 @@ jobs:
           set -euo pipefail
           unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy NO_PROXY no_proxy || true
           cd apps/android-app
-          chmod +x gradlew
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+          bash ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
