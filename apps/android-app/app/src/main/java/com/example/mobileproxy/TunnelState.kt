@@ -10,34 +10,40 @@ object TunnelState {
     private const val LAST_STATE = "last_state"
     private const val LAST_ERROR = "last_error"
 
+    private fun storageContext(context: Context): Context =
+        context.createDeviceProtectedStorageContext()
+
+    private fun prefs(context: Context) =
+        storageContext(context).getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     fun setDesired(context: Context, desired: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putBoolean(DESIRED, desired)
         }
     }
 
     fun isDesired(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs(context)
             .getBoolean(DESIRED, false)
 
     fun setConfig(context: Context, config: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putString(CONFIG, config)
         }
     }
 
     fun getConfig(context: Context): String? =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs(context)
             .getString(CONFIG, null)
 
     fun setLastState(context: Context, state: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putString(LAST_STATE, state)
         }
     }
 
     fun setLastError(context: Context, error: String?) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+        prefs(context).edit {
             putString(LAST_ERROR, error)
         }
     }

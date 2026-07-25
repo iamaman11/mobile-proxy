@@ -29,6 +29,7 @@
             android:name=".MobileProxyVpnService"
             android:exported="true"
             android:permission="android.permission.BIND_VPN_SERVICE"
+            android:directBootAware="true"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -37,7 +38,8 @@
 
         <receiver
             android:name=".TunnelCommandReceiver"
-            android:exported="false">
+            android:exported="false"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="com.example.mobileproxy.action.SET_TUNNEL_CONFIG" />
                 <action android:name="com.example.mobileproxy.action.START_TUNNEL" />
@@ -47,7 +49,8 @@
 
         <receiver
             android:name=".BootReceiver"
-            android:exported="false">
+            android:exported="false"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />

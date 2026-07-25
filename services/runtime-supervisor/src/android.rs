@@ -11,9 +11,11 @@ use tokio::time::sleep;
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 const STOCK_WIREGUARD_TUNNEL: &str = "WiGandroid";
 const APP_OWNED_PACKAGE: &str = "com.example.mobileproxy";
-const APP_OWNED_PREFS_PATH: &str =
-    "/data/user/0/com.example.mobileproxy/shared_prefs/mobile_proxy_tunnel.xml";
 const APP_OWNED_PREFS_TMP_PATH: &str = "/data/local/tmp/mobile_proxy_tunnel.xml.new";
+const APP_OWNED_PREFS_PATHS: &[&str] = &[
+    "/data/user/0/com.example.mobileproxy/shared_prefs/mobile_proxy_tunnel.xml",
+    "/data/user_de/0/com.example.mobileproxy/shared_prefs/mobile_proxy_tunnel.xml",
+];
 
 pub async fn kick_stock_wireguard_bridge() {
     let _ = run_shell("settings put secure always_on_vpn_app com.wireguard.android");
@@ -238,9 +240,18 @@ fn write_first_party_tunnel_prefs(config_path: &Path) -> Result<()> {
     let Some(uid) = package_uid(APP_OWNED_PACKAGE)? else {
         bail!("first-party VPN package is not installed")
     };
-    let command = format!(
-        "cp {APP_OWNED_PREFS_TMP_PATH} {APP_OWNED_PREFS_PATH} && chmod 660 {APP_OWNED_PREFS_PATH}"
-    );
+    let mut command = String::new();
+    for path in APP_OWNED_PREFS_PATHS {
+        let parent = Path::new(path)
+            .parent()
+            .context("first-party tunnel prefs path parent is missing")?
+            .display()
+            .to_string();
+        command.push_str(&format!(
+            "mkdir -p {parent} && cp {APP_OWNED_PREFS_TMP_PATH} {path} && chmod 660 {path} && "
+        ));
+    }
+    command.push_str("true");
     run_as_uid(uid, &command)?;
     let _ = fs::remove_file(APP_OWNED_PREFS_TMP_PATH);
     Ok(())
