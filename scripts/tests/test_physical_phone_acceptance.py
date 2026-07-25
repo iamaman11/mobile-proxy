@@ -14,12 +14,16 @@ SPEC.loader.exec_module(MODULE)
 class PhysicalPhoneAcceptanceTests(unittest.TestCase):
     def evidence(self):
         return {
-            "format_version": 1,
+            "format_version": 2,
             "repository": "iamaman11/mobile-proxy",
             "workflow": "Software Release Candidate",
             "candidate_sha": "a" * 40,
-            "software_complete": True,
+            "primary_runtime": "first_party_reverse_tunnel",
+            "primary_runtime_requires_android_vpn": False,
+            "rollback_runtime": "stock_wireguard_bridge",
+            "software_10_of_10_ready": True,
             "physical_phone_acceptance_required": True,
+            "baseline_complete": False,
             "accepted_checks": sorted(MODULE._REQUIRED_SOFTWARE_CHECKS),
         }
 
@@ -67,10 +71,10 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["env"]["NO_PROXY"], "")
         self.assertEqual(run.call_args.kwargs["env"]["no_proxy"], "")
 
-    def test_incomplete_invalid_or_wrong_source_evidence_fails_closed(self):
+    def test_incomplete_invalid_wrong_runtime_or_wrong_source_evidence_fails_closed(self):
         evidence = self.evidence()
-        evidence["software_complete"] = False
-        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "not complete"):
+        evidence["software_10_of_10_ready"] = False
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "not 10/10-ready"):
             MODULE.verify_candidate(evidence)
 
         evidence = self.evidence()
@@ -84,8 +88,23 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
             MODULE.verify_candidate(evidence)
 
         evidence = self.evidence()
+        evidence["primary_runtime_requires_android_vpn"] = True
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "incorrectly requires"):
+            MODULE.verify_candidate(evidence)
+
+        evidence = self.evidence()
+        evidence["baseline_complete"] = True
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "falsely declares"):
+            MODULE.verify_candidate(evidence)
+
+        evidence = self.evidence()
         evidence["accepted_checks"].remove("quic_recovery")
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "missing required"):
+            MODULE.verify_candidate(evidence)
+
+        evidence = self.evidence()
+        evidence["accepted_checks"].append(evidence["accepted_checks"][0])
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "duplicate"):
             MODULE.verify_candidate(evidence)
 
     def test_non_object_health_response_is_rejected_cleanly(self):
@@ -94,9 +113,9 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
 
     @mock.patch.dict("os.environ", {"PROXY_PASSWORD": "secret-value"}, clear=True)
     def test_secret_validation_does_not_echo_secret(self):
-        self.assertEqual(MODULE._required_secret_env("PROXY_PASSWORD"), "secret-value")
-        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "MISSING is required") as caught:
-            MODULE._required_secret_env("MISSING")
+        self.assertEqual(MODULE._required_environment("PROXY_PASSWORD"), "secret-value")
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "MISSING") as caught:
+            MODULE._required_environment("MISSING")
         self.assertNotIn("secret-value", str(caught.exception))
 
 
