@@ -6,8 +6,12 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::cli::PackageDeviceReleaseArgs;
+use crate::device_support::{
+    PRIMARY_TUNNEL_OWNER, STOCK_WIREGUARD_OWNER, validate_release_id, validate_tunnel_owner,
+};
 use crate::release_integrity::{verify_integrity_manifest, write_integrity_manifest};
 
 const CURL_SHIM: &str = r#"#!/system/bin/sh
@@ -15,12 +19,10 @@ set -eu
 umask 077
 
 LOG_FILE="/data/adb/mobile-proxy-node/logs/curl-shim.log"
-
 max_time=5
 url=""
 proxy_url=""
 proxy_user=""
-
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -79,28 +81,25 @@ else
 fi
 
 run_wget() {
-  _url="$1"
   if [ -n "$effective_proxy" ]; then
     if [ -n "$WGET_BIN" ]; then
-      http_proxy="$effective_proxy" https_proxy="$effective_proxy" "$WGET_BIN" wget -Y on -qO- --timeout "$max_time" "$_url" 2>/dev/null
+      http_proxy="$effective_proxy" https_proxy="$effective_proxy" "$WGET_BIN" wget -Y on -qO- --timeout "$max_time" "$url" 2>/dev/null
     else
-      http_proxy="$effective_proxy" https_proxy="$effective_proxy" wget -Y on -qO- --timeout "$max_time" "$_url" 2>/dev/null
+      http_proxy="$effective_proxy" https_proxy="$effective_proxy" wget -Y on -qO- --timeout "$max_time" "$url" 2>/dev/null
     fi
+  elif [ -n "$WGET_BIN" ]; then
+    "$WGET_BIN" wget -qO- --timeout "$max_time" "$url" 2>/dev/null
   else
-    if [ -n "$WGET_BIN" ]; then
-      "$WGET_BIN" wget -qO- --timeout "$max_time" "$_url" 2>/dev/null
-    else
-      wget -qO- --timeout "$max_time" "$_url" 2>/dev/null
-    fi
+    wget -qO- --timeout "$max_time" "$url" 2>/dev/null
   fi
 }
 
-if run_wget "$url"; then
-  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:ok url:$url" >> "$LOG_FILE" 2>/dev/null || true
+if run_wget; then
+  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:ok" >> "$LOG_FILE" 2>/dev/null || true
   exit 0
 fi
 
-echo "$(date +%s) result:fail url:$url" >> "$LOG_FILE" 2>/dev/null || true
+echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:fail" >> "$LOG_FILE" 2>/dev/null || true
 exit 1
 "#;
 
@@ -128,10 +127,6 @@ struct ManifestTokens {
     relay_user_env: String,
     #[serde(rename = "relayPasswordEnv")]
     relay_password_env: String,
-    #[serde(rename = "wireguardPhonePrivateKeyEnv")]
-    wireguard_phone_private_key_env: Option<String>,
-    #[serde(rename = "wireguardServerPublicKeyEnv")]
-    wireguard_server_public_key_env: Option<String>,
     #[serde(rename = "reverseTunnelCertDerB64Env")]
     reverse_tunnel_cert_der_b64_env: Option<String>,
 }
@@ -139,8 +134,6 @@ struct ManifestTokens {
 #[derive(Debug, Deserialize)]
 struct ManifestRelay {
     host: String,
-    #[serde(rename = "wireguardPort")]
-    wireguard_port: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,32 +143,39 @@ struct DeviceProfile {
 }
 
 pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
-    let repo_root = repo_root()?;
-    let manifest_path = resolve_path(&repo_root, &args.manifest_path);
+    validate_release_id(&args.release_id)?;
+    validate_tunnel_owner(&args.tunnel_owner)?;
+    let root = repo_root()?;
+    ensure_clean_worktree(&root)?;
+    let manifest_path = resolve_path(&root, &args.manifest_path);
     let manifest: DeviceManifest = serde_json::from_str(
         &fs::read_to_string(&manifest_path)
             .with_context(|| format!("failed to read manifest {}", manifest_path.display()))?,
-    )?;
+    )
+    .with_context(|| format!("failed to parse manifest {}", manifest_path.display()))?;
+    validate_manifest(&manifest)?;
 
     let profile_name = manifest
         .operator_profile
-        .clone()
-        .unwrap_or_else(|| "default".into());
-    let profile_path = repo_root
+        .as_deref()
+        .unwrap_or("default");
+    validate_profile_name(profile_name)?;
+    let profile_path = root
         .join("deploy/device-runtime/profiles")
         .join(format!("{profile_name}.json"));
     let profile: DeviceProfile = serde_json::from_str(
         &fs::read_to_string(&profile_path)
             .with_context(|| format!("failed to read profile {}", profile_path.display()))?,
-    )?;
+    )
+    .with_context(|| format!("failed to parse profile {}", profile_path.display()))?;
+    validate_profile_name(&profile.operator_profile)?;
 
     let admin_token = required_env(&manifest.tokens.admin_token_env)?;
     let device_token = required_env(&manifest.tokens.device_token_env)?;
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
-    validate_tunnel_owner(&args.tunnel_owner)?;
 
-    let bin_dir = repo_root.join("deploy/device-runtime/bin");
+    let bin_dir = root.join("deploy/device-runtime/bin");
     let runtime_supervisor_bin = bin_dir.join("runtime-supervisor");
     let host_daemon_bin = bin_dir.join("host-daemon");
     let sing_box_bin = bin_dir.join("sing-box");
@@ -183,7 +183,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     ensure_android_arm_binary(&host_daemon_bin)?;
     ensure_android_arm_binary(&sing_box_bin)?;
 
-    let release_root = resolve_path(&repo_root, &args.output_dir).join(&args.release_id);
+    let release_root = resolve_path(&root, &args.output_dir).join(&args.release_id);
     if release_root.exists() {
         fs::remove_dir_all(&release_root)
             .with_context(|| format!("failed to clean {}", release_root.display()))?;
@@ -192,11 +192,11 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     fs::create_dir_all(release_root.join("config"))?;
 
     fs::copy(
-        repo_root.join("deploy/device-runtime/module/service.sh"),
+        root.join("deploy/device-runtime/module/service.sh"),
         release_root.join("service.sh"),
     )?;
     fs::copy(
-        repo_root.join("deploy/device-runtime/module/module.prop"),
+        root.join("deploy/device-runtime/module/module.prop"),
         release_root.join("module.prop"),
     )?;
     fs::copy(
@@ -208,125 +208,77 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     fs::write(release_root.join("bin/curl"), CURL_SHIM)?;
 
     let host_rendered = if let Some(path) = &args.host_daemon_config_path {
-        fs::read_to_string(resolve_path(&repo_root, path))?
+        let body = fs::read_to_string(resolve_path(&root, path))?;
+        validate_host_config(&body, &args.tunnel_owner)?;
+        body
     } else {
         let template = fs::read_to_string(
-            repo_root.join("deploy/device-runtime/templates/host-daemon.base.json"),
+            root.join("deploy/device-runtime/templates/host-daemon.base.json"),
         )?;
-        render_template(
-            &template,
-            &[
-                ("NODE_ID", manifest.device_id.as_str()),
-                ("NODE_NAME", manifest.node_name.as_str()),
-                ("ADMIN_TOKEN", admin_token.as_str()),
-                ("RELAY_USER", relay_user.as_str()),
-                ("RELAY_PASSWORD", relay_password.as_str()),
-                ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
-                (
-                    "CONTROL_PLANE_RESOLVE_ADDR",
-                    &format!(
-                        "{}:8443",
-                        manifest
-                            .relay
-                            .as_ref()
-                            .map(|relay| relay.host.as_str())
-                            .unwrap_or("34.118.88.54")
-                    ),
-                ),
-                ("DEVICE_TOKEN", device_token.as_str()),
-                ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
-                ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
-                (
-                    "PROXY_LISTEN_ADDRESS",
-                    proxy_listen_address(&args.tunnel_owner),
-                ),
-                (
-                    "WIREGUARD_ENABLED",
-                    bool_literal(args.tunnel_owner != "first_party_reverse_tunnel"),
-                ),
-                (
-                    "REVERSE_TUNNEL_ENABLED",
-                    bool_literal(args.tunnel_owner == "first_party_reverse_tunnel"),
-                ),
-                (
-                    "REVERSE_TUNNEL_ADDR",
-                    &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?,
-                ),
-                (
-                    "REVERSE_TUNNEL_TCP_ADDR",
-                    &reverse_tunnel_tcp_addr(&manifest, &args.tunnel_owner)?,
-                ),
-                ("REVERSE_TUNNEL_SERVER_NAME", "mobile-proxy-relay"),
-                (
-                    "REVERSE_TUNNEL_CERT_DER_B64",
-                    &reverse_tunnel_cert_der_b64(&manifest, &args.tunnel_owner)?,
-                ),
-                (
-                    "AIRPLANE_HOLD_SECS",
-                    &profile.airplane_hold_secs.to_string(),
-                ),
-            ],
-        )
-    };
-    if args.tunnel_owner == "first_party_vpn_service" {
-        let phone_private_key = required_env(
-            manifest
-                .tokens
-                .wireguard_phone_private_key_env
-                .as_deref()
-                .unwrap_or("MOBILE_PROXY_WG_PHONE_PRIVATE_KEY"),
-        )?;
-        let server_public_key = required_env(
-            manifest
-                .tokens
-                .wireguard_server_public_key_env
-                .as_deref()
-                .unwrap_or("MOBILE_PROXY_WG_SERVER_PUBLIC_KEY"),
-        )?;
-        let relay = manifest
+        let relay_host = manifest
             .relay
             .as_ref()
-            .context("first_party_vpn_service requires relay host in device manifest")?;
-        let template = fs::read_to_string(
-            repo_root.join("deploy/device-runtime/templates/app-wireguard.conf"),
-        )?;
-        let rendered = render_template(
-            &template,
-            &[
-                ("WG_PHONE_PRIVATE_KEY", phone_private_key.as_str()),
-                ("WG_SERVER_PUBLIC_KEY", server_public_key.as_str()),
-                ("WG_ENDPOINT_HOST", relay.host.as_str()),
-                (
-                    "WG_ENDPOINT_PORT",
-                    &relay.wireguard_port.unwrap_or(51820).to_string(),
-                ),
-            ],
-        );
-        fs::write(release_root.join("config/app-wireguard.conf"), rendered)?;
-    }
+            .map(|relay| relay.host.as_str())
+            .unwrap_or("34.118.88.54");
+        let reverse_cert = reverse_tunnel_cert_der_b64(&manifest, &args.tunnel_owner)?;
+        let strings = [
+            ("NODE_ID", manifest.device_id.as_str()),
+            ("NODE_NAME", manifest.node_name.as_str()),
+            ("ADMIN_TOKEN", admin_token.as_str()),
+            ("RELAY_USER", relay_user.as_str()),
+            ("RELAY_PASSWORD", relay_password.as_str()),
+            ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
+            ("CONTROL_PLANE_RESOLVE_ADDR", &format!("{relay_host}:8443")),
+            ("DEVICE_TOKEN", device_token.as_str()),
+            ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
+            ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
+            ("PROXY_LISTEN_ADDRESS", proxy_listen_address(&args.tunnel_owner)),
+            ("REVERSE_TUNNEL_ADDR", &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?),
+            (
+                "REVERSE_TUNNEL_TCP_ADDR",
+                &reverse_tunnel_tcp_addr(&manifest, &args.tunnel_owner)?,
+            ),
+            ("REVERSE_TUNNEL_SERVER_NAME", "mobile-proxy-relay"),
+            ("REVERSE_TUNNEL_CERT_DER_B64", reverse_cert.as_str()),
+        ];
+        let raw = [
+            (
+                "WIREGUARD_ENABLED",
+                bool_literal(args.tunnel_owner == STOCK_WIREGUARD_OWNER),
+            ),
+            (
+                "REVERSE_TUNNEL_ENABLED",
+                bool_literal(args.tunnel_owner == PRIMARY_TUNNEL_OWNER),
+            ),
+            ("AIRPLANE_HOLD_SECS", &profile.airplane_hold_secs.to_string()),
+        ];
+        let body = render_json_template(&template, &strings, &raw)?;
+        validate_host_config(&body, &args.tunnel_owner)?;
+        body
+    };
 
     let sing_box_rendered = if let Some(path) = &args.sing_box_config_path {
-        fs::read_to_string(resolve_path(&repo_root, path))?
+        let body = fs::read_to_string(resolve_path(&root, path))?;
+        validate_json(&body, "sing-box configuration")?;
+        body
     } else {
         let template = fs::read_to_string(
-            repo_root.join("deploy/device-runtime/templates/sing-box.base.json"),
+            root.join("deploy/device-runtime/templates/sing-box.base.json"),
         )?;
-        render_template(
+        render_json_template(
             &template,
             &[
                 ("RELAY_USER", relay_user.as_str()),
                 ("RELAY_PASSWORD", relay_password.as_str()),
-                (
-                    "SING_BOX_LISTEN_HOST",
-                    sing_box_listen_host(&args.tunnel_owner),
-                ),
+                ("SING_BOX_LISTEN_HOST", sing_box_listen_host(&args.tunnel_owner)),
             ],
-        )
+            &[],
+        )?
     };
 
     fs::write(release_root.join("config/host-daemon.json"), host_rendered)?;
     fs::write(release_root.join("config/sing-box.json"), sing_box_rendered)?;
-    write_release_metadata(&repo_root, &release_root, &args.release_id)?;
+    write_release_metadata(&root, &release_root, &args.release_id)?;
     write_integrity_manifest(&release_root)?;
     verify_integrity_manifest(&release_root)?;
 
@@ -334,26 +286,78 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     Ok(())
 }
 
-fn write_release_metadata(repo_root: &Path, release_root: &Path, release_id: &str) -> Result<()> {
+fn render_json_template(
+    template: &str,
+    strings: &[(&str, &str)],
+    raw_values: &[(&str, &str)],
+) -> Result<String> {
+    let mut rendered = template.to_string();
+    for (key, value) in strings {
+        let placeholder = format!("\"{{{{{key}}}}}\"");
+        if !rendered.contains(&placeholder) {
+            bail!("JSON template is missing string placeholder {key}")
+        }
+        rendered = rendered.replace(&placeholder, &serde_json::to_string(value)?);
+    }
+    for (key, value) in raw_values {
+        let placeholder = format!("{{{{{key}}}}}");
+        if !rendered.contains(&placeholder) {
+            bail!("JSON template is missing raw placeholder {key}")
+        }
+        rendered = rendered.replace(&placeholder, value);
+    }
+    if rendered.contains("{{") || rendered.contains("}}") {
+        bail!("JSON template contains unresolved placeholders")
+    }
+    validate_json(&rendered, "rendered JSON template")?;
+    Ok(rendered)
+}
+
+fn validate_json(body: &str, label: &str) -> Result<Value> {
+    serde_json::from_str(body).with_context(|| format!("{label} is invalid JSON"))
+}
+
+fn validate_host_config(body: &str, expected_owner: &str) -> Result<()> {
+    let config = validate_json(body, "host-daemon configuration")?;
+    let owner = config
+        .pointer("/wireguard/owner")
+        .and_then(Value::as_str)
+        .context("host-daemon tunnel owner is missing")?;
+    if owner != expected_owner {
+        bail!("host-daemon tunnel owner differs from requested package owner")
+    }
+    let wireguard_enabled = config
+        .pointer("/wireguard/enabled")
+        .and_then(Value::as_bool)
+        .context("host-daemon wireguard.enabled is missing")?;
+    let reverse_enabled = config
+        .pointer("/reverse_tunnel/enabled")
+        .and_then(Value::as_bool)
+        .context("host-daemon reverse_tunnel.enabled is missing")?;
+    match expected_owner {
+        PRIMARY_TUNNEL_OWNER if !wireguard_enabled && reverse_enabled => Ok(()),
+        STOCK_WIREGUARD_OWNER if wireguard_enabled && !reverse_enabled => Ok(()),
+        _ => bail!("host-daemon tunnel enable flags contradict requested owner"),
+    }
+}
+
+fn write_release_metadata(root: &Path, release_root: &Path, release_id: &str) -> Result<()> {
     let revision = Command::new("git")
         .args(["rev-parse", "HEAD"])
-        .current_dir(repo_root)
+        .current_dir(root)
         .output()
         .context("failed to read Git revision for release metadata")?;
     if !revision.status.success() {
-        bail!("git rev-parse HEAD failed while packaging release");
+        bail!("git rev-parse HEAD failed while packaging release")
     }
     let git_sha = String::from_utf8_lossy(&revision.stdout).trim().to_string();
-    let clean = Command::new("git")
-        .args(["diff", "--quiet", "--ignore-submodules", "HEAD", "--"])
-        .current_dir(repo_root)
-        .status()
-        .context("failed to inspect Git worktree for release metadata")?
-        .success();
+    if git_sha.len() != 40 || !git_sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("Git revision is not a full commit SHA")
+    }
     let metadata = serde_json::json!({
         "release_id": release_id,
         "git_sha": git_sha,
-        "git_worktree_clean": clean,
+        "git_worktree_clean": true,
         "format_version": 1
     });
     fs::write(
@@ -363,16 +367,52 @@ fn write_release_metadata(repo_root: &Path, release_root: &Path, release_id: &st
     Ok(())
 }
 
-fn validate_tunnel_owner(raw: &str) -> Result<()> {
-    match raw {
-        "stock_wireguard_bridge" | "first_party_vpn_service" | "first_party_reverse_tunnel" => {
-            Ok(())
-        }
-        _ => bail!(
-            "invalid tunnel owner {}; expected stock_wireguard_bridge, first_party_vpn_service, or first_party_reverse_tunnel",
-            raw
-        ),
+fn ensure_clean_worktree(root: &Path) -> Result<()> {
+    let status = Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=normal"])
+        .current_dir(root)
+        .output()
+        .context("failed to inspect Git worktree")?;
+    if !status.status.success() {
+        bail!("git status failed while packaging release")
     }
+    if !status.stdout.is_empty() {
+        bail!("device release packaging requires a clean Git worktree")
+    }
+    Ok(())
+}
+
+fn validate_manifest(manifest: &DeviceManifest) -> Result<()> {
+    for (field, value) in [
+        ("deviceId", manifest.device_id.as_str()),
+        ("nodeName", manifest.node_name.as_str()),
+        ("controlPlaneUrl", manifest.control_plane_url.as_str()),
+    ] {
+        validate_bounded_text(field, value, 512)?;
+    }
+    if let Some(relay) = &manifest.relay {
+        validate_bounded_text("relay.host", &relay.host, 253)?;
+    }
+    Ok(())
+}
+
+fn validate_profile_name(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        bail!("operator profile name is invalid")
+    }
+    Ok(())
+}
+
+fn validate_bounded_text(field: &str, value: &str, maximum: usize) -> Result<()> {
+    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
+        bail!("{field} is invalid")
+    }
+    Ok(())
 }
 
 fn bool_literal(value: bool) -> &'static str {
@@ -380,7 +420,7 @@ fn bool_literal(value: bool) -> &'static str {
 }
 
 fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
-    if tunnel_owner == "first_party_reverse_tunnel" {
+    if tunnel_owner == PRIMARY_TUNNEL_OWNER {
         "127.0.0.1:1080"
     } else {
         "10.66.66.2:1080"
@@ -388,7 +428,7 @@ fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
 }
 
 fn sing_box_listen_host(tunnel_owner: &str) -> &'static str {
-    if tunnel_owner == "first_party_reverse_tunnel" {
+    if tunnel_owner == PRIMARY_TUNNEL_OWNER {
         "127.0.0.1"
     } else {
         "10.66.66.2"
@@ -396,18 +436,18 @@ fn sing_box_listen_host(tunnel_owner: &str) -> &'static str {
 }
 
 fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != "first_party_reverse_tunnel" {
+    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
         return Ok("127.0.0.1:18090".into());
     }
     let relay = manifest
         .relay
         .as_ref()
         .context("first_party_reverse_tunnel requires relay host in device manifest")?;
-    Ok(format!("{}:{}", relay.host, 18090))
+    Ok(format!("{}:18090", relay.host))
 }
 
 fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != "first_party_reverse_tunnel" {
+    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
         return Ok("127.0.0.1:443".into());
     }
     let relay = manifest
@@ -418,7 +458,7 @@ fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Res
 }
 
 fn reverse_tunnel_cert_der_b64(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != "first_party_reverse_tunnel" {
+    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
         return Ok(String::new());
     }
     required_env(
@@ -437,17 +477,21 @@ fn repo_root() -> Result<PathBuf> {
         .context("failed to resolve repo root")
 }
 
-fn resolve_path(repo_root: &Path, raw: &str) -> PathBuf {
+fn resolve_path(root: &Path, raw: &str) -> PathBuf {
     let path = Path::new(raw);
     if path.is_absolute() {
         path.to_path_buf()
     } else {
-        repo_root.join(path)
+        root.join(path)
     }
 }
 
 fn required_env(name: &str) -> Result<String> {
-    env::var(name).with_context(|| format!("missing required environment variable: {name}"))
+    validate_bounded_text("environment variable name", name, 128)?;
+    let value = env::var(name)
+        .with_context(|| format!("missing required environment variable: {name}"))?;
+    validate_bounded_text(name, &value, 4096)?;
+    Ok(value)
 }
 
 fn ensure_file(path: &Path) -> Result<()> {
@@ -469,7 +513,7 @@ fn ensure_android_arm_binary(path: &Path) -> Result<()> {
         bail!(
             "runtime binary is not Android ARM 32-bit ELF: {}",
             path.display()
-        );
+        )
     }
     Ok(())
 }
@@ -482,25 +526,38 @@ fn is_android_arm_elf_header(header: &[u8; 20]) -> bool {
     magic && elf32 && little_endian && machine == 40
 }
 
-fn render_template(template: &str, values: &[(&str, &str)]) -> String {
-    let mut rendered = template.to_string();
-    for (key, value) in values {
-        rendered = rendered.replace(&format!("{{{{{key}}}}}"), value);
-    }
-    rendered
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{is_android_arm_elf_header, render_template};
+    use super::{
+        is_android_arm_elf_header, render_json_template, validate_host_config,
+        validate_profile_name,
+    };
 
     #[test]
-    fn template_render_replaces_all_tokens() {
-        let rendered = render_template(
-            "hello {{NAME}} {{NAME}} {{PLACE}}",
-            &[("NAME", "world"), ("PLACE", "here")],
-        );
-        assert_eq!(rendered, "hello world world here");
+    fn json_template_escapes_values_and_rejects_unresolved_placeholders() {
+        let rendered = render_json_template(
+            r#"{"value":"{{VALUE}}","enabled":{{ENABLED}}}"#,
+            &[("VALUE", "a\"b\\c")],
+            &[("ENABLED", "true")],
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(parsed["value"], "a\"b\\c");
+        assert_eq!(parsed["enabled"], true);
+        assert!(render_json_template("{{MISSING}}", &[], &[]).is_err());
+    }
+
+    #[test]
+    fn host_config_owner_and_flags_must_agree() {
+        let reverse = r#"{"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
+        assert!(validate_host_config(reverse, "first_party_reverse_tunnel").is_ok());
+        assert!(validate_host_config(reverse, "stock_wireguard_bridge").is_err());
+    }
+
+    #[test]
+    fn profile_name_rejects_path_traversal() {
+        assert!(validate_profile_name("mts_by").is_ok());
+        assert!(validate_profile_name("../mts_by").is_err());
     }
 
     #[test]
@@ -511,7 +568,6 @@ mod tests {
         header[5] = 1;
         header[18..20].copy_from_slice(&40_u16.to_le_bytes());
         assert!(is_android_arm_elf_header(&header));
-
         header[4] = 2;
         assert!(!is_android_arm_elf_header(&header));
     }
