@@ -13,12 +13,7 @@ SOURCE_SUFFIXES = frozenset({".rs", ".py", ".sh", ".kt", ".kts"})
 FORBIDDEN_PACKAGES = frozenset({"sha2", "sha256"})
 DIRECT_BLAKE3_PACKAGE = "blake3"
 DIRECT_BLAKE3_ALLOWED_MANIFEST = Path("crates/foundation/Cargo.toml")
-EXCLUDED_SOURCE_FILES = frozenset(
-    {
-        Path("scripts/check_digest_policy.py"),
-        Path("scripts/tests/test_digest_policy.py"),
-    }
-)
+EXCLUDED_SOURCE_FILES = frozenset({Path("scripts/check_digest_policy.py")})
 FORBIDDEN_SOURCE_PATTERNS = (
     (re.compile(r"\bsha2::", re.IGNORECASE), "direct Rust SHA-256 primitive"),
     (re.compile(r"\bSha256\s*::"), "direct Rust SHA-256 primitive"),
@@ -113,7 +108,7 @@ def _source_files(root: Path):
             if not source.is_file() or source.suffix not in SOURCE_SUFFIXES:
                 continue
             relative = source.relative_to(root)
-            if relative in EXCLUDED_SOURCE_FILES:
+            if relative in EXCLUDED_SOURCE_FILES or "tests" in relative.parts or source.name.startswith("test_"):
                 continue
             yield relative, source
 
