@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 clap.workspace = true
 proxy-core = { path = "../../crates/proxy-core" }
 reqwest.workspace = true

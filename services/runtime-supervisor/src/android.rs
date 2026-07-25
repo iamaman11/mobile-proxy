@@ -1,21 +1,15 @@
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
 use tokio::time::sleep;
 
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 const STOCK_WIREGUARD_TUNNEL: &str = "WiGandroid";
 const APP_OWNED_PACKAGE: &str = "com.example.mobileproxy";
-const APP_OWNED_PREFS_TMP_PATH: &str = "/data/local/tmp/mobile_proxy_tunnel.xml.new";
-const APP_OWNED_PREFS_PATHS: &[&str] = &[
-    "/data/user/0/com.example.mobileproxy/shared_prefs/mobile_proxy_tunnel.xml",
-    "/data/user_de/0/com.example.mobileproxy/shared_prefs/mobile_proxy_tunnel.xml",
-];
 
 pub async fn kick_stock_wireguard_bridge() {
     let _ = run_shell("settings put secure always_on_vpn_app com.wireguard.android");
@@ -28,7 +22,8 @@ pub async fn kick_stock_wireguard_bridge() {
 
 pub async fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
     stop_stock_wireguard_tunnel().ok();
-    write_first_party_tunnel_prefs(config_path)?;
+    stop_first_party_vpn_service().ok();
+    push_first_party_tunnel_config(config_path)?;
     sleep(Duration::from_secs(1)).await;
     let Some(uid) = package_uid(APP_OWNED_PACKAGE)? else {
         bail!("first-party VPN package is not installed")
@@ -222,38 +217,23 @@ fn stop_first_party_vpn_service() -> Result<()> {
     Ok(())
 }
 
-fn write_first_party_tunnel_prefs(config_path: &Path) -> Result<()> {
+fn push_first_party_tunnel_config(config_path: &Path) -> Result<()> {
     let config = fs::read_to_string(config_path)
         .with_context(|| format!("failed to read {}", config_path.display()))?;
     if config.is_empty() || config.len() > 16 * 1024 {
         bail!("first-party tunnel config size is invalid")
     }
-    let xml = format!(
-        "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n  <boolean name=\"desired\" value=\"true\" />\n  <string name=\"config\">{}</string>\n</map>\n",
-        xml_escape(&config).replace('\n', "&#10;")
-    );
-    fs::write(APP_OWNED_PREFS_TMP_PATH, xml.as_bytes())
-        .with_context(|| format!("failed to write {}", APP_OWNED_PREFS_TMP_PATH))?;
-    #[cfg(unix)]
-    fs::set_permissions(APP_OWNED_PREFS_TMP_PATH, fs::Permissions::from_mode(0o644))
-        .with_context(|| format!("failed to set permissions on {}", APP_OWNED_PREFS_TMP_PATH))?;
     let Some(uid) = package_uid(APP_OWNED_PACKAGE)? else {
         bail!("first-party VPN package is not installed")
     };
-    let mut command = String::new();
-    for path in APP_OWNED_PREFS_PATHS {
-        let parent = Path::new(path)
-            .parent()
-            .context("first-party tunnel prefs path parent is missing")?
-            .display()
-            .to_string();
-        command.push_str(&format!(
-            "mkdir -p {parent} && cp {APP_OWNED_PREFS_TMP_PATH} {path} && chmod 660 {path} && "
-        ));
-    }
-    command.push_str("true");
-    run_as_uid(uid, &command)?;
-    let _ = fs::remove_file(APP_OWNED_PREFS_TMP_PATH);
+    let config_b64 = base64::engine::general_purpose::STANDARD.encode(config.as_bytes());
+    run_as_uid(
+        uid,
+        &format!(
+            "am broadcast --user 0 -n com.example.mobileproxy/.TunnelCommandReceiver -a com.example.mobileproxy.action.SET_TUNNEL_CONFIG --es config_b64 '{}'",
+            config_b64
+        ),
+    )?;
     Ok(())
 }
 
@@ -272,18 +252,9 @@ fn parse_package_uid(output: &str, package_name: &str) -> Option<u32> {
     })
 }
 
-fn xml_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{is_cellular_dev, parse_package_uid, parse_route_line, xml_escape};
+    use super::{is_cellular_dev, parse_package_uid, parse_route_line};
 
     #[test]
     fn extracts_cellular_route_hint() {
@@ -309,10 +280,5 @@ mod tests {
             Some(10209)
         );
         assert_eq!(parse_package_uid(output, "com.wireguard.android"), None);
-    }
-
-    #[test]
-    fn xml_escape_covers_shared_prefs_payload() {
-        assert_eq!(xml_escape("a&b<c>\"'"), "a&amp;b&lt;c&gt;&quot;&apos;");
     }
 }
