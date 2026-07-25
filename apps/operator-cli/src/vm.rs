@@ -71,6 +71,8 @@ struct VmSecrets {
     phone_public_key: String,
 }
 
+const RELAY_GATE_UPSTREAM: &str = "127.0.0.1:1080";
+
 pub fn provision_vm(args: &ProvisionVmArgs) -> Result<()> {
     let repo = repo_root()?;
     let manifest = load_manifest(&repo, &args.manifest_path)?;
@@ -223,9 +225,10 @@ fn build_vm_release(
     fs::write(
         release_root.join("config/relay-gate.env"),
         format!(
-            "CONTROL_PLANE_ADMIN_TOKEN={}\nCONTROL_PLANE_URL=\"http://127.0.0.1:8080\"\nRELAY_GATE_DEVICE_ID=\"{}\"\nRELAY_GATE_UPSTREAM=\"10.66.66.2:1080\"\n",
+            "CONTROL_PLANE_ADMIN_TOKEN={}\nCONTROL_PLANE_URL=\"http://127.0.0.1:8080\"\nRELAY_GATE_DEVICE_ID=\"{}\"\nRELAY_GATE_UPSTREAM=\"{}\"\n",
             systemd_env_quote(&secrets.control_token),
-            "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06"
+            "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06",
+            RELAY_GATE_UPSTREAM
         ),
     )?;
     fs::write(
