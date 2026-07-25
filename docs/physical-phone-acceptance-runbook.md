@@ -1,22 +1,49 @@
 # Immutable-SHA Physical Phone Acceptance Runbook
 
-Status: executable external gate for delivery item 15  
-Prerequisite: successful `Software Release Candidate` evidence for the exact candidate SHA
+Status: executable external gate for production baseline item 15  
+Prerequisite: successful evidence v2 from `Software Release Candidate` for the exact candidate SHA
 
-## 1. Freeze the candidate
+## 1. Freeze and verify the candidate
 
-Download `release-candidate-evidence.json` from `software-release-candidate-<candidate-sha>` and use a clean detached checkout:
+Download `release-candidate-evidence.json` from the artifact named `software-release-candidate-<candidate-sha>` and use a clean detached checkout:
 
 ```bash
 git fetch --all --tags
 git checkout --detach <candidate-sha>
 test "$(git rev-parse HEAD)" = "<candidate-sha>"
 test -z "$(git status --porcelain)"
+python3 -m json.tool release-candidate-evidence.json >/dev/null
 ```
 
-Record the candidate SHA, workflow run, phone/Android/operator, VM, tester and UTC timestamps. Never record tokens or proxy credentials.
+The evidence must state:
 
-## 2. Prepare access and secrets
+- `format_version=2`;
+- `primary_runtime=first_party_reverse_tunnel`;
+- `primary_runtime_requires_android_vpn=false`;
+- `rollback_runtime=stock_wireguard_bridge`;
+- `software_10_of_10_ready=true`;
+- `physical_phone_acceptance_required=true`;
+- `baseline_complete=false`.
+
+Record candidate SHA, workflow run, artifact identity, phone model/Android/operator, VM identity, tester and UTC timestamps. Do not record tokens, keys or proxy credentials.
+
+## 2. Environment prerequisites
+
+Primary runtime prerequisites:
+
+- rooted phone and working ADB;
+- no active Android VPN;
+- no requirement to install `apps/android-app`;
+- relay VM provisioned from the same candidate;
+- controlled DNS or hosts entry for the pinned relay name;
+- controlled HTTP and HTTPS probes.
+
+Rollback prerequisites, used only in the WireGuard stage:
+
+- stock package `com.wireguard.android` installed;
+- tunnel `WiGandroid` imported and valid;
+- Android VPN consent granted;
+- VM stock WireGuard backend configured.
 
 Forward the phone host API:
 
@@ -24,19 +51,21 @@ Forward the phone host API:
 adb -s <adb-serial> forward tcp:18088 tcp:8088
 ```
 
-Copy the control-plane public PEM certificate from the VM, make `mobile-proxy-relay` resolve to that VM through controlled DNS or the workstation hosts file, then set:
+Copy the relay control-plane public PEM certificate to the workstation, make `mobile-proxy-relay` resolve to the relay and export secrets only through environment variables:
 
 ```bash
 export SSL_CERT_FILE="$PWD/control-plane.crt"
 export HOST_ADMIN_TOKEN='<host-daemon admin token>'
 export CONTROL_PLANE_ADMIN_TOKEN='<control-plane admin token>'
-export PROXY_USERNAME='<relay proxy username>'
-export PROXY_PASSWORD='<relay proxy password>'
+export PROXY_USERNAME='<proxy username>'
+export PROXY_PASSWORD='<proxy password>'
 ```
 
-The proxy credentials must equal the values rendered into both phone variants.
+The scripts pass proxy credentials through `curl` stdin configuration, disable proxy bypass variables and do not write credentials to reports.
 
-## 3. Build immutable variants from the same SHA
+## 3. Build immutable variants
+
+All variants must be built from the same clean detached SHA:
 
 ```bash
 RELEASE_BASE="physical-<candidate-sha-short>"
@@ -61,9 +90,9 @@ cargo run --release -p operator-cli -- provision-vm \
   --ssh-key <absolute-vm-ssh-key>
 ```
 
-Do not edit package roots after their BLAKE3 manifests are written. The stock WireGuard app must already contain the tunnel named `WiGandroid`, with Android VPN consent granted.
+Do not modify release roots after their BLAKE3 manifests are written. Do not rebuild any variant during the physical sequence.
 
-## 4. Deploy and verify the reverse-tunnel variant
+## 4. Install and prove the native primary release
 
 ```bash
 cargo run --release -p operator-cli -- install-device-release \
@@ -82,9 +111,10 @@ python3 scripts/switch_vm_proxy_transport.py \
   --output physical-vm-primary-switch.json
 
 python3 scripts/verify_physical_deployment.py \
-  --evidence ./release-candidate-evidence.json \
+  --evidence release-candidate-evidence.json \
   --device-release-root "target/device-releases/$REVERSE_RELEASE" \
   --device-serial <adb-serial> \
+  --expected-tunnel-owner first_party_reverse_tunnel \
   --vm-release-root "target/vm-releases/$VM_RELEASE" \
   --vm-project <gcp-project> \
   --vm-zone <gcp-zone> \
@@ -94,25 +124,43 @@ python3 scripts/verify_physical_deployment.py \
   --output physical-primary-deployment.json
 ```
 
-The deployment report must contain the candidate SHA, owner `first_party_reverse_tunnel`, exact phone/VM file matches, no active Android VPN, and `accepted=true`.
+Acceptance requires:
 
-## 5. Configure stage checks
+- local BLAKE3 manifests valid;
+- package SHA equals candidate SHA;
+- active phone and static VM files equal package files byte-for-byte;
+- VM proxy configuration equals the native mapping byte-for-byte;
+- owner `first_party_reverse_tunnel`;
+- WireGuard disabled;
+- no active Android VPN owner;
+- no `tun0` requirement.
+
+## 5. Configure stage runner
 
 ```bash
 COMMON_ARGS=(
-  --evidence ./release-candidate-evidence.json
+  --evidence release-candidate-evidence.json
   --host-api-base http://127.0.0.1:18088
   --control-plane-base https://mobile-proxy-relay:8443
   --proxy-host <protected-proxy-host>
   --http-probe-url http://<controlled-http-probe>/
   --https-probe-url https://<controlled-https-probe>/
-  --device-id <expected-node-id>
+  --expected-device-id <expected-node-id>
 )
 ```
 
-Every stage requires exact device identity, serving/cellular/proxy readiness, durable heartbeat and six authenticated proxy paths: SOCKS5, HTTP and CONNECT on mixed `1080`; SOCKS5 on `1081`; HTTP and CONNECT on `3128`. Proxy credentials are passed to `curl` through stdin, and proxy bypass variables are disabled.
+Every stage requires the exact device, durable heartbeat, serving/cellular/proxy readiness and six authenticated paths:
 
-## 6. QUIC, reboot, TLS/TCP fallback and recovery
+- SOCKS5 on mixed `1080`;
+- HTTP on mixed `1080`;
+- HTTPS through CONNECT on mixed `1080`;
+- SOCKS5 on `1081`;
+- HTTP on `3128`;
+- HTTPS through CONNECT on `3128`.
+
+## 6. Native online stage
+
+Wait for fresh QUIC and run:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -120,7 +168,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-online.json
 ```
 
-Reboot the phone or restart its production service without deleting VM SQLite state. After the same device returns with fresh QUIC:
+Reject if an Android VPN is active, `tun0` is present, transport is not fresh QUIC or any proxy path fails.
+
+## 7. Phone reboot and durable rehydration
+
+Perform a full phone reboot. Do not clear relay SQLite state. Wait for the rooted boot hook, runtime processes, durable heartbeat and fresh QUIC:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -128,7 +180,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-post-reboot.json
 ```
 
-Block only QUIC UDP `18090`, leave certificate-pinned TLS/TCP `443` reachable, force a new tunnel attempt and wait for fresh `tls_tcp`:
+The device ID must remain unchanged.
+
+## 8. Forced pinned TLS/TCP reserve
+
+Block only QUIC UDP `18090`. Leave pinned TLS/TCP `443` reachable. Force a new tunnel connection and wait for fresh `tls_tcp`:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -136,7 +192,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-fallback.json
 ```
 
-Remove the block, terminate the reserve connection through the production service manager and wait for fresh QUIC:
+Reject any plaintext fallback, stale authority, changed device identity or failed proxy path.
+
+## 9. Return to QUIC
+
+Remove the QUIC block, terminate the active reserve connection through the production service manager and wait for new fresh QUIC authority:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -144,7 +204,9 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-recovered.json
 ```
 
-## 7. Prove stock WireGuard rollback
+## 10. Explicit stock WireGuard rollback
+
+Install the already built rollback release and switch the VM public mapping:
 
 ```bash
 cargo run --release -p operator-cli -- install-device-release \
@@ -163,9 +225,10 @@ python3 scripts/switch_vm_proxy_transport.py \
   --output physical-vm-wireguard-switch.json
 
 python3 scripts/verify_physical_deployment.py \
-  --evidence ./release-candidate-evidence.json \
+  --evidence release-candidate-evidence.json \
   --device-release-root "target/device-releases/$WIREGUARD_RELEASE" \
   --device-serial <adb-serial> \
+  --expected-tunnel-owner stock_wireguard_bridge \
   --vm-release-root "target/vm-releases/$VM_RELEASE" \
   --vm-project <gcp-project> \
   --vm-zone <gcp-zone> \
@@ -175,7 +238,7 @@ python3 scripts/verify_physical_deployment.py \
   --output physical-wireguard-deployment.json
 ```
 
-The deployment verifier must identify `com.wireguard.android` as the active Android VPN owner. After health reports owner `stock_wireguard_bridge`, `tun0_present=true`, a recent handshake and no active reverse tunnel:
+The verifier must identify `com.wireguard.android` as the actual Android VPN owner. Wait for owner `stock_wireguard_bridge`, `tun0_present=true`, recent handshake and inactive reverse tunnel:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -183,9 +246,9 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-wireguard.json
 ```
 
-## 8. Reactivate the exact installed reverse release
+## 11. Reactivate the exact native release
 
-First restore the VM public mapping:
+Restore the VM native mapping:
 
 ```bash
 python3 scripts/switch_vm_proxy_transport.py \
@@ -198,23 +261,24 @@ python3 scripts/switch_vm_proxy_transport.py \
   --output physical-vm-reverse-switch.json
 ```
 
-Reactivate the already installed reverse release without rebuilding or copying it. This performs a full runtime/watchdog restart and records the exact active symlink:
+Reactivate the exact previously installed native release without rebuilding or copying it:
 
 ```bash
 python3 scripts/activate_device_release.py \
-  --evidence ./release-candidate-evidence.json \
+  --evidence release-candidate-evidence.json \
   --release-id "$REVERSE_RELEASE" \
   --device-serial <adb-serial> \
   --output physical-reverse-activation.json
 ```
 
-Verify the same original package bytes and absence of an Android VPN:
+Re-verify original package bytes and native ownership:
 
 ```bash
 python3 scripts/verify_physical_deployment.py \
-  --evidence ./release-candidate-evidence.json \
+  --evidence release-candidate-evidence.json \
   --device-release-root "target/device-releases/$REVERSE_RELEASE" \
   --device-serial <adb-serial> \
+  --expected-tunnel-owner first_party_reverse_tunnel \
   --vm-release-root "target/vm-releases/$VM_RELEASE" \
   --vm-project <gcp-project> \
   --vm-zone <gcp-zone> \
@@ -224,7 +288,7 @@ python3 scripts/verify_physical_deployment.py \
   --output physical-final-deployment.json
 ```
 
-After owner `first_party_reverse_tunnel`, WireGuard disabled, no `tun0`, and fresh QUIC:
+After WireGuard is disabled, the Android VPN owner is absent, `tun0` is gone and QUIC is fresh:
 
 ```bash
 python3 scripts/run_physical_phone_acceptance.py \
@@ -232,11 +296,11 @@ python3 scripts/run_physical_phone_acceptance.py \
   --output physical-post-wireguard-recovered.json
 ```
 
-## 9. Verify the whole immutable report set
+## 12. Verify the whole report set
 
 ```bash
 python3 scripts/verify_physical_phone_acceptance_reports.py \
-  --evidence ./release-candidate-evidence.json \
+  --evidence release-candidate-evidence.json \
   --primary-deployment physical-primary-deployment.json \
   --wireguard-deployment physical-wireguard-deployment.json \
   --final-deployment physical-final-deployment.json \
@@ -253,12 +317,32 @@ python3 scripts/verify_physical_phone_acceptance_reports.py \
   --output physical-acceptance-summary.json
 ```
 
-The summary must contain one candidate SHA, one device ID, three owner-bound deployment checks, all three VM switches, accepted immutable release reactivation, all six stages, `physical_phone_acceptance_complete=true` and `accepted=true`.
+The summary must prove one SHA, one device ID, three exact deployment checks, three exact VM mappings, exact native release reactivation and all six stages. It must set `physical_phone_acceptance_complete=true` and `accepted=true`.
 
-Attach only bounded JSON reports and operator timestamps to issue #64. Never attach tokens, private keys, raw configuration, credential-bearing URLs or unrestricted logs.
+Attach only bounded JSON reports and operator timestamps to issue #64. Never attach tokens, keys, raw secret configuration, credential-bearing URLs or unrestricted logs.
 
-## 10. Stop conditions
+## 13. Continue to repeated 10/10 validation
 
-Reject the candidate for any P0/P1 defect, SHA or dirty-tree mismatch, package/deployment mismatch, wrong Android VPN owner, missing heartbeat or cellular route, failed authenticated protocol path, stale/mismatched tunnel authority, plaintext downgrade, missing or lingering `tun0`, stale WireGuard handshake, failed reversible VM switch, changed release bytes, inability to return to QUIC or any report-set mismatch.
+Passing this runbook completes the immutable physical stage but final 10/10 also requires the repeated recovery and 24-hour soak thresholds in `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`.
 
-Any source change requires a new immutable candidate, new evidence, rebuilt variants and a complete restart of this procedure.
+## 14. Stop conditions
+
+Reject the candidate for any:
+
+- source, package-root or SHA change;
+- dirty checkout;
+- failed BLAKE3 integrity or exact-byte comparison;
+- wrong tunnel or Android VPN owner;
+- active Android VPN in a native stage;
+- missing durable heartbeat or cellular route;
+- failed authenticated proxy path;
+- stale or mismatched tunnel authority;
+- plaintext downgrade;
+- missing/stale WireGuard handshake in rollback;
+- lingering `tun0` after native restoration;
+- failed transactional VM switch;
+- inability to return to fresh QUIC;
+- unresolved P0/P1 defect;
+- report-set mismatch.
+
+Any source change requires a new immutable candidate, new software evidence, rebuilt variants and a complete restart of the physical procedure.
