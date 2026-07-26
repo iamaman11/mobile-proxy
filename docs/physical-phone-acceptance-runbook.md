@@ -45,7 +45,7 @@ Rollback prerequisites, used only in the WireGuard stage:
 - Android VPN consent granted;
 - VM stock WireGuard backend configured.
 
-Forward the phone host API:
+`operator-cli` detects Windows `adb.exe` in WSL and queries its Windows-loopback forward through PowerShell, passing the bearer token only through stdin. For manual workstation troubleshooting only, forward the phone host API:
 
 ```bash
 adb -s <adb-serial> forward tcp:18088 tcp:8088

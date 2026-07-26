@@ -1,9 +1,10 @@
 use std::env;
 use std::fs;
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -256,6 +257,12 @@ async fn fetch_device_health(
         device_serial,
         &["forward", &format!("tcp:{health_port}"), "tcp:8088"],
     )?;
+    if detect_adb()?
+        .extension()
+        .is_some_and(|extension| extension == "exe")
+    {
+        return fetch_windows_forwarded_health(health_port, token);
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -271,6 +278,48 @@ async fn fetch_device_health(
         .json::<HealthRecord>()
         .await
         .context("failed to parse health payload")
+}
+
+fn fetch_windows_forwarded_health(health_port: u16, token: &str) -> Result<HealthRecord> {
+    let powershell =
+        if Path::new("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe").is_file() {
+            PathBuf::from("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+        } else {
+            PathBuf::from("powershell.exe")
+        };
+    let script = format!(
+        r#"$token=[Console]::In.ReadToEnd(); $headers=@{{Authorization=("Bearer " + $token)}}; try {{ $response=Invoke-WebRequest -UseBasicParsing -Headers $headers -TimeoutSec 15 -Uri "http://127.0.0.1:{health_port}/v1/health"; [Console]::Out.Write($response.Content) }} catch {{ [Console]::Error.Write($_.Exception.Message); exit 1 }}"#
+    );
+    let mut child = Command::new(&powershell)
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to start Windows PowerShell at {}",
+                powershell.display()
+            )
+        })?;
+    child
+        .stdin
+        .as_mut()
+        .context("failed to open Windows health client stdin")?
+        .write_all(token.as_bytes())
+        .context("failed to send health token to Windows client")?;
+    let output = child
+        .wait_with_output()
+        .context("failed to wait for Windows health client")?;
+    if output.status.success() {
+        serde_json::from_slice(&output.stdout)
+            .context("failed to parse Windows-forwarded health payload")
+    } else {
+        bail!(
+            "Windows-forwarded device health request failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
 }
 
 pub(crate) fn assert_healthy(health: &HealthRecord) -> Result<()> {
