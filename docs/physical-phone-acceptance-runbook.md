@@ -98,6 +98,7 @@ Do not modify release roots after their BLAKE3 manifests are written. Do not reb
 cargo run --release -p operator-cli -- install-device-release \
   --manifest-path <device-manifest> \
   --release-id "$REVERSE_RELEASE" \
+  --use-existing-release \
   --device-serial <adb-serial> \
   --tunnel-owner first_party_reverse_tunnel
 
@@ -212,6 +213,7 @@ Install the already built rollback release and switch the VM public mapping:
 cargo run --release -p operator-cli -- install-device-release \
   --manifest-path <device-manifest> \
   --release-id "$WIREGUARD_RELEASE" \
+  --use-existing-release \
   --device-serial <adb-serial> \
   --tunnel-owner stock_wireguard_bridge
 
