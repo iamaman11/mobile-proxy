@@ -244,9 +244,9 @@ fn rotation_command(
 }
 
 fn fallback_airplane_command(hold_secs: Option<u64>) -> String {
+    let activation_timeout_secs = hold_secs.unwrap_or(DEFAULT_AIRPLANE_HOLD_SECS);
     format!(
-        "settings put global airplane_mode_on 1 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true && sleep {} && settings put global airplane_mode_on 0 && am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false",
-        hold_secs.unwrap_or(DEFAULT_AIRPLANE_HOLD_SECS)
+        "cmd connectivity airplane-mode enable && activation_deadline=$(( $(date +%s) + {activation_timeout_secs} )) && while [ \"$(cmd connectivity airplane-mode)\" != \"enabled\" ]; do [ \"$(date +%s)\" -ge \"$activation_deadline\" ] && exit 1; sleep 0.1; done && cmd connectivity airplane-mode disable"
     )
 }
 
@@ -404,12 +404,13 @@ mod tests {
     }
 
     #[test]
-    fn fallback_airplane_command_uses_settings_broadcast_path() {
+    fn fallback_airplane_command_waits_for_activation_then_disables_immediately() {
         let command = fallback_airplane_command(Some(5));
-        assert!(command.contains("settings put global airplane_mode_on 1"));
-        assert!(command.contains("android.intent.action.AIRPLANE_MODE --ez state true"));
-        assert!(command.contains("sleep 5"));
-        assert!(command.contains("settings put global airplane_mode_on 0"));
-        assert!(command.contains("android.intent.action.AIRPLANE_MODE --ez state false"));
+        assert!(command.contains("cmd connectivity airplane-mode enable"));
+        assert!(command.contains("activation_deadline=$(( $(date +%s) + 5 ))"));
+        assert!(command.contains("cmd connectivity airplane-mode)\" != \"enabled"));
+        assert!(command.contains("sleep 0.1"));
+        assert!(!command.contains("sleep 5"));
+        assert!(command.contains("cmd connectivity airplane-mode disable"));
     }
 }
