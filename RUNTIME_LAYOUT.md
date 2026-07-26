@@ -85,7 +85,7 @@ Current exposure model:
 
 - current operator profile: `mts_by`
 - `rotate_ip` works on `MTS BY`
-- `airplane_bounce` rotation holds airplane mode for 4 seconds before disabling it
+- `airplane_bounce` waits for the Android Connectivity Service to confirm activation, holds it for 2 seconds, then disables it
 - current deployment is effectively IPv4-only
 - public relay is fail-closed
 - required live tunnel owner: `first_party_reverse_tunnel`
