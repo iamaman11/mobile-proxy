@@ -7,10 +7,12 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::cli::PackageDeviceReleaseArgs;
 use crate::device_support::{
-    PRIMARY_TUNNEL_OWNER, STOCK_WIREGUARD_OWNER, validate_release_id, validate_tunnel_owner,
+    APP_OWNED_TUNNEL_OWNER, PRIMARY_TUNNEL_OWNER, STOCK_WIREGUARD_OWNER, validate_release_id,
+    validate_tunnel_owner,
 };
 use crate::release_integrity::{verify_integrity_manifest, write_integrity_manifest};
 
@@ -171,6 +173,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     let device_token = required_env(&manifest.tokens.device_token_env)?;
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
+    let ui_control_token = Uuid::new_v4().to_string();
 
     let bin_dir = root.join("deploy/device-runtime/bin");
     let runtime_supervisor_bin = bin_dir.join("runtime-supervisor");
@@ -221,6 +224,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ("NODE_ID", manifest.device_id.as_str()),
             ("NODE_NAME", manifest.node_name.as_str()),
             ("ADMIN_TOKEN", admin_token.as_str()),
+            ("UI_CONTROL_TOKEN", ui_control_token.as_str()),
             ("RELAY_USER", relay_user.as_str()),
             ("RELAY_PASSWORD", relay_password.as_str()),
             ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
@@ -246,7 +250,10 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
         let raw = [
             (
                 "WIREGUARD_ENABLED",
-                bool_literal(args.tunnel_owner == STOCK_WIREGUARD_OWNER),
+                bool_literal(
+                    args.tunnel_owner == STOCK_WIREGUARD_OWNER
+                        || args.tunnel_owner == APP_OWNED_TUNNEL_OWNER,
+                ),
             ),
             (
                 "REVERSE_TUNNEL_ENABLED",
@@ -285,6 +292,31 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
     fs::write(release_root.join("config/host-daemon.json"), host_rendered)?;
     fs::write(release_root.join("config/sing-box.json"), sing_box_rendered)?;
+    if args.tunnel_owner == APP_OWNED_TUNNEL_OWNER {
+        let template =
+            fs::read_to_string(root.join("deploy/device-runtime/templates/app-wireguard.conf"))?;
+        let relay_host = manifest
+            .relay
+            .as_ref()
+            .map(|relay| relay.host.as_str())
+            .unwrap_or("34.118.88.54");
+        let rendered = render_text_template(
+            &template,
+            &[
+                (
+                    "WG_PHONE_PRIVATE_KEY",
+                    &required_env("MOBILE_PROXY_WG_PHONE_PRIVATE_KEY")?,
+                ),
+                (
+                    "WG_SERVER_PUBLIC_KEY",
+                    &required_env("MOBILE_PROXY_WG_SERVER_PUBLIC_KEY")?,
+                ),
+                ("WG_ENDPOINT_HOST", relay_host),
+                ("WG_ENDPOINT_PORT", "51820"),
+            ],
+        )?;
+        fs::write(release_root.join("config/app-wireguard.conf"), rendered)?;
+    }
     write_release_metadata(&root, &release_root, &args.release_id)?;
     write_integrity_manifest(&release_root)?;
     verify_integrity_manifest(&release_root)?;
@@ -320,12 +352,28 @@ fn render_json_template(
     Ok(rendered)
 }
 
+fn render_text_template(template: &str, values: &[(&str, &str)]) -> Result<String> {
+    let mut rendered = template.to_string();
+    for (key, value) in values {
+        let placeholder = format!("{{{{{key}}}}}");
+        if !rendered.contains(&placeholder) {
+            bail!("text template is missing placeholder {key}")
+        }
+        rendered = rendered.replace(&placeholder, value);
+    }
+    if rendered.contains("{{") || rendered.contains("}}") {
+        bail!("text template contains unresolved placeholders")
+    }
+    Ok(rendered)
+}
+
 fn validate_json(body: &str, label: &str) -> Result<Value> {
     serde_json::from_str(body).with_context(|| format!("{label} is invalid JSON"))
 }
 
 fn validate_host_config(body: &str, expected_owner: &str) -> Result<()> {
     let config = validate_json(body, "host-daemon configuration")?;
+    validate_proxy_shape(&config)?;
     let owner = config
         .pointer("/wireguard/owner")
         .and_then(Value::as_str)
@@ -343,9 +391,32 @@ fn validate_host_config(body: &str, expected_owner: &str) -> Result<()> {
         .context("host-daemon reverse_tunnel.enabled is missing")?;
     match expected_owner {
         PRIMARY_TUNNEL_OWNER if !wireguard_enabled && reverse_enabled => Ok(()),
-        STOCK_WIREGUARD_OWNER if wireguard_enabled && !reverse_enabled => Ok(()),
+        STOCK_WIREGUARD_OWNER | APP_OWNED_TUNNEL_OWNER if wireguard_enabled && !reverse_enabled => {
+            Ok(())
+        }
         _ => bail!("host-daemon tunnel enable flags contradict requested owner"),
     }
+}
+
+fn validate_proxy_shape(config: &Value) -> Result<()> {
+    let proxy = config
+        .get("proxy")
+        .and_then(Value::as_object)
+        .context("host-daemon proxy configuration is missing")?;
+    for required in ["listen_address", "username", "password"] {
+        if !proxy.contains_key(required) {
+            bail!("host-daemon proxy.{required} is missing");
+        }
+    }
+    for key in proxy.keys() {
+        if !matches!(
+            key.as_str(),
+            "listen_address" | "username" | "password" | "binary" | "args" | "working_dir" | "env"
+        ) {
+            bail!("host-daemon proxy contains unsupported field {key}");
+        }
+    }
+    Ok(())
 }
 
 fn write_release_metadata(root: &Path, release_root: &Path, release_id: &str) -> Result<()> {
@@ -556,9 +627,15 @@ mod tests {
 
     #[test]
     fn host_config_owner_and_flags_must_agree() {
-        let reverse = r#"{"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
+        let reverse = r#"{"proxy":{"listen_address":"127.0.0.1:1080","username":"user","password":"pass"},"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
         assert!(validate_host_config(reverse, "first_party_reverse_tunnel").is_ok());
         assert!(validate_host_config(reverse, "stock_wireguard_bridge").is_err());
+    }
+
+    #[test]
+    fn host_config_accepts_shared_proxy_launcher_fields() {
+        let valid = r#"{"proxy":{"listen_address":"127.0.0.1:1080","username":"user","password":"pass","binary":"/bin/sing-box","args":["run","-c","/tmp/sing-box.json"],"working_dir":"/tmp","env":{}},"wireguard":{"enabled":false,"owner":"first_party_reverse_tunnel"},"reverse_tunnel":{"enabled":true}}"#;
+        assert!(validate_host_config(valid, "first_party_reverse_tunnel").is_ok());
     }
 
     #[test]

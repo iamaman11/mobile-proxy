@@ -20,16 +20,17 @@ use crate::state::{RotationCommands, RuntimeState};
 
 const PRIMARY_OWNER: &str = "first_party_reverse_tunnel";
 const ROLLBACK_OWNER: &str = "stock_wireguard_bridge";
+const APP_OWNED_OWNER: &str = "first_party_vpn_service";
 const MAX_SECRET_LENGTH: usize = 4096;
 const MAX_URLS: usize = 8;
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 pub struct FileConfig {
     node_id: Option<String>,
     node_name: Option<String>,
     listen: Option<String>,
     admin_token: Option<String>,
+    ui_control_token: Option<String>,
     observer_urls: Option<Vec<String>>,
     operator_profiles: Option<FileOperatorProfiles>,
     proxy: Option<FileProxyConfig>,
@@ -40,28 +41,36 @@ pub struct FileConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileOperatorProfiles {
     default_profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileProxyConfig {
     listen_address: Option<String>,
     username: Option<String>,
     password: Option<String>,
+    #[allow(dead_code)]
+    binary: Option<String>,
+    #[allow(dead_code)]
+    args: Option<Vec<String>>,
+    #[allow(dead_code)]
+    working_dir: Option<String>,
+    #[allow(dead_code)]
+    env: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileWireguardConfig {
     enabled: Option<bool>,
     owner: Option<String>,
+    #[allow(dead_code)]
+    up_command: Option<String>,
+    #[allow(dead_code)]
+    down_command: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileReverseTunnelConfig {
     enabled: Option<bool>,
     transport: Option<String>,
@@ -79,7 +88,6 @@ struct FileReverseTunnelConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileControlPlaneConfig {
     base_url: Option<String>,
     device_token: Option<String>,
@@ -91,23 +99,26 @@ struct FileControlPlaneConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileRotationConfig {
     data_reconnect: Option<FileRotationStrategyConfig>,
     airplane_bounce: Option<FileRotationStrategyConfig>,
     network_mode_bounce: Option<FileRotationStrategyConfig>,
     ril_bounce: Option<FileRotationStrategyConfig>,
+    #[allow(dead_code)]
+    drain_delay_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 struct FileRotationStrategyConfig {
     command: Option<String>,
+    #[allow(dead_code)]
+    enabled: Option<bool>,
 }
 
 pub struct LoadedConfig {
     pub listen: String,
     pub admin_token: String,
+    pub ui_control_token: Option<String>,
     pub control_plane_sync: Option<ControlPlaneSyncConfig>,
     pub reverse_tunnel: Option<ReverseTunnelClientConfig>,
     pub reverse_tunnel_counter_state_path: Option<PathBuf>,
@@ -147,6 +158,10 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .or_else(|| file_config.admin_token.clone())
         .context("admin_token is required")?;
     validate_secret("admin_token", &admin_token)?;
+    let ui_control_token = file_config.ui_control_token.clone();
+    if let Some(token) = ui_control_token.as_deref() {
+        validate_secret("ui_control_token", token)?;
+    }
 
     let node_id = file_config
         .node_id
@@ -201,7 +216,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .password
         .clone()
         .context("proxy.password is required")?;
-    validate_secret("proxy.username", &proxy_username)?;
+    validate_bounded_text("proxy.username", &proxy_username, 256)?;
     validate_secret("proxy.password", &proxy_password)?;
 
     let observer_urls = file_config
@@ -268,6 +283,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     Ok(LoadedConfig {
         listen,
         admin_token,
+        ui_control_token,
         control_plane_sync,
         reverse_tunnel,
         reverse_tunnel_counter_state_path,
@@ -352,9 +368,9 @@ fn reverse_tunnel_config(
     tunnel_owner: &str,
 ) -> Result<Option<ReverseTunnelClientConfig>> {
     let config = file_config.reverse_tunnel.as_ref();
-    if tunnel_owner == ROLLBACK_OWNER {
+    if matches!(tunnel_owner, ROLLBACK_OWNER | APP_OWNED_OWNER) {
         if config.is_some_and(|value| value.enabled.unwrap_or(false)) {
-            bail!("stock WireGuard rollback must not enable the reverse tunnel")
+            bail!("WireGuard tunnel owners must not enable the reverse tunnel")
         }
         return Ok(None);
     }
@@ -479,6 +495,10 @@ fn validate_owner_flags(owner: &str, wireguard_enabled: bool) -> Result<()> {
         (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
         (PRIMARY_OWNER, true) => bail!("native reverse-tunnel owner must disable WireGuard"),
         (ROLLBACK_OWNER, false) => bail!("stock rollback owner must enable WireGuard"),
+        (APP_OWNED_OWNER, true) => bail!(
+            "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"
+        ),
+        (APP_OWNED_OWNER, false) => bail!("first-party VPN owner must enable WireGuard"),
         _ => bail!("unsupported tunnel owner"),
     }
 }
@@ -553,7 +573,7 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::load_runtime_config;
+    use super::{load_runtime_config, validate_bounded_text, validate_secret};
     use crate::cli::Cli;
 
     fn valid_config() -> String {
@@ -585,6 +605,14 @@ mod tests {
             }
         })
         .to_string()
+    }
+
+    #[test]
+    fn proxy_username_is_bounded_but_not_subject_to_secret_length_policy() {
+        assert!(validate_bounded_text("proxy.username", "relay4855cb91", 256).is_ok());
+        assert!(validate_bounded_text("proxy.username", "", 256).is_err());
+        assert!(validate_bounded_text("proxy.username", "bad\nname", 256).is_err());
+        assert!(validate_secret("proxy.password", "short").is_err());
     }
 
     #[test]
@@ -649,6 +677,67 @@ mod tests {
         value["wireguard"]["enabled"] = true.into();
         fs::write(&path, value.to_string()).unwrap();
         assert!(load_runtime_config(&cli(&path)).is_err());
+
+        let mut value: serde_json::Value = serde_json::from_str(&valid_config()).unwrap();
+        value["wireguard"]["enabled"] = true.into();
+        value["wireguard"]["owner"] = "first_party_vpn_service".into();
+        value["proxy"]["listen_address"] = "10.66.66.2:1080".into();
+        value["reverse_tunnel"]["enabled"] = false.into();
+        fs::write(&path, value.to_string()).unwrap();
+        let error = match load_runtime_config(&cli(&path)) {
+            Ok(_) => panic!("disabled app-owned owner must fail closed"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("first_party_vpn_service is disabled"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn shared_runtime_template_fields_are_tolerated() {
+        let root = std::env::temp_dir().join(format!(
+            "mobile-proxy-host-config-shared-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("host-daemon.json");
+        let mut value: serde_json::Value = serde_json::from_str(&valid_config()).unwrap();
+        value["proxy"]["binary"] = "/data/adb/mobile-proxy-node/current/bin/sing-box".into();
+        value["proxy"]["args"] = serde_json::json!([
+            "run",
+            "-c",
+            "/data/adb/mobile-proxy-node/current/config/sing-box.json"
+        ]);
+        value["proxy"]["working_dir"] = "/data/adb/mobile-proxy-node/current".into();
+        value["proxy"]["env"] = serde_json::json!({});
+        value["wireguard"]["up_command"] = "true".into();
+        value["wireguard"]["down_command"] = "true".into();
+        value["rotation"]["drain_delay_secs"] = 2.into();
+        value["rotation"]["data_reconnect"]["enabled"] = true.into();
+        value["network"] = serde_json::json!({
+            "cellular_only": true
+        });
+        value["reliability"] = serde_json::json!({
+            "max_restart_attempts": 5
+        });
+        value["operator_detection"] = serde_json::json!({
+            "command": "getprop gsm.operator.numeric"
+        });
+        value["operator_profiles"]["profiles"] = serde_json::json!({
+            "default": {
+                "preferred_rotation_strategy": "data_reconnect"
+            }
+        });
+        fs::write(&path, value.to_string()).unwrap();
+
+        assert!(
+            load_runtime_config(&Cli {
+                listen: None,
+                admin_token: None,
+                config: Some(path.to_string_lossy().into_owned()),
+            })
+            .is_ok()
+        );
 
         let _ = fs::remove_dir_all(root);
     }

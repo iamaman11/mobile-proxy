@@ -10,13 +10,17 @@ use crate::cli::Cli;
 struct RuntimeConfig {
     listen: Option<String>,
     admin_token: String,
+    #[serde(default)]
+    ui_control_token: Option<String>,
     proxy: ProxyConfig,
     wireguard: WireguardConfig,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProxyConfig {
-    binary: String,
+    #[serde(default)]
+    binary: Option<String>,
+    #[serde(default)]
     args: Vec<String>,
     working_dir: Option<String>,
 }
@@ -33,12 +37,14 @@ pub struct SupervisorConfig {
     pub host_binary: PathBuf,
     pub host_listen: String,
     pub admin_token: String,
+    pub ui_control_token: Option<String>,
     pub proxy_binary: PathBuf,
     pub proxy_config: PathBuf,
     pub proxy_args: Vec<String>,
     pub proxy_working_dir: PathBuf,
     pub wireguard_enabled: bool,
     pub tunnel_owner: TunnelOwner,
+    pub app_tunnel_config: Option<PathBuf>,
     pub poll_secs: u64,
     pub repair_cooldown_secs: u64,
     pub data_bounce_down_secs: u64,
@@ -49,6 +55,7 @@ pub struct SupervisorConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TunnelOwner {
     StockWireguardBridge,
+    FirstPartyVpnService,
     FirstPartyReverseTunnel,
 }
 
@@ -56,9 +63,10 @@ impl TunnelOwner {
     pub fn parse(raw: &str) -> Result<Self> {
         match raw {
             "stock_wireguard_bridge" => Ok(Self::StockWireguardBridge),
+            "first_party_vpn_service" => Ok(Self::FirstPartyVpnService),
             "first_party_reverse_tunnel" => Ok(Self::FirstPartyReverseTunnel),
             other => bail!(
-                "unsupported tunnel owner {other}; expected stock_wireguard_bridge or first_party_reverse_tunnel"
+                "unsupported tunnel owner {other}; expected stock_wireguard_bridge, first_party_vpn_service, or first_party_reverse_tunnel"
             ),
         }
     }
@@ -66,18 +74,24 @@ impl TunnelOwner {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::StockWireguardBridge => "stock_wireguard_bridge",
+            Self::FirstPartyVpnService => "first_party_vpn_service",
             Self::FirstPartyReverseTunnel => "first_party_reverse_tunnel",
         }
     }
 
     fn validate_wireguard_flag(self, enabled: bool) -> Result<()> {
         match (self, enabled) {
-            (Self::FirstPartyReverseTunnel, false) | (Self::StockWireguardBridge, true) => Ok(()),
+            (Self::FirstPartyReverseTunnel, false)
+            | (Self::StockWireguardBridge, true)
+            | (Self::FirstPartyVpnService, true) => Ok(()),
             (Self::FirstPartyReverseTunnel, true) => {
                 bail!("first_party_reverse_tunnel must not enable WireGuard")
             }
             (Self::StockWireguardBridge, false) => {
                 bail!("stock WireGuard rollback owner requires wireguard.enabled=true")
+            }
+            (Self::FirstPartyVpnService, false) => {
+                bail!("first_party_vpn_service requires wireguard.enabled=true")
             }
         }
     }
@@ -91,33 +105,68 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
     let file: RuntimeConfig = serde_json::from_str(&config_body)
         .with_context(|| format!("failed to parse {}", host_config.display()))?;
     let host_listen = file.listen.unwrap_or_else(|| "127.0.0.1:8088".into());
-    let proxy_binary = PathBuf::from(file.proxy.binary);
+    let proxy_binary = file
+        .proxy
+        .binary
+        .map(PathBuf::from)
+        .unwrap_or_else(|| runtime_root.join("bin/sing-box"));
     let proxy_working_dir = file
         .proxy
         .working_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| runtime_root.clone());
-    let proxy_config = proxy_config_path(&runtime_root, &file.proxy.args);
+    let proxy_args = default_proxy_args(&runtime_root, file.proxy.args);
+    let proxy_config = proxy_config_path(&runtime_root, &proxy_args);
     let tunnel_owner = TunnelOwner::parse(&file.wireguard.owner)?;
     tunnel_owner.validate_wireguard_flag(file.wireguard.enabled)?;
+    if tunnel_owner == TunnelOwner::FirstPartyVpnService {
+        bail!(
+            "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"
+        )
+    }
+    let app_tunnel_config = if tunnel_owner == TunnelOwner::FirstPartyVpnService {
+        let path = runtime_root.join("config/app-wireguard.conf");
+        if !path.is_file() {
+            bail!("missing first-party VPN tunnel config: {}", path.display())
+        }
+        Some(path)
+    } else {
+        None
+    };
 
     Ok(SupervisorConfig {
         host_binary: runtime_root.join("bin/host-daemon"),
         host_config,
         host_listen,
         admin_token: file.admin_token,
+        ui_control_token: file.ui_control_token,
         proxy_binary,
         proxy_config,
-        proxy_args: file.proxy.args,
+        proxy_args,
         proxy_working_dir,
         wireguard_enabled: file.wireguard.enabled,
         tunnel_owner,
+        app_tunnel_config,
         poll_secs: cli.poll_secs,
         repair_cooldown_secs: cli.repair_cooldown_secs,
         data_bounce_down_secs: cli.data_bounce_down_secs,
         data_bounce_settle_secs: cli.data_bounce_settle_secs,
         once: cli.once,
     })
+}
+
+fn default_proxy_args(runtime_root: &std::path::Path, args: Vec<String>) -> Vec<String> {
+    if !args.is_empty() {
+        return args;
+    }
+    vec![
+        "run".into(),
+        "-c".into(),
+        runtime_root
+            .join("config/sing-box.json")
+            .to_string_lossy()
+            .into_owned(),
+    ]
 }
 
 fn proxy_config_path(runtime_root: &std::path::Path, args: &[String]) -> PathBuf {
@@ -129,13 +178,19 @@ fn proxy_config_path(runtime_root: &std::path::Path, args: &[String]) -> PathBuf
 
 #[cfg(test)]
 mod tests {
-    use super::TunnelOwner;
+    use std::fs;
+
+    use super::{TunnelOwner, load_config};
+    use crate::cli::Cli;
 
     #[test]
     fn tunnel_owner_is_explicit_and_fail_closed() {
         assert!(TunnelOwner::parse("").is_err());
         assert!(TunnelOwner::parse("unknown").is_err());
-        assert!(TunnelOwner::parse("first_party_vpn_service").is_err());
+        assert_eq!(
+            TunnelOwner::parse("first_party_vpn_service").unwrap(),
+            TunnelOwner::FirstPartyVpnService
+        );
         assert_eq!(
             TunnelOwner::parse("stock_wireguard_bridge").unwrap(),
             TunnelOwner::StockWireguardBridge
@@ -164,9 +219,117 @@ mod tests {
                 .is_ok()
         );
         assert!(
+            TunnelOwner::FirstPartyVpnService
+                .validate_wireguard_flag(true)
+                .is_ok()
+        );
+        assert!(
             TunnelOwner::StockWireguardBridge
                 .validate_wireguard_flag(false)
                 .is_err()
         );
+        assert!(
+            TunnelOwner::FirstPartyVpnService
+                .validate_wireguard_flag(false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn supervisor_rejects_disabled_app_owned_owner() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "mobile-proxy-runtime-supervisor-app-owned-{unique}"
+        ));
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(
+            root.join("config/host-daemon.json"),
+            serde_json::json!({
+                "listen": "127.0.0.1:8088",
+                "admin_token": "admin-token-0000000000000000000000000001",
+                "proxy": {
+                    "listen_address": "10.66.66.2:1080",
+                    "username": "proxy-user-0000000000000000000000000001",
+                    "password": "proxy-pass-0000000000000000000000000001"
+                },
+                "wireguard": {
+                    "enabled": true,
+                    "owner": "first_party_vpn_service"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let error = load_config(Cli {
+            runtime_root: root.to_string_lossy().into_owned(),
+            poll_secs: 1,
+            repair_cooldown_secs: 15,
+            data_bounce_down_secs: 2,
+            data_bounce_settle_secs: 8,
+            once: false,
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("first_party_vpn_service is disabled"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn supervisor_defaults_proxy_launcher_from_runtime_root() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("mobile-proxy-runtime-supervisor-config-{unique}"));
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(
+            root.join("config/host-daemon.json"),
+            serde_json::json!({
+                "listen": "127.0.0.1:8088",
+                "admin_token": "admin-token-0000000000000000000000000001",
+                "proxy": {
+                    "listen_address": "127.0.0.1:1080",
+                    "username": "proxy-user-0000000000000000000000000001",
+                    "password": "proxy-pass-0000000000000000000000000001"
+                },
+                "wireguard": {
+                    "enabled": false,
+                    "owner": "first_party_reverse_tunnel"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let loaded = load_config(Cli {
+            runtime_root: root.to_string_lossy().into_owned(),
+            poll_secs: 1,
+            repair_cooldown_secs: 15,
+            data_bounce_down_secs: 2,
+            data_bounce_settle_secs: 8,
+            once: false,
+        })
+        .unwrap();
+
+        assert_eq!(loaded.proxy_binary, root.join("bin/sing-box"));
+        assert_eq!(
+            loaded.proxy_args,
+            vec![
+                "run".to_string(),
+                "-c".to_string(),
+                root.join("config/sing-box.json")
+                    .to_string_lossy()
+                    .into_owned(),
+            ]
+        );
+        assert_eq!(loaded.proxy_config, root.join("config/sing-box.json"));
+
+        let _ = fs::remove_dir_all(root);
     }
 }

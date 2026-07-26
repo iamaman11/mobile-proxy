@@ -13,6 +13,7 @@ use crate::device_support::{
     verify_installed_release_files, wait_for_health, write_temp_script,
 };
 use crate::provision::package_device_release;
+use crate::release_integrity::verify_integrity_manifest;
 
 pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<()> {
     validate_release_id(&args.release_id)?;
@@ -20,14 +21,18 @@ pub async fn install_device_release(args: &InstallDeviceReleaseArgs) -> Result<(
     validate_device_path(&args.temp_root, "temp_root")?;
     validate_tunnel_owner(&args.tunnel_owner)?;
 
-    package_device_release(&PackageDeviceReleaseArgs {
-        manifest_path: args.manifest_path.clone(),
-        release_id: args.release_id.clone(),
-        output_dir: args.output_dir.clone(),
-        host_daemon_config_path: args.host_daemon_config_path.clone(),
-        sing_box_config_path: args.sing_box_config_path.clone(),
-        tunnel_owner: args.tunnel_owner.clone(),
-    })?;
+    if args.use_existing_release {
+        verify_integrity_manifest(&release_root(&args.output_dir, &args.release_id)?)?;
+    } else {
+        package_device_release(&PackageDeviceReleaseArgs {
+            manifest_path: args.manifest_path.clone(),
+            release_id: args.release_id.clone(),
+            output_dir: args.output_dir.clone(),
+            host_daemon_config_path: args.host_daemon_config_path.clone(),
+            sing_box_config_path: args.sing_box_config_path.clone(),
+            tunnel_owner: args.tunnel_owner.clone(),
+        })?;
+    }
 
     let manifest = load_manifest(&args.manifest_path)?;
     let token = admin_token(&manifest)?;

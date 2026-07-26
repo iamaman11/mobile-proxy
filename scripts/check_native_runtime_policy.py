@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 PRIMARY_OWNER = "first_party_reverse_tunnel"
 ROLLBACK_OWNER = "stock_wireguard_bridge"
-REMOVED_OWNER = "first_party_vpn_service"
+APP_OWNED_OWNER = "first_party_vpn_service"
 BASELINE_MARKER = Path("docs/PRODUCTION_BASELINE_PLAN.md")
 
 
@@ -62,7 +62,7 @@ def check_repository(root: Path) -> list[str]:
     _forbid(
         device_stack,
         production_stack,
-        ("install_android_app", "InstallAndroidAppArgs", REMOVED_OWNER),
+        ("install_android_app", "InstallAndroidAppArgs"),
         errors,
         root,
     )
@@ -72,12 +72,12 @@ def check_repository(root: Path) -> list[str]:
     for required in [
         PRIMARY_OWNER,
         ROLLBACK_OWNER,
+        APP_OWNED_OWNER,
         "native reverse tunnel requires no active Android VPN",
         "if local != deployed",
     ]:
         if required not in support_body:
             errors.append(f"{support.relative_to(root)}: missing native device invariant {required!r}")
-    _forbid(support, support_body, (REMOVED_OWNER,), errors, root)
 
     device = root / "apps/operator-cli/src/device.rs"
     device_body = _production_rust(device) if device.is_file() else ""
@@ -92,14 +92,14 @@ def check_repository(root: Path) -> list[str]:
 
     provision = root / "apps/operator-cli/src/provision.rs"
     provision_body = _production_rust(provision) if provision.is_file() else ""
-    _forbid(
-        provision,
-        provision_body,
-        (REMOVED_OWNER, "app-wireguard.conf", "wireguardPhonePrivateKeyEnv"),
-        errors,
-        root,
-    )
-    for required in ["validate_host_config", "render_json_template", "ensure_clean_worktree"]:
+    for required in [
+        "validate_host_config",
+        "render_json_template",
+        "ensure_clean_worktree",
+        "app-wireguard.conf",
+        "MOBILE_PROXY_WG_PHONE_PRIVATE_KEY",
+        "MOBILE_PROXY_WG_SERVER_PUBLIC_KEY",
+    ]:
         if required not in provision_body:
             errors.append(f"{provision.relative_to(root)}: missing fail-closed packaging control {required!r}")
 
@@ -118,35 +118,29 @@ def check_repository(root: Path) -> list[str]:
 
     supervisor_config = root / "services/runtime-supervisor/src/config.rs"
     config_body = _production_rust(supervisor_config) if supervisor_config.is_file() else ""
-    for required in ["StockWireguardBridge", "FirstPartyReverseTunnel"]:
+    for required in ["StockWireguardBridge", "FirstPartyVpnService", "FirstPartyReverseTunnel"]:
         if required not in config_body:
             errors.append(f"{supervisor_config.relative_to(root)}: missing owner {required}")
-    _forbid(
-        supervisor_config,
-        config_body,
-        ("FirstPartyVpnService", REMOVED_OWNER, "app_tunnel_config"),
-        errors,
-        root,
-    )
+    for required in [APP_OWNED_OWNER, "app_tunnel_config"] :
+        if required not in config_body:
+            errors.append(f"{supervisor_config.relative_to(root)}: missing first-party VPN invariant {required!r}")
 
     supervisor_health = root / "services/runtime-supervisor/src/health.rs"
     health_body = _production_rust(supervisor_health) if supervisor_health.is_file() else ""
-    _forbid(supervisor_health, health_body, ("kick_first_party_vpn_service",), errors, root)
-    if "kick_stock_wireguard_bridge" not in health_body:
-        errors.append(f"{supervisor_health.relative_to(root)}: stock rollback recovery is missing")
+    for required in ["kick_stock_wireguard_bridge", "kick_first_party_vpn_service"]:
+        if required not in health_body:
+            errors.append(f"{supervisor_health.relative_to(root)}: tunnel recovery path is missing: {required}")
 
     android_adapter = root / "services/runtime-supervisor/src/android.rs"
     android_body = _production_rust(android_adapter) if android_adapter.is_file() else ""
-    _forbid(
-        android_adapter,
-        android_body,
-        ("com.example.mobileproxy", "SET_TUNNEL_CONFIG", "START_TUNNEL"),
-        errors,
-        root,
-    )
-    for required in ["com.wireguard.android", "stop_compatibility_vpns"]:
+    for required in [
+        "com.wireguard.android",
+        "com.example.mobileproxy",
+        "START_TUNNEL",
+        "stop_compatibility_vpns",
+    ]:
         if required not in android_body:
-            errors.append(f"{android_adapter.relative_to(root)}: rollback compatibility control is missing: {required}")
+            errors.append(f"{android_adapter.relative_to(root)}: Android tunnel control is missing: {required}")
 
     relay = root / "services/reverse-tunnel-server/src/main.rs"
     relay_body = _production_rust(relay) if relay.is_file() else ""

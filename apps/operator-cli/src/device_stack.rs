@@ -10,6 +10,7 @@ pub async fn install_device_stack(args: &InstallDeviceStackArgs) -> Result<()> {
         manifest_path: args.manifest_path.clone(),
         release_id: args.release_id.clone(),
         output_dir: args.output_dir.clone(),
+        use_existing_release: false,
         host_daemon_config_path: args.host_daemon_config_path.clone(),
         sing_box_config_path: args.sing_box_config_path.clone(),
         tunnel_owner: args.tunnel_owner.clone(),

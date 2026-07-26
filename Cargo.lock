@@ -314,6 +314,7 @@ dependencies = [
  "mobile-proxy-control-plane-sqlite",
  "mobile-proxy-foundation",
  "proxy-core",
+ "reqwest",
  "serde",
  "serde_json",
  "subtle",
@@ -1366,7 +1367,6 @@ name = "runtime-supervisor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
  "clap",
  "proxy-core",
  "reqwest",

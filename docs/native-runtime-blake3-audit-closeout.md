@@ -20,12 +20,13 @@ The normal phone runtime is rooted and native:
 - no active Android VPN;
 - no `tun0` dependency.
 
-The only production tunnel-owner values are:
+The supported tunnel-owner values are:
 
 - `first_party_reverse_tunnel` — default and primary;
-- `stock_wireguard_bridge` — explicit rollback compatibility.
+- `stock_wireguard_bridge` — explicit stock WireGuard rollback compatibility;
+- `first_party_vpn_service` — app-owned Android `VpnService` compatibility mode, currently disabled.
 
-`first_party_vpn_service` is removed from packaging, installation, verification, runtime ownership and recovery. The optional Android project remains independently build-tested but is not part of the production device stack.
+`first_party_vpn_service` is not the primary production transport. Physical validation on July 26, 2026 showed that the Android `VpnService` path did not expose a routable `10.66.66.2` listener for the rooted proxy runtime on a real Samsung device, so the owner is now fail-closed until the compatibility topology is redesigned and revalidated.
 
 ## Corrected findings
 
@@ -34,10 +35,10 @@ The only production tunnel-owner values are:
 - package, install-stack, install-release and verify default to native reverse tunnel;
 - missing, unknown or contradictory owner configuration fails closed;
 - owner and `wireguard.enabled` must agree;
-- normal installation never installs the Android APK;
+- normal native reverse-tunnel installation never installs or requires the Android APK;
 - normal verification requires no active Android VPN;
 - stock rollback verifies the actual `com.wireguard.android` owner UID;
-- native startup stops stock always-on VPN state before serving.
+- native startup stops incompatible stock or app-owned Android VPN state before serving.
 
 ### Device deployment safety
 
@@ -93,6 +94,7 @@ Evidence v2 explicitly records:
 - native reverse-tunnel primary;
 - no Android VPN requirement for primary runtime;
 - stock WireGuard rollback;
+- app-owned WireGuard compatibility path explicitly disabled pending redesign and new physical validation;
 - `software_10_of_10_ready=true`;
 - `physical_phone_acceptance_required=true`;
 - `baseline_complete=false`.

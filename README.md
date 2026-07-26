@@ -16,9 +16,9 @@ root/Magisk boot service
               -> relay VM public proxy ports
 ```
 
-The primary tunnel owner is always `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. `stock_wireguard_bridge` is retained only as an explicitly selected rollback compatibility mode. Unknown, missing or contradictory tunnel ownership fails closed.
+The primary tunnel owner is always `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. The rooted runtime also supports two explicit compatibility owners: `stock_wireguard_bridge` for stock WireGuard rollback and `first_party_vpn_service` for the app-owned Android `VpnService` path. Unknown, missing or contradictory tunnel ownership fails closed.
 
-The Android project under `apps/android-app` is an optional, non-production scaffold/tool. It is not installed by `install-device-stack`, is not a supported runtime tunnel owner and is not required to package, install or verify the rooted production runtime.
+The Android project under `apps/android-app` remains optional for the primary rooted runtime, but it is now the supported owner for the app-owned WireGuard compatibility path. Normal native reverse-tunnel packaging, installation and verification still do not require an active Android VPN.
 
 ## Public compatibility surface
 
@@ -29,7 +29,8 @@ The relay preserves:
 - HTTP proxy including CONNECT on `3128`;
 - QUIC as primary reverse transport;
 - certificate-pinned TLS/TCP as automatic reserve;
-- explicit stock WireGuard rollback.
+- explicit stock WireGuard rollback;
+- app-owned WireGuard compatibility path.
 
 All public proxy paths require authentication. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
 
@@ -154,7 +155,7 @@ cargo run --release -p operator-cli -- provision-vm \
   --ssh-key <absolute-key-path>
 ```
 
-The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional stock WireGuard rollback backend.
+The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional WireGuard compatibility backend used by both the stock rollback path and the app-owned VPN path.
 
 ## Rotate cellular identity
 

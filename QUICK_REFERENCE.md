@@ -39,17 +39,21 @@ $env:MOBILE_PROXY_RELAY_PASSWORD='replace_relay_password'
 Target phone prerequisites:
 
 - `adb shell su 0 sh -c "id"` returns `uid=0`
-- first-party Android app installed:
-  - `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
-
-Temporary live bridge prerequisites until the app-owned tunnel engine replaces stock WireGuard:
-
-- `adb shell pm list packages com.wireguard.android` returns installed package
-- tunnel `WiGandroid` exists in WireGuard app and can be started
-- always-on VPN is pinned to WireGuard:
-  - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
-  - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
 - first bootstrap after reboot/install must allow screen unlock
+
+Owner-specific prerequisites:
+
+- `first_party_reverse_tunnel`:
+  - no Android `VpnService` is required
+- `first_party_vpn_service`:
+  - first-party Android app installed:
+    - `cargo run -p operator-cli -- install-android-app --device-serial R58T10QKGBE`
+- `stock_wireguard_bridge`:
+  - `adb shell pm list packages com.wireguard.android` returns installed package
+  - tunnel `WiGandroid` exists in WireGuard app and can be started
+  - always-on VPN is pinned to WireGuard:
+    - `adb shell su 0 sh -c "settings put secure always_on_vpn_app com.wireguard.android"`
+    - `adb shell su 0 sh -c "settings put secure always_on_vpn_lockdown 0"`
 
 Check app-owned VPN scaffold:
 

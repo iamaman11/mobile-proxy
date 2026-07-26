@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let runtime = Arc::new(Mutex::new(loaded.runtime_state));
     let state = AppState {
         admin_token: loaded.admin_token,
+        ui_control_token: loaded.ui_control_token,
         runtime,
     };
 

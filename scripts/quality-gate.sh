@@ -14,6 +14,12 @@ cargo audit
 cargo deny check advisories licenses bans sources
 git diff --check
 
+if grep -qi microsoft /proc/version 2>/dev/null \
+    && [[ -x /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe ]]; then
+    cargo run -p operator-cli -- install-android-app --skip-install
+    exit 0
+fi
+
 if [[ ! -d "$android_sdk" ]]; then
     echo "Linux Android SDK directory is missing; set ANDROID_SDK_ROOT" >&2
     exit 1

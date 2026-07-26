@@ -3,6 +3,7 @@
   "node_name": "{{NODE_NAME}}",
   "listen": "127.0.0.1:8088",
   "admin_token": "{{ADMIN_TOKEN}}",
+  "ui_control_token": "{{UI_CONTROL_TOKEN}}",
   "control_plane": {
     "base_url": "{{CONTROL_PLANE_URL}}",
     "device_token": "{{DEVICE_TOKEN}}",
@@ -16,14 +17,6 @@
     "https://api.ipify.org?format=json"
   ],
   "proxy": {
-    "binary": "/data/adb/mobile-proxy-node/current/bin/sing-box",
-    "args": [
-      "run",
-      "-c",
-      "/data/adb/mobile-proxy-node/current/config/sing-box.json"
-    ],
-    "working_dir": "/data/adb/mobile-proxy-node/current",
-    "env": {},
     "username": "{{RELAY_USER}}",
     "password": "{{RELAY_PASSWORD}}",
     "listen_address": "{{PROXY_LISTEN_ADDRESS}}"

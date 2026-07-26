@@ -7,6 +7,20 @@ use axum::{
 use subtle::ConstantTimeEq;
 
 pub fn authorize(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
+    authorize_token(headers, token)
+}
+
+pub fn authorize_ui(headers: &HeaderMap, token: Option<&str>) -> Result<(), ApiError> {
+    let Some(token) = token else {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "local UI control is not configured".into(),
+        ));
+    };
+    authorize_token(headers, token)
+}
+
+fn authorize_token(headers: &HeaderMap, token: &str) -> Result<(), ApiError> {
     let actual = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())

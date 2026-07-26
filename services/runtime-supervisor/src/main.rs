@@ -13,7 +13,7 @@ use clap::Parser;
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::android::stop_compatibility_vpns;
+use crate::android::{push_local_ui_control_token, stop_compatibility_vpns, tun0_ready};
 use crate::cli::Cli;
 use crate::config::{TunnelOwner, load_config};
 use crate::dns::reconcile_cellular_dns;
@@ -35,10 +35,13 @@ async fn main() -> Result<()> {
     let mut state = SupervisorState::new();
 
     cleanup_stale_runtime_processes();
-    if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel
+    if let Err(error) = push_local_ui_control_token(config.ui_control_token.as_deref()) {
+        warn!("failed to provision local UI control: {error:#}");
+    }
+    if config.tunnel_owner != TunnelOwner::StockWireguardBridge
         && let Err(error) = stop_compatibility_vpns()
     {
-        warn!("failed to stop compatibility VPNs before reverse-tunnel startup: {error:#}");
+        warn!("failed to stop compatibility VPNs before startup: {error:#}");
     }
     reconcile_startup_cellular_bootstrap(&config, &mut state);
 
@@ -47,6 +50,12 @@ async fn main() -> Result<()> {
             Ok(true) => children.restart_proxy(&config),
             Ok(false) => {}
             Err(err) => warn!("cellular DNS reconciliation failed: {err:#}"),
+        }
+        if state.observe_wireguard_tunnel_ready(config.wireguard_enabled, tun0_ready())
+            && state.claim_proxy_restart(config.repair_cooldown_secs)
+        {
+            warn!("tun0 became ready; restarting proxy to refresh listener binds");
+            children.restart_proxy(&config);
         }
         children.ensure(&config)?;
         reconcile_wireguard(&config).await;

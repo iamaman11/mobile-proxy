@@ -201,6 +201,8 @@ pub struct InstallDeviceReleaseArgs {
     pub release_id: String,
     #[arg(long, default_value = "target/device-releases")]
     pub output_dir: String,
+    #[arg(long, default_value_t = false)]
+    pub use_existing_release: bool,
     #[arg(long)]
     pub host_daemon_config_path: Option<String>,
     #[arg(long)]
@@ -309,6 +311,22 @@ mod tests {
             panic!("install-device-release must parse");
         };
         assert_eq!(install.tunnel_owner, PRIMARY_TUNNEL_OWNER);
+        assert!(!install.use_existing_release);
+
+        let immutable_install = Cli::try_parse_from([
+            "operator-cli",
+            "install-device-release",
+            "--manifest-path",
+            "device.json",
+            "--release-id",
+            "candidate",
+            "--use-existing-release",
+        ])
+        .unwrap();
+        let Command::InstallDeviceRelease(immutable_install) = immutable_install.command else {
+            panic!("install-device-release must parse immutable mode");
+        };
+        assert!(immutable_install.use_existing_release);
 
         let verify = Cli::try_parse_from([
             "operator-cli",

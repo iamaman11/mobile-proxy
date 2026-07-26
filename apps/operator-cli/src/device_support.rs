@@ -1,9 +1,10 @@
 use std::env;
 use std::fs;
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -15,7 +16,10 @@ use tokio::time::sleep;
 
 pub(crate) const PRIMARY_TUNNEL_OWNER: &str = "first_party_reverse_tunnel";
 pub(crate) const STOCK_WIREGUARD_OWNER: &str = "stock_wireguard_bridge";
+pub(crate) const APP_OWNED_TUNNEL_OWNER: &str = "first_party_vpn_service";
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
+const APP_OWNED_TUNNEL_PACKAGE: &str = "com.example.mobileproxy";
+const APP_OWNED_TUNNEL_DISABLED_REASON: &str = "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DeviceManifest {
@@ -68,6 +72,7 @@ pub(crate) fn release_root(output_dir: &str, release_id: &str) -> Result<PathBuf
 pub(crate) fn validate_tunnel_owner(value: &str) -> Result<()> {
     match value {
         PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER => Ok(()),
+        APP_OWNED_TUNNEL_OWNER => bail!("{APP_OWNED_TUNNEL_DISABLED_REASON}"),
         other => bail!(
             "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER} or {STOCK_WIREGUARD_OWNER}"
         ),
@@ -252,6 +257,12 @@ async fn fetch_device_health(
         device_serial,
         &["forward", &format!("tcp:{health_port}"), "tcp:8088"],
     )?;
+    if detect_adb()?
+        .extension()
+        .is_some_and(|extension| extension == "exe")
+    {
+        return fetch_windows_forwarded_health(health_port, token);
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -267,6 +278,48 @@ async fn fetch_device_health(
         .json::<HealthRecord>()
         .await
         .context("failed to parse health payload")
+}
+
+fn fetch_windows_forwarded_health(health_port: u16, token: &str) -> Result<HealthRecord> {
+    let powershell =
+        if Path::new("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe").is_file() {
+            PathBuf::from("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
+        } else {
+            PathBuf::from("powershell.exe")
+        };
+    let script = format!(
+        r#"$token=[Console]::In.ReadToEnd(); $headers=@{{Authorization=("Bearer " + $token)}}; try {{ $response=Invoke-WebRequest -UseBasicParsing -Headers $headers -TimeoutSec 15 -Uri "http://127.0.0.1:{health_port}/v1/health"; [Console]::Out.Write($response.Content) }} catch {{ [Console]::Error.Write($_.Exception.Message); exit 1 }}"#
+    );
+    let mut child = Command::new(&powershell)
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to start Windows PowerShell at {}",
+                powershell.display()
+            )
+        })?;
+    child
+        .stdin
+        .as_mut()
+        .context("failed to open Windows health client stdin")?
+        .write_all(token.as_bytes())
+        .context("failed to send health token to Windows client")?;
+    let output = child
+        .wait_with_output()
+        .context("failed to wait for Windows health client")?;
+    if output.status.success() {
+        serde_json::from_slice(&output.stdout)
+            .context("failed to parse Windows-forwarded health payload")
+    } else {
+        bail!(
+            "Windows-forwarded device health request failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
 }
 
 pub(crate) fn assert_healthy(health: &HealthRecord) -> Result<()> {
@@ -318,6 +371,19 @@ pub(crate) fn assert_active_vpn_owner(
                 bail!(
                     "active Android VPN owner mismatch: expected_package={} expected_uid={} actual_owner_uid={}",
                     STOCK_WIREGUARD_PACKAGE,
+                    expected_uid,
+                    actual_uid
+                )
+            }
+        }
+        APP_OWNED_TUNNEL_OWNER => {
+            let expected_uid = package_uid(device_serial, APP_OWNED_TUNNEL_PACKAGE)?;
+            let actual_uid =
+                active_vpn_owner_uid.context("active Android VPN owner uid was not found")?;
+            if actual_uid != expected_uid {
+                bail!(
+                    "active Android VPN owner mismatch: expected_package={} expected_uid={} actual_owner_uid={}",
+                    APP_OWNED_TUNNEL_PACKAGE,
                     expected_uid,
                     actual_uid
                 )
@@ -459,6 +525,17 @@ fn resolve_repo_path(raw: &str) -> Result<PathBuf> {
 }
 
 fn detect_adb() -> Result<PathBuf> {
+    if let Some(configured) = env::var_os("MOBILE_PROXY_ADB") {
+        let configured = PathBuf::from(configured);
+        if configured.is_absolute() && !configured.is_file() {
+            bail!(
+                "MOBILE_PROXY_ADB points to a missing executable: {}",
+                configured.display()
+            );
+        }
+        return Ok(configured);
+    }
+
     let user = env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .unwrap_or_else(|_| "Bose".to_string());
@@ -469,12 +546,24 @@ fn detect_adb() -> Result<PathBuf> {
         "adb".into(),
     ];
     #[cfg(not(windows))]
-    let candidates = [
-        format!("/mnt/c/Users/{user}/tools/platform-tools/adb.exe"),
-        format!("/mnt/c/Users/{user}/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
-        "/usr/bin/adb".into(),
-        "adb".into(),
-    ];
+    let candidates = if env::var_os("ADB_SERVER_SOCKET").is_some() {
+        // In WSL, prefer the Linux client when it is explicitly configured to
+        // talk to the Windows ADB server. This avoids relying on WSL interop to
+        // spawn adb.exe and keeps all operator commands on one server.
+        vec![
+            "/usr/bin/adb".into(),
+            "adb".into(),
+            format!("/mnt/c/Users/{user}/tools/platform-tools/adb.exe"),
+            format!("/mnt/c/Users/{user}/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
+        ]
+    } else {
+        vec![
+            format!("/mnt/c/Users/{user}/tools/platform-tools/adb.exe"),
+            format!("/mnt/c/Users/{user}/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
+            "/usr/bin/adb".into(),
+            "adb".into(),
+        ]
+    };
     detect_tool(&candidates, "adb")
 }
 
@@ -494,8 +583,9 @@ fn detect_tool(candidates: &[String], tool_name: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PRIMARY_TUNNEL_OWNER, is_ipv4, parse_active_vpn_owner_uid, parse_package_uid,
-        shell_quote_validated, validate_device_path, validate_release_id, validate_tunnel_owner,
+        APP_OWNED_TUNNEL_OWNER, PRIMARY_TUNNEL_OWNER, is_ipv4, parse_active_vpn_owner_uid,
+        parse_package_uid, shell_quote_validated, validate_device_path, validate_release_id,
+        validate_tunnel_owner,
     };
 
     #[test]
@@ -513,7 +603,7 @@ mod tests {
             None
         );
         assert!(validate_tunnel_owner(PRIMARY_TUNNEL_OWNER).is_ok());
-        assert!(validate_tunnel_owner("first_party_vpn_service").is_err());
+        assert!(validate_tunnel_owner(APP_OWNED_TUNNEL_OWNER).is_err());
         assert!(validate_release_id("candidate-1.0").is_ok());
         assert!(validate_release_id("../candidate").is_err());
         assert!(validate_device_path("/data/adb/mobile-proxy-node", "root").is_ok());

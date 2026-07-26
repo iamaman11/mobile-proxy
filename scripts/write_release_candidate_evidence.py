@@ -59,12 +59,14 @@ def _required(env: Mapping[str, str], name: str, maximum: int = 256) -> str:
     return value
 
 
-def build_evidence(env: Mapping[str, str], checked_out_sha: str) -> dict[str, object]:
+def build_evidence(env: Mapping[str, str], checked_out_sha: str, checked_out_clean: bool) -> dict[str, object]:
     candidate_sha = _required(env, "CANDIDATE_SHA", 40)
     if not _SHA_PATTERN.fullmatch(candidate_sha):
         raise ValueError("CANDIDATE_SHA must be a lowercase 40-character Git SHA")
     if checked_out_sha != candidate_sha:
         raise ValueError("checked-out commit does not match CANDIDATE_SHA")
+    if not checked_out_clean:
+        raise ValueError("checked-out candidate worktree is not clean")
 
     repository = _required(env, "GITHUB_REPOSITORY")
     if not _REPOSITORY_PATTERN.fullmatch(repository):
@@ -89,6 +91,7 @@ def build_evidence(env: Mapping[str, str], checked_out_sha: str) -> dict[str, ob
         "workflow_run_attempt": run_attempt,
         "workflow_event": event_name,
         "workflow_url": f"https://github.com/{repository}/actions/runs/{run_id}",
+        "git_worktree_clean": True,
         "primary_runtime": "first_party_reverse_tunnel",
         "primary_runtime_requires_android_vpn": False,
         "rollback_runtime": "stock_wireguard_bridge",
@@ -108,12 +111,21 @@ def checked_out_sha() -> str:
     ).stdout.strip()
 
 
+def checked_out_clean() -> bool:
+    return not subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=normal"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    evidence = build_evidence(os.environ, checked_out_sha())
+    evidence = build_evidence(os.environ, checked_out_sha(), checked_out_clean())
     args.output.write_text(
         json.dumps(evidence, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
