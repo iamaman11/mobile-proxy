@@ -449,7 +449,7 @@ mod tests {
         let content = std::fs::read_to_string(build_dir.join("local.properties"))
             .expect("read local.properties");
         assert!(content.starts_with("sdk.dir="));
-        assert!(content.contains("\\:"));
+        assert!(content.ends_with('\n'));
 
         std::fs::remove_dir_all(build_dir).expect("cleanup temp build dir");
     }
