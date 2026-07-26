@@ -9,6 +9,7 @@ object TunnelState {
     private const val CONFIG = "config"
     private const val LAST_STATE = "last_state"
     private const val LAST_ERROR = "last_error"
+    private const val LOCAL_CONTROL_TOKEN = "local_control_token"
 
     private fun storageContext(context: Context): Context =
         context.createDeviceProtectedStorageContext()
@@ -47,4 +48,13 @@ object TunnelState {
             putString(LAST_ERROR, error)
         }
     }
+
+    fun setLocalControlToken(context: Context, token: String) {
+        prefs(context).edit(commit = true) {
+            putString(LOCAL_CONTROL_TOKEN, token)
+        }
+    }
+
+    fun getLocalControlToken(context: Context): String? =
+        prefs(context).getString(LOCAL_CONTROL_TOKEN, null)
 }

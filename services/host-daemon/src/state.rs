@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
     pub admin_token: String,
+    pub ui_control_token: Option<String>,
     pub runtime: SharedRuntime,
 }
 

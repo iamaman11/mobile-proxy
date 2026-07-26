@@ -13,7 +13,7 @@ use clap::Parser;
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::android::{stop_compatibility_vpns, tun0_ready};
+use crate::android::{push_local_ui_control_token, stop_compatibility_vpns, tun0_ready};
 use crate::cli::Cli;
 use crate::config::{TunnelOwner, load_config};
 use crate::dns::reconcile_cellular_dns;
@@ -35,6 +35,9 @@ async fn main() -> Result<()> {
     let mut state = SupervisorState::new();
 
     cleanup_stale_runtime_processes();
+    if let Err(error) = push_local_ui_control_token(config.ui_control_token.as_deref()) {
+        warn!("failed to provision local UI control: {error:#}");
+    }
     if config.tunnel_owner != TunnelOwner::StockWireguardBridge
         && let Err(error) = stop_compatibility_vpns()
     {

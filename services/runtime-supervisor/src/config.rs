@@ -10,6 +10,8 @@ use crate::cli::Cli;
 struct RuntimeConfig {
     listen: Option<String>,
     admin_token: String,
+    #[serde(default)]
+    ui_control_token: Option<String>,
     proxy: ProxyConfig,
     wireguard: WireguardConfig,
 }
@@ -35,6 +37,7 @@ pub struct SupervisorConfig {
     pub host_binary: PathBuf,
     pub host_listen: String,
     pub admin_token: String,
+    pub ui_control_token: Option<String>,
     pub proxy_binary: PathBuf,
     pub proxy_config: PathBuf,
     pub proxy_args: Vec<String>,
@@ -136,6 +139,7 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         host_config,
         host_listen,
         admin_token: file.admin_token,
+        ui_control_token: file.ui_control_token,
         proxy_binary,
         proxy_config,
         proxy_args,

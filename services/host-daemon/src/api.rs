@@ -12,9 +12,10 @@ use reverse_tunnel::{
     TunnelActiveTransport, TunnelDisconnectReason, TunnelEventCounters, TunnelFailoverReason,
     TunnelTransportTransition,
 };
+use serde::Serialize;
 use uuid::Uuid;
 
-use crate::auth::{ApiError, authorize};
+use crate::auth::{ApiError, authorize, authorize_ui};
 use crate::rotation::start_rotation;
 use crate::state::AppState;
 
@@ -26,7 +27,74 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/proxy", get(get_proxy))
         .route("/v1/ip/rotate", post(rotate_ip))
         .route("/v1/jobs/{id}", get(get_job))
+        .route("/v1/ui/status", get(get_ui_status))
+        .route("/v1/ui/ip/rotate", post(rotate_ip_from_ui))
+        .route("/v1/ui/jobs/{id}", get(get_ui_job))
         .with_state(state)
+}
+
+#[derive(Serialize)]
+struct UiStatus {
+    public_ip: Option<String>,
+    readiness: String,
+    serving: bool,
+    tunnel_owner: Option<String>,
+    rotation_in_progress: bool,
+}
+
+#[derive(Serialize)]
+struct UiJob {
+    id: Uuid,
+    status: String,
+    old_public_ip: Option<String>,
+    new_public_ip: Option<String>,
+    changed: Option<bool>,
+}
+
+async fn get_ui_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<UiStatus>, ApiError> {
+    authorize_ui(&headers, state.ui_control_token.as_deref())?;
+    let runtime = state.runtime.lock().await;
+    Ok(Json(UiStatus {
+        public_ip: runtime.health.last_public_ip.clone(),
+        readiness: runtime.health.readiness_state.clone(),
+        serving: runtime.health.serving,
+        tunnel_owner: runtime.health.tunnel_owner.clone(),
+        rotation_in_progress: runtime.current_job.is_some(),
+    }))
+}
+
+async fn rotate_ip_from_ui(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<proxy_core::RotateAccepted>, ApiError> {
+    authorize_ui(&headers, state.ui_control_token.as_deref())?;
+    let mut request = proxy_core::default_rotate_request();
+    request.reason = "android-ui".into();
+    let accepted = start_rotation(&state, request).await?;
+    Ok(Json(accepted))
+}
+
+async fn get_ui_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<UiJob>, ApiError> {
+    authorize_ui(&headers, state.ui_control_token.as_deref())?;
+    let runtime = state.runtime.lock().await;
+    let job = runtime
+        .jobs
+        .get(&id)
+        .ok_or_else(|| ApiError(axum::http::StatusCode::NOT_FOUND, "job not found".into()))?;
+    Ok(Json(UiJob {
+        id: job.id,
+        status: job.status.clone(),
+        old_public_ip: job.old_public_ip.clone(),
+        new_public_ip: job.new_public_ip.clone(),
+        changed: job.changed,
+    }))
 }
 
 async fn get_health(
@@ -404,6 +472,7 @@ mod tests {
     async fn metrics_endpoint_requires_admin_authentication() {
         let state = AppState {
             admin_token: "admin-secret".into(),
+            ui_control_token: Some("ui-control-secret".into()),
             runtime: Arc::new(Mutex::new(RuntimeState::new(
                 test_health(),
                 false,

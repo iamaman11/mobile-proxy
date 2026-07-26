@@ -1,61 +1,90 @@
 package com.example.mobileproxy
 
-import android.content.Context
-import android.content.Intent
-import android.net.VpnService
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.activity.result.contract.ActivityResultContracts
 
 class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
-
-    private val vpnPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        updateVpnStatus()
-    }
+    private lateinit var currentIpText: TextView
+    private lateinit var refreshButton: Button
+    private lateinit var rotateButton: Button
+    private lateinit var runtimeClient: LocalRuntimeClient
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         statusText = findViewById(R.id.statusText)
+        currentIpText = findViewById(R.id.currentIpText)
+        refreshButton = findViewById(R.id.refreshRuntimeButton)
+        rotateButton = findViewById(R.id.rotateIpButton)
+        runtimeClient = LocalRuntimeClient(this)
 
         findViewById<TextView>(R.id.proxySummary).text = ProxySummary.text()
-        findViewById<Button>(R.id.prepareVpnButton).setOnClickListener {
-            requestVpnPermission()
-        }
-        findViewById<Button>(R.id.startTunnelButton).setOnClickListener {
-            sendTunnelCommand(this, TunnelCommandReceiver.ACTION_START)
-            statusText.setText(R.string.status_started)
-        }
-        findViewById<Button>(R.id.stopTunnelButton).setOnClickListener {
-            sendTunnelCommand(this, TunnelCommandReceiver.ACTION_STOP)
-            statusText.setText(R.string.status_stopped)
-        }
-        updateVpnStatus()
+        refreshButton.setOnClickListener { refreshRuntimeStatus() }
+        rotateButton.setOnClickListener { rotateIp() }
+        refreshRuntimeStatus()
     }
 
-    private fun requestVpnPermission() {
-        val intent = VpnService.prepare(this)
-        if (intent == null) {
-            statusText.setText(R.string.status_prepared)
-        } else {
-            vpnPermissionLauncher.launch(intent)
-        }
+    override fun onDestroy() {
+        runtimeClient.close()
+        super.onDestroy()
     }
 
-    private fun updateVpnStatus() {
-        if (VpnService.prepare(this) == null) {
-            statusText.setText(R.string.status_prepared)
-        } else {
-            statusText.setText(R.string.status_needs_consent)
+    private fun refreshRuntimeStatus() {
+        refreshButton.isEnabled = false
+        statusText.setText(R.string.status_checking)
+        runtimeClient.fetchStatus { result ->
+            runOnUiThread {
+                refreshButton.isEnabled = true
+                result.onSuccess(::renderStatus).onFailure(::renderError)
+            }
         }
     }
 
-    private fun sendTunnelCommand(context: Context, action: String) {
-        context.sendBroadcast(Intent(action).setPackage(context.packageName))
+    private fun rotateIp() {
+        rotateButton.isEnabled = false
+        refreshButton.isEnabled = false
+        statusText.setText(R.string.status_rotating)
+        runtimeClient.rotate { result ->
+            runOnUiThread {
+                refreshButton.isEnabled = true
+                result.onSuccess { job ->
+                    if (job.status == "succeeded" && job.changed == true) {
+                        currentIpText.text = getString(
+                            R.string.current_ip,
+                            job.newPublicIp ?: getString(R.string.ip_unknown),
+                        )
+                        statusText.text = getString(
+                            R.string.status_rotation_succeeded,
+                            job.oldPublicIp ?: getString(R.string.ip_unknown),
+                            job.newPublicIp ?: getString(R.string.ip_unknown),
+                        )
+                    } else {
+                        statusText.text = getString(R.string.status_rotation_failed, job.status)
+                    }
+                    refreshRuntimeStatus()
+                }.onFailure(::renderError)
+            }
+        }
+    }
+
+    private fun renderStatus(status: LocalRuntimeStatus) {
+        currentIpText.text = getString(
+            R.string.current_ip,
+            status.publicIp ?: getString(R.string.ip_unknown),
+        )
+        rotateButton.isEnabled = status.serving && !status.rotationInProgress
+        statusText.text = when {
+            status.rotationInProgress -> getString(R.string.status_rotation_in_progress)
+            status.serving -> getString(R.string.status_ready, status.readiness)
+            else -> getString(R.string.status_not_ready, status.readiness)
+        }
+    }
+
+    private fun renderError(error: Throwable) {
+        rotateButton.isEnabled = false
+        statusText.text = getString(R.string.status_runtime_unavailable, error.message ?: "unknown error")
     }
 }

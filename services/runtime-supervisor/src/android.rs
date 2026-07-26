@@ -34,6 +34,31 @@ pub async fn kick_first_party_vpn_service(config_path: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn push_local_ui_control_token(token: Option<&str>) -> Result<()> {
+    let Some(token) = token else {
+        return Ok(());
+    };
+    if token.is_empty()
+        || token.len() > 256
+        || !token
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '-')
+    {
+        bail!("local UI control token is invalid")
+    }
+    let Some(uid) = package_uid(APP_OWNED_PACKAGE)? else {
+        return Ok(());
+    };
+    run_as_uid(
+        uid,
+        &format!(
+            "am broadcast --user 0 -n com.example.mobileproxy/.TunnelCommandReceiver -a com.example.mobileproxy.action.SET_LOCAL_CONTROL_TOKEN --es control_token {}",
+            shell_single_quote(token)
+        ),
+    )?;
+    Ok(())
+}
+
 pub fn stop_compatibility_vpns() -> Result<()> {
     let mut failures = Vec::new();
     if let Err(error) = stop_stock_wireguard_tunnel() {

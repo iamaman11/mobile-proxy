@@ -7,6 +7,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::cli::PackageDeviceReleaseArgs;
 use crate::device_support::{
@@ -172,6 +173,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     let device_token = required_env(&manifest.tokens.device_token_env)?;
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
+    let ui_control_token = Uuid::new_v4().to_string();
 
     let bin_dir = root.join("deploy/device-runtime/bin");
     let runtime_supervisor_bin = bin_dir.join("runtime-supervisor");
@@ -222,6 +224,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ("NODE_ID", manifest.device_id.as_str()),
             ("NODE_NAME", manifest.node_name.as_str()),
             ("ADMIN_TOKEN", admin_token.as_str()),
+            ("UI_CONTROL_TOKEN", ui_control_token.as_str()),
             ("RELAY_USER", relay_user.as_str()),
             ("RELAY_PASSWORD", relay_password.as_str()),
             ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),

@@ -38,35 +38,38 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/subtitleText" />
 
-    <Button
-        android:id="@+id/prepareVpnButton"
+    <TextView
+        android:id="@+id/currentIpText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
-        android:text="@string/prepare_vpn"
+        android:background="#E8F1FF"
+        android:padding="16dp"
+        android:text="@string/current_ip_loading"
+        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/proxySummary" />
 
     <Button
-        android:id="@+id/startTunnelButton"
+        android:id="@+id/refreshRuntimeButton"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="@string/start_tunnel"
+        android:text="@string/refresh_runtime"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/prepareVpnButton" />
+        app:layout_constraintTop_toBottomOf="@id/currentIpText" />
 
     <Button
-        android:id="@+id/stopTunnelButton"
+        android:id="@+id/rotateIpButton"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="@string/stop_tunnel"
+        android:text="@string/rotate_ip"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/startTunnelButton" />
+        app:layout_constraintTop_toBottomOf="@id/refreshRuntimeButton" />
 
     <TextView
         android:id="@+id/statusText"
@@ -77,6 +80,6 @@
         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/stopTunnelButton" />
+        app:layout_constraintTop_toBottomOf="@id/rotateIpButton" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

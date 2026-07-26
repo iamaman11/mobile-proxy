@@ -42,6 +42,7 @@
             android:directBootAware="true">
             <intent-filter>
                 <action android:name="com.example.mobileproxy.action.SET_TUNNEL_CONFIG" />
+                <action android:name="com.example.mobileproxy.action.SET_LOCAL_CONTROL_TOKEN" />
                 <action android:name="com.example.mobileproxy.action.START_TUNNEL" />
                 <action android:name="com.example.mobileproxy.action.STOP_TUNNEL" />
             </intent-filter>

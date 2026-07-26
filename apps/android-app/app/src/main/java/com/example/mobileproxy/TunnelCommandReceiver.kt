@@ -22,6 +22,11 @@ class TunnelCommandReceiver : BroadcastReceiver() {
                 TunnelState.setDesired(context, false)
                 context.startService(MobileProxyVpnService.stopIntent(context))
             }
+            ACTION_SET_LOCAL_CONTROL_TOKEN -> {
+                intent.getStringExtra(EXTRA_CONTROL_TOKEN)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { TunnelState.setLocalControlToken(context, it) }
+            }
         }
     }
 
@@ -42,8 +47,10 @@ class TunnelCommandReceiver : BroadcastReceiver() {
         const val ACTION_START = "com.example.mobileproxy.action.START_TUNNEL"
         const val ACTION_STOP = "com.example.mobileproxy.action.STOP_TUNNEL"
         const val ACTION_SET_CONFIG = "com.example.mobileproxy.action.SET_TUNNEL_CONFIG"
+        const val ACTION_SET_LOCAL_CONTROL_TOKEN = "com.example.mobileproxy.action.SET_LOCAL_CONTROL_TOKEN"
         const val EXTRA_CONFIG = "config"
         const val EXTRA_CONFIG_B64 = "config_b64"
+        const val EXTRA_CONTROL_TOKEN = "control_token"
 
         private fun decodeConfig(raw: String): String =
             String(Base64.decode(raw, Base64.DEFAULT), Charsets.UTF_8)

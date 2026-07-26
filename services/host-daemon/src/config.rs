@@ -30,6 +30,7 @@ pub struct FileConfig {
     node_name: Option<String>,
     listen: Option<String>,
     admin_token: Option<String>,
+    ui_control_token: Option<String>,
     observer_urls: Option<Vec<String>>,
     operator_profiles: Option<FileOperatorProfiles>,
     proxy: Option<FileProxyConfig>,
@@ -117,6 +118,7 @@ struct FileRotationStrategyConfig {
 pub struct LoadedConfig {
     pub listen: String,
     pub admin_token: String,
+    pub ui_control_token: Option<String>,
     pub control_plane_sync: Option<ControlPlaneSyncConfig>,
     pub reverse_tunnel: Option<ReverseTunnelClientConfig>,
     pub reverse_tunnel_counter_state_path: Option<PathBuf>,
@@ -156,6 +158,10 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .or_else(|| file_config.admin_token.clone())
         .context("admin_token is required")?;
     validate_secret("admin_token", &admin_token)?;
+    let ui_control_token = file_config.ui_control_token.clone();
+    if let Some(token) = ui_control_token.as_deref() {
+        validate_secret("ui_control_token", token)?;
+    }
 
     let node_id = file_config
         .node_id
@@ -277,6 +283,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     Ok(LoadedConfig {
         listen,
         admin_token,
+        ui_control_token,
         control_plane_sync,
         reverse_tunnel,
         reverse_tunnel_counter_state_path,
