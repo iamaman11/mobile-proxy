@@ -210,7 +210,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .password
         .clone()
         .context("proxy.password is required")?;
-    validate_secret("proxy.username", &proxy_username)?;
+    validate_bounded_text("proxy.username", &proxy_username, 256)?;
     validate_secret("proxy.password", &proxy_password)?;
 
     let observer_urls = file_config
@@ -566,7 +566,7 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::load_runtime_config;
+    use super::{load_runtime_config, validate_bounded_text, validate_secret};
     use crate::cli::Cli;
 
     fn valid_config() -> String {
@@ -598,6 +598,14 @@ mod tests {
             }
         })
         .to_string()
+    }
+
+    #[test]
+    fn proxy_username_is_bounded_but_not_subject_to_secret_length_policy() {
+        assert!(validate_bounded_text("proxy.username", "relay4855cb91", 256).is_ok());
+        assert!(validate_bounded_text("proxy.username", "", 256).is_err());
+        assert!(validate_bounded_text("proxy.username", "bad\nname", 256).is_err());
+        assert!(validate_secret("proxy.password", "short").is_err());
     }
 
     #[test]
