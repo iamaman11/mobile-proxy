@@ -55,7 +55,7 @@ class LocalRuntimeClient(private val context: Context) {
         val token = TunnelState.getLocalControlToken(context)
             ?.takeIf { it.isNotBlank() }
             ?: throw IOException("local control is not ready")
-        val connection = (URL("http://127.0.0.1:8088$path").openConnection() as HttpURLConnection)
+        val connection = (URL("http://localhost:8088$path").openConnection() as HttpURLConnection)
         try {
             connection.requestMethod = method
             connection.connectTimeout = 5_000
