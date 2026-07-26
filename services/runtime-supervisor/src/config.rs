@@ -116,6 +116,11 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
     let proxy_config = proxy_config_path(&runtime_root, &proxy_args);
     let tunnel_owner = TunnelOwner::parse(&file.wireguard.owner)?;
     tunnel_owner.validate_wireguard_flag(file.wireguard.enabled)?;
+    if tunnel_owner == TunnelOwner::FirstPartyVpnService {
+        bail!(
+            "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"
+        )
+    }
     let app_tunnel_config = if tunnel_owner == TunnelOwner::FirstPartyVpnService {
         let path = runtime_root.join("config/app-wireguard.conf");
         if !path.is_file() {
@@ -224,6 +229,50 @@ mod tests {
                 .validate_wireguard_flag(false)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn supervisor_rejects_disabled_app_owned_owner() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "mobile-proxy-runtime-supervisor-app-owned-{unique}"
+        ));
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(
+            root.join("config/host-daemon.json"),
+            serde_json::json!({
+                "listen": "127.0.0.1:8088",
+                "admin_token": "admin-token-0000000000000000000000000001",
+                "proxy": {
+                    "listen_address": "10.66.66.2:1080",
+                    "username": "proxy-user-0000000000000000000000000001",
+                    "password": "proxy-pass-0000000000000000000000000001"
+                },
+                "wireguard": {
+                    "enabled": true,
+                    "owner": "first_party_vpn_service"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let error = load_config(Cli {
+            runtime_root: root.to_string_lossy().into_owned(),
+            poll_secs: 1,
+            repair_cooldown_secs: 15,
+            data_bounce_down_secs: 2,
+            data_bounce_settle_secs: 8,
+            once: false,
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("first_party_vpn_service is disabled"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

@@ -485,9 +485,12 @@ fn load_file_config(path: Option<&str>) -> Result<(Option<FileConfig>, Option<Co
 
 fn validate_owner_flags(owner: &str, wireguard_enabled: bool) -> Result<()> {
     match (owner, wireguard_enabled) {
-        (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) | (APP_OWNED_OWNER, true) => Ok(()),
+        (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
         (PRIMARY_OWNER, true) => bail!("native reverse-tunnel owner must disable WireGuard"),
         (ROLLBACK_OWNER, false) => bail!("stock rollback owner must enable WireGuard"),
+        (APP_OWNED_OWNER, true) => bail!(
+            "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"
+        ),
         (APP_OWNED_OWNER, false) => bail!("first-party VPN owner must enable WireGuard"),
         _ => bail!("unsupported tunnel owner"),
     }
@@ -659,6 +662,18 @@ mod tests {
         value["wireguard"]["enabled"] = true.into();
         fs::write(&path, value.to_string()).unwrap();
         assert!(load_runtime_config(&cli(&path)).is_err());
+
+        let mut value: serde_json::Value = serde_json::from_str(&valid_config()).unwrap();
+        value["wireguard"]["enabled"] = true.into();
+        value["wireguard"]["owner"] = "first_party_vpn_service".into();
+        value["proxy"]["listen_address"] = "10.66.66.2:1080".into();
+        value["reverse_tunnel"]["enabled"] = false.into();
+        fs::write(&path, value.to_string()).unwrap();
+        let error = match load_runtime_config(&cli(&path)) {
+            Ok(_) => panic!("disabled app-owned owner must fail closed"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("first_party_vpn_service is disabled"));
 
         let _ = fs::remove_dir_all(root);
     }

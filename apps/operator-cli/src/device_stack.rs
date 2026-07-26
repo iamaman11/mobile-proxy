@@ -30,6 +30,6 @@ mod tests {
     fn stack_accepts_only_native_primary_and_stock_rollback() {
         assert!(validate_tunnel_owner("first_party_reverse_tunnel").is_ok());
         assert!(validate_tunnel_owner("stock_wireguard_bridge").is_ok());
-        assert!(validate_tunnel_owner("first_party_vpn_service").is_ok());
+        assert!(validate_tunnel_owner("first_party_vpn_service").is_err());
     }
 }

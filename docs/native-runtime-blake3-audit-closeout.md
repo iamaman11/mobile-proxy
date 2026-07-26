@@ -24,9 +24,9 @@ The supported tunnel-owner values are:
 
 - `first_party_reverse_tunnel` — default and primary;
 - `stock_wireguard_bridge` — explicit stock WireGuard rollback compatibility;
-- `first_party_vpn_service` — app-owned Android `VpnService` compatibility mode.
+- `first_party_vpn_service` — app-owned Android `VpnService` compatibility mode, currently disabled.
 
-`first_party_vpn_service` is not the primary production transport. It remains an explicitly selected compatibility owner that packages app-owned WireGuard configuration, verifies the actual `com.example.mobileproxy` VPN owner UID and reuses the same rooted runtime supervision contract.
+`first_party_vpn_service` is not the primary production transport. Physical validation on July 26, 2026 showed that the Android `VpnService` path did not expose a routable `10.66.66.2` listener for the rooted proxy runtime on a real Samsung device, so the owner is now fail-closed until the compatibility topology is redesigned and revalidated.
 
 ## Corrected findings
 
@@ -38,7 +38,6 @@ The supported tunnel-owner values are:
 - normal native reverse-tunnel installation never installs or requires the Android APK;
 - normal verification requires no active Android VPN;
 - stock rollback verifies the actual `com.wireguard.android` owner UID;
-- app-owned compatibility verifies the actual `com.example.mobileproxy` owner UID;
 - native startup stops incompatible stock or app-owned Android VPN state before serving.
 
 ### Device deployment safety
@@ -95,7 +94,7 @@ Evidence v2 explicitly records:
 - native reverse-tunnel primary;
 - no Android VPN requirement for primary runtime;
 - stock WireGuard rollback;
-- app-owned WireGuard compatibility path available for controlled physical testing;
+- app-owned WireGuard compatibility path explicitly disabled pending redesign and new physical validation;
 - `software_10_of_10_ready=true`;
 - `physical_phone_acceptance_required=true`;
 - `baseline_complete=false`.

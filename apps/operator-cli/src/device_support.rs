@@ -18,6 +18,7 @@ pub(crate) const STOCK_WIREGUARD_OWNER: &str = "stock_wireguard_bridge";
 pub(crate) const APP_OWNED_TUNNEL_OWNER: &str = "first_party_vpn_service";
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 const APP_OWNED_TUNNEL_PACKAGE: &str = "com.example.mobileproxy";
+const APP_OWNED_TUNNEL_DISABLED_REASON: &str = "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DeviceManifest {
@@ -69,9 +70,10 @@ pub(crate) fn release_root(output_dir: &str, release_id: &str) -> Result<PathBuf
 
 pub(crate) fn validate_tunnel_owner(value: &str) -> Result<()> {
     match value {
-        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER | APP_OWNED_TUNNEL_OWNER => Ok(()),
+        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER => Ok(()),
+        APP_OWNED_TUNNEL_OWNER => bail!("{APP_OWNED_TUNNEL_DISABLED_REASON}"),
         other => bail!(
-            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER}, {STOCK_WIREGUARD_OWNER}, or {APP_OWNED_TUNNEL_OWNER}"
+            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER} or {STOCK_WIREGUARD_OWNER}"
         ),
     }
 }
@@ -474,6 +476,17 @@ fn resolve_repo_path(raw: &str) -> Result<PathBuf> {
 }
 
 fn detect_adb() -> Result<PathBuf> {
+    if let Some(configured) = env::var_os("MOBILE_PROXY_ADB") {
+        let configured = PathBuf::from(configured);
+        if configured.is_absolute() && !configured.is_file() {
+            bail!(
+                "MOBILE_PROXY_ADB points to a missing executable: {}",
+                configured.display()
+            );
+        }
+        return Ok(configured);
+    }
+
     let user = env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .unwrap_or_else(|_| "Bose".to_string());
@@ -484,12 +497,24 @@ fn detect_adb() -> Result<PathBuf> {
         "adb".into(),
     ];
     #[cfg(not(windows))]
-    let candidates = [
-        format!("/mnt/c/Users/{user}/tools/platform-tools/adb.exe"),
-        format!("/mnt/c/Users/{user}/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
-        "/usr/bin/adb".into(),
-        "adb".into(),
-    ];
+    let candidates = if env::var_os("ADB_SERVER_SOCKET").is_some() {
+        // In WSL, prefer the Linux client when it is explicitly configured to
+        // talk to the Windows ADB server. This avoids relying on WSL interop to
+        // spawn adb.exe and keeps all operator commands on one server.
+        vec![
+            "/usr/bin/adb".into(),
+            "adb".into(),
+            format!("/mnt/c/Users/{user}/tools/platform-tools/adb.exe"),
+            format!("/mnt/c/Users/{user}/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
+        ]
+    } else {
+        vec![
+            format!("/mnt/c/Users/{user}/tools/platform-tools/adb.exe"),
+            format!("/mnt/c/Users/{user}/AppData/Local/Android/Sdk/platform-tools/adb.exe"),
+            "/usr/bin/adb".into(),
+            "adb".into(),
+        ]
+    };
     detect_tool(&candidates, "adb")
 }
 
@@ -529,7 +554,7 @@ mod tests {
             None
         );
         assert!(validate_tunnel_owner(PRIMARY_TUNNEL_OWNER).is_ok());
-        assert!(validate_tunnel_owner(APP_OWNED_TUNNEL_OWNER).is_ok());
+        assert!(validate_tunnel_owner(APP_OWNED_TUNNEL_OWNER).is_err());
         assert!(validate_release_id("candidate-1.0").is_ok());
         assert!(validate_release_id("../candidate").is_err());
         assert!(validate_device_path("/data/adb/mobile-proxy-node", "root").is_ok());
