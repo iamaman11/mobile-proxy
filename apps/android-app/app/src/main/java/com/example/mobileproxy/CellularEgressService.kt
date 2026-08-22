@@ -22,6 +22,7 @@ import java.net.Socket
 import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * A loopback-only SOCKS5 endpoint whose outbound sockets are explicitly bound to a
@@ -30,6 +31,7 @@ import java.util.concurrent.Executors
  */
 class CellularEgressService : Service() {
     private val workers: ExecutorService = Executors.newCachedThreadPool()
+    private val dnsCache = ConcurrentHashMap<String, CachedTargets>()
     @Volatile private var server: ServerSocket? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -111,10 +113,7 @@ class CellularEgressService : Service() {
         val port = (input.read() shl 8) or input.read()
         if (port !in 1..65535) return
         val network = validatedCellularNetwork() ?: run { reply(output, NETWORK_UNREACHABLE); return }
-        val targets = runCatching { network.getAllByName(address).toList() }.getOrNull()
-            ?.distinct()
-            ?.take(MAX_TARGET_ADDRESSES)
-            .orEmpty()
+        val targets = resolveTargets(network, address)
         if (targets.isEmpty()) {
             reply(output, HOST_UNREACHABLE)
             return
@@ -145,6 +144,24 @@ class CellularEgressService : Service() {
             }
         }
         return null
+    }
+
+    private fun resolveTargets(network: Network, address: String): List<InetAddress> {
+        val key = network.toString() + ":" + address
+        val now = System.currentTimeMillis()
+        dnsCache[key]?.takeIf { now - it.createdAt < DNS_CACHE_MILLIS }?.let { return it.targets }
+        synchronized(dnsCache) {
+            dnsCache[key]?.takeIf { now - it.createdAt < DNS_CACHE_MILLIS }?.let { return it.targets }
+            val targets = runCatching { network.getAllByName(address).toList() }
+                .getOrDefault(emptyList())
+                .distinct()
+                .take(MAX_TARGET_ADDRESSES)
+            if (targets.isNotEmpty()) {
+                if (dnsCache.size >= MAX_DNS_CACHE_ENTRIES) dnsCache.clear()
+                dnsCache[key] = CachedTargets(now, targets)
+            }
+            return targets
+        }
     }
 
     @Suppress("DEPRECATION") // API 24 support needs enumeration; every selected Network is capability-checked.
@@ -219,8 +236,12 @@ class CellularEgressService : Service() {
         private const val HANDSHAKE_TIMEOUT_MS = 15_000
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val MAX_TARGET_ADDRESSES = 4
+        private const val DNS_CACHE_MILLIS = 60_000L
+        private const val MAX_DNS_CACHE_ENTRIES = 256
 
         fun startIntent(context: Context) = Intent(context, CellularEgressService::class.java)
         fun stopIntent(context: Context) = Intent(context, CellularEgressService::class.java).setAction(ACTION_STOP)
     }
+
+    private data class CachedTargets(val createdAt: Long, val targets: List<InetAddress>)
 }
