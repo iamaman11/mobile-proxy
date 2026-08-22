@@ -195,7 +195,11 @@ fn reconcile_reverse_tunnel_cellular_bootstrap(
     let Some(reason) = health.degradation_reason_code.as_deref() else {
         return;
     };
-    if !matches!(reason, "public_probe_failed" | "reverse_tunnel_not_ready") {
+    // A failed VM-side public probe is not evidence that the phone's cellular
+    // route is broken. Re-running `svc data enable` for it drops an otherwise
+    // healthy QUIC session, so the public probe can never catch up. Cellular
+    // bootstrap is reserved for a tunnel that is actually unavailable.
+    if reason != "reverse_tunnel_not_ready" {
         return;
     }
     if !route_repair_allowed(config, state) {
