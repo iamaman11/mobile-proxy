@@ -525,7 +525,13 @@ fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<
         .relay
         .as_ref()
         .context("first_party_reverse_tunnel requires relay host in device manifest")?;
-    Ok(format!("{}:18090", relay.host))
+    // Mobile networks frequently age or rewrite UDP/NAT mappings while an
+    // otherwise healthy TCP/TLS session on 443 survives for days. The client
+    // remains hybrid-capable, but deliberately targets 443 first: its QUIC
+    // attempt fails closed and it establishes the pinned TLS/TCP control
+    // channel used by the production fallback. This makes the reliable
+    // transport independent of UDP availability.
+    Ok(format!("{}:443", relay.host))
 }
 
 fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
