@@ -13,6 +13,8 @@ struct RuntimeConfig {
     #[serde(default)]
     ui_control_token: Option<String>,
     proxy: ProxyConfig,
+    #[serde(default)]
+    app_egress: Option<FileAppEgressConfig>,
     wireguard: WireguardConfig,
 }
 
@@ -23,6 +25,20 @@ struct ProxyConfig {
     #[serde(default)]
     args: Vec<String>,
     working_dir: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileAppEgressConfig {
+    port: u16,
+}
+
+#[derive(Debug)]
+pub struct AppEgressConfig {
+    pub port: u16,
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +61,7 @@ pub struct SupervisorConfig {
     pub wireguard_enabled: bool,
     pub tunnel_owner: TunnelOwner,
     pub app_tunnel_config: Option<PathBuf>,
+    pub app_egress: Option<AppEgressConfig>,
     pub poll_secs: u64,
     pub repair_cooldown_secs: u64,
     pub data_bounce_down_secs: u64,
@@ -57,6 +74,7 @@ pub enum TunnelOwner {
     StockWireguardBridge,
     FirstPartyVpnService,
     FirstPartyReverseTunnel,
+    FirstPartyAndroidEgress,
 }
 
 impl TunnelOwner {
@@ -65,8 +83,9 @@ impl TunnelOwner {
             "stock_wireguard_bridge" => Ok(Self::StockWireguardBridge),
             "first_party_vpn_service" => Ok(Self::FirstPartyVpnService),
             "first_party_reverse_tunnel" => Ok(Self::FirstPartyReverseTunnel),
+            "first_party_android_egress" => Ok(Self::FirstPartyAndroidEgress),
             other => bail!(
-                "unsupported tunnel owner {other}; expected stock_wireguard_bridge, first_party_vpn_service, or first_party_reverse_tunnel"
+                "unsupported tunnel owner {other}; expected stock_wireguard_bridge, first_party_vpn_service, first_party_reverse_tunnel, or first_party_android_egress"
             ),
         }
     }
@@ -76,16 +95,21 @@ impl TunnelOwner {
             Self::StockWireguardBridge => "stock_wireguard_bridge",
             Self::FirstPartyVpnService => "first_party_vpn_service",
             Self::FirstPartyReverseTunnel => "first_party_reverse_tunnel",
+            Self::FirstPartyAndroidEgress => "first_party_android_egress",
         }
     }
 
     fn validate_wireguard_flag(self, enabled: bool) -> Result<()> {
         match (self, enabled) {
             (Self::FirstPartyReverseTunnel, false)
+            | (Self::FirstPartyAndroidEgress, false)
             | (Self::StockWireguardBridge, true)
             | (Self::FirstPartyVpnService, true) => Ok(()),
             (Self::FirstPartyReverseTunnel, true) => {
                 bail!("first_party_reverse_tunnel must not enable WireGuard")
+            }
+            (Self::FirstPartyAndroidEgress, true) => {
+                bail!("first_party_android_egress must not enable WireGuard")
             }
             (Self::StockWireguardBridge, false) => {
                 bail!("stock WireGuard rollback owner requires wireguard.enabled=true")
@@ -124,6 +148,34 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
             "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"
         )
     }
+    let app_egress = if tunnel_owner == TunnelOwner::FirstPartyAndroidEgress {
+        let app = file
+            .app_egress
+            .context("first_party_android_egress requires app_egress")?;
+        if !(1024..=65535).contains(&app.port) {
+            bail!("app_egress.port must be unprivileged")
+        }
+        let username = file
+            .proxy
+            .username
+            .as_deref()
+            .context("app_egress requires proxy.username")?;
+        let password = file
+            .proxy
+            .password
+            .as_deref()
+            .context("app_egress requires proxy.password")?;
+        if username.is_empty() || username.len() > 256 || password.len() < 16 {
+            bail!("app_egress proxy credentials are invalid")
+        }
+        Some(AppEgressConfig {
+            port: app.port,
+            username: username.to_string(),
+            password: password.to_string(),
+        })
+    } else {
+        None
+    };
     let app_tunnel_config = if tunnel_owner == TunnelOwner::FirstPartyVpnService {
         let path = runtime_root.join("config/app-wireguard.conf");
         if !path.is_file() {
@@ -147,6 +199,7 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         wireguard_enabled: file.wireguard.enabled,
         tunnel_owner,
         app_tunnel_config,
+        app_egress,
         poll_secs: cli.poll_secs,
         repair_cooldown_secs: cli.repair_cooldown_secs,
         data_bounce_down_secs: cli.data_bounce_down_secs,

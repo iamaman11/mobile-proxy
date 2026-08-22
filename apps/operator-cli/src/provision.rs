@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::cli::PackageDeviceReleaseArgs;
 use crate::device_support::{
-    APP_OWNED_TUNNEL_OWNER, PRIMARY_TUNNEL_OWNER, STOCK_WIREGUARD_OWNER, validate_release_id,
-    validate_tunnel_owner,
+    ANDROID_EGRESS_TUNNEL_OWNER, APP_OWNED_TUNNEL_OWNER, PRIMARY_TUNNEL_OWNER,
+    STOCK_WIREGUARD_OWNER, validate_release_id, validate_tunnel_owner,
 };
 use crate::release_integrity::{verify_integrity_manifest, write_integrity_manifest};
 
@@ -241,6 +241,10 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 proxy_listen_address(&args.tunnel_owner),
             ),
             (
+                "LOCAL_PROXY_ADDRESS",
+                proxy_listen_address(&args.tunnel_owner),
+            ),
+            (
                 "REVERSE_TUNNEL_ADDR",
                 &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?,
             ),
@@ -261,12 +265,13 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ),
             (
                 "REVERSE_TUNNEL_ENABLED",
-                bool_literal(args.tunnel_owner == PRIMARY_TUNNEL_OWNER),
+                bool_literal(uses_reverse_tunnel(&args.tunnel_owner)),
             ),
             (
                 "AIRPLANE_HOLD_SECS",
                 &profile.airplane_hold_secs.to_string(),
             ),
+            ("APP_EGRESS_PORT", "18080"),
         ];
         let body = render_json_template(&template, &strings, &raw)?;
         validate_host_config(&body, &args.tunnel_owner)?;
@@ -394,7 +399,11 @@ fn validate_host_config(body: &str, expected_owner: &str) -> Result<()> {
         .and_then(Value::as_bool)
         .context("host-daemon reverse_tunnel.enabled is missing")?;
     match expected_owner {
-        PRIMARY_TUNNEL_OWNER if !wireguard_enabled && reverse_enabled => Ok(()),
+        PRIMARY_TUNNEL_OWNER | ANDROID_EGRESS_TUNNEL_OWNER
+            if !wireguard_enabled && reverse_enabled =>
+        {
+            Ok(())
+        }
         STOCK_WIREGUARD_OWNER | APP_OWNED_TUNNEL_OWNER if wireguard_enabled && !reverse_enabled => {
             Ok(())
         }
@@ -504,6 +513,8 @@ fn bool_literal(value: bool) -> &'static str {
 fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
     if tunnel_owner == PRIMARY_TUNNEL_OWNER {
         "127.0.0.1:1080"
+    } else if tunnel_owner == "first_party_android_egress" {
+        "127.0.0.1:18080"
     } else {
         "10.66.66.2:1080"
     }
@@ -518,7 +529,7 @@ fn sing_box_listen_host(tunnel_owner: &str) -> &'static str {
 }
 
 fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
+    if !uses_reverse_tunnel(tunnel_owner) {
         return Ok("127.0.0.1:18090".into());
     }
     let relay = manifest
@@ -535,7 +546,7 @@ fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<
 }
 
 fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
+    if !uses_reverse_tunnel(tunnel_owner) {
         return Ok("127.0.0.1:443".into());
     }
     let relay = manifest
@@ -546,7 +557,7 @@ fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Res
 }
 
 fn reverse_tunnel_cert_der_b64(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
+    if !uses_reverse_tunnel(tunnel_owner) {
         return Ok(String::new());
     }
     required_env(
@@ -555,6 +566,13 @@ fn reverse_tunnel_cert_der_b64(manifest: &DeviceManifest, tunnel_owner: &str) ->
             .reverse_tunnel_cert_der_b64_env
             .as_deref()
             .unwrap_or("MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64"),
+    )
+}
+
+fn uses_reverse_tunnel(tunnel_owner: &str) -> bool {
+    matches!(
+        tunnel_owner,
+        PRIMARY_TUNNEL_OWNER | ANDROID_EGRESS_TUNNEL_OWNER
     )
 }
 

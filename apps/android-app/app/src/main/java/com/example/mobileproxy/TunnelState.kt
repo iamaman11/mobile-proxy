@@ -7,6 +7,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.content.edit
 import java.nio.charset.StandardCharsets
+import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -23,6 +24,8 @@ object TunnelState {
     private const val LOCAL_CONTROL_TOKEN_IV = "local_control_token_iv"
     private const val LOCAL_CONTROL_KEY_ALIAS = "mobile_proxy_local_control_v1"
     private const val GCM_TAG_BITS = 128
+
+    data class EgressConfig(val port: Int, val username: String, val password: String)
 
     private fun storageContext(context: Context): Context =
         context.createDeviceProtectedStorageContext()
@@ -84,6 +87,52 @@ object TunnelState {
             )
             String(cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP)), StandardCharsets.UTF_8)
         }.getOrNull()
+    }
+
+    fun setEgressConfig(context: Context, port: Int, username: String, password: String) {
+        require(port in 1024..65535) { "egress port must be unprivileged" }
+        require(username.isNotBlank() && username.length <= 256) { "egress username is invalid" }
+        require(password.length >= 16) { "egress password is too short" }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, localControlKey())
+        val ciphertext = cipher.doFinal(password.toByteArray(StandardCharsets.UTF_8))
+        prefs(context).edit(commit = true) {
+            putInt("egress_port", port)
+            putString("egress_username", username)
+            putString("egress_password_ciphertext", Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+            putString("egress_password_iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+        }
+    }
+
+    fun getEgressConfig(context: Context): EgressConfig? {
+        val store = prefs(context)
+        val port = store.getInt("egress_port", -1)
+        val username = store.getString("egress_username", null)
+        val ciphertext = store.getString("egress_password_ciphertext", null)
+        val iv = store.getString("egress_password_iv", null)
+        if (port !in 1024..65535 || username.isNullOrBlank() || ciphertext == null || iv == null) return null
+        val password = runCatching {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, localControlKey(), GCMParameterSpec(GCM_TAG_BITS, Base64.decode(iv, Base64.NO_WRAP)))
+            String(cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP)), StandardCharsets.UTF_8)
+        }.getOrNull() ?: return null
+        return EgressConfig(port, username, password)
+    }
+
+    /** Consumes the root-provisioned one-time file from this app's private DE storage. */
+    fun consumeProvisionedEgressConfig(context: Context): EgressConfig? {
+        val file = File(storageContext(context).filesDir, "cellular-egress.json")
+        val raw = runCatching { file.readText(StandardCharsets.UTF_8) }.getOrNull() ?: return null
+        return runCatching {
+            val json = org.json.JSONObject(raw)
+            val config = EgressConfig(
+                json.getInt("port"),
+                json.getString("username"),
+                json.getString("password"),
+            )
+            setEgressConfig(context, config.port, config.username, config.password)
+            config
+        }.also { file.delete() }.getOrNull()
     }
 
     private fun localControlKey(): SecretKey {

@@ -33,7 +33,7 @@
     "transport": "hybrid",
     "server_addr": "{{REVERSE_TUNNEL_ADDR}}",
     "tcp_fallback_addr": "{{REVERSE_TUNNEL_TCP_ADDR}}",
-    "local_proxy_addr": "127.0.0.1:1080",
+    "local_proxy_addr": "{{LOCAL_PROXY_ADDRESS}}",
     "server_name": "{{REVERSE_TUNNEL_SERVER_NAME}}",
     "server_cert_der_b64": "{{REVERSE_TUNNEL_CERT_DER_B64}}",
     "auth_token": "{{DEVICE_TOKEN}}",
@@ -41,6 +41,9 @@
     "heartbeat_interval_ms": 2000,
     "reconnect_floor_ms": 1000,
     "reconnect_ceiling_ms": 5000
+  },
+  "app_egress": {
+    "port": {{APP_EGRESS_PORT}}
   },
   "network": {
     "cellular_only": true,

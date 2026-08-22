@@ -13,7 +13,9 @@ use clap::Parser;
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::android::{push_local_ui_control_token, stop_compatibility_vpns, tun0_ready};
+use crate::android::{
+    provision_android_egress, push_local_ui_control_token, stop_compatibility_vpns, tun0_ready,
+};
 use crate::cli::Cli;
 use crate::config::{TunnelOwner, load_config};
 use crate::dns::{reconcile_cellular_dns, reconcile_cellular_proxy_interface};
@@ -37,6 +39,12 @@ async fn main() -> Result<()> {
     cleanup_stale_runtime_processes();
     if let Err(error) = push_local_ui_control_token(config.ui_control_token.as_deref()) {
         warn!("failed to provision local UI control: {error:#}");
+    }
+    if let Some(egress) = config.app_egress.as_ref()
+        && let Err(error) =
+            provision_android_egress(egress.port, &egress.username, &egress.password)
+    {
+        warn!("failed to provision Android cellular egress: {error:#}");
     }
     if config.tunnel_owner != TunnelOwner::StockWireguardBridge
         && let Err(error) = stop_compatibility_vpns()

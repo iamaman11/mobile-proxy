@@ -22,6 +22,7 @@ use crate::state::{RotationCommands, RuntimeState};
 const PRIMARY_OWNER: &str = "first_party_reverse_tunnel";
 const ROLLBACK_OWNER: &str = "stock_wireguard_bridge";
 const APP_OWNED_OWNER: &str = "first_party_vpn_service";
+const ANDROID_EGRESS_OWNER: &str = "first_party_android_egress";
 const MAX_SECRET_LENGTH: usize = 4096;
 const MAX_URLS: usize = 8;
 
@@ -519,8 +520,9 @@ fn load_file_config(path: Option<&str>) -> Result<(Option<FileConfig>, Option<Co
 
 fn validate_owner_flags(owner: &str, wireguard_enabled: bool) -> Result<()> {
     match (owner, wireguard_enabled) {
-        (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
+        (PRIMARY_OWNER, false) | (ANDROID_EGRESS_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
         (PRIMARY_OWNER, true) => bail!("native reverse-tunnel owner must disable WireGuard"),
+        (ANDROID_EGRESS_OWNER, true) => bail!("Android egress owner must disable WireGuard"),
         (ROLLBACK_OWNER, false) => bail!("stock rollback owner must enable WireGuard"),
         (APP_OWNED_OWNER, true) => bail!(
             "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"

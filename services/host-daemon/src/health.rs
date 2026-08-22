@@ -69,8 +69,10 @@ async fn run_health_probe_loop(
         if let Some(ip) = snapshot.public_ip {
             runtime.health.last_public_ip = Some(ip);
         }
-        let reverse_tunnel_required =
-            config.tunnel_owner.as_deref() == Some("first_party_reverse_tunnel");
+        let reverse_tunnel_required = matches!(
+            config.tunnel_owner.as_deref(),
+            Some("first_party_reverse_tunnel" | "first_party_android_egress")
+        );
         let reverse_tunnel_ready = !reverse_tunnel_required
             || runtime.reverse_tunnel.as_ref().is_some_and(|snapshot| {
                 snapshot.connected && snapshot.freshness == TunnelFreshness::Fresh

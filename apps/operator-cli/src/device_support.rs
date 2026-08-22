@@ -17,6 +17,7 @@ use tokio::time::sleep;
 pub(crate) const PRIMARY_TUNNEL_OWNER: &str = "first_party_reverse_tunnel";
 pub(crate) const STOCK_WIREGUARD_OWNER: &str = "stock_wireguard_bridge";
 pub(crate) const APP_OWNED_TUNNEL_OWNER: &str = "first_party_vpn_service";
+pub(crate) const ANDROID_EGRESS_TUNNEL_OWNER: &str = "first_party_android_egress";
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 const APP_OWNED_TUNNEL_PACKAGE: &str = "com.example.mobileproxy";
 const APP_OWNED_TUNNEL_DISABLED_REASON: &str = "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime";
@@ -71,10 +72,10 @@ pub(crate) fn release_root(output_dir: &str, release_id: &str) -> Result<PathBuf
 
 pub(crate) fn validate_tunnel_owner(value: &str) -> Result<()> {
     match value {
-        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER => Ok(()),
+        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER | ANDROID_EGRESS_TUNNEL_OWNER => Ok(()),
         APP_OWNED_TUNNEL_OWNER => bail!("{APP_OWNED_TUNNEL_DISABLED_REASON}"),
         other => bail!(
-            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER} or {STOCK_WIREGUARD_OWNER}"
+            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER}, {ANDROID_EGRESS_TUNNEL_OWNER}, or {STOCK_WIREGUARD_OWNER}"
         ),
     }
 }
@@ -355,7 +356,7 @@ pub(crate) fn assert_active_vpn_owner(
     let connectivity_dump = adb(device_serial, &["shell", "dumpsys", "connectivity"])?;
     let active_vpn_owner_uid = parse_active_vpn_owner_uid(&connectivity_dump);
     match required_tunnel_owner {
-        PRIMARY_TUNNEL_OWNER => {
+        PRIMARY_TUNNEL_OWNER | ANDROID_EGRESS_TUNNEL_OWNER => {
             if let Some(actual_owner_uid) = active_vpn_owner_uid {
                 bail!(
                     "native reverse tunnel requires no active Android VPN, but owner uid {} is active",

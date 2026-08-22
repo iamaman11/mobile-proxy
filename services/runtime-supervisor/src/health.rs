@@ -107,7 +107,7 @@ pub async fn reconcile_wireguard(config: &SupervisorConfig) {
                 warn!("first-party VPN tunnel kick failed: {error:#}");
             }
         }
-        TunnelOwner::FirstPartyReverseTunnel => {}
+        TunnelOwner::FirstPartyReverseTunnel | TunnelOwner::FirstPartyAndroidEgress => {}
     }
 }
 
@@ -138,7 +138,7 @@ pub async fn reconcile_health(
                     warn!("first-party VPN tunnel kick failed: {error:#}");
                 }
             }
-            TunnelOwner::FirstPartyReverseTunnel => {}
+            TunnelOwner::FirstPartyReverseTunnel | TunnelOwner::FirstPartyAndroidEgress => {}
         }
     }
 

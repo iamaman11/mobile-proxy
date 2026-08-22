@@ -82,6 +82,9 @@ fn restart_host_daemon_after_proxy_exit(host_daemon: &mut Option<Child>) {
 }
 
 fn proxy_start_allowed(config: &SupervisorConfig) -> bool {
+    if config.tunnel_owner == TunnelOwner::FirstPartyAndroidEgress {
+        return false;
+    }
     if !config.wireguard_enabled {
         return true;
     }
