@@ -16,6 +16,7 @@ const STALE_RUNTIME_PATTERNS: &[&str] = &[
     "/data/adb/mobile-proxy-node/.*/bin/sing-box",
     "/data/adb/mobile-proxy-node/.*/service.sh --route-guard",
 ];
+const RUNTIME_LOG_DIR: &str = "/data/adb/mobile-proxy-node/logs";
 
 pub struct RuntimeChildren {
     host_daemon: Option<Child>,
@@ -110,7 +111,7 @@ fn child_exited(child: &mut Option<Child>) -> Result<bool> {
 
 fn spawn_host_daemon(config: &SupervisorConfig) -> Result<Child> {
     ensure_executable(&config.host_binary)?;
-    let stdout = append_log("/data/local/tmp/mobile-proxy-logs/host-daemon.log")?;
+    let stdout = append_log(&format!("{RUNTIME_LOG_DIR}/host-daemon.log"))?;
     let stderr = stdout
         .try_clone()
         .context("failed to clone host-daemon log")?;
@@ -128,7 +129,7 @@ fn spawn_host_daemon(config: &SupervisorConfig) -> Result<Child> {
 
 fn spawn_proxy(config: &SupervisorConfig) -> Result<Child> {
     ensure_executable(&config.proxy_binary)?;
-    let stdout = append_log("/data/local/tmp/mobile-proxy-logs/sing-box.log")?;
+    let stdout = append_log(&format!("{RUNTIME_LOG_DIR}/sing-box.log"))?;
     let stderr = stdout.try_clone().context("failed to clone sing-box log")?;
     let child = Command::new(&config.proxy_binary)
         .args(&config.proxy_args)
@@ -143,6 +144,23 @@ fn spawn_proxy(config: &SupervisorConfig) -> Result<Child> {
 }
 
 fn append_log(path: &str) -> Result<std::fs::File> {
+    if let Some(parent) = Path::new(path).parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create runtime log directory {}",
+                parent.display()
+            )
+        })?;
+        #[cfg(unix)]
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).with_context(
+            || {
+                format!(
+                    "failed to secure runtime log directory {}",
+                    parent.display()
+                )
+            },
+        )?;
+    }
     rotate_log(path, 5 * 1024 * 1024)?;
     let file = OpenOptions::new()
         .create(true)

@@ -4,7 +4,7 @@ umask 077
 
 ROOT="/data/adb/mobile-proxy-node/current"
 BIN="$ROOT/bin"
-LOG_DIR="/data/local/tmp/mobile-proxy-logs"
+LOG_DIR="/data/adb/mobile-proxy-node/logs"
 BOOT_LOG="$LOG_DIR/runtime-boot.log"
 SUPERVISOR_LOG="$LOG_DIR/runtime-supervisor.log"
 WATCHDOG_PID="$LOG_DIR/runtime-watchdog.pid"
@@ -55,7 +55,7 @@ set -u
 umask 077
 ROOT="$1"
 BIN="$ROOT/bin"
-LOG_DIR="/data/local/tmp/mobile-proxy-logs"
+LOG_DIR="/data/adb/mobile-proxy-node/logs"
 SUPERVISOR_LOG="$LOG_DIR/runtime-supervisor.log"
 WATCHDOG_PID="$LOG_DIR/runtime-watchdog.pid"
 echo "$$" > "$WATCHDOG_PID"
