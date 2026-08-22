@@ -17,30 +17,48 @@ struct IpifyResponse {
 }
 
 pub async fn run_health_probe(runtime_arc: SharedRuntime, config: ProbeConfig) {
-    let proxy = match reqwest::Proxy::all(format!("http://{}", config.proxy_listen_address)) {
-        Ok(proxy) => proxy.basic_auth(&config.proxy_username, &config.proxy_password),
+    // A bad proxy-client configuration must never prevent the local probes
+    // from being published.  Otherwise the control plane sees the immutable
+    // startup projection forever (`booting`) and cannot distinguish a failed
+    // public probe from a dead phone runtime.
+    let proxy_client = match reqwest::Proxy::all(format!("http://{}", config.proxy_listen_address))
+    {
+        Ok(proxy) => reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .proxy(proxy.basic_auth(&config.proxy_username, &config.proxy_password))
+            .build(),
         Err(err) => {
-            warn!("health probe disabled: failed to configure local proxy: {err}");
-            return;
+            warn!("health public probe disabled: failed to configure local proxy: {err}");
+            Err(err)
         }
     };
-    let proxy_client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .proxy(proxy)
-        .build()
-    {
+    let proxy_client = match proxy_client {
         Ok(client) => client,
         Err(err) => {
-            warn!("health probe disabled: failed to create proxied client: {err}");
-            return;
+            warn!("health public probe disabled: failed to create proxied client: {err}");
+            // Keep running local TCP/cellular/tunnel probes and fail public
+            // serving closed until the next daemon restart creates a client.
+            return run_health_probe_without_public_client(runtime_arc, config).await;
         }
     };
+    run_health_probe_loop(runtime_arc, config, Some(proxy_client)).await;
+}
+
+async fn run_health_probe_without_public_client(runtime_arc: SharedRuntime, config: ProbeConfig) {
+    run_health_probe_loop(runtime_arc, config, None).await;
+}
+
+async fn run_health_probe_loop(
+    runtime_arc: SharedRuntime,
+    config: ProbeConfig,
+    proxy_client: Option<reqwest::Client>,
+) {
     let mut tick = interval(Duration::from_secs(2));
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
         tick.tick().await;
-        let snapshot = probe_once(&proxy_client, &config).await;
+        let snapshot = probe_once(proxy_client.as_ref(), &config).await;
         let public_probe_ready = snapshot.public_ip.is_some();
         let mut runtime = runtime_arc.lock().await;
         runtime.health.cellular_route_ready = Some(snapshot.cellular_route_ready);
@@ -145,7 +163,7 @@ struct ProbeSnapshot {
     public_ip: Option<String>,
 }
 
-async fn probe_once(client: &reqwest::Client, config: &ProbeConfig) -> ProbeSnapshot {
+async fn probe_once(client: Option<&reqwest::Client>, config: &ProbeConfig) -> ProbeSnapshot {
     let config_clone = config.clone();
     let blocking_res = tokio::task::spawn_blocking(move || {
         let proxy_bind_ready = tcp_ready(&config_clone.proxy_listen_address);
@@ -165,7 +183,10 @@ async fn probe_once(client: &reqwest::Client, config: &ProbeConfig) -> ProbeSnap
     .await
     .unwrap_or((false, false, false, false, false));
 
-    let public_ip = fetch_public_ip(client, &config.observer_urls).await;
+    let public_ip = match client {
+        Some(client) => fetch_public_ip(client, &config.observer_urls).await,
+        None => None,
+    };
 
     ProbeSnapshot {
         cellular_route_ready: blocking_res.4,
