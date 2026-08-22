@@ -20,6 +20,12 @@ use uuid::Uuid;
 use crate::model::*;
 use crate::state::{ActiveSessionTarget, ReverseTunnelServerState, SessionAuthority};
 
+// A data connection that completes TLS but never sends its authenticated
+// reverse-tunnel preface must not consume a server task indefinitely. This is
+// especially important behind a TLS stream terminator, where a partial or
+// non-tunnel client otherwise looks indistinguishable from a stalled phone.
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub async fn run_client(
     config: ReverseTunnelClientConfig,
     shutdown: watch::Receiver<bool>,
@@ -746,7 +752,9 @@ async fn handle_server_connection(
     config: ReverseTunnelServerConfig,
     state: ReverseTunnelServerState,
 ) -> Result<()> {
-    let first = read_first_frame(&mut stream).await?;
+    let first = timeout(FIRST_FRAME_TIMEOUT, read_first_frame(&mut stream))
+        .await
+        .context("reverse tunnel first frame timed out")??;
     if let ClientFrame::ProxyStream {
         node_id,
         session_id,

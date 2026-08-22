@@ -143,6 +143,16 @@ pub async fn reconcile_health(
     }
 
     if health.cellular_route_ready != Some(false) {
+        // Android keeps cellular defaults in per-network policy tables. A
+        // root-owned direct proxy socket does not inherit an app UID's
+        // netd mark, so it needs a matching main-table default as well. The
+        // health projection can correctly observe a cellular policy route
+        // while that main route is absent; repair it idempotently before
+        // declaring the route sufficient for the native reverse-tunnel
+        // runtime.
+        if let Err(error) = ensure_cellular_default_route() {
+            warn!("cellular main-route reconciliation failed: {error:#}");
+        }
         reconcile_reverse_tunnel_cellular_bootstrap(config, state, health);
         return Ok(());
     }
