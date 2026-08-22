@@ -599,12 +599,17 @@ async fn handle_quic_incoming(
 }
 
 async fn handle_quic_control_stream(
-    _send: quinn::SendStream,
+    send: quinn::SendStream,
     recv: quinn::RecvStream,
     connection: quinn::Connection,
     config: ReverseTunnelServerConfig,
     state: ReverseTunnelServerState,
 ) -> Result<()> {
+    // Keep the server half of the bidirectional control stream open for the
+    // lifetime of the session. Dropping it immediately sends FIN; the client
+    // then correctly treats the control channel as closed and tears down an
+    // otherwise authenticated QUIC connection.
+    let _control_send = send;
     let mut reader = BufReader::new(recv);
     let first = read_required_frame(&mut reader).await?;
     let ClientFrame::Hello(hello) = first else {
