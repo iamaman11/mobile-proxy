@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -43,6 +44,8 @@ pub struct FileConfig {
 #[derive(Debug, Deserialize, Clone)]
 struct FileOperatorProfiles {
     default_profile: Option<String>,
+    #[serde(default)]
+    by_plmn: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -177,11 +180,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .unwrap_or_else(|| proxy_core::NODE_NAME.to_string());
     validate_identifier("node_name", &node_name, 128)?;
 
-    let active_profile = file_config
-        .operator_profiles
-        .as_ref()
-        .and_then(|profiles| profiles.default_profile.clone())
-        .unwrap_or_else(|| "default".into());
+    let active_profile = active_operator_profile(file_config.operator_profiles.as_ref());
     validate_identifier("operator profile", &active_profile, 64)?;
 
     let wireguard = file_config
@@ -305,6 +304,27 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
             tunnel_owner: Some(tunnel_owner),
         },
     })
+}
+
+fn active_operator_profile(profiles: Option<&FileOperatorProfiles>) -> String {
+    let fallback = profiles
+        .and_then(|profiles| profiles.default_profile.clone())
+        .unwrap_or_else(|| "default".into());
+    let Some(profiles) = profiles else {
+        return fallback;
+    };
+    let Ok(output) = std::process::Command::new("getprop")
+        .arg("gsm.operator.numeric")
+        .output()
+    else {
+        return fallback;
+    };
+    let values = String::from_utf8_lossy(&output.stdout);
+    values
+        .split(',')
+        .map(str::trim)
+        .find_map(|plmn| profiles.by_plmn.get(plmn).cloned())
+        .unwrap_or(fallback)
 }
 
 fn control_plane_config(file_config: &FileConfig) -> Result<Option<ControlPlaneSyncConfig>> {
