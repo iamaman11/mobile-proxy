@@ -66,11 +66,18 @@ async fn main() -> Result<()> {
                     warn!("runtime health reconciliation failed: {err:#}");
                 }
                 if health.degradation_reason_code.as_deref() == Some("public_probe_failed")
+                    && config.tunnel_owner != TunnelOwner::FirstPartyReverseTunnel
                     && state.claim_proxy_restart(config.repair_cooldown_secs)
                 {
-                    warn!("end-to-end proxy probe failed; restarting proxy and tunnel session");
+                    warn!("end-to-end proxy probe failed; restarting local proxy");
                     children.restart_proxy(&config);
                 }
+                // A reverse-tunnel proxy must keep its authenticated transport
+                // session alive while the VM performs its independent public
+                // probe. Restarting the local proxy here also kills host-daemon,
+                // which tears down QUIC before that probe can succeed and causes
+                // a permanent reconnect loop. Process exits and missing local
+                // listeners are still repaired by `children.ensure`.
             }
             Err(err) => warn!("host-daemon health unavailable: {err:#}"),
         }
