@@ -60,8 +60,11 @@ class CellularEgressService : Service() {
         // startForegroundService(), including during first-boot provisioning
         // when private storage may still be unavailable.
         startForeground(NOTIFICATION_ID, notification())
-        val config = TunnelState.getEgressConfig(this)
-            ?: TunnelState.consumeProvisionedEgressConfig(this)
+        // A freshly provisioned file is authoritative during credential
+        // rotation. Consuming it also persists the new pair before falling
+        // back to the last known private app configuration.
+        val config = TunnelState.consumeProvisionedEgressConfig(this)
+            ?: TunnelState.getEgressConfig(this)
             ?: run {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
