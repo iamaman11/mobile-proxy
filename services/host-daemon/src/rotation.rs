@@ -19,7 +19,14 @@ pub async fn start_rotation(
     state: &AppState,
     request: RotateRequest,
 ) -> Result<RotateAccepted, ApiError> {
-    let mut runtime = state.runtime.lock().await;
+    start_rotation_for_runtime(state.runtime.clone(), request).await
+}
+
+pub async fn start_rotation_for_runtime(
+    runtime_arc: SharedRuntime,
+    request: RotateRequest,
+) -> Result<RotateAccepted, ApiError> {
+    let mut runtime = runtime_arc.lock().await;
     if runtime
         .current_job
         .and_then(|id| runtime.jobs.get(&id))
@@ -69,8 +76,8 @@ pub async fn start_rotation(
             changed: None,
         },
     );
+    drop(runtime);
 
-    let runtime_arc = state.runtime.clone();
     spawn(async move {
         if let Err(err) = execute_rotation(runtime_arc, job_id, request).await {
             warn!("rotation job failed: {err:#}");

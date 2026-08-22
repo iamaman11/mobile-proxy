@@ -1,4 +1,4 @@
-use crate::auth::{AuthConfig, require_admin, require_device};
+use crate::auth::{AuthConfig, require_admin, require_device, require_ui};
 use crate::projection::now_unix_secs;
 use crate::{request_context::attach_request_context, state::AppState};
 use axum::{
@@ -38,8 +38,17 @@ pub fn router(state: AppState, auth: AuthConfig) -> Router {
             post(ack_command),
         )
         .route_layer(middleware::from_fn(attach_request_context))
-        .route_layer(middleware::from_fn_with_state(auth, require_device));
-    Router::new().merge(admin).merge(device).with_state(state)
+        .route_layer(middleware::from_fn_with_state(auth.clone(), require_device));
+    let ui = Router::new()
+        .route("/api/v1/ui/devices/{id}", get(get_ui_device))
+        .route("/api/v1/ui/devices/{id}/commands", post(issue_command))
+        .route_layer(middleware::from_fn(attach_request_context))
+        .route_layer(middleware::from_fn_with_state(auth, require_ui));
+    Router::new()
+        .merge(admin)
+        .merge(device)
+        .merge(ui)
+        .with_state(state)
 }
 
 async fn get_ip() -> (StatusCode, Json<serde_json::Value>) {
@@ -66,6 +75,24 @@ async fn list_ready_devices(State(state): State<AppState>) -> Json<Vec<DeviceRec
             .filter(|device| device.availability == "ready")
             .collect(),
     )
+}
+
+async fn get_ui_device(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<DeviceRecord>, ControlPlaneRouteError> {
+    let devices = state.devices.lock().await;
+    devices
+        .get(&id)
+        .cloned()
+        .map(mark_stale)
+        .map(Json)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error":"device_not_found"})),
+            )
+        })
 }
 
 async fn register_device(
@@ -465,7 +492,12 @@ mod tests {
         ));
         router(
             AppState::load(path).await.unwrap(),
-            AuthConfig::new("admin-token".into(), "device-token".into()).unwrap(),
+            AuthConfig::new(
+                "admin-token".into(),
+                "device-token".into(),
+                "ui-token".into(),
+            )
+            .unwrap(),
         )
     }
 
@@ -501,6 +533,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wrong_role.status(), StatusCode::UNAUTHORIZED);
+
+        let ui = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/ui/devices/device-1")
+                    .header("authorization", "Bearer ui-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ui.status(), StatusCode::NOT_FOUND);
+
+        let ui_with_admin_token = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/ui/devices/device-1")
+                    .header("authorization", "Bearer admin-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ui_with_admin_token.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -702,6 +758,41 @@ mod tests {
             .unwrap();
         let second_command: DeviceCommand = serde_json::from_slice(&second_body).unwrap();
         assert_eq!(second_command.command_id, first_command.command_id);
+    }
+
+    #[tokio::test]
+    async fn ui_token_can_issue_a_vm_delivered_rotation_command() {
+        const PAYLOAD: &str = r#"{
+            "desired_state":"healthy_serving",
+            "recovery_intent":"rotate_recovery",
+            "deadline_secs":30,
+            "idempotency_key":"ui-rotate-123"
+        }"#;
+        let app = test_app().await;
+        let issued = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/ui/devices/device-1/commands")
+                    .header("authorization", "Bearer ui-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(PAYLOAD))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(issued.status(), StatusCode::OK);
+
+        let denied = app
+            .oneshot(
+                Request::post("/api/v1/ui/devices/device-1/commands")
+                    .header("authorization", "Bearer device-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(PAYLOAD))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

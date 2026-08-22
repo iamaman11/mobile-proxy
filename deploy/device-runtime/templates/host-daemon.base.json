@@ -7,6 +7,7 @@
   "control_plane": {
     "base_url": "{{CONTROL_PLANE_URL}}",
     "device_token": "{{DEVICE_TOKEN}}",
+    "ui_token": "{{CONTROL_PLANE_UI_TOKEN}}",
     "server_name": "mobile-proxy-relay",
     "server_addr": "{{CONTROL_PLANE_RESOLVE_ADDR}}",
     "server_cert_der_b64": "{{REVERSE_TUNNEL_CERT_DER_B64}}",

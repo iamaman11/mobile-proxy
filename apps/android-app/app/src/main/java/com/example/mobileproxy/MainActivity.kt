@@ -51,7 +51,9 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 refreshButton.isEnabled = true
                 result.onSuccess { job ->
-                    if (job.status == "succeeded" && job.changed == true) {
+                    if (job.status == "queued") {
+                        statusText.setText(R.string.status_rotation_queued)
+                    } else if (job.status == "succeeded" && job.changed == true) {
                         currentIpText.text = getString(
                             R.string.current_ip,
                             job.newPublicIp ?: getString(R.string.ip_unknown),
@@ -64,7 +66,9 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         statusText.text = getString(R.string.status_rotation_failed, job.status)
                     }
-                    refreshRuntimeStatus()
+                    if (job.status != "queued") {
+                        refreshRuntimeStatus()
+                    }
                 }.onFailure(::renderError)
             }
         }

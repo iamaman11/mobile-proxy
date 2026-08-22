@@ -9,12 +9,13 @@
     <string name="rotate_ip">Сменить IP</string>
     <string name="status_checking">Проверяем состояние runtime…</string>
     <string name="status_rotating">Смена IP: включаем и подтверждаем авиарежим…</string>
+    <string name="status_rotation_queued">Команда отправлена в VM; ожидаем выполнение на телефоне…</string>
     <string name="status_rotation_in_progress">Смена IP уже выполняется…</string>
     <string name="status_rotation_succeeded">IP изменён: %1$s → %2$s</string>
     <string name="status_rotation_failed">Смена IP не подтверждена: %1$s</string>
     <string name="status_ready">Готово: %1$s</string>
     <string name="status_not_ready">Runtime не готов: %1$s</string>
-    <string name="status_runtime_unavailable">Локальное управление недоступно: %1$s</string>
+    <string name="status_runtime_unavailable">Управление через VM недоступно: %1$s</string>
     <string name="vpn_notification_channel">Mobile Proxy Tunnel</string>
     <string name="vpn_notification_title">Mobile Proxy tunnel</string>
     <string name="vpn_notification_text">App-owned relay tunnel is active.</string>

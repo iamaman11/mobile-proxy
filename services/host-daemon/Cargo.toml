@@ -8,6 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+mobile-proxy-foundation = { path = "../../crates/foundation" }
 proxy-core = { path = "../../crates/proxy-core" }
 reqwest.workspace = true
 reverse-tunnel = { path = "../../crates/reverse-tunnel" }

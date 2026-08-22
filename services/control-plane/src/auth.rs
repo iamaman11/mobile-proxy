@@ -11,18 +11,24 @@ use subtle::ConstantTimeEq;
 pub struct AuthConfig {
     admin_token: String,
     device_token: String,
+    ui_token: String,
 }
 
 impl AuthConfig {
-    pub fn new(admin_token: String, device_token: String) -> Result<Self> {
+    pub fn new(admin_token: String, device_token: String, ui_token: String) -> Result<Self> {
         validate_token("control-plane admin token", &admin_token)?;
         validate_token("control-plane device token", &device_token)?;
-        if bool::from(admin_token.as_bytes().ct_eq(device_token.as_bytes())) {
-            bail!("control-plane admin and device tokens must be different")
+        validate_token("control-plane UI token", &ui_token)?;
+        if bool::from(admin_token.as_bytes().ct_eq(device_token.as_bytes()))
+            || bool::from(admin_token.as_bytes().ct_eq(ui_token.as_bytes()))
+            || bool::from(device_token.as_bytes().ct_eq(ui_token.as_bytes()))
+        {
+            bail!("control-plane admin, device, and UI tokens must be different")
         }
         Ok(Self {
             admin_token,
             device_token,
+            ui_token,
         })
     }
 }
@@ -82,6 +88,17 @@ pub async fn require_device(
     Ok(next.run(request).await)
 }
 
+pub async fn require_ui(
+    State(auth): State<AuthConfig>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if !matches(bearer(request.headers()), &auth.ui_token) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(next.run(request).await)
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue, header::AUTHORIZATION};
@@ -90,10 +107,26 @@ mod tests {
 
     #[test]
     fn rejects_invalid_or_shared_tokens() {
-        assert!(AuthConfig::new("".into(), "device-token".into()).is_err());
-        assert!(AuthConfig::new("same-token".into(), "same-token".into()).is_err());
-        assert!(AuthConfig::new("admin token with spaces".into(), "device-token".into()).is_err());
-        assert!(AuthConfig::new("admin-secret".into(), "device-secret".into()).is_ok());
+        assert!(AuthConfig::new("".into(), "device-token".into(), "ui-token".into()).is_err());
+        assert!(
+            AuthConfig::new("same-token".into(), "same-token".into(), "ui-token".into()).is_err()
+        );
+        assert!(
+            AuthConfig::new(
+                "admin token with spaces".into(),
+                "device-token".into(),
+                "ui-token".into()
+            )
+            .is_err()
+        );
+        assert!(
+            AuthConfig::new(
+                "admin-secret".into(),
+                "device-secret".into(),
+                "ui-secret".into()
+            )
+            .is_ok()
+        );
     }
 
     #[test]

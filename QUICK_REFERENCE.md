@@ -173,6 +173,7 @@ Required environment variables:
 
 ```bash
 export MOBILE_PROXY_CONTROL_TOKEN=replace_control_token
+export MOBILE_PROXY_UI_TOKEN=replace_distinct_ui_token
 export MOBILE_PROXY_RELAY_USER=replace_relay_user
 export MOBILE_PROXY_RELAY_PASSWORD=replace_relay_password
 export MOBILE_PROXY_WG_SERVER_PRIVATE_KEY=replace_server_private_key

@@ -125,6 +125,8 @@ struct ManifestTokens {
     admin_token_env: String,
     #[serde(rename = "deviceTokenEnv")]
     device_token_env: String,
+    #[serde(rename = "uiTokenEnv")]
+    ui_token_env: String,
     #[serde(rename = "relayUserEnv")]
     relay_user_env: String,
     #[serde(rename = "relayPasswordEnv")]
@@ -171,6 +173,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
     let admin_token = required_env(&manifest.tokens.admin_token_env)?;
     let device_token = required_env(&manifest.tokens.device_token_env)?;
+    let control_plane_ui_token = required_env(&manifest.tokens.ui_token_env)?;
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
     let ui_control_token = Uuid::new_v4().to_string();
@@ -230,6 +233,7 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
             ("CONTROL_PLANE_RESOLVE_ADDR", &format!("{relay_host}:8443")),
             ("DEVICE_TOKEN", device_token.as_str()),
+            ("CONTROL_PLANE_UI_TOKEN", control_plane_ui_token.as_str()),
             ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
             ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
             (

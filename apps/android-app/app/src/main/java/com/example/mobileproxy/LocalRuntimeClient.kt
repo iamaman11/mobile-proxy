@@ -37,16 +37,12 @@ class LocalRuntimeClient(private val context: Context) {
     fun rotate(callback: (Result<LocalRotationJob>) -> Unit) {
         executor.execute {
             callback(runCatching {
-                val accepted = JSONObject(request("/v1/ui/ip/rotate", "POST"))
-                val jobId = accepted.getString("job_id")
-                repeat(90) {
-                    Thread.sleep(1_000)
-                    val job = parseJob(request("/v1/ui/jobs/$jobId", "GET"))
-                    if (job.status != "running") {
-                        return@runCatching job
-                    }
-                }
-                throw IOException("rotation timed out")
+                // The VM owns command scheduling.  The accepted id is a
+                // control-plane command id, not a phone-local rotation job;
+                // polling /v1/ui/jobs here would therefore report a false
+                // failure before the phone receives the command.
+                request("/v1/ui/ip/rotate", "POST")
+                LocalRotationJob("queued", null, null, null)
             })
         }
     }

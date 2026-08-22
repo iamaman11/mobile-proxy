@@ -91,6 +91,7 @@ struct FileReverseTunnelConfig {
 struct FileControlPlaneConfig {
     base_url: Option<String>,
     device_token: Option<String>,
+    ui_token: Option<String>,
     server_name: Option<String>,
     server_addr: Option<SocketAddr>,
     server_cert_der_b64: Option<String>,
@@ -325,6 +326,11 @@ fn control_plane_config(file_config: &FileConfig) -> Result<Option<ControlPlaneS
         .or_else(|| env::var("HOST_DAEMON_DEVICE_TOKEN").ok())
         .context("control_plane.device_token is required")?;
     validate_secret("control_plane.device_token", &device_token)?;
+    let ui_token = config
+        .ui_token
+        .clone()
+        .context("control_plane.ui_token is required")?;
+    validate_secret("control_plane.ui_token", &ui_token)?;
     let server_name = config
         .server_name
         .clone()
@@ -354,6 +360,7 @@ fn control_plane_config(file_config: &FileConfig) -> Result<Option<ControlPlaneS
     Ok(Some(ControlPlaneSyncConfig {
         base_url,
         device_token,
+        ui_token,
         server_name: Some(server_name),
         server_addr: Some(server_addr),
         server_cert_der: Some(server_cert_der),

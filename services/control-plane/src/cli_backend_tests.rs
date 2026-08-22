@@ -4,13 +4,15 @@ use clap::Parser;
 
 use super::Cli;
 
-fn base_args() -> [&'static str; 5] {
+fn base_args() -> [&'static str; 7] {
     [
         "control-plane",
         "--admin-token",
         "admin",
         "--device-token",
         "device",
+        "--ui-token",
+        "ui-token",
     ]
 }
 
@@ -31,6 +33,8 @@ fn explicit_state_path_overrides_the_sqlite_default() {
         "admin",
         "--device-token",
         "device",
+        "--ui-token",
+        "ui-token",
         "--state-path",
         "/srv/control-plane/custom-state.db",
     ])
@@ -51,6 +55,8 @@ fn retired_state_backend_option_is_rejected() {
                 "admin",
                 "--device-token",
                 "device",
+                "--ui-token",
+                "ui-token",
                 "--state-backend",
                 value,
             ])

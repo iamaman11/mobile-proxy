@@ -213,6 +213,8 @@ async fn prove_restored_process(restored: PathBuf) {
             "admin-secret",
             "--device-token",
             "device-secret",
+            "--ui-token",
+            "ui-secret",
             "--state-path",
             restored.to_str().unwrap(),
         ])

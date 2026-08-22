@@ -36,6 +36,8 @@ struct VmManifest {
 struct VmTokenEnv {
     #[serde(rename = "controlTokenEnv")]
     control_token_env: String,
+    #[serde(rename = "uiTokenEnv")]
+    ui_token_env: String,
     #[serde(rename = "deviceTokenEnv")]
     device_token_env: String,
     #[serde(rename = "reverseTunnelCertDerB64Env")]
@@ -62,6 +64,7 @@ struct VmWireguard {
 
 struct VmSecrets {
     control_token: String,
+    ui_token: String,
     device_token: String,
     reverse_tunnel_cert_der_b64: String,
     reverse_tunnel_key_der_b64: String,
@@ -217,9 +220,10 @@ fn build_vm_release(
     fs::write(
         release_root.join("config/control-plane.env"),
         format!(
-            "CONTROL_PLANE_LISTEN=\"127.0.0.1:8080\"\nCONTROL_PLANE_ADMIN_TOKEN={}\nCONTROL_PLANE_DEVICE_TOKEN={}\n",
+            "CONTROL_PLANE_LISTEN=\"127.0.0.1:8080\"\nCONTROL_PLANE_ADMIN_TOKEN={}\nCONTROL_PLANE_DEVICE_TOKEN={}\nCONTROL_PLANE_UI_TOKEN={}\n",
             systemd_env_quote(&secrets.control_token),
             systemd_env_quote(&secrets.device_token),
+            systemd_env_quote(&secrets.ui_token),
         ),
     )?;
     fs::write(
@@ -708,6 +712,7 @@ fn load_manifest(repo: &Path, raw: &str) -> Result<VmManifest> {
 fn load_secrets(manifest: &VmManifest) -> Result<VmSecrets> {
     Ok(VmSecrets {
         control_token: required_env(&manifest.tokens.control_token_env)?,
+        ui_token: required_env(&manifest.tokens.ui_token_env)?,
         device_token: required_env(&manifest.tokens.device_token_env)?,
         reverse_tunnel_cert_der_b64: required_env(
             &manifest.tokens.reverse_tunnel_cert_der_b64_env,
