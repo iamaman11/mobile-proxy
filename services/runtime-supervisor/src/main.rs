@@ -16,7 +16,7 @@ use tracing::warn;
 use crate::android::{push_local_ui_control_token, stop_compatibility_vpns, tun0_ready};
 use crate::cli::Cli;
 use crate::config::{TunnelOwner, load_config};
-use crate::dns::reconcile_cellular_dns;
+use crate::dns::{reconcile_cellular_dns, reconcile_cellular_proxy_interface};
 use crate::health::{
     SupervisorState, fetch_health, reconcile_health, reconcile_startup_cellular_bootstrap,
     reconcile_wireguard,
@@ -46,10 +46,22 @@ async fn main() -> Result<()> {
     reconcile_startup_cellular_bootstrap(&config, &mut state);
 
     loop {
-        match reconcile_cellular_dns(&config) {
-            Ok(true) => children.restart_proxy(&config),
-            Ok(false) => {}
-            Err(err) => warn!("cellular DNS reconciliation failed: {err:#}"),
+        let dns_changed = match reconcile_cellular_dns(&config) {
+            Ok(changed) => changed,
+            Err(err) => {
+                warn!("cellular DNS reconciliation failed: {err:#}");
+                false
+            }
+        };
+        let interface_changed = match reconcile_cellular_proxy_interface(&config) {
+            Ok(changed) => changed,
+            Err(err) => {
+                warn!("cellular proxy interface reconciliation failed: {err:#}");
+                false
+            }
+        };
+        if dns_changed || interface_changed {
+            children.restart_proxy(&config);
         }
         if state.observe_wireguard_tunnel_ready(config.wireguard_enabled, tun0_ready())
             && state.claim_proxy_restart(config.repair_cooldown_secs)

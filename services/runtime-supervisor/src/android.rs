@@ -97,6 +97,12 @@ pub fn ensure_cellular_default_route() -> Result<()> {
     Ok(())
 }
 
+pub fn cellular_interface() -> Result<String> {
+    cellular_route_hint()?
+        .map(|(device, _)| device)
+        .context("no cellular route hint found")
+}
+
 pub fn bootstrap_cellular_data() -> Result<()> {
     let mut failures = Vec::new();
     for command in [
