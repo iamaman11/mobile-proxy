@@ -37,6 +37,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.proxySummary).text = ProxySummary.text()
         refreshButton.setOnClickListener { refreshRuntimeStatus() }
         rotateButton.setOnClickListener { rotateIp() }
+    }
+
+    override fun onResume() {
+        super.onResume()
         refreshRuntimeStatus()
     }
 
@@ -46,17 +50,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshRuntimeStatus() {
-        if (monitoringRotation) return
         refreshButton.isEnabled = false
         progress.visibility = View.VISIBLE
-        statusText.setText(R.string.status_checking)
+        if (!monitoringRotation) statusText.setText(R.string.status_checking)
         runtimeClient.fetchStatus { result ->
             runOnUiThread {
                 refreshButton.isEnabled = true
                 progress.visibility = View.GONE
                 result.onSuccess { status ->
-                    renderStatus(status)
-                    pendingOldIp()?.let { resumeRotation(it) }
+                    if (monitoringRotation) {
+                        renderRotationStatus(status)
+                    } else {
+                        renderStatus(status)
+                        pendingOldIp()?.let { resumeRotation(it) }
+                    }
                 }.onFailure(::renderError)
             }
         }
@@ -79,7 +86,7 @@ class MainActivity : AppCompatActivity() {
     private fun monitorRotation(oldIp: String, issueCommand: Boolean) {
         monitoringRotation = true
         rotateButton.isEnabled = false
-        refreshButton.isEnabled = false
+        refreshButton.isEnabled = true
         progress.visibility = View.VISIBLE
         stateBadge.setText(R.string.state_rotating)
         statusText.setText(

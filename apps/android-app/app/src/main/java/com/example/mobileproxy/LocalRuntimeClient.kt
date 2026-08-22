@@ -17,7 +17,9 @@ data class LocalRuntimeStatus(
 )
 
 class LocalRuntimeClient(private val context: Context) {
-    private val executor = Executors.newSingleThreadExecutor()
+    // Rotation monitoring can run for several minutes. Keep a second worker
+    // available so a manual status refresh never queues behind that loop.
+    private val executor = Executors.newFixedThreadPool(2)
     private val closed = AtomicBoolean(false)
 
     fun close() {
