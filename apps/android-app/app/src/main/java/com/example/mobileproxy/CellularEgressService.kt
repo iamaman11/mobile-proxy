@@ -111,19 +111,40 @@ class CellularEgressService : Service() {
         val port = (input.read() shl 8) or input.read()
         if (port !in 1..65535) return
         val network = validatedCellularNetwork() ?: run { reply(output, NETWORK_UNREACHABLE); return }
-        val target = runCatching { network.getAllByName(address).firstOrNull() }.getOrNull()
-            ?: run { reply(output, HOST_UNREACHABLE); return }
-        val upstream = Socket()
+        val targets = runCatching { network.getAllByName(address).toList() }.getOrNull()
+            ?.distinct()
+            ?.take(MAX_TARGET_ADDRESSES)
+            .orEmpty()
+        if (targets.isEmpty()) {
+            reply(output, HOST_UNREACHABLE)
+            return
+        }
+        val upstream = connectUpstream(network, targets, port)
+        if (upstream == null) {
+            reply(output, HOST_UNREACHABLE)
+            return
+        }
         try {
-            network.bindSocket(upstream)
-            upstream.connect(InetSocketAddress(target, port), CONNECT_TIMEOUT_MS)
             reply(output, SUCCESS)
             client.soTimeout = 0
             bridge(client, upstream)
         } catch (_: Exception) {
-            reply(output, HOST_UNREACHABLE)
             upstream.close()
         }
+    }
+
+    private fun connectUpstream(network: Network, targets: List<InetAddress>, port: Int): Socket? {
+        for (target in targets) {
+            val candidate = Socket()
+            try {
+                network.bindSocket(candidate)
+                candidate.connect(InetSocketAddress(target, port), CONNECT_TIMEOUT_MS)
+                return candidate
+            } catch (_: Exception) {
+                candidate.close()
+            }
+        }
+        return null
     }
 
     @Suppress("DEPRECATION") // API 24 support needs enumeration; every selected Network is capability-checked.
@@ -197,6 +218,7 @@ class CellularEgressService : Service() {
         private const val HOST_UNREACHABLE = 4
         private const val HANDSHAKE_TIMEOUT_MS = 15_000
         private const val CONNECT_TIMEOUT_MS = 15_000
+        private const val MAX_TARGET_ADDRESSES = 4
 
         fun startIntent(context: Context) = Intent(context, CellularEgressService::class.java)
         fun stopIntent(context: Context) = Intent(context, CellularEgressService::class.java).setAction(ACTION_STOP)

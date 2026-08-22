@@ -238,7 +238,7 @@ fn build_vm_release(
     fs::write(
         release_root.join("config/reverse-tunnel-server.env"),
         format!(
-            "REVERSE_TUNNEL_LISTEN='0.0.0.0:18090'\nREVERSE_TUNNEL_TCP_LISTEN='127.0.0.1:18091'\nREVERSE_TUNNEL_TRANSPORT='hybrid'\nREVERSE_TUNNEL_PUBLIC_PROXY_LISTEN='127.0.0.1:14080,127.0.0.1:14081,127.0.0.1:14128'\nREVERSE_TUNNEL_AUTH_TOKEN='{}'\nREVERSE_TUNNEL_SERVER_NAME='mobile-proxy-relay'\nREVERSE_TUNNEL_CERT_DER_B64='{}'\nREVERSE_TUNNEL_KEY_DER_B64='{}'\n",
+            "REVERSE_TUNNEL_LISTEN='0.0.0.0:443'\nREVERSE_TUNNEL_TCP_LISTEN='127.0.0.1:18091'\nREVERSE_TUNNEL_TRANSPORT='hybrid'\nREVERSE_TUNNEL_PUBLIC_PROXY_LISTEN='127.0.0.1:14080,127.0.0.1:14081,127.0.0.1:14128'\nREVERSE_TUNNEL_AUTH_TOKEN='{}'\nREVERSE_TUNNEL_SERVER_NAME='mobile-proxy-relay'\nREVERSE_TUNNEL_CERT_DER_B64='{}'\nREVERSE_TUNNEL_KEY_DER_B64='{}'\n",
             shell_escape(&secrets.device_token),
             shell_escape(&secrets.reverse_tunnel_cert_der_b64),
             shell_escape(&secrets.reverse_tunnel_key_der_b64)
@@ -278,7 +278,7 @@ fn ensure_firewall_rules(manifest: &VmManifest) -> Result<()> {
     let rules = [
         (
             format!("{}-ingress", manifest.instance_name),
-            "tcp:22,tcp:443,tcp:8443,udp:18090,udp:51820",
+            "tcp:22,tcp:443,tcp:8443,udp:443,udp:18090,udp:51820",
         ),
         (
             format!("{}-proxy", manifest.instance_name),
