@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use mobile_proxy_foundation::{ContentDigest, DigestDomain};
 use serde::Deserialize;
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::cli::PackageDeviceReleaseArgs;
 use crate::device_support::{
@@ -105,6 +105,9 @@ echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:fail" >> "$LOG_FILE" 2>/dev/null || 
 exit 1
 "#;
 
+const UI_CONTROL_TOKEN_DOMAIN: DigestDomain =
+    DigestDomain::new("mobile-proxy/local-ui-control-token/v1");
+
 #[derive(Debug, Deserialize)]
 struct DeviceManifest {
     #[serde(rename = "deviceId")]
@@ -176,13 +179,14 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     let control_plane_ui_token = required_env(&manifest.tokens.ui_token_env)?;
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
-    let ui_control_token = Uuid::new_v4().to_string();
+    let ui_control_token = stable_ui_control_token(&manifest.device_id, &admin_token);
 
     let bin_dir = root.join("deploy/device-runtime/bin");
     let runtime_supervisor_bin = bin_dir.join("runtime-supervisor");
     let host_daemon_bin = bin_dir.join("host-daemon");
     let sing_box_bin = bin_dir.join("sing-box");
     ensure_android_arm_binary(&runtime_supervisor_bin)?;
+    ensure_runtime_owner_support(&runtime_supervisor_bin, &args.tunnel_owner)?;
     ensure_android_arm_binary(&host_daemon_bin)?;
     ensure_android_arm_binary(&sing_box_bin)?;
 
@@ -285,6 +289,11 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     } else {
         let template =
             fs::read_to_string(root.join("deploy/device-runtime/templates/sing-box.base.json"))?;
+        let outbound = sing_box_outbound(
+            &args.tunnel_owner,
+            relay_user.as_str(),
+            relay_password.as_str(),
+        );
         render_json_template(
             &template,
             &[
@@ -294,8 +303,12 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                     "SING_BOX_LISTEN_HOST",
                     sing_box_listen_host(&args.tunnel_owner),
                 ),
+                (
+                    "SING_BOX_FINAL_OUTBOUND",
+                    sing_box_final_outbound(&args.tunnel_owner),
+                ),
             ],
-            &[],
+            &[("PROXY_OUTBOUND", outbound.as_str())],
         )?
     };
 
@@ -332,6 +345,17 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
     println!("{}", release_root.display());
     Ok(())
+}
+
+fn stable_ui_control_token(device_id: &str, admin_token: &str) -> String {
+    ContentDigest::derive(
+        UI_CONTROL_TOKEN_DOMAIN,
+        [device_id.as_bytes(), admin_token.as_bytes()],
+    )
+    .as_bytes()
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect()
 }
 
 fn render_json_template(
@@ -511,20 +535,43 @@ fn bool_literal(value: bool) -> &'static str {
 }
 
 fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
-    if tunnel_owner == PRIMARY_TUNNEL_OWNER {
+    if uses_reverse_tunnel(tunnel_owner) {
         "127.0.0.1:1080"
-    } else if tunnel_owner == "first_party_android_egress" {
-        "127.0.0.1:18080"
     } else {
         "10.66.66.2:1080"
     }
 }
 
 fn sing_box_listen_host(tunnel_owner: &str) -> &'static str {
-    if tunnel_owner == PRIMARY_TUNNEL_OWNER {
+    if uses_reverse_tunnel(tunnel_owner) {
         "127.0.0.1"
     } else {
         "10.66.66.2"
+    }
+}
+
+fn sing_box_final_outbound(tunnel_owner: &str) -> &'static str {
+    if tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+        "cellular-egress"
+    } else {
+        "direct"
+    }
+}
+
+fn sing_box_outbound(tunnel_owner: &str, username: &str, password: &str) -> String {
+    if tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+        serde_json::json!({
+            "type": "socks",
+            "tag": "cellular-egress",
+            "server": "127.0.0.1",
+            "server_port": 18080,
+            "version": "5",
+            "username": username,
+            "password": password
+        })
+        .to_string()
+    } else {
+        serde_json::json!({"type": "direct", "tag": "direct"}).to_string()
     }
 }
 
@@ -624,6 +671,28 @@ fn ensure_android_arm_binary(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn ensure_runtime_owner_support(path: &Path, tunnel_owner: &str) -> Result<()> {
+    let binary = fs::read(path)
+        .with_context(|| format!("failed to read runtime binary {}", path.display()))?;
+    if !binary_contains_marker(&binary, tunnel_owner.as_bytes()) {
+        bail!(
+            "runtime-supervisor does not support tunnel owner {tunnel_owner}; rebuild runtime binaries before packaging"
+        )
+    }
+    if tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER
+        && !binary_contains_marker(&binary, b"android-egress-mixed-proxy-v1")
+    {
+        bail!(
+            "runtime-supervisor does not contain the Android egress mixed-proxy feature; rebuild runtime binaries before packaging"
+        )
+    }
+    Ok(())
+}
+
+fn binary_contains_marker(binary: &[u8], marker: &[u8]) -> bool {
+    !marker.is_empty() && binary.windows(marker.len()).any(|window| window == marker)
+}
+
 fn is_android_arm_elf_header(header: &[u8; 20]) -> bool {
     let magic = &header[0..4] == b"\x7FELF";
     let elf32 = header[4] == 1;
@@ -635,8 +704,9 @@ fn is_android_arm_elf_header(header: &[u8; 20]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_android_arm_elf_header, render_json_template, validate_host_config,
-        validate_profile_name,
+        binary_contains_marker, is_android_arm_elf_header, proxy_listen_address,
+        render_json_template, sing_box_final_outbound, sing_box_listen_host, sing_box_outbound,
+        validate_host_config, validate_profile_name,
     };
 
     #[test]
@@ -682,5 +752,27 @@ mod tests {
         assert!(is_android_arm_elf_header(&header));
         header[4] = 2;
         assert!(!is_android_arm_elf_header(&header));
+    }
+
+    #[test]
+    fn runtime_owner_marker_rejects_stale_binary() {
+        let binary = b"first_party_reverse_tunnel\0first_party_android_egress\0";
+        assert!(binary_contains_marker(
+            binary,
+            b"first_party_android_egress"
+        ));
+        assert!(!binary_contains_marker(binary, b"stock_wireguard_bridge"));
+    }
+
+    #[test]
+    fn android_egress_keeps_mixed_proxy_in_front_of_cellular_socks() {
+        let owner = "first_party_android_egress";
+        assert_eq!(proxy_listen_address(owner), "127.0.0.1:1080");
+        assert_eq!(sing_box_listen_host(owner), "127.0.0.1");
+        assert_eq!(sing_box_final_outbound(owner), "cellular-egress");
+        let outbound: serde_json::Value =
+            serde_json::from_str(&sing_box_outbound(owner, "user", "password")).unwrap();
+        assert_eq!(outbound["type"], "socks");
+        assert_eq!(outbound["server_port"], 18080);
     }
 }

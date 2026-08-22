@@ -38,12 +38,11 @@
     }
   ],
   "outbounds": [
-    {
-      "type": "direct"
-    }
+    {{PROXY_OUTBOUND}}
   ],
   "route": {
-    "default_domain_resolver": "dns-bootstrap"
+    "default_domain_resolver": "dns-bootstrap",
+    "final": "{{SING_BOX_FINAL_OUTBOUND}}"
   },
   "dns": {
     "strategy": "ipv4_only",

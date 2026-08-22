@@ -9,6 +9,7 @@ mod http;
 mod provision;
 mod release_integrity;
 mod secrets;
+mod server_rotate;
 mod vm;
 
 use anyhow::{Context, Result};
@@ -46,6 +47,7 @@ async fn main() -> Result<()> {
             let token = resolve_token(cli.token.as_deref())?;
             run_rotate(&client, &cli.api, &token, &args).await?
         }
+        Command::RotateServer(args) => server_rotate::run(&args).await?,
         Command::AirplaneStudy(args) => {
             let token = resolve_token(cli.token.as_deref())?;
             run_airplane_study(&client, &cli.api, &token, &args).await?

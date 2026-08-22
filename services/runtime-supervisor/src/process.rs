@@ -17,6 +17,7 @@ const STALE_RUNTIME_PATTERNS: &[&str] = &[
     "/data/adb/mobile-proxy-node/.*/service.sh --route-guard",
 ];
 const RUNTIME_LOG_DIR: &str = "/data/adb/mobile-proxy-node/logs";
+const ANDROID_EGRESS_MIXED_PROXY_MARKER: &str = "android-egress-mixed-proxy-v1";
 
 pub struct RuntimeChildren {
     host_daemon: Option<Child>,
@@ -35,7 +36,7 @@ impl RuntimeChildren {
         if child_exited(&mut self.proxy)? {
             warn!("proxy process exited; restarting");
             self.proxy = None;
-            if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel {
+            if uses_reverse_tunnel(config.tunnel_owner) {
                 restart_host_daemon_after_proxy_exit(&mut self.host_daemon);
             }
         }
@@ -62,7 +63,7 @@ impl RuntimeChildren {
             warn!("failed to stop proxy for configuration reload: {err:#}");
         }
         let _ = proxy.wait();
-        if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel {
+        if uses_reverse_tunnel(config.tunnel_owner) {
             restart_host_daemon_after_proxy_exit(&mut self.host_daemon);
         }
     }
@@ -83,7 +84,7 @@ fn restart_host_daemon_after_proxy_exit(host_daemon: &mut Option<Child>) {
 
 fn proxy_start_allowed(config: &SupervisorConfig) -> bool {
     if config.tunnel_owner == TunnelOwner::FirstPartyAndroidEgress {
-        return false;
+        info!("{ANDROID_EGRESS_MIXED_PROXY_MARKER}");
     }
     if !config.wireguard_enabled {
         return true;
@@ -93,6 +94,13 @@ fn proxy_start_allowed(config: &SupervisorConfig) -> bool {
         warn!("wireguard is enabled but tun0 is absent; deferring proxy start");
     }
     ready
+}
+
+fn uses_reverse_tunnel(owner: TunnelOwner) -> bool {
+    matches!(
+        owner,
+        TunnelOwner::FirstPartyReverseTunnel | TunnelOwner::FirstPartyAndroidEgress
+    )
 }
 
 pub fn cleanup_stale_runtime_processes() {
@@ -235,10 +243,16 @@ fn terminate_stale_pids(pattern: &str, current_pid: u32, pids: &[u32]) {
 
 #[cfg(test)]
 mod tests {
-    use super::terminate_stale_pids;
+    use super::{terminate_stale_pids, uses_reverse_tunnel};
+    use crate::config::TunnelOwner;
 
     #[test]
     fn stale_termination_skips_current_pid() {
         terminate_stale_pids("test-pattern", std::process::id(), &[std::process::id()]);
+    }
+
+    #[test]
+    fn android_egress_runs_the_reverse_tunnel_proxy_chain() {
+        assert!(uses_reverse_tunnel(TunnelOwner::FirstPartyAndroidEgress));
     }
 }

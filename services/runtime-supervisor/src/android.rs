@@ -1,6 +1,4 @@
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -11,26 +9,16 @@ use tokio::time::sleep;
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 const STOCK_WIREGUARD_TUNNEL: &str = "WiGandroid";
 const APP_OWNED_PACKAGE: &str = "com.example.mobileproxy";
-const APP_EGRESS_CONFIG_PATH: &str =
-    "/data/user_de/0/com.example.mobileproxy/files/cellular-egress.json";
-
 pub fn provision_android_egress(port: u16, username: &str, password: &str) -> Result<()> {
     let uid = package_uid(APP_OWNED_PACKAGE)?.context("Android egress package is not installed")?;
-    let path = Path::new(APP_EGRESS_CONFIG_PATH);
-    let parent = path
-        .parent()
-        .context("Android egress config parent is missing")?;
-    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
-    let body = serde_json::to_vec(&serde_json::json!({
-        "port": port,
-        "username": username,
-        "password": password,
-    }))?;
-    fs::write(path, body).with_context(|| format!("failed to write {}", path.display()))?;
-    #[cfg(unix)]
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    run_command("chown", &[&format!("{uid}:{uid}"), APP_EGRESS_CONFIG_PATH])?;
-    let _ = run_command("restorecon", &[APP_EGRESS_CONFIG_PATH]);
+    run_as_uid(
+        uid,
+        &format!(
+            "am broadcast --user 0 -n com.example.mobileproxy/.TunnelCommandReceiver -a com.example.mobileproxy.action.SET_EGRESS_CONFIG --ei egress_port {port} --es egress_username {} --es egress_password {}",
+            shell_single_quote(username),
+            shell_single_quote(password),
+        ),
+    )?;
     run_as_uid(
         uid,
         "am start-foreground-service --user 0 -n com.example.mobileproxy/.CellularEgressService",
@@ -75,7 +63,7 @@ pub fn push_local_ui_control_token(token: Option<&str>) -> Result<()> {
         bail!("local UI control token is invalid")
     }
     let Some(uid) = package_uid(APP_OWNED_PACKAGE)? else {
-        return Ok(());
+        bail!("Android app is not installed")
     };
     run_as_uid(
         uid,

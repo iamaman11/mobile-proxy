@@ -141,7 +141,17 @@ fn adb_output(device_serial: Option<&str>, args: &[&str]) -> Result<Output> {
     if let Some(serial) = device_serial {
         command.arg("-s").arg(serial);
     }
-    command.args(args);
+    if adb_path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+        && args.first() == Some(&"push")
+        && args.len() >= 3
+    {
+        let local_path = windows_path_for_adb(args[1])?;
+        command.arg("push").arg(local_path).args(&args[2..]);
+    } else {
+        command.args(args);
+    }
     let output = command
         .output()
         .with_context(|| format!("failed to start adb at {}", adb_path.display()))?;
@@ -153,6 +163,24 @@ fn adb_output(device_serial: Option<&str>, args: &[&str]) -> Result<Output> {
             String::from_utf8_lossy(&output.stderr).trim()
         )
     }
+}
+
+fn windows_path_for_adb(path: &str) -> Result<String> {
+    let output = Command::new("wslpath")
+        .args(["-w", path])
+        .output()
+        .context("failed to start wslpath for Windows adb")?;
+    if !output.status.success() {
+        bail!(
+            "wslpath failed for Windows adb: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+    let translated = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if translated.is_empty() {
+        bail!("wslpath returned an empty path for Windows adb")
+    }
+    Ok(translated)
 }
 
 pub(crate) fn write_temp_script(stem: &str, body: &str) -> Result<PathBuf> {

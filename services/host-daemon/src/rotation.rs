@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::auth::ApiError;
 use crate::state::{AppState, SharedRuntime};
 
-const AIRPLANE_POST_ACTIVATION_HOLD_SECS: u64 = 2;
+const AIRPLANE_ACTIVATION_TIMEOUT_SECS: u64 = 10;
 
 pub async fn start_rotation(
     state: &AppState,
@@ -253,9 +253,9 @@ fn rotation_command(
 }
 
 fn fallback_airplane_command(hold_secs: Option<u64>) -> String {
-    let activation_timeout_secs = hold_secs.unwrap_or(DEFAULT_AIRPLANE_HOLD_SECS);
+    let hold_secs = hold_secs.unwrap_or(DEFAULT_AIRPLANE_HOLD_SECS);
     format!(
-        "cmd connectivity airplane-mode enable && activation_deadline=$(( $(date +%s) + {activation_timeout_secs} )) && while [ \"$(cmd connectivity airplane-mode)\" != \"enabled\" ]; do [ \"$(date +%s)\" -ge \"$activation_deadline\" ] && exit 1; sleep 0.1; done && sleep {AIRPLANE_POST_ACTIVATION_HOLD_SECS} && cmd connectivity airplane-mode disable"
+        "cmd connectivity airplane-mode enable && activation_deadline=$(( $(date +%s) + {AIRPLANE_ACTIVATION_TIMEOUT_SECS} )) && while [ \"$(cmd connectivity airplane-mode)\" != \"enabled\" ]; do [ \"$(date +%s)\" -ge \"$activation_deadline\" ] && exit 1; sleep 0.1; done && sleep {hold_secs} && cmd connectivity airplane-mode disable"
     )
 }
 
@@ -413,14 +413,13 @@ mod tests {
     }
 
     #[test]
-    fn fallback_airplane_command_waits_for_activation_then_holds_for_two_seconds() {
+    fn fallback_airplane_command_waits_for_activation_then_holds_for_requested_period() {
         let command = fallback_airplane_command(Some(5));
         assert!(command.contains("cmd connectivity airplane-mode enable"));
-        assert!(command.contains("activation_deadline=$(( $(date +%s) + 5 ))"));
+        assert!(command.contains("activation_deadline=$(( $(date +%s) + 10 ))"));
         assert!(command.contains("cmd connectivity airplane-mode)\" != \"enabled"));
         assert!(command.contains("sleep 0.1"));
-        assert!(!command.contains("sleep 5"));
-        assert!(command.contains("sleep 2 && cmd connectivity airplane-mode disable"));
+        assert!(command.contains("sleep 5 && cmd connectivity airplane-mode disable"));
         assert!(command.contains("cmd connectivity airplane-mode disable"));
     }
 }

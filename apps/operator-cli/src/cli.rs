@@ -21,6 +21,8 @@ pub enum Command {
     Metrics,
     Proxy,
     Rotate(RotateArgs),
+    /// Rotate the mobile IP through the remote control plane (no ADB required).
+    RotateServer(RotateServerArgs),
     AirplaneStudy(AirplaneStudyArgs),
     PrepareRuntimeBinaries(PrepareRuntimeBinariesArgs),
     ProvisionVm(ProvisionVmArgs),
@@ -125,6 +127,32 @@ pub struct RotateArgs {
     pub hold_secs: Option<u64>,
     #[arg(long, default_value_t = 2)]
     pub poll_secs: u64,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RotateServerArgs {
+    #[arg(long, default_value = "https://mobile-proxy-relay:8443")]
+    pub control_plane_url: String,
+    #[arg(long, default_value = "34.118.88.54:8443")]
+    pub control_plane_addr: std::net::SocketAddr,
+    #[arg(long, default_value = "mobile-proxy-relay")]
+    pub control_plane_name: String,
+    #[arg(
+        long,
+        env = "MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64",
+        hide_env_values = true
+    )]
+    pub control_plane_cert_der_b64: String,
+    #[arg(long, env = "MOBILE_PROXY_UI_TOKEN", hide_env_values = true)]
+    pub ui_token: String,
+    #[arg(long, default_value = "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06")]
+    pub device_id: String,
+    #[arg(long, default_value_t = 240)]
+    pub timeout_secs: u32,
+    #[arg(long, default_value_t = 2)]
+    pub poll_secs: u64,
+    #[arg(long, value_enum, default_value_t = StatusFormat::Summary)]
+    pub format: StatusFormat,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -280,6 +308,24 @@ mod tests {
 
         let metrics = Cli::try_parse_from(["operator-cli", "metrics"]).unwrap();
         assert!(matches!(metrics.command, Command::Metrics));
+    }
+
+    #[test]
+    fn server_rotation_is_an_explicit_remote_surface() {
+        let cli = Cli::try_parse_from([
+            "operator-cli",
+            "rotate-server",
+            "--control-plane-cert-der-b64",
+            "certificate",
+            "--ui-token",
+            "token",
+        ])
+        .unwrap();
+        let Command::RotateServer(args) = cli.command else {
+            panic!("rotate-server command must parse");
+        };
+        assert_eq!(args.format, StatusFormat::Summary);
+        assert_eq!(args.timeout_secs, 240);
     }
 
     #[test]

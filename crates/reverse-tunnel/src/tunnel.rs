@@ -25,6 +25,11 @@ use crate::state::{ActiveSessionTarget, ReverseTunnelServerState, SessionAuthori
 // especially important behind a TLS stream terminator, where a partial or
 // non-tunnel client otherwise looks indistinguishable from a stalled phone.
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+// A1 BY can require more than two seconds for an additional cellular TLS
+// handshake. Keep the control-plane failover fast, but give reserve data
+// streams enough time to register within the server's bounded five-second
+// pending-stream window.
+const TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR: Duration = Duration::from_secs(4);
 
 pub async fn run_client(
     config: ReverseTunnelClientConfig,
@@ -440,6 +445,13 @@ async fn connect_and_pump_tls_tcp(
 }
 
 async fn tls_tcp_connect(config: &ReverseTunnelClientConfig) -> Result<TlsStream<TcpStream>> {
+    tls_tcp_connect_with_timeout(config, config.connect_timeout).await
+}
+
+async fn tls_tcp_connect_with_timeout(
+    config: &ReverseTunnelClientConfig,
+    connect_timeout: Duration,
+) -> Result<TlsStream<TcpStream>> {
     let TunnelTransport::Hybrid {
         server_name,
         server_cert_der,
@@ -457,12 +469,12 @@ async fn tls_tcp_connect(config: &ReverseTunnelClientConfig) -> Result<TlsStream
     let name =
         ServerName::try_from(server_name.clone()).context("invalid TLS fallback server name")?;
     let tcp = timeout(
-        config.connect_timeout,
+        connect_timeout,
         TcpStream::connect(config.tcp_fallback_addr.unwrap_or(config.server_addr)),
     )
     .await
     .context("TLS/TCP connect timed out")??;
-    timeout(config.connect_timeout, connector.connect(name, tcp))
+    timeout(connect_timeout, connector.connect(name, tcp))
         .await
         .context("TLS/TCP handshake timed out")?
         .context("TLS/TCP handshake failed")
@@ -474,7 +486,10 @@ async fn open_tcp_client_proxy_stream(
     stream_id: Uuid,
 ) -> Result<()> {
     if matches!(config.transport, TunnelTransport::Hybrid { .. }) {
-        let mut server = tls_tcp_connect(config).await?;
+        let timeout = config
+            .connect_timeout
+            .max(TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR);
+        let mut server = tls_tcp_connect_with_timeout(config, timeout).await?;
         write_frame(
             &mut server,
             &ClientFrame::ProxyStream {

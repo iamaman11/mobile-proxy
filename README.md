@@ -159,6 +159,25 @@ The VM hosts the control plane, reverse-tunnel server, readiness gate, authentic
 
 ## Rotate cellular identity
 
+For normal remote operation, send the command through the VM control plane. This path does not
+use ADB and waits until the phone reports a different public IP and healthy proxy service:
+
+```bash
+MOBILE_PROXY_UI_TOKEN='<ui token>' \
+MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64='<pinned certificate>' \
+cargo run --release -p operator-cli -- rotate-server
+```
+
+For agents and programs, select JSON output. The result contains `old_ip`, `new_ip`, elapsed time,
+readiness and both local and public serving state:
+
+```bash
+cargo run --release -p operator-cli -- rotate-server --format json
+```
+
+The older `rotate` command below targets the phone-local operator API and is intended for device
+maintenance and diagnostics:
+
 ```bash
 cargo run --release -p operator-cli -- rotate \
   --strategy airplane_bounce \

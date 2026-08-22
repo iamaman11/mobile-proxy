@@ -103,7 +103,7 @@ async fn rotate_ip_from_ui(
     let request = IssueCommandRequest {
         desired_state: DesiredState::HealthyServing,
         recovery_intent: RecoveryIntent::RotateRecovery,
-        deadline_secs: DeadlineWindow::new(120).expect("constant deadline is valid"),
+        deadline_secs: DeadlineWindow::new(240).expect("constant deadline is valid"),
         idempotency_key: IdempotencyKey::parse(format!("android-ui-{}", Uuid::new_v4()))
             .expect("generated idempotency key is valid"),
     };

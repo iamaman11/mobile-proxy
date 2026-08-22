@@ -37,14 +37,18 @@ async fn main() -> Result<()> {
     let mut state = SupervisorState::new();
 
     cleanup_stale_runtime_processes();
-    if let Err(error) = push_local_ui_control_token(config.ui_control_token.as_deref()) {
-        warn!("failed to provision local UI control: {error:#}");
+    let mut ui_control_provisioned =
+        push_local_ui_control_token(config.ui_control_token.as_deref()).is_ok();
+    if !ui_control_provisioned {
+        warn!("local UI control provisioning deferred until the Android app is available");
     }
-    if let Some(egress) = config.app_egress.as_ref()
-        && let Err(error) =
-            provision_android_egress(egress.port, &egress.username, &egress.password)
-    {
-        warn!("failed to provision Android cellular egress: {error:#}");
+    let mut android_egress_provisioned = config.app_egress.is_none();
+    if let Some(egress) = config.app_egress.as_ref() {
+        android_egress_provisioned =
+            provision_android_egress(egress.port, &egress.username, &egress.password).is_ok();
+        if !android_egress_provisioned {
+            warn!("Android cellular egress provisioning deferred until the app is available");
+        }
     }
     if config.tunnel_owner != TunnelOwner::StockWireguardBridge
         && let Err(error) = stop_compatibility_vpns()
@@ -54,6 +58,14 @@ async fn main() -> Result<()> {
     reconcile_startup_cellular_bootstrap(&config, &mut state);
 
     loop {
+        if !ui_control_provisioned {
+            ui_control_provisioned =
+                push_local_ui_control_token(config.ui_control_token.as_deref()).is_ok();
+        }
+        if !android_egress_provisioned && let Some(egress) = config.app_egress.as_ref() {
+            android_egress_provisioned =
+                provision_android_egress(egress.port, &egress.username, &egress.password).is_ok();
+        }
         let dns_changed = match reconcile_cellular_dns(&config) {
             Ok(changed) => changed,
             Err(err) => {

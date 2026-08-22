@@ -33,7 +33,15 @@ class CellularEgressService : Service() {
     @Volatile private var server: ServerSocket? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) stopAgent() else startAgent()
+        if (intent?.action == ACTION_STOP) {
+            stopAgent()
+        } else {
+            // Provisioning may rotate SOCKS credentials while the process is
+            // alive. Rebind so the listener never keeps stale in-memory auth.
+            server?.close()
+            server = null
+            startAgent()
+        }
         return START_STICKY
     }
 
@@ -46,13 +54,23 @@ class CellularEgressService : Service() {
 
     private fun startAgent() {
         if (server != null) return
+        // Android requires a foreground notification immediately after
+        // startForegroundService(), including during first-boot provisioning
+        // when private storage may still be unavailable.
+        startForeground(NOTIFICATION_ID, notification())
         val config = TunnelState.getEgressConfig(this)
             ?: TunnelState.consumeProvisionedEgressConfig(this)
-            ?: return
-        startForeground(NOTIFICATION_ID, notification())
+            ?: run {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return
+            }
         val listener = ServerSocket()
         listener.reuseAddress = true
-        listener.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), config.port))
+        // The rooted reverse-tunnel client uses an IPv4 loopback target.
+        // Android may otherwise choose ::1 here, leaving the authenticated
+        // app listener unreachable even though the service is running.
+        listener.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), config.port))
         server = listener
         workers.execute {
             while (!listener.isClosed) {
