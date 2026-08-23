@@ -16,7 +16,9 @@ root/Magisk boot service
               -> relay VM public proxy ports
 ```
 
-The primary tunnel owner is always `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. The rooted runtime also supports two explicit compatibility owners: `stock_wireguard_bridge` for stock WireGuard rollback and `first_party_vpn_service` for the app-owned Android `VpnService` path. Unknown, missing or contradictory tunnel ownership fails closed.
+The default tunnel owner is `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. The rooted runtime also supports explicit carrier and rollback owners. Unknown, missing or contradictory tunnel ownership fails closed.
+
+On carriers that do not route root-owned sockets through the validated INTERNET data network, use `first_party_android_egress`. The authenticated reverse tunnel and server control plane remain authoritative, while both proxy upstream sockets and the pinned TLS reserve are created through the app's `Network.bindSocket()` cellular egress. This mode does not create an Android VPN.
 
 The Android project under `apps/android-app` remains optional for the primary rooted runtime, but it is now the supported owner for the app-owned WireGuard compatibility path. Normal native reverse-tunnel packaging, installation and verification still do not require an active Android VPN.
 
@@ -33,6 +35,8 @@ The relay preserves:
 - app-owned WireGuard compatibility path.
 
 All public proxy paths require authentication. The reverse-tunnel control frame carries the selected proxy protocol, so SOCKS5 streams terminate at the phone's dedicated `1081` inbound and HTTP/CONNECT streams at `3128`; the mixed public port is detected before forwarding. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
+
+Use the dedicated `3128` endpoint for production HTTP/HTTPS clients. Port `1080` remains a mixed SOCKS5/HTTP compatibility endpoint and should not be selected when the consumer can choose a dedicated protocol port.
 
 ## Repository layout
 
