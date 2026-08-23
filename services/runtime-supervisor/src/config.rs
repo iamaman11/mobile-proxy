@@ -139,8 +139,9 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
         .working_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| runtime_root.clone());
-    let proxy_args = default_proxy_args(&runtime_root, file.proxy.args);
-    let proxy_config = proxy_config_path(&runtime_root, &proxy_args);
+    let mut proxy_args = default_proxy_args(&runtime_root, file.proxy.args);
+    let proxy_source_config = proxy_config_path(&runtime_root, &proxy_args);
+    let proxy_config = mutable_proxy_config_path(&runtime_root);
     let tunnel_owner = TunnelOwner::parse(&file.wireguard.owner)?;
     tunnel_owner.validate_wireguard_flag(file.wireguard.enabled)?;
     if tunnel_owner == TunnelOwner::FirstPartyVpnService {
@@ -148,6 +149,8 @@ pub fn load_config(cli: Cli) -> Result<SupervisorConfig> {
             "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"
         )
     }
+    prepare_mutable_proxy_config(&proxy_source_config, &proxy_config)?;
+    replace_proxy_config_arg(&mut proxy_args, &proxy_config);
     let app_egress = if tunnel_owner == TunnelOwner::FirstPartyAndroidEgress {
         let app = file
             .app_egress
@@ -229,11 +232,53 @@ fn proxy_config_path(runtime_root: &std::path::Path, args: &[String]) -> PathBuf
         .unwrap_or_else(|| runtime_root.join("config/sing-box.json"))
 }
 
+fn mutable_proxy_config_path(runtime_root: &std::path::Path) -> PathBuf {
+    if runtime_root
+        .file_name()
+        .is_some_and(|name| name == "current")
+    {
+        return runtime_root
+            .parent()
+            .unwrap_or(runtime_root)
+            .join("state/sing-box.json");
+    }
+    runtime_root.join("state/sing-box.json")
+}
+
+fn prepare_mutable_proxy_config(source: &std::path::Path, target: &std::path::Path) -> Result<()> {
+    let parent = target
+        .parent()
+        .context("mutable proxy config has no parent directory")?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    fs::copy(source, target).with_context(|| {
+        format!(
+            "failed to initialize mutable proxy config {} from {}",
+            target.display(),
+            source.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(target, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+fn replace_proxy_config_arg(args: &mut [String], config: &std::path::Path) {
+    if let Some(index) = args
+        .windows(2)
+        .position(|parts| parts[0] == "-c" || parts[0] == "--config")
+    {
+        args[index + 1] = config.to_string_lossy().into_owned();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use super::{TunnelOwner, load_config};
+    use super::{TunnelOwner, load_config, mutable_proxy_config_path};
     use crate::cli::Cli;
 
     #[test]
@@ -251,6 +296,14 @@ mod tests {
         assert_eq!(
             TunnelOwner::parse("first_party_reverse_tunnel").unwrap(),
             TunnelOwner::FirstPartyReverseTunnel
+        );
+    }
+
+    #[test]
+    fn production_current_release_uses_sibling_mutable_state() {
+        assert_eq!(
+            mutable_proxy_config_path(std::path::Path::new("/data/adb/mobile-proxy-node/current")),
+            std::path::Path::new("/data/adb/mobile-proxy-node/state/sing-box.json")
         );
     }
 
@@ -359,6 +412,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
+        fs::write(root.join("config/sing-box.json"), "{}").unwrap();
 
         let loaded = load_config(Cli {
             runtime_root: root.to_string_lossy().into_owned(),
@@ -376,12 +430,16 @@ mod tests {
             vec![
                 "run".to_string(),
                 "-c".to_string(),
-                root.join("config/sing-box.json")
+                root.join("state/sing-box.json")
                     .to_string_lossy()
                     .into_owned(),
             ]
         );
-        assert_eq!(loaded.proxy_config, root.join("config/sing-box.json"));
+        assert_eq!(loaded.proxy_config, root.join("state/sing-box.json"));
+        assert_eq!(
+            fs::read(root.join("state/sing-box.json")).unwrap(),
+            fs::read(root.join("config/sing-box.json")).unwrap()
+        );
 
         let _ = fs::remove_dir_all(root);
     }
