@@ -225,9 +225,14 @@ pub(crate) fn verify_installed_release_files(
             relative.replace('/', "_")
         );
         adb(device_serial, &["push", local, &staged])?;
-        let compare = format!("chmod 0600 '{staged}' && cmp -s -- '{staged}' '{remote}'");
-        let result = adb(device_serial, &["shell", "su", "0", "sh", "-c", &compare]);
-        let cleanup = adb(device_serial, &["shell", "rm", "-f", &staged]);
+        let compare = format!("chmod 0600 {staged} && cmp -s -- {staged} {remote}");
+        // Windows adb joins `shell` arguments without preserving the final
+        // command boundary. Send one remote argument so operators running
+        // from WSL execute the complete comparison under Magisk root.
+        let root_compare = format!("su -c '{compare}'");
+        let result = adb(device_serial, &["shell", &root_compare]);
+        let root_cleanup = format!("su -c 'rm -f {staged}'");
+        let cleanup = adb(device_serial, &["shell", &root_cleanup]);
         cleanup.context("failed to remove staged release verification file")?;
         result.with_context(|| format!("deployed device release file differs: {relative}"))?;
     }
