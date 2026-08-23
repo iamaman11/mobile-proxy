@@ -17,7 +17,17 @@ class SwitchFailure(RuntimeError):
 
 
 _CONFIG_VERSION = 1
-_CONFIGS = {
+_TLS_REVERSE_TUNNEL_INGRESS = """server {
+    listen 0.0.0.0:443 ssl;
+    ssl_certificate /etc/mobile-relaycontrolpoint/control-plane.crt;
+    ssl_certificate_key /etc/mobile-relaycontrolpoint/control-plane.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    proxy_pass 127.0.0.1:18091;
+}
+"""
+
+_PROXY_CONFIGS = {
     "reverse-tunnel": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14128; }
@@ -30,6 +40,10 @@ server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:13128; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:12081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
 """,
+}
+_CONFIGS = {
+    mode: proxy_config + _TLS_REVERSE_TUNNEL_INGRESS
+    for mode, proxy_config in _PROXY_CONFIGS.items()
 }
 _REMOTE_CONFIG = "/etc/nginx/stream-available/mobile-public-proxy.conf"
 _SUCCESS_MARKER = "exact-config-match"

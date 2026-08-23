@@ -41,6 +41,7 @@
     "server_name": "{{REVERSE_TUNNEL_SERVER_NAME}}",
     "server_cert_der_b64": "{{REVERSE_TUNNEL_CERT_DER_B64}}",
     "auth_token": "{{DEVICE_TOKEN}}",
+    "counter_state_path": "/data/adb/mobile-proxy-node/state/reverse-tunnel-counters-v1.json",
     "connect_timeout_ms": 2000,
     "heartbeat_interval_ms": 2000,
     "reconnect_floor_ms": 1000,

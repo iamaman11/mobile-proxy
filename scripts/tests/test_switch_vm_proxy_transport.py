@@ -44,6 +44,12 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
         self.assertIn("mobile-public-proxy.service", command)
         self.assertIn("mobile-reverse-tunnel-server.service", command)
 
+    def test_every_mode_preserves_pinned_tls_reverse_tunnel_ingress(self):
+        for config in MODULE._CONFIGS.values():
+            self.assertIn("listen 0.0.0.0:443 ssl", config)
+            self.assertIn("proxy_pass 127.0.0.1:18091", config)
+            self.assertIn("ssl_session_tickets off", config)
+
     def test_remote_command_is_atomic_exact_and_reversible_on_any_failure(self):
         command = MODULE.remote_command("wireguard")
         self.assertIn(".candidate.$", command)
