@@ -114,8 +114,12 @@ The compact repository snapshot is available at any revision:
 
 ## Production deployment
 
-Run Deploy Production from GitHub Actions using the published tag as both the workflow ref and
-the `release_tag` input. For example, the CLI form is:
+Publishing a verified GitHub Release automatically starts Deploy Production for both the VM and
+the attached Android device. The release event supplies the immutable tag, so routine production
+delivery does not depend on a separate operator token or a second manual dispatch.
+
+Manual dispatch remains available for an explicit rollback or partial recovery. Use the published
+tag as both the workflow ref and the `release_tag` input. For example:
 
     gh workflow run deploy-production.yml --ref v0.1.0 -f release_tag=v0.1.0
 
