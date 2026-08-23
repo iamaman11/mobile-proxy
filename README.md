@@ -104,8 +104,7 @@ job logs. The pinned toolchain is defined in `rust-toolchain.toml`.
 
 The mandatory GitHub quality workflows additionally run:
 
-- RustSec advisory audit;
-- cargo-deny advisories, licenses, bans and sources checks;
+- RustSec advisories, dependency licenses, bans and sources through pinned cargo-deny;
 - Android scaffold unit tests;
 - Android lint with warnings as errors;
 - Android debug assembly;

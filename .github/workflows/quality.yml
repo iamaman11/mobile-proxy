@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  checks: write
 
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
@@ -77,13 +76,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.CANDIDATE_SHA }}
-      - name: Audit RustSec advisories
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
-      - name: Check licenses, bans and sources
+      - name: Check RustSec advisories, licenses, bans and sources
         run: cargo deny check advisories licenses bans sources
 
   android:
@@ -104,15 +99,13 @@ jobs:
           cache-dependency-path: |
             apps/android-app/*.gradle*
             apps/android-app/gradle/wrapper/gradle-wrapper.properties
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
       - name: Unit test, lint and assemble
         shell: bash
         run: |
           set -euo pipefail
           unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy NO_PROXY no_proxy || true
           cd apps/android-app
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+          bash ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
   quality-gate:
     name: Quality Gate

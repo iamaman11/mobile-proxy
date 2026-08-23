@@ -22,7 +22,6 @@ fi
 cargo metadata --format-version 1 --locked > /dev/null
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-cargo audit
 cargo deny check advisories licenses bans sources
 
 if grep -qi microsoft /proc/version 2>/dev/null \
