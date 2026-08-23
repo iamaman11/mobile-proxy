@@ -2,8 +2,8 @@
 
 ## Status
 
-Implemented as an explicit A/B candidate. The production default remains direct reverse-tunnel
-forwarding to the phone protocol engine.
+Promoted to the production default after physical A/B acceptance. Direct reverse-tunnel forwarding
+to the phone protocol engine remains an explicit rollback mode.
 
 ## Candidate topology
 
@@ -20,11 +20,14 @@ NGINX validation, service check or exact byte comparison restores the prior conf
 ## Acceptance
 
 `scripts/compare_proxy_topologies.py` compares the protected proxy surfaces with five concurrent
-connections by default and always restores `reverse-tunnel` mode in a `finally` block. Credentials
+connections by default, waits for NGINX workers to settle before measuring, and always restores
+`server-termination` production mode in a `finally` block. The switch retries bounded transient SSH/IAP failures
+and verifies that TCP/443, all public proxy listeners and the exact configuration bytes are active. Credentials
 are read only from `MOBILE_PROXY_RELAY_USER` and `MOBILE_PROXY_RELAY_PASSWORD`; they are never
 written into the report or child-process command lines. Curl receives its authentication config
 through standard input.
 
-The candidate must not become the default unless all surfaces pass, throughput and latency do not
-regress, Android CPU/RAM decrease, IP rotation remains reliable and exact rollback is proven on the
-physical deployment.
+The physical acceptance run passed all four proxy surfaces with five concurrent connections each.
+Server-side IP rotation changed the address in 14 seconds and returned healthy, publicly serving,
+fresh TLS transport state. The reverse-tunnel mode remains available for exact rollback and future
+comparative testing.

@@ -168,6 +168,11 @@ cargo run --release -p operator-cli -- provision-vm \
 
 The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional WireGuard compatibility backend used by both the stock rollback path and the app-owned VPN path.
 
+The production public proxy terminates authenticated HTTP/CONNECT and SOCKS on the VM sing-box,
+then carries the resulting streams through the pinned TLS reverse tunnel to the Android cellular
+egress service. `scripts/switch_vm_proxy_transport.py --mode reverse-tunnel` retains the prior
+phone-terminated path as an atomic rollback.
+
 ## Rotate cellular identity
 
 For agents and remote operators, install `scripts/mobile-proxy-ip` on `PATH` and provision the

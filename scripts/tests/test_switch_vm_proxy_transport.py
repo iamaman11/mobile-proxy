@@ -21,6 +21,7 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
             instance="instance",
             ssh_user="operator",
             ssh_key="/tmp/key",
+            ssh_attempts=3,
         )
 
     def test_modes_use_distinct_exact_upstreams(self):
@@ -42,6 +43,7 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
     def test_server_termination_requires_both_proxy_layers(self):
         command = MODULE.remote_command("server-termination")
         self.assertIn("mobile-public-proxy.service", command)
+        self.assertIn(":(443|1080|1081|3128)", command)
         self.assertIn("mobile-reverse-tunnel-server.service", command)
 
     def test_every_mode_preserves_pinned_tls_reverse_tunnel_ingress(self):
@@ -83,6 +85,18 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
     def test_exact_marker_parser_is_strict(self):
         self.assertTrue(MODULE.exact_match_returned("active\nexact-config-match\n"))
         self.assertFalse(MODULE.exact_match_returned("active\nexact-config-match-extra\n"))
+
+    @mock.patch.object(MODULE.time, "sleep")
+    @mock.patch.object(MODULE.subprocess, "run")
+    def test_switch_retries_transient_ssh_failure(self, run, sleep):
+        run.side_effect = [
+            MODULE.subprocess.CalledProcessError(255, ["gcloud"]),
+            mock.Mock(stdout=f"{MODULE._SUCCESS_MARKER}\n"),
+        ]
+        report = MODULE.switch(self.args("reverse-tunnel"))
+        self.assertTrue(report["accepted"])
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(1)
 
 
 if __name__ == "__main__":

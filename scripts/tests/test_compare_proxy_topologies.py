@@ -32,6 +32,7 @@ class CompareProxyTopologiesTests(unittest.TestCase):
 
     def test_inventory_compares_candidate_and_restorable_default(self):
         self.assertEqual(MODULE.MODES, ("reverse-tunnel", "server-termination"))
+        self.assertEqual(MODULE.PRODUCTION_MODE, "server-termination")
 
     @mock.patch.object(MODULE.subprocess, "run")
     def test_probe_keeps_credentials_out_of_result(self, run):
@@ -47,12 +48,13 @@ class CompareProxyTopologiesTests(unittest.TestCase):
     def test_summary_is_bounded_and_ignores_failed_latency(self):
         report = MODULE.summarize([
             {"ok": True, "duration_ms": 10, "public_ip": "192.0.2.1"},
-            {"ok": False, "duration_ms": 999, "public_ip": None},
+            {"ok": False, "duration_ms": 999, "public_ip": None, "exit_code": 28},
             {"ok": True, "duration_ms": 20, "public_ip": "192.0.2.1"},
         ])
         self.assertEqual(report["successes"], 2)
         self.assertEqual(report["median_ms"], 15)
         self.assertEqual(report["max_ms"], 20)
+        self.assertEqual(report["failure_exit_codes"], {"28": 1})
 
     def test_switch_command_does_not_accept_proxy_credentials(self):
         args = Namespace(

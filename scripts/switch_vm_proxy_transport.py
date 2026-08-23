@@ -9,6 +9,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -84,7 +85,7 @@ sudo mv "$TEMP" "$CONFIG"
 sudo nginx -t
 sudo systemctl reload nginx
 sudo systemctl is-active {required_services}
-sudo ss -lnt | grep -E ':(1080|1081|3128) '
+sudo ss -lnt | grep -E ':(443|1080|1081|3128) '
 sudo cmp -s -- "$CONFIG" "$EXPECTED"
 printf '{_SUCCESS_MARKER}\\n'
 COMMITTED=1
@@ -111,10 +112,20 @@ def switch(args: argparse.Namespace) -> dict[str, object]:
         "--command",
         remote_command(args.mode),
     ]
-    try:
-        completed = subprocess.run(command, check=True, capture_output=True, text=True)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise SwitchFailure("VM public proxy transport switch failed") from error
+    completed = None
+    last_error = None
+    for attempt in range(args.ssh_attempts):
+        try:
+            completed = subprocess.run(command, check=True, capture_output=True, text=True)
+            break
+        except (OSError, subprocess.CalledProcessError) as error:
+            last_error = error
+            if attempt + 1 < args.ssh_attempts:
+                time.sleep(min(2 ** attempt, 5))
+    if completed is None:
+        raise SwitchFailure(
+            f"VM public proxy transport switch failed after {args.ssh_attempts} attempts"
+        ) from last_error
     if not exact_match_returned(completed.stdout):
         raise SwitchFailure("VM public proxy transport config was not verified byte-for-byte")
     return {
@@ -136,12 +147,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--instance", required=True)
     parser.add_argument("--ssh-user", required=True)
     parser.add_argument("--ssh-key", required=True)
+    parser.add_argument("--ssh-attempts", type=int, default=3)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.ssh_attempts < 1 or args.ssh_attempts > 10:
+        print("VM proxy transport switch failed: ssh-attempts must be between 1 and 10", file=sys.stderr)
+        return 2
     try:
         report = switch(args)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

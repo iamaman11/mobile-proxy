@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A/B-test native and VM-terminated proxy paths, then restore native routing."""
+"""A/B-test native and VM-terminated proxy paths, then restore production routing."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ import statistics
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
 MODES = ("reverse-tunnel", "server-termination")
+PRODUCTION_MODE = "server-termination"
 
 
 def switch_command(args: argparse.Namespace, mode: str, output: Path) -> list[str]:
@@ -64,6 +66,9 @@ def run_probe(proxy: str, credentials: str, url: str, timeout: int) -> dict[str,
 
 def summarize(results: list[dict[str, object]]) -> dict[str, object]:
     durations = [int(item["duration_ms"]) for item in results if item["ok"]]
+    failure_exit_codes = Counter(
+        str(item["exit_code"]) for item in results if not item["ok"]
+    )
     return {
         "attempts": len(results),
         "successes": len(durations),
@@ -71,6 +76,7 @@ def summarize(results: list[dict[str, object]]) -> dict[str, object]:
         "median_ms": round(statistics.median(durations)) if durations else None,
         "max_ms": max(durations) if durations else None,
         "public_ips": sorted({str(item["public_ip"]) for item in results if item["ok"]}),
+        "failure_exit_codes": dict(sorted(failure_exit_codes.items())),
     }
 
 
@@ -89,6 +95,7 @@ def probe_mode(args: argparse.Namespace, credentials: str) -> dict[str, object]:
                 range(args.attempts),
             ))
         report[name] = summarize(results)
+        time.sleep(args.surface_pause_ms / 1000)
     return report
 
 
@@ -104,6 +111,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--attempts", type=int, default=25)
     parser.add_argument("--concurrency", type=int, default=5)
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--settle-secs", type=int, default=4)
+    parser.add_argument("--surface-pause-ms", type=int, default=500)
     parser.add_argument("--probe-url", default="https://api.ipify.org")
     return parser.parse_args()
 
@@ -112,6 +121,8 @@ def main() -> int:
     args = parse_args()
     if args.attempts < 1 or args.concurrency < 1 or args.concurrency > args.attempts:
         raise SystemExit("attempts/concurrency values are invalid")
+    if not 0 <= args.settle_secs <= 30 or not 0 <= args.surface_pause_ms <= 10_000:
+        raise SystemExit("settle/pause values are invalid")
     username = os.environ.get("MOBILE_PROXY_RELAY_USER", "")
     password = os.environ.get("MOBILE_PROXY_RELAY_PASSWORD", "")
     if not username or not password:
@@ -123,10 +134,11 @@ def main() -> int:
         try:
             for mode in MODES:
                 subprocess.run(switch_command(args, mode, temp / f"switch-{mode}.json"), check=True)
+                time.sleep(args.settle_secs)
                 report["modes"][mode] = probe_mode(args, credentials)
         finally:
             subprocess.run(
-                switch_command(args, "reverse-tunnel", temp / "switch-restored.json"),
+                switch_command(args, PRODUCTION_MODE, temp / "switch-restored.json"),
                 check=True,
             )
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

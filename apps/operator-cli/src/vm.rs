@@ -736,9 +736,9 @@ const NGINX_CONTROL_PLANE_TLS_CONFIG: &str = r#"server {
 }
 "#;
 
-const NGINX_STREAM_CONFIG: &str = r#"server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
-server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
-server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14128; }
+const NGINX_STREAM_CONFIG: &str = r#"server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:12080; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:12081; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
 server {
     listen 0.0.0.0:443 ssl;
     ssl_certificate /etc/mobile-relaycontrolpoint/control-plane.crt;
@@ -859,7 +859,7 @@ fn repo_root() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{VmSecrets, public_proxy_config};
+    use super::{NGINX_STREAM_CONFIG, VmSecrets, public_proxy_config};
 
     fn secrets() -> VmSecrets {
         VmSecrets {
@@ -891,6 +891,17 @@ mod tests {
             config["route"]["rules"][0]["outbound"].as_str(),
             Some("reverse-tunnel-phone")
         );
+    }
+
+    #[test]
+    fn server_termination_is_the_vm_public_proxy_default() {
+        for port in [12080, 12081, 12128] {
+            assert!(NGINX_STREAM_CONFIG.contains(&port.to_string()));
+        }
+        for port in [14080, 14081, 14128] {
+            assert!(!NGINX_STREAM_CONFIG.contains(&format!("proxy_pass 127.0.0.1:{port}")));
+        }
+        assert!(NGINX_STREAM_CONFIG.contains("listen 0.0.0.0:443 ssl"));
     }
 
     #[test]
