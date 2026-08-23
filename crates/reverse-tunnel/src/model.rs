@@ -30,6 +30,11 @@ pub enum ClientFrame {
         stream_id: Uuid,
         auth_token: String,
     },
+    ProxyReserve {
+        node_id: String,
+        session_id: Uuid,
+        auth_token: String,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]

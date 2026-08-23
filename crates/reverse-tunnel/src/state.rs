@@ -21,6 +21,7 @@ const MAX_PENDING_TCP_STREAMS: usize = 256;
 // A fixed per-device ceiling prevents one unavailable phone from monopolizing
 // the global reserve-tunnel budget while still allowing a bounded burst.
 const MAX_PENDING_TCP_STREAMS_PER_NODE: usize = 32;
+const MAX_RESERVED_TCP_STREAMS_PER_NODE: usize = 16;
 // Session selection tolerates multiple missed heartbeats while remaining bounded.
 // Freshness is checked lazily on every routing/acceptance decision; no sweeper is spawned.
 const DEFAULT_SESSION_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -37,6 +38,12 @@ pub(crate) struct TcpControlChannel {
     pub(crate) session_id: Uuid,
     pub(crate) authority_id: Uuid,
     pub(crate) sender: mpsc::Sender<ServerFrame>,
+}
+
+pub(crate) struct ReservedTcpStream {
+    session_id: Uuid,
+    authority_id: Uuid,
+    stream: TcpStream,
 }
 
 #[derive(Clone)]
@@ -112,6 +119,7 @@ pub struct ReverseTunnelServerState {
     pub(crate) connections: Arc<Mutex<HashMap<String, SessionBound<quinn::Connection>>>>,
     pub(crate) tcp_controls: Arc<Mutex<HashMap<String, TcpControlChannel>>>,
     pub(crate) pending_tcp: Arc<StdMutex<PendingTcpMap>>,
+    reserved_tcp: Arc<Mutex<HashMap<String, Vec<ReservedTcpStream>>>>,
     session_liveness: Arc<Mutex<HashMap<String, SessionLiveness>>>,
     heartbeat_timeout: Duration,
 }
@@ -123,6 +131,7 @@ impl Default for ReverseTunnelServerState {
             connections: Arc::default(),
             tcp_controls: Arc::default(),
             pending_tcp: Arc::default(),
+            reserved_tcp: Arc::default(),
             session_liveness: Arc::default(),
             heartbeat_timeout: DEFAULT_SESSION_HEARTBEAT_TIMEOUT,
         }
@@ -264,6 +273,20 @@ impl ReverseTunnelServerState {
         protocol: ProxyProtocol,
         wait: Duration,
     ) -> Result<TcpStream> {
+        while let Some(mut stream) = self.take_reserved_tcp_stream(target).await {
+            if crate::tunnel::write_server_frame(
+                &mut stream,
+                &ServerFrame::OpenProxy {
+                    stream_id: Uuid::new_v4(),
+                    protocol,
+                },
+            )
+            .await
+            .is_ok()
+            {
+                return Ok(stream);
+            }
+        }
         let control = self
             .select_tcp_control_for_target(target)
             .await
@@ -332,6 +355,61 @@ impl ReverseTunnelServerState {
             .await
             .context("TCP reverse tunnel proxy stream timed out")?
             .context("TCP reverse tunnel proxy stream was cancelled")
+    }
+
+    async fn take_reserved_tcp_stream(&self, target: &ActiveSessionTarget) -> Option<TcpStream> {
+        let mut reserves = self.reserved_tcp.lock().await;
+        let streams = reserves.get_mut(&target.node_id)?;
+        while let Some(reserved) = streams.pop() {
+            if reserved.session_id == target.session_id
+                && reserved.authority_id == target.authority_id
+            {
+                return Some(reserved.stream);
+            }
+        }
+        reserves.remove(&target.node_id);
+        None
+    }
+
+    pub(crate) async fn register_reserved_tcp_stream(
+        &self,
+        node_id: &str,
+        session_id: Uuid,
+        stream: TcpStream,
+    ) -> Result<()> {
+        let authority_id = {
+            let sessions = self.sessions.lock().await;
+            let liveness = self.session_liveness.lock().await;
+            let controls = self.tcp_controls.lock().await;
+            let session = sessions
+                .get(node_id)
+                .filter(|session| session.connected && session.session_id == session_id)
+                .context("reserved TCP stream session is not active")?;
+            let live = liveness
+                .get(node_id)
+                .filter(|live| live.session_id == session.session_id)
+                .context("reserved TCP stream authority is not active")?;
+            let control_active = controls.get(node_id).is_some_and(|control| {
+                control.session_id == session_id
+                    && control.authority_id == live.authority_id
+                    && !control.sender.is_closed()
+            });
+            if !control_active {
+                bail!("reserved TCP stream control is not active");
+            }
+            live.authority_id
+        };
+        let mut reserves = self.reserved_tcp.lock().await;
+        let streams = reserves.entry(node_id.to_owned()).or_default();
+        if streams.len() >= MAX_RESERVED_TCP_STREAMS_PER_NODE {
+            bail!("reserved TCP stream capacity reached");
+        }
+        streams.push(ReservedTcpStream {
+            session_id,
+            authority_id,
+            stream,
+        });
+        Ok(())
     }
 
     #[cfg(test)]
@@ -478,6 +556,7 @@ impl ReverseTunnelServerState {
             let mut liveness = self.session_liveness.lock().await;
             let mut connections = self.connections.lock().await;
             let mut controls = self.tcp_controls.lock().await;
+            let mut reserves = self.reserved_tcp.lock().await;
             let mut pending = lock_pending(&self.pending_tcp);
 
             let previous_session = sessions.get(&node_id).map(|session| session.session_id);
@@ -501,6 +580,7 @@ impl ReverseTunnelServerState {
 
             let displaced_connection = connections.remove(&node_id);
             controls.remove(&node_id);
+            reserves.remove(&node_id);
             liveness.remove(&node_id);
             sessions.insert(
                 node_id.clone(),
@@ -565,6 +645,7 @@ impl ReverseTunnelServerState {
             let mut liveness = self.session_liveness.lock().await;
             let mut connections = self.connections.lock().await;
             let mut controls = self.tcp_controls.lock().await;
+            let mut reserves = self.reserved_tcp.lock().await;
             let mut pending = lock_pending(&self.pending_tcp);
 
             let current_session = sessions
@@ -588,6 +669,7 @@ impl ReverseTunnelServerState {
             }) {
                 controls.remove(node_id);
             }
+            reserves.remove(node_id);
             pending.retain(|_, request| {
                 request.expected_node_id != node_id
                     || request.expected_session_id != session_id
@@ -641,6 +723,7 @@ impl ReverseTunnelServerState {
             control.session_id == session_id && control.authority_id == authority_id
         }) {
             controls.remove(node_id);
+            self.reserved_tcp.lock().await.remove(node_id);
         }
     }
 
@@ -756,6 +839,7 @@ impl ReverseTunnelServerState {
             .map(|(node_id, control)| (node_id, control.session_id))
             .collect();
         lock_pending(&self.pending_tcp).clear();
+        self.reserved_tcp.lock().await.clear();
         for (node_id, session_id) in controls {
             if let Some(session) = self.sessions.lock().await.get_mut(&node_id)
                 && session.session_id == session_id

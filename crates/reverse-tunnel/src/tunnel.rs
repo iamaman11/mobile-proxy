@@ -29,6 +29,8 @@ const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 // handshake. Keep the control-plane failover fast, but allow each transport
 // phase to complete within the server's bounded twelve-second pending window.
 const TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR: Duration = Duration::from_secs(4);
+const TCP_RESERVED_STREAM_WORKERS: usize = 8;
+const TCP_RESERVED_STREAM_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 pub async fn run_client(
     config: ReverseTunnelClientConfig,
@@ -121,7 +123,7 @@ pub async fn run_server(
                 let config = config.clone();
                 tokio::spawn(async move {
                     if let Err(err) = handle_server_connection(stream, config, state).await {
-                        warn!(error = %err, "TCP reverse tunnel control connection ended");
+                        warn!(error = %err, "TCP reverse tunnel connection ended");
                     }
                 });
             }
@@ -428,6 +430,14 @@ async fn connect_and_pump_tls_tcp(
     .await?;
     mark_snapshot_connected(snapshot, TunnelActiveTransport::TlsTcp, true);
     let _ = status.send(snapshot.clone());
+    let mut reserved_workers = tokio::task::JoinSet::new();
+    for _ in 0..TCP_RESERVED_STREAM_WORKERS {
+        reserved_workers.spawn(run_tcp_reserved_stream_worker(
+            config.clone(),
+            session_id,
+            shutdown.clone(),
+        ));
+    }
     let mut sequence = snapshot.sent_heartbeats;
     loop {
         let deadline = Instant::now() + config.heartbeat_interval;
@@ -612,6 +622,55 @@ async fn open_tcp_client_proxy_stream(
     Ok(())
 }
 
+async fn run_tcp_reserved_stream_worker(
+    config: ReverseTunnelClientConfig,
+    session_id: Uuid,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        if *shutdown.borrow() {
+            return;
+        }
+        let result = tokio::select! {
+            _ = shutdown.changed() => return,
+            result = open_tcp_reserved_stream(&config, session_id) => result,
+        };
+        if let Err(error) = result {
+            warn!(error = %error, "TLS/TCP reserved proxy stream ended");
+        }
+        tokio::select! {
+            _ = shutdown.changed() => return,
+            _ = sleep(TCP_RESERVED_STREAM_RETRY_DELAY) => {}
+        }
+    }
+}
+
+async fn open_tcp_reserved_stream(
+    config: &ReverseTunnelClientConfig,
+    session_id: Uuid,
+) -> Result<()> {
+    let timeout = config
+        .connect_timeout
+        .max(TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR);
+    let mut server = tls_tcp_connect_with_timeout(config, timeout).await?;
+    write_frame(
+        &mut server,
+        &ClientFrame::ProxyReserve {
+            node_id: config.node_id.clone(),
+            session_id,
+            auth_token: config.auth_token.clone(),
+        },
+    )
+    .await?;
+    let mut reader = BufReader::new(server);
+    let ServerFrame::OpenProxy { protocol, .. } = read_required_server_frame(&mut reader).await?;
+    let mut local = TcpStream::connect(config.local_proxy_addr_for(protocol)).await?;
+    // Keep the BufReader in the data path: the first read can contain both the
+    // JSON activation frame and early proxy bytes from the public client.
+    tokio::io::copy_bidirectional(&mut reader, &mut local).await?;
+    Ok(())
+}
+
 async fn connect_and_pump_quic(
     config: &ReverseTunnelClientConfig,
     session_id: Uuid,
@@ -743,7 +802,11 @@ async fn handle_quic_control_stream(
             Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
                 mark_heartbeat(&state, &heartbeat, authority_id).await;
             }
-            Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
+            Ok(Some(
+                ClientFrame::Hello(_)
+                | ClientFrame::ProxyStream { .. }
+                | ClientFrame::ProxyReserve { .. },
+            )) => {
                 bail!("unexpected repeated hello on reverse tunnel session");
             }
             Ok(None) => {
@@ -877,6 +940,20 @@ async fn handle_server_connection(
             .await?;
         return Ok(());
     }
+    if let ClientFrame::ProxyReserve {
+        node_id,
+        session_id,
+        auth_token,
+    } = first
+    {
+        if !bool::from(auth_token.as_bytes().ct_eq(config.auth_token.as_bytes())) {
+            bail!("reverse tunnel reserved stream authentication failed");
+        }
+        state
+            .register_reserved_tcp_stream(&node_id, session_id, stream)
+            .await?;
+        return Ok(());
+    }
     let ClientFrame::Hello(hello) = first else {
         bail!("reverse tunnel connection did not start with hello");
     };
@@ -906,7 +983,11 @@ async fn handle_server_connection(
                 Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
                     mark_heartbeat(&state, &heartbeat, authority_id).await;
                 }
-                Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
+                Ok(Some(
+                    ClientFrame::Hello(_)
+                    | ClientFrame::ProxyStream { .. }
+                    | ClientFrame::ProxyReserve { .. },
+                )) => {
                     break Err(anyhow::anyhow!(
                         "unexpected repeated hello on reverse tunnel session"
                     ));
@@ -1085,7 +1166,7 @@ where
     Ok(())
 }
 
-async fn write_server_frame<W>(writer: &mut W, frame: &ServerFrame) -> Result<()>
+pub(crate) async fn write_server_frame<W>(writer: &mut W, frame: &ServerFrame) -> Result<()>
 where
     W: AsyncWrite + Unpin,
 {
