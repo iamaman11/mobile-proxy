@@ -172,10 +172,11 @@ The production `optimized-hybrid` route keeps mixed `1080` and SOCKS `1081` on t
 reverse-tunnel path, while VM sing-box terminates HTTP/CONNECT `3128` before carrying streams
 through the pinned TLS reverse tunnel to Android cellular egress. The switch tool retains both
 fully phone-terminated and fully VM-terminated modes for atomic rollback and controlled A/B tests.
-The TLS fallback maintains sixteen authenticated reserve data streams per phone session, so a burst
+The TLS fallback maintains eight authenticated idle data streams per phone session, so a burst
 of five consumers reuses established cellular connections instead of starting five simultaneous
 TCP and TLS handshakes. Capacity remains bounded and the legacy on-demand stream remains a
-compatible overflow path.
+compatible overflow path. Activated streams are replenished immediately instead of waiting for the
+proxied request to finish.
 
 ## Rotate cellular identity
 

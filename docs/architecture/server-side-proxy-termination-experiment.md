@@ -31,8 +31,9 @@ through standard input.
 Repeated physical runs showed VM HTTP/CONNECT termination was consistently stronger on `3128`,
 while the VM mixed inbound intermittently rejected SOCKS method negotiation on `1080`. Production
 therefore uses only the accepted per-surface mappings instead of promoting the full candidate.
-The TLS fallback maintains sixteen authenticated reserve streams for each active phone session.
+The TLS fallback maintains eight authenticated idle streams for each active phone session.
 Five-way bursts reuse these established cellular connections instead of creating simultaneous TCP
-and TLS handshakes; bounded on-demand streams remain available for overflow and rolling upgrades.
+and TLS handshakes. Activated streams are replenished immediately, while bounded on-demand streams
+remain available for overflow and rolling upgrades.
 Server-side IP rotation changed the address in 14 seconds and returned healthy, publicly serving,
 fresh TLS transport state. Both complete modes remain available for exact rollback and comparison.
