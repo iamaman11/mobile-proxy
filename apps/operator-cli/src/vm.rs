@@ -737,8 +737,8 @@ const NGINX_CONTROL_PLANE_TLS_CONFIG: &str = r#"server {
 "#;
 
 const NGINX_STREAM_CONFIG: &str = r#"server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
-server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
-server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14080; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14080; }
 server {
     listen 0.0.0.0:443 ssl;
     ssl_certificate /etc/mobile-relaycontrolpoint/control-plane.crt;
@@ -895,9 +895,12 @@ mod tests {
 
     #[test]
     fn optimized_hybrid_is_the_vm_public_proxy_default() {
-        for port in [14080, 14081, 12128] {
-            assert!(NGINX_STREAM_CONFIG.contains(&format!("proxy_pass 127.0.0.1:{port}")));
-        }
+        assert_eq!(
+            NGINX_STREAM_CONFIG
+                .matches("proxy_pass 127.0.0.1:14080")
+                .count(),
+            3
+        );
         for port in [12080, 12081, 14128] {
             assert!(!NGINX_STREAM_CONFIG.contains(&format!("proxy_pass 127.0.0.1:{port}")));
         }

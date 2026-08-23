@@ -199,9 +199,9 @@ pub async fn run_quic_tcp_forward_listener(
                 let state = state.clone();
                 let target_node_id = target_node_id.clone();
                 tokio::spawn(async move {
-                    let protocol = resolve_proxy_protocol(&stream, protocol).await;
+                    let response_protocol = resolve_proxy_protocol(&stream, protocol).await;
                     let Some(target) = state.select_active_target(target_node_id.as_deref()).await else {
-                        reject_unavailable(&mut stream, protocol).await;
+                        reject_unavailable(&mut stream, response_protocol).await;
                         return;
                     };
                     if let Err(err) = forward_tcp_over_quic(stream, state, target, protocol).await {

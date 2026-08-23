@@ -2,9 +2,10 @@
 
 ## Status
 
-Promoted selectively as the `optimized-hybrid` production default after physical A/B acceptance.
-Mixed `1080` and SOCKS `1081` retain phone termination; HTTP/CONNECT `3128` uses VM termination.
-Both fully direct and fully VM-terminated paths remain explicit comparison/rollback modes.
+The experiment remains available, but VM termination was removed from the `optimized-hybrid`
+production data path after sustained physical concurrency tests. Public `1080`, `1081` and `3128`
+now retain phone mixed-proxy termination. Fully direct and fully VM-terminated paths remain explicit
+comparison/rollback modes.
 
 ## Candidate topology
 
@@ -28,9 +29,10 @@ are read only from `MOBILE_PROXY_RELAY_USER` and `MOBILE_PROXY_RELAY_PASSWORD`; 
 written into the report or child-process command lines. Curl receives its authentication config
 through standard input.
 
-Repeated physical runs showed VM HTTP/CONNECT termination was consistently stronger on `3128`,
-while the VM mixed inbound intermittently rejected SOCKS method negotiation on `1080`. Production
-therefore uses only the accepted per-surface mappings instead of promoting the full candidate.
+Early physical runs favored VM HTTP/CONNECT termination on `3128`, while the VM mixed inbound
+intermittently rejected SOCKS method negotiation on `1080`. Longer sustained runs showed the
+single phone mixed backend was the only surface that remained lossless under five-way bursts, so
+production now keeps all three public ports on that path.
 The TLS fallback maintains eight authenticated idle streams for each active phone session.
 Five-way bursts reuse these established cellular connections instead of creating simultaneous TCP
 and TLS handshakes. Activated streams are replenished immediately, while bounded on-demand streams

@@ -42,8 +42,8 @@ server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:12081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
 """,
     "optimized-hybrid": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
-server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
-server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14080; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14080; }
 """,
 }
 _CONFIGS = {

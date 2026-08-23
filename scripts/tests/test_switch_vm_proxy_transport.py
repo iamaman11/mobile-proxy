@@ -39,9 +39,9 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
             self.assertIn(str(port), server)
             self.assertNotIn(str(port), reverse)
             self.assertNotIn(str(port), wireguard)
-        self.assertIn("14080", optimized)
-        self.assertIn("14081", optimized)
-        self.assertIn("12128", optimized)
+        self.assertEqual(optimized.count("proxy_pass 127.0.0.1:14080"), 3)
+        self.assertNotIn("proxy_pass 127.0.0.1:14081", optimized)
+        self.assertNotIn("proxy_pass 127.0.0.1:12128", optimized)
         self.assertEqual(len({reverse, wireguard, server, optimized}), 4)
 
     def test_server_termination_requires_both_proxy_layers(self):

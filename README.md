@@ -168,10 +168,10 @@ cargo run --release -p operator-cli -- provision-vm \
 
 The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional WireGuard compatibility backend used by both the stock rollback path and the app-owned VPN path.
 
-The production `optimized-hybrid` route keeps mixed `1080` and SOCKS `1081` on the proven native
-reverse-tunnel path, while VM sing-box terminates HTTP/CONNECT `3128` before carrying streams
-through the pinned TLS reverse tunnel to Android cellular egress. The switch tool retains both
-fully phone-terminated and fully VM-terminated modes for atomic rollback and controlled A/B tests.
+The production `optimized-hybrid` route keeps public `1080`, `1081` and `3128` on the proven phone
+mixed-proxy path through the pinned TLS reverse tunnel to Android cellular egress. The port numbers
+and client protocols remain unchanged. VM sing-box termination remains an explicit comparison and
+rollback mode, but is not in the production data path.
 The TLS fallback maintains eight authenticated idle data streams per phone session, so a burst
 of five consumers reuses established cellular connections instead of starting five simultaneous
 TCP and TLS handshakes. Capacity remains bounded and the legacy on-demand stream remains a
