@@ -28,6 +28,7 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
         reverse = MODULE._CONFIGS["reverse-tunnel"]
         wireguard = MODULE._CONFIGS["wireguard"]
         server = MODULE._CONFIGS["server-termination"]
+        optimized = MODULE._CONFIGS["optimized-hybrid"]
         for port in [14080, 14081, 14128]:
             self.assertIn(str(port), reverse)
             self.assertNotIn(str(port), wireguard)
@@ -38,7 +39,10 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
             self.assertIn(str(port), server)
             self.assertNotIn(str(port), reverse)
             self.assertNotIn(str(port), wireguard)
-        self.assertEqual(len({reverse, wireguard, server}), 3)
+        self.assertIn("14080", optimized)
+        self.assertIn("14081", optimized)
+        self.assertIn("12128", optimized)
+        self.assertEqual(len({reverse, wireguard, server, optimized}), 4)
 
     def test_server_termination_requires_both_proxy_layers(self):
         command = MODULE.remote_command("server-termination")
@@ -66,6 +70,8 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
         self.assertIn("wg-quick@wg0.service", command)
         self.assertIn("mobile-public-proxy.service", command)
         self.assertIn('sudo cmp -s -- "$CONFIG" "$EXPECTED"', command)
+        self.assertIn("if sudo cmp -s", command)
+        self.assertIn("verify_runtime", command)
         self.assertNotIn("sha256", command.lower())
         self.assertIn("COMMITTED=1", command)
 

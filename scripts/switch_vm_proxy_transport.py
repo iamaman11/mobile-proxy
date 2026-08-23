@@ -41,6 +41,10 @@ server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:13128; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:12081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
 """,
+    "optimized-hybrid": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
+""",
 }
 _CONFIGS = {
     mode: proxy_config + _TLS_REVERSE_TUNNEL_INGRESS
@@ -54,7 +58,7 @@ def remote_command(mode: str) -> str:
     encoded = base64.b64encode(_CONFIGS[mode].encode()).decode()
     if mode == "wireguard":
         required_services = "wg-quick@wg0.service mobile-public-proxy.service"
-    elif mode == "server-termination":
+    elif mode in {"server-termination", "optimized-hybrid"}:
         required_services = "mobile-public-proxy.service mobile-reverse-tunnel-server.service"
     else:
         required_services = "mobile-reverse-tunnel-server.service"
@@ -77,15 +81,24 @@ cleanup() {{
   sudo rm -f "$TEMP" "$EXPECTED" "$BACKUP"
 }}
 trap cleanup EXIT
-sudo cp "$CONFIG" "$BACKUP"
 printf %s {shlex.quote(encoded)} | base64 -d | sudo tee "$TEMP" >/dev/null
 sudo cp "$TEMP" "$EXPECTED"
 sudo chmod 0644 "$TEMP" "$EXPECTED"
+verify_runtime() {{
+  sudo systemctl is-active {required_services}
+  sudo ss -lnt | grep -E ':(443|1080|1081|3128) '
+}}
+if sudo cmp -s -- "$CONFIG" "$EXPECTED"; then
+  verify_runtime
+  printf '{_SUCCESS_MARKER}\n'
+  COMMITTED=1
+  exit 0
+fi
+sudo cp "$CONFIG" "$BACKUP"
 sudo mv "$TEMP" "$CONFIG"
 sudo nginx -t
 sudo systemctl reload nginx
-sudo systemctl is-active {required_services}
-sudo ss -lnt | grep -E ':(443|1080|1081|3128) '
+verify_runtime
 sudo cmp -s -- "$CONFIG" "$EXPECTED"
 printf '{_SUCCESS_MARKER}\\n'
 COMMITTED=1

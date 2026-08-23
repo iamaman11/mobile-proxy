@@ -31,8 +31,11 @@ class CompareProxyTopologiesTests(unittest.TestCase):
         self.assertTrue(result["ok"])
 
     def test_inventory_compares_candidate_and_restorable_default(self):
-        self.assertEqual(MODULE.MODES, ("reverse-tunnel", "server-termination"))
-        self.assertEqual(MODULE.PRODUCTION_MODE, "server-termination")
+        self.assertEqual(
+            MODULE.MODES,
+            ("reverse-tunnel", "server-termination", "optimized-hybrid"),
+        )
+        self.assertEqual(MODULE.PRODUCTION_MODE, "optimized-hybrid")
 
     @mock.patch.object(MODULE.subprocess, "run")
     def test_probe_keeps_credentials_out_of_result(self, run):

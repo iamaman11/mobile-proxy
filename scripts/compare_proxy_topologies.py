@@ -15,8 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
-MODES = ("reverse-tunnel", "server-termination")
-PRODUCTION_MODE = "server-termination"
+MODES = ("reverse-tunnel", "server-termination", "optimized-hybrid")
+PRODUCTION_MODE = "optimized-hybrid"
 
 
 def switch_command(args: argparse.Namespace, mode: str, output: Path) -> list[str]:
@@ -89,12 +89,23 @@ def probe_mode(args: argparse.Namespace, credentials: str) -> dict[str, object]:
     }
     report: dict[str, object] = {}
     for name, proxy in surfaces.items():
+        warmup_ready = False
+        warmup_attempts = 0
+        for warmup_attempts in range(1, args.warmup_attempts + 1):
+            if run_probe(proxy, credentials, args.probe_url, args.timeout)["ok"]:
+                warmup_ready = True
+                break
+            time.sleep(1)
         with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
             results = list(executor.map(
                 lambda _: run_probe(proxy, credentials, args.probe_url, args.timeout),
                 range(args.attempts),
             ))
-        report[name] = summarize(results)
+        report[name] = {
+            "warmup_ready": warmup_ready,
+            "warmup_attempts": warmup_attempts,
+            **summarize(results),
+        }
         time.sleep(args.surface_pause_ms / 1000)
     return report
 
@@ -113,7 +124,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--settle-secs", type=int, default=4)
     parser.add_argument("--surface-pause-ms", type=int, default=500)
+    parser.add_argument("--warmup-attempts", type=int, default=6)
     parser.add_argument("--probe-url", default="https://api.ipify.org")
+    parser.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
     return parser.parse_args()
 
 
@@ -123,6 +136,10 @@ def main() -> int:
         raise SystemExit("attempts/concurrency values are invalid")
     if not 0 <= args.settle_secs <= 30 or not 0 <= args.surface_pause_ms <= 10_000:
         raise SystemExit("settle/pause values are invalid")
+    if not 1 <= args.warmup_attempts <= 30:
+        raise SystemExit("warmup-attempts must be between 1 and 30")
+    if len(set(args.modes)) != len(args.modes):
+        raise SystemExit("modes must not contain duplicates")
     username = os.environ.get("MOBILE_PROXY_RELAY_USER", "")
     password = os.environ.get("MOBILE_PROXY_RELAY_PASSWORD", "")
     if not username or not password:
@@ -132,7 +149,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="mobile-proxy-topology-") as raw_temp:
         temp = Path(raw_temp)
         try:
-            for mode in MODES:
+            for mode in args.modes:
                 subprocess.run(switch_command(args, mode, temp / f"switch-{mode}.json"), check=True)
                 time.sleep(args.settle_secs)
                 report["modes"][mode] = probe_mode(args, credentials)

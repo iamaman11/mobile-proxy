@@ -2,8 +2,9 @@
 
 ## Status
 
-Promoted to the production default after physical A/B acceptance. Direct reverse-tunnel forwarding
-to the phone protocol engine remains an explicit rollback mode.
+Promoted selectively as the `optimized-hybrid` production default after physical A/B acceptance.
+Mixed `1080` and SOCKS `1081` retain phone termination; HTTP/CONNECT `3128` uses VM termination.
+Both fully direct and fully VM-terminated paths remain explicit comparison/rollback modes.
 
 ## Candidate topology
 
@@ -21,13 +22,14 @@ NGINX validation, service check or exact byte comparison restores the prior conf
 
 `scripts/compare_proxy_topologies.py` compares the protected proxy surfaces with five concurrent
 connections by default, waits for NGINX workers to settle before measuring, and always restores
-`server-termination` production mode in a `finally` block. The switch retries bounded transient SSH/IAP failures
+`optimized-hybrid` production mode in a `finally` block. The switch retries bounded transient SSH/IAP failures
 and verifies that TCP/443, all public proxy listeners and the exact configuration bytes are active. Credentials
 are read only from `MOBILE_PROXY_RELAY_USER` and `MOBILE_PROXY_RELAY_PASSWORD`; they are never
 written into the report or child-process command lines. Curl receives its authentication config
 through standard input.
 
-The physical acceptance run passed all four proxy surfaces with five concurrent connections each.
+Repeated physical runs showed VM HTTP/CONNECT termination was consistently stronger on `3128`,
+while the VM mixed inbound intermittently rejected SOCKS method negotiation on `1080`. Production
+therefore uses only the accepted per-surface mappings instead of promoting the full candidate.
 Server-side IP rotation changed the address in 14 seconds and returned healthy, publicly serving,
-fresh TLS transport state. The reverse-tunnel mode remains available for exact rollback and future
-comparative testing.
+fresh TLS transport state. Both complete modes remain available for exact rollback and comparison.

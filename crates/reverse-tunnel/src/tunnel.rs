@@ -26,9 +26,8 @@ use crate::state::{ActiveSessionTarget, ReverseTunnelServerState, SessionAuthori
 // non-tunnel client otherwise looks indistinguishable from a stalled phone.
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 // A1 BY can require more than two seconds for an additional cellular TLS
-// handshake. Keep the control-plane failover fast, but give reserve data
-// streams enough time to register within the server's bounded five-second
-// pending-stream window.
+// handshake. Keep the control-plane failover fast, but allow each transport
+// phase to complete within the server's bounded twelve-second pending window.
 const TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR: Duration = Duration::from_secs(4);
 
 pub async fn run_client(

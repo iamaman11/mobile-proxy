@@ -11,7 +11,12 @@ use uuid::Uuid;
 
 use crate::model::{ProxyProtocol, ServerFrame, ServerSessionSnapshot};
 
-const TCP_PROXY_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
+// A reserve TLS data stream may spend up to four seconds establishing its
+// transport TCP connection and another four seconds completing TLS. Under a
+// cellular burst those phases can approach their individual bounds, so the
+// server must not retire the pending request at the old five-second mark.
+// Keep the deadline finite and pair it with the per-node capacity below.
+const TCP_PROXY_STREAM_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_PENDING_TCP_STREAMS: usize = 256;
 // A fixed per-device ceiling prevents one unavailable phone from monopolizing
 // the global reserve-tunnel budget while still allowing a bounded burst.
