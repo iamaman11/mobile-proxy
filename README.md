@@ -90,6 +90,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+For the exact local gate, use:
+
+```bash
+scripts/quality-gate.sh       # full code and Android gate
+scripts/quality-gate.sh fast  # architecture, Python tests, formatting and diff hygiene
+```
+
+GitHub runs one aggregate required check named `Quality Gate`. It executes policy, Rust,
+supply-chain and Android checks in parallel and publishes a compact
+`quality-summary-<git-sha>` artifact. Agents should read that summary before loading large
+job logs. The pinned toolchain is defined in `rust-toolchain.toml`.
+
 The mandatory GitHub quality workflows additionally run:
 
 - RustSec advisory audit;
@@ -101,6 +113,17 @@ The mandatory GitHub quality workflows additionally run:
 - SQLite migration, backup and clean restore drills;
 - forced QUIC failure, pinned TLS/TCP reserve and QUIC recovery;
 - mixed `1080`, SOCKS5 `1081`, HTTP and CONNECT proxy coverage.
+
+## Git delivery
+
+Code reaches production only through an annotated semantic-version tag that passed
+`Quality Gate` and produced a published GitHub Release. `Deploy Production` resolves that
+tag to one immutable SHA, waits for approval in the `production` environment, then uses the
+dedicated runner to deploy and verify the VM followed by the Android device.
+
+Operational secrets stay in the local Secret Vault on the trusted runner and are injected only
+into child deployment processes. See [Git delivery and production control](docs/GIT_DELIVERY.md)
+for repository settings, release commands, rollback and runner setup.
 
 ## Prepare runtime binaries
 

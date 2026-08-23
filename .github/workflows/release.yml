@@ -1,0 +1,113 @@
+name: Publish Release
+
+on:
+  workflow_run:
+    workflows:
+      - Quality
+    types:
+      - completed
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: publish-release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish verified tag
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out verified SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Select the unique semantic version tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(git tag --points-at HEAD --list 'v[0-9]*')
+          if [[ ${#tags[@]} -eq 0 ]]; then
+            echo 'eligible=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test ${#tags[@]} -eq 1
+          tag="${tags[0]}"
+          test "$(git cat-file -t "refs/tags/$tag")" = tag
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          test "$tag" = "v$version"
+          echo 'eligible=true' >> "$GITHUB_OUTPUT"
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Rust toolchain
+        if: steps.tag.outputs.eligible == 'true'
+        run: rustup show active-toolchain
+      - name: Build immutable Linux release binaries
+        if: steps.tag.outputs.eligible == 'true'
+        run: |
+          cargo build --release --locked \
+            -p operator-cli \
+            -p control-plane \
+            -p relay-gate \
+            -p reverse-tunnel-server
+      - name: Package release and provenance manifest
+        if: steps.tag.outputs.eligible == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="release/mobile-proxy-linux-x86_64-$RELEASE_TAG"
+          mkdir -p "$stage/bin"
+          install -m 0755 target/release/operator-cli "$stage/bin/"
+          install -m 0755 target/release/control-plane "$stage/bin/"
+          install -m 0755 target/release/relay-gate "$stage/bin/"
+          install -m 0755 target/release/reverse-tunnel-server "$stage/bin/"
+          cp Cargo.lock "$stage/"
+          python3 scripts/repository_context.py --format json --output "$stage/repository-context.json"
+          tar -C release -czf "release/mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" \
+            "mobile-proxy-linux-x86_64-$RELEASE_TAG"
+          cd release
+          sha256sum "mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" > SHA256SUMS
+          python3 - "$RELEASE_TAG" "$RELEASE_SHA" <<'PY'
+          import json, pathlib, sys
+          tag, sha = sys.argv[1:]
+          checksum = pathlib.Path("SHA256SUMS").read_text(encoding="utf-8").split()[0]
+          pathlib.Path("release-manifest.json").write_text(json.dumps({
+              "format_version": 1,
+              "git_sha": sha,
+              "release_tag": tag,
+              "artifacts": [{
+                  "name": f"mobile-proxy-linux-x86_64-{tag}.tar.gz",
+                  "sha256": checksum,
+              }],
+          }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+      - name: Attest release provenance
+        if: steps.tag.outputs.eligible == 'true'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: |
+            release/mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz
+            release/SHA256SUMS
+            release/release-manifest.json
+      - name: Publish GitHub Release
+        if: steps.tag.outputs.eligible == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz
+            release/SHA256SUMS
+            release/release-manifest.json
