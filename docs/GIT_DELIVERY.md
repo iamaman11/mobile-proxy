@@ -104,7 +104,12 @@ The compact repository snapshot is available at any revision:
        git tag -a v0.1.0 -m "mobile-proxy v0.1.0"
        git push origin v0.1.0
 
-4. The tag receives the same Quality workflow. Only after it succeeds does Publish Release create immutable Linux artifacts, SHA-256 interoperability checksums, a release manifest and GitHub provenance attestations.
+4. The tag receives the same Quality workflow. Only after it succeeds does Publish Release
+   create immutable Linux artifacts, SHA-256 interoperability checksums, a release manifest
+   and machine-readable provenance. GitHub-native attestations are additionally required when
+   the repository owner and plan expose that API. Private repositories owned by personal
+   accounts instead publish `provenance.json`, with every release asset covered by
+   `SHA256SUMS`, because GitHub rejects native attestations for that repository class.
 5. Do not reuse or move a release tag. Fix forward with a new patch version.
 
 ## Production deployment

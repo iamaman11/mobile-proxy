@@ -1,6 +1,12 @@
 name: Publish Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing annotated semantic-version tag to publish or recover
+        required: true
+        type: string
   workflow_run:
     workflows:
       - Quality
@@ -13,42 +19,70 @@ permissions:
   attestations: write
 
 concurrency:
-  group: publish-release-${{ github.event.workflow_run.head_sha }}
+  group: publish-release-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.release_tag }}
   cancel-in-progress: false
 
 jobs:
   publish:
     name: Publish verified tag
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+      startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out verified SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.release_tag }}
           fetch-depth: 0
       - name: Select the unique semantic version tag
         id: tag
         env:
-          VERIFIED_TAG: ${{ github.event.workflow_run.head_branch }}
-          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+          VERIFIED_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.release_tag }}
+          VERIFIED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
         shell: bash
         run: |
           set -euo pipefail
           [[ "$VERIFIED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$(git cat-file -t "refs/tags/$VERIFIED_TAG")" = tag
-          test "$(git rev-list -n 1 "$VERIFIED_TAG")" = "$VERIFIED_SHA"
+          tag_sha=$(git rev-list -n 1 "$VERIFIED_TAG")
+          if [[ -n "$VERIFIED_SHA" ]]; then
+            test "$tag_sha" = "$VERIFIED_SHA"
+          else
+            VERIFIED_SHA="$tag_sha"
+          fi
           mapfile -t tags < <(git tag --points-at "$VERIFIED_SHA" --list 'v[0-9]*')
           test ${#tags[@]} -eq 1
           test "${tags[0]}" = "$VERIFIED_TAG"
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
           test "$VERIFIED_TAG" = "v$version"
-          echo 'eligible=true' >> "$GITHUB_OUTPUT"
-          echo "name=$VERIFIED_TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo 'eligible=true'
+            echo "name=$VERIFIED_TAG"
+            echo "sha=$VERIFIED_SHA"
+          } >> "$GITHUB_OUTPUT"
+      - name: Select provenance mode
+        id: provenance
+        if: steps.tag.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          visibility=$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)
+          owner_type=$(gh api "repos/$GITHUB_REPOSITORY" --jq .owner.type)
+          native=true
+          if [[ "$visibility" = private && "$owner_type" = User ]]; then
+            native=false
+          fi
+          {
+            echo "native=$native"
+            echo "visibility=$visibility"
+            echo "owner_type=$owner_type"
+          } >> "$GITHUB_OUTPUT"
       - name: Install pinned Rust toolchain
         if: steps.tag.outputs.eligible == 'true'
         run: rustup show active-toolchain
@@ -64,7 +98,8 @@ jobs:
         if: steps.tag.outputs.eligible == 'true'
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_SHA: ${{ steps.tag.outputs.sha }}
+          NATIVE_ATTESTATION: ${{ steps.provenance.outputs.native }}
         shell: bash
         run: |
           set -euo pipefail
@@ -97,14 +132,41 @@ jobs:
               }],
           }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY
+          python3 - "$RELEASE_TAG" "$RELEASE_SHA" "$checksum" <<'PY'
+          import json, os, pathlib, sys
+          tag, sha, checksum = sys.argv[1:]
+          pathlib.Path("provenance.json").write_text(json.dumps({
+              "artifact": f"mobile-proxy-linux-x86_64-{tag}.tar.gz",
+              "artifact_sha256": checksum,
+              "builder": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "format_version": 1,
+              "git_sha": sha,
+              "github_native_attestation": os.environ["NATIVE_ATTESTATION"] == "true",
+              "release_tag": tag,
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+          }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          sha256sum \
+            "mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" \
+            release-manifest.json \
+            provenance.json > SHA256SUMS
       - name: Attest release provenance
-        if: steps.tag.outputs.eligible == 'true'
+        if: steps.tag.outputs.eligible == 'true' && steps.provenance.outputs.native == 'true'
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
           subject-path: |
             release/mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz
             release/SHA256SUMS
             release/release-manifest.json
+            release/provenance.json
+      - name: Record private-repository provenance mode
+        if: steps.tag.outputs.eligible == 'true' && steps.provenance.outputs.native != 'true'
+        run: |
+          {
+            echo '## Provenance mode'
+            echo 'GitHub-native attestations are unavailable for this private user-owned repository.'
+            echo 'The release includes provenance.json and SHA256SUMS covering every published artifact.'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Publish GitHub Release
         if: steps.tag.outputs.eligible == 'true'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -116,3 +178,4 @@ jobs:
             release/mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz
             release/SHA256SUMS
             release/release-manifest.json
+            release/provenance.json
