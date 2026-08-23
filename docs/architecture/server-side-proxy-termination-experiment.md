@@ -37,5 +37,9 @@ The TLS fallback maintains eight authenticated idle streams for each active phon
 Five-way bursts reuse these established cellular connections instead of creating simultaneous TCP
 and TLS handshakes. Activated streams are replenished immediately, while bounded on-demand streams
 remain available for overflow and rolling upgrades.
+The VM sends a protocol-level keepalive over every idle reserve at five-second intervals. This
+keeps carrier NAT mappings active and removes a stream after a failed write before it can be
+assigned to a public client. Keepalives are accepted only on reserved TLS/TCP streams; receiving
+one on a control or QUIC proxy stream fails closed.
 Server-side IP rotation changed the address in 14 seconds and returned healthy, publicly serving,
 fresh TLS transport state. Both complete modes remain available for exact rollback and comparison.

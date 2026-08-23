@@ -439,6 +439,32 @@ impl ReverseTunnelServerState {
         Ok(())
     }
 
+    /// Keep every idle TLS/TCP reserve visible to cellular NAT state. A write
+    /// failure also removes the dead stream before it can be handed to a
+    /// public proxy client.
+    pub async fn keepalive_reserved_tcp_streams(&self) -> usize {
+        let mut reserves = self.reserved_tcp.lock().await;
+        let mut healthy_count = 0;
+        for streams in reserves.values_mut() {
+            let mut healthy = Vec::with_capacity(streams.len());
+            for mut reserved in streams.drain(..) {
+                if crate::tunnel::write_server_frame(
+                    &mut reserved.stream,
+                    &ServerFrame::ReserveKeepalive,
+                )
+                .await
+                .is_ok()
+                {
+                    healthy_count += 1;
+                    healthy.push(reserved);
+                }
+            }
+            *streams = healthy;
+        }
+        reserves.retain(|_, streams| !streams.is_empty());
+        healthy_count
+    }
+
     #[cfg(test)]
     async fn select_tcp_control(
         &self,
@@ -1014,6 +1040,7 @@ fn lock_pending(pending: &StdMutex<PendingTcpMap>) -> MutexGuard<'_, PendingTcpM
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::net::TcpListener;
     use tokio::task::yield_now;
 
@@ -1072,6 +1099,39 @@ mod tests {
         let delivered = request.await.unwrap().unwrap();
         drop(delivered);
         drop(peer);
+    }
+
+    #[tokio::test]
+    async fn reserved_stream_remains_assignable_after_keepalive() {
+        let state = ReverseTunnelServerState::default();
+        let session_id = Uuid::new_v4();
+        let _control = register_session(&state, "phone-a", session_id).await;
+        let (reserved, peer) = tcp_pair().await;
+        state
+            .register_reserved_tcp_stream("phone-a", session_id, reserved)
+            .await
+            .unwrap();
+        let mut peer = BufReader::new(peer);
+
+        assert_eq!(state.keepalive_reserved_tcp_streams().await, 1);
+        let mut line = String::new();
+        peer.read_line(&mut line).await.unwrap();
+        assert_eq!(
+            serde_json::from_str::<ServerFrame>(&line).unwrap(),
+            ServerFrame::ReserveKeepalive
+        );
+
+        let delivered = state
+            .open_tcp_proxy_with_timeout(Some("phone-a"), Duration::from_secs(1))
+            .await
+            .unwrap();
+        line.clear();
+        peer.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            serde_json::from_str::<ServerFrame>(&line).unwrap(),
+            ServerFrame::OpenProxy { .. }
+        ));
+        drop(delivered);
     }
 
     #[tokio::test]
@@ -1625,8 +1685,10 @@ mod tests {
 
     async fn open_stream_id(control: &mut mpsc::Receiver<ServerFrame>) -> Uuid {
         let frame = control.recv().await.expect("open request must be sent");
-        let ServerFrame::OpenProxy { stream_id, .. } = frame;
-        stream_id
+        match frame {
+            ServerFrame::OpenProxy { stream_id, .. } => stream_id,
+            ServerFrame::ReserveKeepalive => panic!("keepalive must not use the control channel"),
+        }
     }
 
     async fn tcp_pair() -> (TcpStream, TcpStream) {

@@ -339,6 +339,11 @@ async fn connect_and_pump(
                             }
                         });
                     }
+                    ServerFrame::ReserveKeepalive => {
+                        return Err(anyhow::anyhow!(
+                            "reserve keepalive received on TCP control channel"
+                        ));
+                    }
                 }
             }
             _ = sleep_until(deadline) => {
@@ -445,16 +450,22 @@ async fn connect_and_pump_tls_tcp(
             _ = shutdown.changed() => return Ok(()),
             maybe_line = read_optional_line(&mut reader) => {
                 let Some(line) = maybe_line? else { bail!("TLS/TCP server closed reverse tunnel"); };
-                let ServerFrame::OpenProxy {
-                    stream_id,
-                    protocol,
-                } = serde_json::from_str(&line)?;
-                let config = config.clone();
-                tokio::spawn(async move {
-                    if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id, protocol).await {
-                        warn!(error = %err, "TLS/TCP client proxy stream failed");
+                match serde_json::from_str(&line)? {
+                    ServerFrame::OpenProxy {
+                        stream_id,
+                        protocol,
+                    } => {
+                        let config = config.clone();
+                        tokio::spawn(async move {
+                            if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id, protocol).await {
+                                warn!(error = %err, "TLS/TCP client proxy stream failed");
+                            }
+                        });
                     }
-                });
+                    ServerFrame::ReserveKeepalive => {
+                        bail!("reserve keepalive received on TLS/TCP control channel");
+                    }
+                }
             }
             _ = sleep_until(deadline) => {
                 sequence += 1;
@@ -663,7 +674,14 @@ async fn open_tcp_reserved_stream(
     )
     .await?;
     let mut reader = BufReader::new(server);
-    let ServerFrame::OpenProxy { protocol, .. } = read_required_server_frame(&mut reader).await?;
+    let protocol = loop {
+        match read_required_server_frame(&mut reader).await? {
+            ServerFrame::OpenProxy { protocol, .. } => break protocol,
+            ServerFrame::ReserveKeepalive => {
+                debug!("TLS/TCP reserved proxy keepalive received");
+            }
+        }
+    };
     let mut local = TcpStream::connect(config.local_proxy_addr_for(protocol)).await?;
     // Keep the BufReader in the data path: the first read can contain both the
     // JSON activation frame and early proxy bytes from the public client.
@@ -876,6 +894,9 @@ async fn handle_client_proxy_stream(
                 .await
                 .with_context(|| format!("failed to connect local proxy at {local_proxy_addr}"))?;
             pipe_tcp_and_quic(tcp_stream, quic_send, reader).await
+        }
+        ServerFrame::ReserveKeepalive => {
+            bail!("reserve keepalive received on QUIC proxy stream")
         }
     }
 }

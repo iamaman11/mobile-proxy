@@ -12,11 +12,13 @@ use reverse_tunnel::{
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tracing::info;
+use tokio::time::{Duration, MissedTickBehavior, interval};
+use tracing::{debug, info};
 
 use crate::cli::Cli;
 
 const MAX_PUBLIC_PROXY_LISTENERS: usize = 8;
+const RESERVED_STREAM_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -67,6 +69,10 @@ async fn main() -> Result<()> {
         state.clone(),
         shutdown_rx.clone(),
     ));
+    tasks.spawn(run_reserved_stream_keepalives(
+        state.clone(),
+        shutdown_rx.clone(),
+    ));
 
     for (listen, listener) in public_proxy_listeners {
         let protocol = match listen.port() {
@@ -86,6 +92,26 @@ async fn main() -> Result<()> {
         result??;
     }
     Ok(())
+}
+
+async fn run_reserved_stream_keepalives(
+    state: ReverseTunnelServerState,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    let mut ticks = interval(RESERVED_STREAM_KEEPALIVE_INTERVAL);
+    ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // The first Tokio interval tick is immediate; reserves cannot exist before
+    // the server starts, so wait for the first real interval.
+    ticks.tick().await;
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => return Ok(()),
+            _ = ticks.tick() => {
+                let healthy = state.keepalive_reserved_tcp_streams().await;
+                debug!(healthy, "TLS/TCP reserve keepalive sweep completed");
+            }
+        }
+    }
 }
 
 struct ValidatedCli {

@@ -44,6 +44,7 @@ pub enum ServerFrame {
         #[serde(default)]
         protocol: ProxyProtocol,
     },
+    ReserveKeepalive,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +174,16 @@ mod protocol_routing_tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn reserve_keepalive_has_a_stable_wire_representation() {
+        let encoded = serde_json::to_string(&ServerFrame::ReserveKeepalive).unwrap();
+        assert_eq!(encoded, r#"{"type":"ReserveKeepalive"}"#);
+        assert_eq!(
+            serde_json::from_str::<ServerFrame>(&encoded).unwrap(),
+            ServerFrame::ReserveKeepalive
+        );
     }
 }
 
