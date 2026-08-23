@@ -194,11 +194,12 @@ The production `optimized-hybrid` route keeps public `1080`, `1081` and `3128` o
 mixed-proxy path through the pinned TLS reverse tunnel to Android cellular egress. The port numbers
 and client protocols remain unchanged. VM sing-box termination remains an explicit comparison and
 rollback mode, but is not in the production data path.
-The TLS fallback maintains eight authenticated idle data streams per phone session, so a burst
+The TLS fallback maintains 32 authenticated idle data streams per phone session, so a burst
 of five consumers reuses established cellular connections instead of starting five simultaneous
 TCP and TLS handshakes. Capacity remains bounded and the legacy on-demand stream remains a
 compatible overflow path. Activated streams are replenished immediately instead of waiting for the
-proxied request to finish.
+proxied request to finish, and bounded reserve backpressure absorbs slower handshakes after a
+mobile-operator change.
 
 ## Rotate cellular identity
 

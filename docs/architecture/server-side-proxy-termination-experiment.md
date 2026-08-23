@@ -33,7 +33,7 @@ Early physical runs favored VM HTTP/CONNECT termination on `3128`, while the VM 
 intermittently rejected SOCKS method negotiation on `1080`. Longer sustained runs showed the
 single phone mixed backend was the only surface that remained lossless under five-way bursts, so
 production now keeps all three public ports on that path.
-The TLS fallback maintains eight authenticated idle streams for each active phone session.
+The TLS fallback maintains 32 authenticated idle streams for each active phone session.
 Five-way bursts reuse these established cellular connections instead of creating simultaneous TCP
 and TLS handshakes. Activated streams are replenished immediately, while bounded on-demand streams
 remain available for overflow and rolling upgrades.

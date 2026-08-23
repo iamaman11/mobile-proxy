@@ -29,7 +29,10 @@ const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 // handshake. Keep the control-plane failover fast, but allow each transport
 // phase to complete within the server's bounded twelve-second pending window.
 const TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR: Duration = Duration::from_secs(4);
-const TCP_RESERVED_STREAM_WORKERS: usize = 8;
+// Keep the client and server capacity in one source of truth. The production
+// phone is a dedicated, powered proxy node; 32 idle pinned streams absorb a
+// sustained five-consumer burst even when cellular TLS setup takes seconds.
+const TCP_RESERVED_STREAM_WORKERS: usize = crate::state::MAX_RESERVED_TCP_STREAMS_PER_NODE;
 const TCP_RESERVED_STREAM_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 pub async fn run_client(
