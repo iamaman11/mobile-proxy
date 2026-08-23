@@ -34,7 +34,11 @@ pub enum ClientFrame {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerFrame {
-    OpenProxy { stream_id: Uuid },
+    OpenProxy {
+        stream_id: Uuid,
+        #[serde(default)]
+        protocol: ProxyProtocol,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +47,8 @@ pub struct ReverseTunnelClientConfig {
     pub server_addr: SocketAddr,
     pub tcp_fallback_addr: Option<SocketAddr>,
     pub local_proxy_addr: SocketAddr,
+    pub local_socks5_addr: Option<SocketAddr>,
+    pub local_http_addr: Option<SocketAddr>,
     pub auth_token: String,
     pub transport: TunnelTransport,
     pub connect_timeout: Duration,
@@ -74,17 +80,84 @@ impl TunnelTransport {
         matches!(self, Self::Quic { .. } | Self::Hybrid { .. })
     }
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProxyProtocol {
+    #[default]
     Mixed,
     Socks5,
     Http,
+}
+
+impl ReverseTunnelClientConfig {
+    pub(crate) fn local_proxy_addr_for(&self, protocol: ProxyProtocol) -> SocketAddr {
+        match protocol {
+            ProxyProtocol::Mixed => self.local_proxy_addr,
+            ProxyProtocol::Socks5 => self.local_socks5_addr.unwrap_or(self.local_proxy_addr),
+            ProxyProtocol::Http => self.local_http_addr.unwrap_or(self.local_proxy_addr),
+        }
+    }
 }
 
 pub fn decode_der_base64(raw: &str) -> Result<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(raw.trim())
         .context("failed to decode base64 DER")
+}
+
+#[cfg(test)]
+mod protocol_routing_tests {
+    use super::{ProxyProtocol, ReverseTunnelClientConfig, ServerFrame, TunnelTransport};
+    use std::time::Duration;
+
+    fn config() -> ReverseTunnelClientConfig {
+        ReverseTunnelClientConfig {
+            node_id: "phone".into(),
+            server_addr: "127.0.0.1:18090".parse().unwrap(),
+            tcp_fallback_addr: None,
+            local_proxy_addr: "127.0.0.1:1080".parse().unwrap(),
+            local_socks5_addr: Some("127.0.0.1:1081".parse().unwrap()),
+            local_http_addr: Some("127.0.0.1:3128".parse().unwrap()),
+            auth_token: "token".into(),
+            transport: TunnelTransport::Tcp,
+            connect_timeout: Duration::from_secs(1),
+            heartbeat_interval: Duration::from_secs(1),
+            reconnect_floor: Duration::from_secs(1),
+            reconnect_ceiling: Duration::from_secs(1),
+        }
+    }
+
+    #[test]
+    fn dedicated_protocols_use_dedicated_phone_inbounds() {
+        let config = config();
+        assert_eq!(
+            config.local_proxy_addr_for(ProxyProtocol::Mixed),
+            "127.0.0.1:1080".parse().unwrap()
+        );
+        assert_eq!(
+            config.local_proxy_addr_for(ProxyProtocol::Socks5),
+            "127.0.0.1:1081".parse().unwrap()
+        );
+        assert_eq!(
+            config.local_proxy_addr_for(ProxyProtocol::Http),
+            "127.0.0.1:3128".parse().unwrap()
+        );
+    }
+
+    #[test]
+    fn old_server_frame_defaults_to_mixed_protocol() {
+        let frame: ServerFrame = serde_json::from_str(
+            r#"{"type":"OpenProxy","stream_id":"00000000-0000-0000-0000-000000000000"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            frame,
+            ServerFrame::OpenProxy {
+                protocol: ProxyProtocol::Mixed,
+                ..
+            }
+        ));
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

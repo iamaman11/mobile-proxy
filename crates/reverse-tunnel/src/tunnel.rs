@@ -198,11 +198,12 @@ pub async fn run_quic_tcp_forward_listener(
                 let state = state.clone();
                 let target_node_id = target_node_id.clone();
                 tokio::spawn(async move {
+                    let protocol = resolve_proxy_protocol(&stream, protocol).await;
                     let Some(target) = state.select_active_target(target_node_id.as_deref()).await else {
                         reject_unavailable(&mut stream, protocol).await;
                         return;
                     };
-                    if let Err(err) = forward_tcp_over_quic(stream, state, target).await {
+                    if let Err(err) = forward_tcp_over_quic(stream, state, target, protocol).await {
                         warn!(error = %err, "reverse tunnel TCP forward failed");
                     }
                 });
@@ -212,16 +213,6 @@ pub async fn run_quic_tcp_forward_listener(
 }
 
 async fn reject_unavailable(stream: &mut TcpStream, protocol: ProxyProtocol) {
-    let protocol = match protocol {
-        ProxyProtocol::Mixed => {
-            let mut first = [0_u8; 1];
-            match timeout(Duration::from_millis(500), stream.peek(&mut first)).await {
-                Ok(Ok(1)) if first[0] == 5 => ProxyProtocol::Socks5,
-                _ => ProxyProtocol::Http,
-            }
-        }
-        protocol => protocol,
-    };
     let response: &[u8] = match protocol {
         ProxyProtocol::Socks5 => &[5, 0xff],
         ProxyProtocol::Http | ProxyProtocol::Mixed => {
@@ -232,13 +223,27 @@ async fn reject_unavailable(stream: &mut TcpStream, protocol: ProxyProtocol) {
     let _ = stream.shutdown().await;
 }
 
+async fn resolve_proxy_protocol(stream: &TcpStream, protocol: ProxyProtocol) -> ProxyProtocol {
+    match protocol {
+        ProxyProtocol::Mixed => {
+            let mut first = [0_u8; 1];
+            match timeout(Duration::from_millis(500), stream.peek(&mut first)).await {
+                Ok(Ok(1)) if first[0] == 5 => ProxyProtocol::Socks5,
+                _ => ProxyProtocol::Http,
+            }
+        }
+        protocol => protocol,
+    }
+}
+
 async fn forward_tcp_over_quic(
     mut tcp_stream: TcpStream,
     state: ReverseTunnelServerState,
     target: ActiveSessionTarget,
+    protocol: ProxyProtocol,
 ) -> Result<()> {
     let Some(connection) = state.active_connection_for_target(&target).await else {
-        let mut upstream = state.open_tcp_proxy_for_target(&target).await?;
+        let mut upstream = state.open_tcp_proxy_for_target(&target, protocol).await?;
         tokio::io::copy_bidirectional(&mut tcp_stream, &mut upstream).await?;
         return Ok(());
     };
@@ -251,6 +256,7 @@ async fn forward_tcp_over_quic(
         &mut quic_send,
         &ServerFrame::OpenProxy {
             stream_id: Uuid::new_v4(),
+            protocol,
         },
     )
     .await?;
@@ -318,10 +324,13 @@ async fn connect_and_pump(
                 let frame: ServerFrame = serde_json::from_str(&line)
                     .context("failed to decode TCP reverse tunnel server frame")?;
                 match frame {
-                    ServerFrame::OpenProxy { stream_id } => {
+                    ServerFrame::OpenProxy {
+                        stream_id,
+                        protocol,
+                    } => {
                         let config = config.clone();
                         tokio::spawn(async move {
-                            if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id).await {
+                            if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id, protocol).await {
                                 warn!(error = %err, "TCP client proxy stream failed");
                             }
                         });
@@ -424,10 +433,13 @@ async fn connect_and_pump_tls_tcp(
             _ = shutdown.changed() => return Ok(()),
             maybe_line = read_optional_line(&mut reader) => {
                 let Some(line) = maybe_line? else { bail!("TLS/TCP server closed reverse tunnel"); };
-                let ServerFrame::OpenProxy { stream_id } = serde_json::from_str(&line)?;
+                let ServerFrame::OpenProxy {
+                    stream_id,
+                    protocol,
+                } = serde_json::from_str(&line)?;
                 let config = config.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id).await {
+                    if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id, protocol).await {
                         warn!(error = %err, "TLS/TCP client proxy stream failed");
                     }
                 });
@@ -484,6 +496,7 @@ async fn open_tcp_client_proxy_stream(
     config: &ReverseTunnelClientConfig,
     session_id: Uuid,
     stream_id: Uuid,
+    protocol: ProxyProtocol,
 ) -> Result<()> {
     if matches!(config.transport, TunnelTransport::Hybrid { .. }) {
         let timeout = config
@@ -500,7 +513,7 @@ async fn open_tcp_client_proxy_stream(
             },
         )
         .await?;
-        let mut local = TcpStream::connect(config.local_proxy_addr).await?;
+        let mut local = TcpStream::connect(config.local_proxy_addr_for(protocol)).await?;
         tokio::io::copy_bidirectional(&mut server, &mut local).await?;
         return Ok(());
     }
@@ -520,7 +533,7 @@ async fn open_tcp_client_proxy_stream(
         },
     )
     .await?;
-    let mut local = TcpStream::connect(config.local_proxy_addr).await?;
+    let mut local = TcpStream::connect(config.local_proxy_addr_for(protocol)).await?;
     tokio::io::copy_bidirectional(&mut server, &mut local).await?;
     Ok(())
 }
@@ -567,11 +580,12 @@ async fn connect_and_pump_quic(
     let _ = status.send(snapshot.clone());
     let mut sequence = snapshot.sent_heartbeats;
     let proxy_connection = connection.clone();
-    let local_proxy_addr = config.local_proxy_addr;
+    let proxy_config = config.clone();
     tokio::spawn(async move {
         while let Ok((send, recv)) = proxy_connection.accept_bi().await {
+            let proxy_config = proxy_config.clone();
             tokio::spawn(async move {
-                if let Err(err) = handle_client_proxy_stream(send, recv, local_proxy_addr).await {
+                if let Err(err) = handle_client_proxy_stream(send, recv, &proxy_config).await {
                     warn!(error = %err, "client proxy stream failed");
                 }
             });
@@ -706,12 +720,13 @@ fn quic_server_key(transport: &TunnelTransport) -> Result<PrivatePkcs8KeyDer<'st
 async fn handle_client_proxy_stream(
     quic_send: quinn::SendStream,
     quic_recv: quinn::RecvStream,
-    local_proxy_addr: SocketAddr,
+    config: &ReverseTunnelClientConfig,
 ) -> Result<()> {
     let mut reader = BufReader::new(quic_recv);
     let first = read_required_server_frame(&mut reader).await?;
     match first {
-        ServerFrame::OpenProxy { .. } => {
+        ServerFrame::OpenProxy { protocol, .. } => {
+            let local_proxy_addr = config.local_proxy_addr_for(protocol);
             debug!(local_proxy_addr = %local_proxy_addr, "opening phone-local proxy stream");
             let tcp_stream = TcpStream::connect(local_proxy_addr)
                 .await
@@ -1606,6 +1621,8 @@ mod tests {
             server_addr,
             tcp_fallback_addr: None,
             local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
+            local_socks5_addr: None,
+            local_http_addr: None,
             auth_token: "test-token".into(),
             transport: TunnelTransport::Tcp,
             connect_timeout: Duration::from_millis(100),
@@ -1631,6 +1648,8 @@ mod tests {
             server_addr,
             tcp_fallback_addr: None,
             local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
+            local_socks5_addr: None,
+            local_http_addr: None,
             auth_token: "test-token".into(),
             transport: TunnelTransport::Quic {
                 server_name: "localhost".into(),

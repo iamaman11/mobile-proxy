@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::{Instant, timeout_at};
 use uuid::Uuid;
 
-use crate::model::{ServerFrame, ServerSessionSnapshot};
+use crate::model::{ProxyProtocol, ServerFrame, ServerSessionSnapshot};
 
 const TCP_PROXY_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PENDING_TCP_STREAMS: usize = 256;
@@ -226,14 +226,16 @@ impl ReverseTunnelServerState {
             .select_active_target(node_id)
             .await
             .context("no unambiguous authenticated reverse tunnel is active")?;
-        self.open_tcp_proxy_for_target(&target).await
+        self.open_tcp_proxy_for_target(&target, ProxyProtocol::Mixed)
+            .await
     }
 
     pub(crate) async fn open_tcp_proxy_for_target(
         &self,
         target: &ActiveSessionTarget,
+        protocol: ProxyProtocol,
     ) -> Result<TcpStream> {
-        self.open_tcp_proxy_for_target_with_timeout(target, TCP_PROXY_STREAM_TIMEOUT)
+        self.open_tcp_proxy_for_target_with_timeout(target, protocol, TCP_PROXY_STREAM_TIMEOUT)
             .await
     }
 
@@ -247,13 +249,14 @@ impl ReverseTunnelServerState {
             .select_active_target(node_id)
             .await
             .context("no unambiguous authenticated reverse tunnel is active")?;
-        self.open_tcp_proxy_for_target_with_timeout(&target, wait)
+        self.open_tcp_proxy_for_target_with_timeout(&target, ProxyProtocol::Mixed, wait)
             .await
     }
 
     async fn open_tcp_proxy_for_target_with_timeout(
         &self,
         target: &ActiveSessionTarget,
+        protocol: ProxyProtocol,
         wait: Duration,
     ) -> Result<TcpStream> {
         let control = self
@@ -295,10 +298,16 @@ impl ReverseTunnelServerState {
             pending: self.pending_tcp.clone(),
         };
 
-        if timeout_at(deadline, control.send(ServerFrame::OpenProxy { stream_id }))
-            .await
-            .context("TCP reverse tunnel control send timed out")?
-            .is_err()
+        if timeout_at(
+            deadline,
+            control.send(ServerFrame::OpenProxy {
+                stream_id,
+                protocol,
+            }),
+        )
+        .await
+        .context("TCP reverse tunnel control send timed out")?
+        .is_err()
         {
             self.remove_tcp_control_for_authority(
                 &target.node_id,
@@ -1464,7 +1473,7 @@ mod tests {
 
     async fn open_stream_id(control: &mut mpsc::Receiver<ServerFrame>) -> Uuid {
         let frame = control.recv().await.expect("open request must be sent");
-        let ServerFrame::OpenProxy { stream_id } = frame;
+        let ServerFrame::OpenProxy { stream_id, .. } = frame;
         stream_id
     }
 

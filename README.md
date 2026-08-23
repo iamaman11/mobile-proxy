@@ -32,7 +32,7 @@ The relay preserves:
 - explicit stock WireGuard rollback;
 - app-owned WireGuard compatibility path.
 
-All public proxy paths require authentication. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
+All public proxy paths require authentication. The reverse-tunnel control frame carries the selected proxy protocol, so SOCKS5 streams terminate at the phone's dedicated `1081` inbound and HTTP/CONNECT streams at `3128`; the mixed public port is detected before forwarding. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
 
 ## Repository layout
 

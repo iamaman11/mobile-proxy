@@ -66,6 +66,8 @@ async fn hybrid_client_falls_back_to_tls_tcp_and_forwards_proxy_bytes() {
         server_addr: blocked_quic_addr,
         tcp_fallback_addr: Some(tls_addr),
         local_proxy_addr: phone_proxy_addr,
+        local_socks5_addr: None,
+        local_http_addr: None,
         auth_token: "test-token".into(),
         transport: TunnelTransport::Hybrid {
             server_name: "localhost".into(),

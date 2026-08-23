@@ -81,6 +81,8 @@ struct FileReverseTunnelConfig {
     server_addr: Option<String>,
     tcp_fallback_addr: Option<String>,
     local_proxy_addr: Option<String>,
+    local_socks5_addr: Option<String>,
+    local_http_addr: Option<String>,
     server_name: Option<String>,
     server_cert_der_b64: Option<String>,
     auth_token: Option<String>,
@@ -430,6 +432,22 @@ fn reverse_tunnel_config(
     if !local_proxy_addr.ip().is_loopback() {
         bail!("reverse_tunnel.local_proxy_addr must be loopback")
     }
+    let parse_optional_loopback = |name: &str, value: Option<&str>| -> Result<Option<SocketAddr>> {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let address: SocketAddr = value
+            .parse()
+            .with_context(|| format!("reverse_tunnel.{name} is invalid"))?;
+        if !address.ip().is_loopback() {
+            bail!("reverse_tunnel.{name} must be loopback")
+        }
+        Ok(Some(address))
+    };
+    let local_socks5_addr =
+        parse_optional_loopback("local_socks5_addr", config.local_socks5_addr.as_deref())?;
+    let local_http_addr =
+        parse_optional_loopback("local_http_addr", config.local_http_addr.as_deref())?;
     let auth_token = config
         .auth_token
         .clone()
@@ -477,6 +495,8 @@ fn reverse_tunnel_config(
         server_addr,
         tcp_fallback_addr: Some(tcp_fallback_addr),
         local_proxy_addr,
+        local_socks5_addr,
+        local_http_addr,
         auth_token,
         transport: TunnelTransport::Hybrid {
             server_name,
@@ -624,6 +644,8 @@ mod tests {
                 "server_addr": "127.0.0.1:18090",
                 "tcp_fallback_addr": "127.0.0.1:443",
                 "local_proxy_addr": "127.0.0.1:1080",
+                "local_socks5_addr": "127.0.0.1:1081",
+                "local_http_addr": "127.0.0.1:3128",
                 "server_name": "mobile-proxy-relay",
                 "server_cert_der_b64": "MAA=",
                 "auth_token": "reverse-token-00000000000000000000000001",
@@ -664,7 +686,15 @@ mod tests {
             loaded.runtime_state.health.tunnel_owner.as_deref(),
             Some("first_party_reverse_tunnel")
         );
-        assert!(loaded.reverse_tunnel.is_some());
+        let reverse_tunnel = loaded.reverse_tunnel.as_ref().unwrap();
+        assert_eq!(
+            reverse_tunnel.local_socks5_addr,
+            Some("127.0.0.1:1081".parse().unwrap())
+        );
+        assert_eq!(
+            reverse_tunnel.local_http_addr,
+            Some("127.0.0.1:3128".parse().unwrap())
+        );
         assert!(
             loaded
                 .runtime_state
