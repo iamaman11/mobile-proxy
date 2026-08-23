@@ -20,7 +20,16 @@ use tracing::info;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
-    let auth = AuthConfig::new(cli.admin_token, cli.device_token, cli.ui_token)?;
+    let auth = match cli.rotation_token {
+        Some(rotation_token) => AuthConfig::new_with_rotation(
+            cli.admin_token,
+            cli.device_token,
+            cli.ui_token,
+            rotation_token,
+            true,
+        )?,
+        None => AuthConfig::new(cli.admin_token, cli.device_token, cli.ui_token)?,
+    };
     let state_path = cli.state_path.clone();
     let app = router(AppState::load(cli.state_path).await?, auth).merge(health_router(state_path));
     let listener = TcpListener::bind(&cli.listen).await?;

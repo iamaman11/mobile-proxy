@@ -159,21 +159,29 @@ The VM hosts the control plane, reverse-tunnel server, readiness gate, authentic
 
 ## Rotate cellular identity
 
-For normal remote operation, send the command through the VM control plane. This path does not
-use ADB and waits until the phone reports a different public IP and healthy proxy service:
+For agents and remote operators, install `scripts/mobile-proxy-ip` on `PATH` and provision the
+mode-`600` client config shown in `deploy/client/mobile-proxy-ip.env.example` once. Rotation is then
+one command, uses no ADB, and does not expose admin or UI credentials:
 
 ```bash
-MOBILE_PROXY_UI_TOKEN='<ui token>' \
-MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64='<pinned certificate>' \
-cargo run --release -p operator-cli -- rotate-server
+mobile-proxy-ip
 ```
 
-For agents and programs, select JSON output. The result contains `old_ip`, `new_ip`, elapsed time,
-readiness and both local and public serving state:
+On the operator host, the wrapper automatically consumes the existing `mobile-proxy.rotation-token`
+and certificate records from Secret Vault, so no plaintext client config is created.
+
+For programs, select JSON output. Exit code zero means the IP changed and the public proxy plus
+fresh reverse tunnel recovered. The result contains `old_ip`, `new_ip`, elapsed time, readiness and
+both local and public serving state:
 
 ```bash
-cargo run --release -p operator-cli -- rotate-server --format json
+mobile-proxy-ip --format json
 ```
+
+The client talks only to `/api/v1/rotation/devices/{id}` with a dedicated rotation token. It
+generates an idempotency key, safely retries transient command submission, waits for the server and
+requires a different IP, healthy readiness, public serving and a fresh reverse tunnel before
+reporting success. The legacy `rotate-server` CLI name remains available for compatibility.
 
 The older `rotate` command below targets the phone-local operator API and is intended for device
 maintenance and diagnostics:

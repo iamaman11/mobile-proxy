@@ -21,6 +21,8 @@ pub enum Command {
     Metrics,
     Proxy,
     Rotate(RotateArgs),
+    /// Change the mobile public IP through the server and wait for proxy recovery.
+    Ip(RotateServerArgs),
     /// Rotate the mobile IP through the remote control plane (no ADB required).
     RotateServer(RotateServerArgs),
     AirplaneStudy(AirplaneStudyArgs),
@@ -143,8 +145,8 @@ pub struct RotateServerArgs {
         hide_env_values = true
     )]
     pub control_plane_cert_der_b64: String,
-    #[arg(long, env = "MOBILE_PROXY_UI_TOKEN", hide_env_values = true)]
-    pub ui_token: String,
+    #[arg(long, env = "MOBILE_PROXY_ROTATION_TOKEN", hide_env_values = true)]
+    pub rotation_token: String,
     #[arg(long, default_value = "b4a6b2f4-5f6f-4fd1-baa4-b7d241b49a06")]
     pub device_id: String,
     #[arg(long, default_value_t = 240)]
@@ -314,15 +316,15 @@ mod tests {
     fn server_rotation_is_an_explicit_remote_surface() {
         let cli = Cli::try_parse_from([
             "operator-cli",
-            "rotate-server",
+            "ip",
             "--control-plane-cert-der-b64",
             "certificate",
-            "--ui-token",
+            "--rotation-token",
             "token",
         ])
         .unwrap();
-        let Command::RotateServer(args) = cli.command else {
-            panic!("rotate-server command must parse");
+        let Command::Ip(args) = cli.command else {
+            panic!("ip command must parse");
         };
         assert_eq!(args.format, StatusFormat::Summary);
         assert_eq!(args.timeout_secs, 240);

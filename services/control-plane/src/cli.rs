@@ -15,6 +15,8 @@ pub struct Cli {
     pub device_token: String,
     #[arg(long, env = "CONTROL_PLANE_UI_TOKEN", hide_env_values = true)]
     pub ui_token: String,
+    #[arg(long, env = "CONTROL_PLANE_ROTATION_TOKEN", hide_env_values = true)]
+    pub rotation_token: Option<String>,
     #[arg(
         long,
         env = "CONTROL_PLANE_STATE_PATH",
