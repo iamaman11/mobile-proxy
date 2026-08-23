@@ -21,8 +21,11 @@ const MAX_PENDING_TCP_STREAMS: usize = 256;
 // A fixed per-device ceiling prevents one unavailable phone from monopolizing
 // the global reserve-tunnel budget while still allowing a bounded burst.
 const MAX_PENDING_TCP_STREAMS_PER_NODE: usize = 32;
-const MAX_RESERVED_TCP_STREAMS_PER_NODE: usize = 16;
-const TCP_RESERVED_STREAM_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const MAX_RESERVED_TCP_STREAMS_PER_NODE: usize = 32;
+// A changed carrier can take several seconds to replenish a pinned TLS stream.
+// Prefer bounded backpressure over immediately falling back to another cold
+// cellular handshake after a short burst consumes the idle reserve.
+const TCP_RESERVED_STREAM_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 // Session selection tolerates multiple missed heartbeats while remaining bounded.
 // Freshness is checked lazily on every routing/acceptance decision; no sweeper is spawned.
 const DEFAULT_SESSION_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -1132,6 +1135,38 @@ mod tests {
             ServerFrame::OpenProxy { .. }
         ));
         drop(delivered);
+    }
+
+    #[tokio::test]
+    async fn reserved_stream_capacity_matches_the_cellular_burst_budget() {
+        let state = ReverseTunnelServerState::default();
+        let session_id = Uuid::new_v4();
+        let _control = register_session(&state, "phone-a", session_id).await;
+        let mut peers = Vec::new();
+
+        for _ in 0..MAX_RESERVED_TCP_STREAMS_PER_NODE {
+            let (reserved, peer) = tcp_pair().await;
+            state
+                .register_reserved_tcp_stream("phone-a", session_id, reserved)
+                .await
+                .expect("the configured reserve budget must be accepted");
+            peers.push(peer);
+        }
+
+        let (overflow, _peer) = tcp_pair().await;
+        assert_eq!(
+            state
+                .register_reserved_tcp_stream("phone-a", session_id, overflow)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "reserved TCP stream capacity reached"
+        );
+        assert_eq!(
+            state.reserved_tcp.lock().await["phone-a"].len(),
+            MAX_RESERVED_TCP_STREAMS_PER_NODE
+        );
+        drop(peers);
     }
 
     #[tokio::test]

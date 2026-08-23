@@ -14,6 +14,7 @@ on:
       - completed
 
 permissions:
+  actions: write
   contents: write
   id-token: write
   attestations: write
@@ -180,3 +181,17 @@ jobs:
             release/SHA256SUMS
             release/release-manifest.json
             release/provenance.json
+      - name: Dispatch immutable production deployment
+        if: steps.tag.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run deploy-production.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$RELEASE_TAG" \
+            -f release_tag="$RELEASE_TAG" \
+            -f deploy_vm=true \
+            -f deploy_device=true
