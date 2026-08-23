@@ -19,8 +19,29 @@ concurrency:
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
 
 jobs:
+  classify:
+    name: Change scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+    steps:
+      - name: Check out comparison history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: scope
+        run: |
+          python3 scripts/classify_changes.py \
+            --base "$BASE_SHA" \
+            --head "$CANDIDATE_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
   policy:
     name: Architecture and policy
     runs-on: ubuntu-latest
@@ -40,6 +61,8 @@ jobs:
 
   rust:
     name: Rust workspace
+    needs: classify
+    if: needs.classify.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -69,6 +92,8 @@ jobs:
 
   supply-chain:
     name: Supply chain
+    needs: classify
+    if: needs.classify.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -83,6 +108,8 @@ jobs:
 
   android:
     name: Android application
+    needs: classify
+    if: needs.classify.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -111,6 +138,7 @@ jobs:
     name: Quality Gate
     if: always()
     needs:
+      - classify
       - policy
       - rust
       - supply-chain
@@ -128,14 +156,23 @@ jobs:
           RUST_RESULT: ${{ needs.rust.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           ANDROID_RESULT: ${{ needs.android.result }}
+          CODE_CHANGE: ${{ needs.classify.outputs.code }}
         run: |
-          python3 scripts/write_ci_summary.py \
-            --output quality-summary.json \
-            --sha "$CANDIDATE_SHA" \
-            --check "policy=$POLICY_RESULT" \
-            --check "rust=$RUST_RESULT" \
-            --check "supply_chain=$SUPPLY_CHAIN_RESULT" \
-            --check "android=$ANDROID_RESULT"
+          if [[ "$CODE_CHANGE" == true ]]; then
+            python3 scripts/write_ci_summary.py \
+              --output quality-summary.json \
+              --sha "$CANDIDATE_SHA" \
+              --check "policy=$POLICY_RESULT" \
+              --check "rust=$RUST_RESULT" \
+              --check "supply_chain=$SUPPLY_CHAIN_RESULT" \
+              --check "android=$ANDROID_RESULT"
+          else
+            python3 scripts/write_ci_summary.py \
+              --output quality-summary.json \
+              --sha "$CANDIDATE_SHA" \
+              --check "policy=$POLICY_RESULT" \
+              --check documentation_scope=success
+          fi
           python3 scripts/repository_context.py --format markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Upload bounded quality evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -150,8 +187,15 @@ jobs:
           RUST_RESULT: ${{ needs.rust.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           ANDROID_RESULT: ${{ needs.android.result }}
+          CODE_CHANGE: ${{ needs.classify.outputs.code }}
         run: |
           test "$POLICY_RESULT" = success
-          test "$RUST_RESULT" = success
-          test "$SUPPLY_CHAIN_RESULT" = success
-          test "$ANDROID_RESULT" = success
+          if [[ "$CODE_CHANGE" == true ]]; then
+            test "$RUST_RESULT" = success
+            test "$SUPPLY_CHAIN_RESULT" = success
+            test "$ANDROID_RESULT" = success
+          else
+            test "$RUST_RESULT" = skipped
+            test "$SUPPLY_CHAIN_RESULT" = skipped
+            test "$ANDROID_RESULT" = skipped
+          fi

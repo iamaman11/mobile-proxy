@@ -36,6 +36,9 @@ For code or release changes:
 
     scripts/quality-gate.sh
 
-GitHub has one aggregate required check named Quality Gate. Read its small quality-summary artifact before inspecting individual logs. Open detailed logs only for failed checks.
+GitHub has one aggregate required check named Quality Gate. Markdown-only changes run the
+policy gate; every other path runs policy, Rust, supply-chain and Android jobs. Read the small
+quality-summary artifact before inspecting individual logs. Open detailed logs only for failed
+checks.
 
 Live phone or VM mutation is allowed only when the task calls for deployment or live acceptance. Record the tag, SHA, release ID and bounded pass/fail evidence; do not commit credentials or large logs.

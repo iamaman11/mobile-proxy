@@ -20,7 +20,9 @@ The release ID installed on the VM and phone is git- followed by the first 12 ch
 
 Create a ruleset for main:
 
-- require a pull request and one approval;
+- require a pull request;
+- while there is only one maintainer, require zero approvals so the repository remains operable;
+- as soon as a second maintainer is added, require one approval and code-owner review for critical paths;
 - require conversation resolution;
 - require the Quality Gate status check;
 - require branches to be current before merge;
@@ -89,7 +91,8 @@ Rollback always names an already published tag or an already installed release I
 ## Token and time economy
 
 - AGENTS.md and repository_context.py replace repeated whole-repository discovery.
-- The single Quality Gate replaces duplicate full test workflows.
+- The single Quality Gate replaces duplicate full test workflows and skips Rust, Android and
+  supply-chain builds for Markdown-only diffs.
 - Parallel policy, Rust, supply-chain and Android jobs shorten feedback.
 - Success is summarized in a tiny JSON artifact; detailed logs remain server-side and are read only on failure.
 - Release manifests and deployment SHAs remove repeated questions about what version is running.
