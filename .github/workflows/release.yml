@@ -21,7 +21,8 @@ jobs:
     name: Publish verified tag
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -32,21 +33,22 @@ jobs:
           fetch-depth: 0
       - name: Select the unique semantic version tag
         id: tag
+        env:
+          VERIFIED_TAG: ${{ github.event.workflow_run.head_branch }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t tags < <(git tag --points-at HEAD --list 'v[0-9]*')
-          if [[ ${#tags[@]} -eq 0 ]]; then
-            echo 'eligible=false' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          [[ "$VERIFIED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(git cat-file -t "refs/tags/$VERIFIED_TAG")" = tag
+          test "$(git rev-list -n 1 "$VERIFIED_TAG")" = "$VERIFIED_SHA"
+          mapfile -t tags < <(git tag --points-at "$VERIFIED_SHA" --list 'v[0-9]*')
           test ${#tags[@]} -eq 1
-          tag="${tags[0]}"
-          test "$(git cat-file -t "refs/tags/$tag")" = tag
+          test "${tags[0]}" = "$VERIFIED_TAG"
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          test "$tag" = "v$version"
+          test "$VERIFIED_TAG" = "v$version"
           echo 'eligible=true' >> "$GITHUB_OUTPUT"
-          echo "name=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=$VERIFIED_TAG" >> "$GITHUB_OUTPUT"
       - name: Install pinned Rust toolchain
         if: steps.tag.outputs.eligible == 'true'
         run: rustup show active-toolchain
