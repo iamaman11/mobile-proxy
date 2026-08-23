@@ -17,6 +17,7 @@ use tokio::time::sleep;
 pub(crate) const PRIMARY_TUNNEL_OWNER: &str = "first_party_reverse_tunnel";
 pub(crate) const STOCK_WIREGUARD_OWNER: &str = "stock_wireguard_bridge";
 pub(crate) const APP_OWNED_TUNNEL_OWNER: &str = "first_party_vpn_service";
+pub(crate) const ANDROID_EGRESS_TUNNEL_OWNER: &str = "first_party_android_egress";
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 const APP_OWNED_TUNNEL_PACKAGE: &str = "com.example.mobileproxy";
 const APP_OWNED_TUNNEL_DISABLED_REASON: &str = "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime";
@@ -71,10 +72,10 @@ pub(crate) fn release_root(output_dir: &str, release_id: &str) -> Result<PathBuf
 
 pub(crate) fn validate_tunnel_owner(value: &str) -> Result<()> {
     match value {
-        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER => Ok(()),
+        PRIMARY_TUNNEL_OWNER | STOCK_WIREGUARD_OWNER | ANDROID_EGRESS_TUNNEL_OWNER => Ok(()),
         APP_OWNED_TUNNEL_OWNER => bail!("{APP_OWNED_TUNNEL_DISABLED_REASON}"),
         other => bail!(
-            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER} or {STOCK_WIREGUARD_OWNER}"
+            "unsupported tunnel owner {other}; expected {PRIMARY_TUNNEL_OWNER}, {ANDROID_EGRESS_TUNNEL_OWNER}, or {STOCK_WIREGUARD_OWNER}"
         ),
     }
 }
@@ -130,17 +131,23 @@ pub(crate) fn adb(device_serial: Option<&str>, args: &[&str]) -> Result<String> 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn adb_bytes(device_serial: Option<&str>, args: &[&str]) -> Result<Vec<u8>> {
-    Ok(adb_output(device_serial, args)?.stdout)
-}
-
 fn adb_output(device_serial: Option<&str>, args: &[&str]) -> Result<Output> {
     let adb_path = detect_adb()?;
     let mut command = Command::new(&adb_path);
     if let Some(serial) = device_serial {
         command.arg("-s").arg(serial);
     }
-    command.args(args);
+    if adb_path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+        && args.first() == Some(&"push")
+        && args.len() >= 3
+    {
+        let local_path = windows_path_for_adb(args[1])?;
+        command.arg("push").arg(local_path).args(&args[2..]);
+    } else {
+        command.args(args);
+    }
     let output = command
         .output()
         .with_context(|| format!("failed to start adb at {}", adb_path.display()))?;
@@ -152,6 +159,24 @@ fn adb_output(device_serial: Option<&str>, args: &[&str]) -> Result<Output> {
             String::from_utf8_lossy(&output.stderr).trim()
         )
     }
+}
+
+fn windows_path_for_adb(path: &str) -> Result<String> {
+    let output = Command::new("wslpath")
+        .args(["-w", path])
+        .output()
+        .context("failed to start wslpath for Windows adb")?;
+    if !output.status.success() {
+        bail!(
+            "wslpath failed for Windows adb: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    }
+    let translated = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if translated.is_empty() {
+        bail!("wslpath returned an empty path for Windows adb")
+    }
+    Ok(translated)
 }
 
 pub(crate) fn write_temp_script(stem: &str, body: &str) -> Result<PathBuf> {
@@ -189,13 +214,27 @@ pub(crate) fn verify_installed_release_files(
             .as_str()
             .context("release integrity path is invalid")?;
         validate_relative_release_path(relative)?;
-        let local = fs::read(root.join(relative))
-            .with_context(|| format!("failed to read packaged release file {relative}"))?;
+        let local_path = root.join(relative);
+        let local = local_path
+            .to_str()
+            .context("packaged release path is not UTF-8")?;
         let remote = format!("{}/current/{}", device_root.trim_end_matches('/'), relative);
-        let deployed = adb_bytes(device_serial, &["exec-out", "su", "0", "cat", &remote])?;
-        if local != deployed {
-            bail!("deployed device release file differs: {relative}")
-        }
+        let staged = format!(
+            "/data/local/tmp/mobile-proxy-verify-{}-{}",
+            std::process::id(),
+            relative.replace('/', "_")
+        );
+        adb(device_serial, &["push", local, &staged])?;
+        let compare = format!("chmod 0600 {staged} && cmp -s -- {staged} {remote}");
+        // Windows adb joins `shell` arguments without preserving the final
+        // command boundary. Send one remote argument so operators running
+        // from WSL execute the complete comparison under Magisk root.
+        let root_compare = format!("su -c '{compare}'");
+        let result = adb(device_serial, &["shell", &root_compare]);
+        let root_cleanup = format!("su -c 'rm -f {staged}'");
+        let cleanup = adb(device_serial, &["shell", &root_cleanup]);
+        cleanup.context("failed to remove staged release verification file")?;
+        result.with_context(|| format!("deployed device release file differs: {relative}"))?;
     }
     Ok(())
 }
@@ -355,7 +394,7 @@ pub(crate) fn assert_active_vpn_owner(
     let connectivity_dump = adb(device_serial, &["shell", "dumpsys", "connectivity"])?;
     let active_vpn_owner_uid = parse_active_vpn_owner_uid(&connectivity_dump);
     match required_tunnel_owner {
-        PRIMARY_TUNNEL_OWNER => {
+        PRIMARY_TUNNEL_OWNER | ANDROID_EGRESS_TUNNEL_OWNER => {
             if let Some(actual_owner_uid) = active_vpn_owner_uid {
                 bail!(
                     "native reverse tunnel requires no active Android VPN, but owner uid {} is active",

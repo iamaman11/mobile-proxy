@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+client_config_path="${MOBILE_PROXY_CLIENT_ENV:-${XDG_CONFIG_HOME:-${HOME}/.config}/mobile-proxy/client.env}"
+if [[ -f "${client_config_path}" ]]; then
+  config_owner="$(stat -c '%u' "${client_config_path}")"
+  config_mode="$(stat -c '%a' "${client_config_path}")"
+  if [[ "${config_owner}" != "$(id -u)" ]] || (( (8#${config_mode} & 077) != 0 )); then
+    echo "Refusing insecure client config: ${client_config_path} must be owned by the current user and mode 600" >&2
+    exit 78
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  source "${client_config_path}"
+  set +a
+fi
+
+operator_binary="${MOBILE_PROXY_OPERATOR_CLI:-}"
+if [[ -z "${operator_binary}" ]]; then
+  if command -v operator-cli >/dev/null 2>&1; then
+    operator_binary="$(command -v operator-cli)"
+  else
+    script_path="$(readlink -f "${BASH_SOURCE[0]}")"
+    script_directory="$(cd "$(dirname "${script_path}")" && pwd)"
+    operator_binary="${script_directory}/../target/release/operator-cli"
+  fi
+fi
+if [[ ! -x "${operator_binary}" ]]; then
+  echo "operator-cli not found; set MOBILE_PROXY_OPERATOR_CLI or install the release binary" >&2
+  exit 69
+fi
+
+secret_vault_binary="${MOBILE_PROXY_SECRET_VAULT:-/home/bose/projects/secret-vault/bin/secret-vault}"
+direct_env=(env
+  -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY
+  -u http_proxy -u https_proxy -u all_proxy -u no_proxy)
+if [[ -z "${MOBILE_PROXY_ROTATION_TOKEN:-}" || -z "${MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64:-}" ]]; then
+  if [[ -x "${secret_vault_binary}" ]]; then
+    exec "${secret_vault_binary}" run mobile-proxy.rotation-token MOBILE_PROXY_ROTATION_TOKEN -- \
+      "${secret_vault_binary}" run mobile-proxy.reverse-tunnel-cert-der-b64 \
+      MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64 -- "${direct_env[@]}" "${operator_binary}" ip "$@"
+  fi
+  echo "Missing rotation client credentials; provision ${client_config_path} or configure the secret vault" >&2
+  exit 78
+fi
+
+exec "${direct_env[@]}" "${operator_binary}" ip "$@"

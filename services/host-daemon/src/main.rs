@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         admin_token: loaded.admin_token,
         ui_control_token: loaded.ui_control_token,
+        control_plane_sync: loaded.control_plane_sync.clone(),
         runtime,
     };
 

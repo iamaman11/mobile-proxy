@@ -20,6 +20,18 @@ use uuid::Uuid;
 use crate::model::*;
 use crate::state::{ActiveSessionTarget, ReverseTunnelServerState, SessionAuthority};
 
+// A data connection that completes TLS but never sends its authenticated
+// reverse-tunnel preface must not consume a server task indefinitely. This is
+// especially important behind a TLS stream terminator, where a partial or
+// non-tunnel client otherwise looks indistinguishable from a stalled phone.
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+// A1 BY can require more than two seconds for an additional cellular TLS
+// handshake. Keep the control-plane failover fast, but allow each transport
+// phase to complete within the server's bounded twelve-second pending window.
+const TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR: Duration = Duration::from_secs(4);
+const TCP_RESERVED_STREAM_WORKERS: usize = 8;
+const TCP_RESERVED_STREAM_RETRY_DELAY: Duration = Duration::from_millis(100);
+
 pub async fn run_client(
     config: ReverseTunnelClientConfig,
     shutdown: watch::Receiver<bool>,
@@ -111,7 +123,7 @@ pub async fn run_server(
                 let config = config.clone();
                 tokio::spawn(async move {
                     if let Err(err) = handle_server_connection(stream, config, state).await {
-                        warn!(error = %err, "TCP reverse tunnel control connection ended");
+                        warn!(error = %err, "TCP reverse tunnel connection ended");
                     }
                 });
             }
@@ -187,11 +199,12 @@ pub async fn run_quic_tcp_forward_listener(
                 let state = state.clone();
                 let target_node_id = target_node_id.clone();
                 tokio::spawn(async move {
+                    let response_protocol = resolve_proxy_protocol(&stream, protocol).await;
                     let Some(target) = state.select_active_target(target_node_id.as_deref()).await else {
-                        reject_unavailable(&mut stream, protocol).await;
+                        reject_unavailable(&mut stream, response_protocol).await;
                         return;
                     };
-                    if let Err(err) = forward_tcp_over_quic(stream, state, target).await {
+                    if let Err(err) = forward_tcp_over_quic(stream, state, target, protocol).await {
                         warn!(error = %err, "reverse tunnel TCP forward failed");
                     }
                 });
@@ -201,16 +214,6 @@ pub async fn run_quic_tcp_forward_listener(
 }
 
 async fn reject_unavailable(stream: &mut TcpStream, protocol: ProxyProtocol) {
-    let protocol = match protocol {
-        ProxyProtocol::Mixed => {
-            let mut first = [0_u8; 1];
-            match timeout(Duration::from_millis(500), stream.peek(&mut first)).await {
-                Ok(Ok(1)) if first[0] == 5 => ProxyProtocol::Socks5,
-                _ => ProxyProtocol::Http,
-            }
-        }
-        protocol => protocol,
-    };
     let response: &[u8] = match protocol {
         ProxyProtocol::Socks5 => &[5, 0xff],
         ProxyProtocol::Http | ProxyProtocol::Mixed => {
@@ -221,13 +224,27 @@ async fn reject_unavailable(stream: &mut TcpStream, protocol: ProxyProtocol) {
     let _ = stream.shutdown().await;
 }
 
+async fn resolve_proxy_protocol(stream: &TcpStream, protocol: ProxyProtocol) -> ProxyProtocol {
+    match protocol {
+        ProxyProtocol::Mixed => {
+            let mut first = [0_u8; 1];
+            match timeout(Duration::from_millis(500), stream.peek(&mut first)).await {
+                Ok(Ok(1)) if first[0] == 5 => ProxyProtocol::Socks5,
+                _ => ProxyProtocol::Http,
+            }
+        }
+        protocol => protocol,
+    }
+}
+
 async fn forward_tcp_over_quic(
     mut tcp_stream: TcpStream,
     state: ReverseTunnelServerState,
     target: ActiveSessionTarget,
+    protocol: ProxyProtocol,
 ) -> Result<()> {
     let Some(connection) = state.active_connection_for_target(&target).await else {
-        let mut upstream = state.open_tcp_proxy_for_target(&target).await?;
+        let mut upstream = state.open_tcp_proxy_for_target(&target, protocol).await?;
         tokio::io::copy_bidirectional(&mut tcp_stream, &mut upstream).await?;
         return Ok(());
     };
@@ -240,6 +257,7 @@ async fn forward_tcp_over_quic(
         &mut quic_send,
         &ServerFrame::OpenProxy {
             stream_id: Uuid::new_v4(),
+            protocol,
         },
     )
     .await?;
@@ -258,6 +276,9 @@ async fn connect_and_pump(
         return connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await;
     }
     if matches!(config.transport, TunnelTransport::Hybrid { .. }) {
+        if !config.quic_enabled {
+            return connect_and_pump_tls_tcp(config, session_id, shutdown, snapshot, status).await;
+        }
         match connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await {
             Ok(()) => return Ok(()),
             Err(error) => {
@@ -307,10 +328,13 @@ async fn connect_and_pump(
                 let frame: ServerFrame = serde_json::from_str(&line)
                     .context("failed to decode TCP reverse tunnel server frame")?;
                 match frame {
-                    ServerFrame::OpenProxy { stream_id } => {
+                    ServerFrame::OpenProxy {
+                        stream_id,
+                        protocol,
+                    } => {
                         let config = config.clone();
                         tokio::spawn(async move {
-                            if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id).await {
+                            if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id, protocol).await {
                                 warn!(error = %err, "TCP client proxy stream failed");
                             }
                         });
@@ -406,6 +430,14 @@ async fn connect_and_pump_tls_tcp(
     .await?;
     mark_snapshot_connected(snapshot, TunnelActiveTransport::TlsTcp, true);
     let _ = status.send(snapshot.clone());
+    let mut reserved_workers = tokio::task::JoinSet::new();
+    for _ in 0..TCP_RESERVED_STREAM_WORKERS {
+        reserved_workers.spawn(run_tcp_reserved_stream_worker(
+            config.clone(),
+            session_id,
+            shutdown.clone(),
+        ));
+    }
     let mut sequence = snapshot.sent_heartbeats;
     loop {
         let deadline = Instant::now() + config.heartbeat_interval;
@@ -413,10 +445,13 @@ async fn connect_and_pump_tls_tcp(
             _ = shutdown.changed() => return Ok(()),
             maybe_line = read_optional_line(&mut reader) => {
                 let Some(line) = maybe_line? else { bail!("TLS/TCP server closed reverse tunnel"); };
-                let ServerFrame::OpenProxy { stream_id } = serde_json::from_str(&line)?;
+                let ServerFrame::OpenProxy {
+                    stream_id,
+                    protocol,
+                } = serde_json::from_str(&line)?;
                 let config = config.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id).await {
+                    if let Err(err) = open_tcp_client_proxy_stream(&config, session_id, stream_id, protocol).await {
                         warn!(error = %err, "TLS/TCP client proxy stream failed");
                     }
                 });
@@ -434,6 +469,13 @@ async fn connect_and_pump_tls_tcp(
 }
 
 async fn tls_tcp_connect(config: &ReverseTunnelClientConfig) -> Result<TlsStream<TcpStream>> {
+    tls_tcp_connect_with_timeout(config, config.connect_timeout).await
+}
+
+async fn tls_tcp_connect_with_timeout(
+    config: &ReverseTunnelClientConfig,
+    connect_timeout: Duration,
+) -> Result<TlsStream<TcpStream>> {
     let TunnelTransport::Hybrid {
         server_name,
         server_cert_der,
@@ -450,25 +492,101 @@ async fn tls_tcp_connect(config: &ReverseTunnelClientConfig) -> Result<TlsStream
     let connector = TlsConnector::from(Arc::new(tls));
     let name =
         ServerName::try_from(server_name.clone()).context("invalid TLS fallback server name")?;
-    let tcp = timeout(
-        config.connect_timeout,
-        TcpStream::connect(config.tcp_fallback_addr.unwrap_or(config.server_addr)),
-    )
-    .await
-    .context("TLS/TCP connect timed out")??;
-    timeout(config.connect_timeout, connector.connect(name, tcp))
+    let target = config.tcp_fallback_addr.unwrap_or(config.server_addr);
+    let tcp = timeout(connect_timeout, connect_transport_tcp(config, target))
+        .await
+        .context("TLS/TCP connect timed out")??;
+    timeout(connect_timeout, connector.connect(name, tcp))
         .await
         .context("TLS/TCP handshake timed out")?
         .context("TLS/TCP handshake failed")
+}
+
+async fn connect_transport_tcp(
+    config: &ReverseTunnelClientConfig,
+    target: SocketAddr,
+) -> Result<TcpStream> {
+    let Some(proxy) = &config.transport_socks5 else {
+        return TcpStream::connect(target)
+            .await
+            .context("TCP connect failed");
+    };
+    let mut stream = TcpStream::connect(proxy.server_addr)
+        .await
+        .context("transport SOCKS5 connect failed")?;
+    socks5_connect(&mut stream, target, &proxy.username, &proxy.password).await?;
+    Ok(stream)
+}
+
+async fn socks5_connect(
+    stream: &mut TcpStream,
+    target: SocketAddr,
+    username: &str,
+    password: &str,
+) -> Result<()> {
+    if username.is_empty() || username.len() > 255 || password.is_empty() || password.len() > 255 {
+        bail!("transport SOCKS5 credentials are invalid");
+    }
+    stream.write_all(&[5, 1, 2]).await?;
+    let mut response = [0_u8; 2];
+    stream.read_exact(&mut response).await?;
+    if response != [5, 2] {
+        bail!("transport SOCKS5 authentication method was rejected");
+    }
+    let mut auth = Vec::with_capacity(username.len() + password.len() + 3);
+    auth.extend_from_slice(&[1, username.len() as u8]);
+    auth.extend_from_slice(username.as_bytes());
+    auth.push(password.len() as u8);
+    auth.extend_from_slice(password.as_bytes());
+    stream.write_all(&auth).await?;
+    stream.read_exact(&mut response).await?;
+    if response != [1, 0] {
+        bail!("transport SOCKS5 authentication failed");
+    }
+    let mut request = vec![5, 1, 0];
+    match target.ip() {
+        std::net::IpAddr::V4(ip) => {
+            request.push(1);
+            request.extend_from_slice(&ip.octets());
+        }
+        std::net::IpAddr::V6(ip) => {
+            request.push(4);
+            request.extend_from_slice(&ip.octets());
+        }
+    }
+    request.extend_from_slice(&target.port().to_be_bytes());
+    stream.write_all(&request).await?;
+    let mut head = [0_u8; 4];
+    stream.read_exact(&mut head).await?;
+    if head[0] != 5 || head[1] != 0 {
+        bail!("transport SOCKS5 connection failed");
+    }
+    let address_len = match head[3] {
+        1 => 4,
+        4 => 16,
+        3 => {
+            let mut length = [0_u8; 1];
+            stream.read_exact(&mut length).await?;
+            usize::from(length[0])
+        }
+        _ => bail!("transport SOCKS5 returned an invalid address type"),
+    };
+    let mut remainder = vec![0_u8; address_len + 2];
+    stream.read_exact(&mut remainder).await?;
+    Ok(())
 }
 
 async fn open_tcp_client_proxy_stream(
     config: &ReverseTunnelClientConfig,
     session_id: Uuid,
     stream_id: Uuid,
+    protocol: ProxyProtocol,
 ) -> Result<()> {
     if matches!(config.transport, TunnelTransport::Hybrid { .. }) {
-        let mut server = tls_tcp_connect(config).await?;
+        let timeout = config
+            .connect_timeout
+            .max(TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR);
+        let mut server = tls_tcp_connect_with_timeout(config, timeout).await?;
         write_frame(
             &mut server,
             &ClientFrame::ProxyStream {
@@ -479,7 +597,7 @@ async fn open_tcp_client_proxy_stream(
             },
         )
         .await?;
-        let mut local = TcpStream::connect(config.local_proxy_addr).await?;
+        let mut local = TcpStream::connect(config.local_proxy_addr_for(protocol)).await?;
         tokio::io::copy_bidirectional(&mut server, &mut local).await?;
         return Ok(());
     }
@@ -499,8 +617,61 @@ async fn open_tcp_client_proxy_stream(
         },
     )
     .await?;
-    let mut local = TcpStream::connect(config.local_proxy_addr).await?;
+    let mut local = TcpStream::connect(config.local_proxy_addr_for(protocol)).await?;
     tokio::io::copy_bidirectional(&mut server, &mut local).await?;
+    Ok(())
+}
+
+async fn run_tcp_reserved_stream_worker(
+    config: ReverseTunnelClientConfig,
+    session_id: Uuid,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        if *shutdown.borrow() {
+            return;
+        }
+        let result = tokio::select! {
+            _ = shutdown.changed() => return,
+            result = open_tcp_reserved_stream(&config, session_id) => result,
+        };
+        if let Err(error) = result {
+            warn!(error = %error, "TLS/TCP reserved proxy stream ended");
+        }
+        tokio::select! {
+            _ = shutdown.changed() => return,
+            _ = sleep(TCP_RESERVED_STREAM_RETRY_DELAY) => {}
+        }
+    }
+}
+
+async fn open_tcp_reserved_stream(
+    config: &ReverseTunnelClientConfig,
+    session_id: Uuid,
+) -> Result<()> {
+    let timeout = config
+        .connect_timeout
+        .max(TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR);
+    let mut server = tls_tcp_connect_with_timeout(config, timeout).await?;
+    write_frame(
+        &mut server,
+        &ClientFrame::ProxyReserve {
+            node_id: config.node_id.clone(),
+            session_id,
+            auth_token: config.auth_token.clone(),
+        },
+    )
+    .await?;
+    let mut reader = BufReader::new(server);
+    let ServerFrame::OpenProxy { protocol, .. } = read_required_server_frame(&mut reader).await?;
+    let mut local = TcpStream::connect(config.local_proxy_addr_for(protocol)).await?;
+    // Keep the BufReader in the data path: the first read can contain both the
+    // JSON activation frame and early proxy bytes from the public client.
+    tokio::spawn(async move {
+        if let Err(error) = tokio::io::copy_bidirectional(&mut reader, &mut local).await {
+            warn!(error = %error, "TLS/TCP reserved proxy copy ended");
+        }
+    });
     Ok(())
 }
 
@@ -546,11 +717,12 @@ async fn connect_and_pump_quic(
     let _ = status.send(snapshot.clone());
     let mut sequence = snapshot.sent_heartbeats;
     let proxy_connection = connection.clone();
-    let local_proxy_addr = config.local_proxy_addr;
+    let proxy_config = config.clone();
     tokio::spawn(async move {
         while let Ok((send, recv)) = proxy_connection.accept_bi().await {
+            let proxy_config = proxy_config.clone();
             tokio::spawn(async move {
-                if let Err(err) = handle_client_proxy_stream(send, recv, local_proxy_addr).await {
+                if let Err(err) = handle_client_proxy_stream(send, recv, &proxy_config).await {
                     warn!(error = %err, "client proxy stream failed");
                 }
             });
@@ -566,6 +738,9 @@ async fn connect_and_pump_quic(
                 connection.close(0_u32.into(), b"shutdown");
                 endpoint.close(0_u32.into(), b"shutdown");
                 return Ok(());
+            }
+            closed = connection.closed() => {
+                return Err(anyhow::anyhow!("QUIC connection closed: {closed}"));
             }
             maybe_line = read_optional_line(&mut reader) => {
                 let line = maybe_line?;
@@ -599,12 +774,17 @@ async fn handle_quic_incoming(
 }
 
 async fn handle_quic_control_stream(
-    _send: quinn::SendStream,
+    send: quinn::SendStream,
     recv: quinn::RecvStream,
     connection: quinn::Connection,
     config: ReverseTunnelServerConfig,
     state: ReverseTunnelServerState,
 ) -> Result<()> {
+    // Keep the server half of the bidirectional control stream open for the
+    // lifetime of the session. Dropping it immediately sends FIN; the client
+    // then correctly treats the control channel as closed and tears down an
+    // otherwise authenticated QUIC connection.
+    let _control_send = send;
     let mut reader = BufReader::new(recv);
     let first = read_required_frame(&mut reader).await?;
     let ClientFrame::Hello(hello) = first else {
@@ -626,7 +806,11 @@ async fn handle_quic_control_stream(
             Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
                 mark_heartbeat(&state, &heartbeat, authority_id).await;
             }
-            Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
+            Ok(Some(
+                ClientFrame::Hello(_)
+                | ClientFrame::ProxyStream { .. }
+                | ClientFrame::ProxyReserve { .. },
+            )) => {
                 bail!("unexpected repeated hello on reverse tunnel session");
             }
             Ok(None) => {
@@ -680,12 +864,13 @@ fn quic_server_key(transport: &TunnelTransport) -> Result<PrivatePkcs8KeyDer<'st
 async fn handle_client_proxy_stream(
     quic_send: quinn::SendStream,
     quic_recv: quinn::RecvStream,
-    local_proxy_addr: SocketAddr,
+    config: &ReverseTunnelClientConfig,
 ) -> Result<()> {
     let mut reader = BufReader::new(quic_recv);
     let first = read_required_server_frame(&mut reader).await?;
     match first {
-        ServerFrame::OpenProxy { .. } => {
+        ServerFrame::OpenProxy { protocol, .. } => {
+            let local_proxy_addr = config.local_proxy_addr_for(protocol);
             debug!(local_proxy_addr = %local_proxy_addr, "opening phone-local proxy stream");
             let tcp_stream = TcpStream::connect(local_proxy_addr)
                 .await
@@ -741,7 +926,9 @@ async fn handle_server_connection(
     config: ReverseTunnelServerConfig,
     state: ReverseTunnelServerState,
 ) -> Result<()> {
-    let first = read_first_frame(&mut stream).await?;
+    let first = timeout(FIRST_FRAME_TIMEOUT, read_first_frame(&mut stream))
+        .await
+        .context("reverse tunnel first frame timed out")??;
     if let ClientFrame::ProxyStream {
         node_id,
         session_id,
@@ -754,6 +941,20 @@ async fn handle_server_connection(
         }
         state
             .accept_tcp_proxy_stream(&node_id, session_id, stream_id, stream)
+            .await?;
+        return Ok(());
+    }
+    if let ClientFrame::ProxyReserve {
+        node_id,
+        session_id,
+        auth_token,
+    } = first
+    {
+        if !bool::from(auth_token.as_bytes().ct_eq(config.auth_token.as_bytes())) {
+            bail!("reverse tunnel reserved stream authentication failed");
+        }
+        state
+            .register_reserved_tcp_stream(&node_id, session_id, stream)
             .await?;
         return Ok(());
     }
@@ -786,7 +987,11 @@ async fn handle_server_connection(
                 Ok(Some(ClientFrame::Heartbeat(heartbeat))) => {
                     mark_heartbeat(&state, &heartbeat, authority_id).await;
                 }
-                Ok(Some(ClientFrame::Hello(_) | ClientFrame::ProxyStream { .. })) => {
+                Ok(Some(
+                    ClientFrame::Hello(_)
+                    | ClientFrame::ProxyStream { .. }
+                    | ClientFrame::ProxyReserve { .. },
+                )) => {
                     break Err(anyhow::anyhow!(
                         "unexpected repeated hello on reverse tunnel session"
                     ));
@@ -965,7 +1170,7 @@ where
     Ok(())
 }
 
-async fn write_server_frame<W>(writer: &mut W, frame: &ServerFrame) -> Result<()>
+pub(crate) async fn write_server_frame<W>(writer: &mut W, frame: &ServerFrame) -> Result<()>
 where
     W: AsyncWrite + Unpin,
 {
@@ -1578,6 +1783,10 @@ mod tests {
             server_addr,
             tcp_fallback_addr: None,
             local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
+            local_socks5_addr: None,
+            local_http_addr: None,
+            quic_enabled: true,
+            transport_socks5: None,
             auth_token: "test-token".into(),
             transport: TunnelTransport::Tcp,
             connect_timeout: Duration::from_millis(100),
@@ -1603,6 +1812,10 @@ mod tests {
             server_addr,
             tcp_fallback_addr: None,
             local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
+            local_socks5_addr: None,
+            local_http_addr: None,
+            quic_enabled: true,
+            transport_socks5: None,
             auth_token: "test-token".into(),
             transport: TunnelTransport::Quic {
                 server_name: "localhost".into(),

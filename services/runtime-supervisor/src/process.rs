@@ -16,6 +16,8 @@ const STALE_RUNTIME_PATTERNS: &[&str] = &[
     "/data/adb/mobile-proxy-node/.*/bin/sing-box",
     "/data/adb/mobile-proxy-node/.*/service.sh --route-guard",
 ];
+const RUNTIME_LOG_DIR: &str = "/data/adb/mobile-proxy-node/logs";
+const ANDROID_EGRESS_MIXED_PROXY_MARKER: &str = "android-egress-mixed-proxy-v1";
 
 pub struct RuntimeChildren {
     host_daemon: Option<Child>,
@@ -34,7 +36,7 @@ impl RuntimeChildren {
         if child_exited(&mut self.proxy)? {
             warn!("proxy process exited; restarting");
             self.proxy = None;
-            if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel {
+            if uses_reverse_tunnel(config.tunnel_owner) {
                 restart_host_daemon_after_proxy_exit(&mut self.host_daemon);
             }
         }
@@ -61,7 +63,7 @@ impl RuntimeChildren {
             warn!("failed to stop proxy for configuration reload: {err:#}");
         }
         let _ = proxy.wait();
-        if config.tunnel_owner == TunnelOwner::FirstPartyReverseTunnel {
+        if uses_reverse_tunnel(config.tunnel_owner) {
             restart_host_daemon_after_proxy_exit(&mut self.host_daemon);
         }
     }
@@ -81,6 +83,9 @@ fn restart_host_daemon_after_proxy_exit(host_daemon: &mut Option<Child>) {
 }
 
 fn proxy_start_allowed(config: &SupervisorConfig) -> bool {
+    if config.tunnel_owner == TunnelOwner::FirstPartyAndroidEgress {
+        info!("{ANDROID_EGRESS_MIXED_PROXY_MARKER}");
+    }
     if !config.wireguard_enabled {
         return true;
     }
@@ -89,6 +94,13 @@ fn proxy_start_allowed(config: &SupervisorConfig) -> bool {
         warn!("wireguard is enabled but tun0 is absent; deferring proxy start");
     }
     ready
+}
+
+fn uses_reverse_tunnel(owner: TunnelOwner) -> bool {
+    matches!(
+        owner,
+        TunnelOwner::FirstPartyReverseTunnel | TunnelOwner::FirstPartyAndroidEgress
+    )
 }
 
 pub fn cleanup_stale_runtime_processes() {
@@ -110,7 +122,7 @@ fn child_exited(child: &mut Option<Child>) -> Result<bool> {
 
 fn spawn_host_daemon(config: &SupervisorConfig) -> Result<Child> {
     ensure_executable(&config.host_binary)?;
-    let stdout = append_log("/data/local/tmp/mobile-proxy-logs/host-daemon.log")?;
+    let stdout = append_log(&format!("{RUNTIME_LOG_DIR}/host-daemon.log"))?;
     let stderr = stdout
         .try_clone()
         .context("failed to clone host-daemon log")?;
@@ -128,7 +140,7 @@ fn spawn_host_daemon(config: &SupervisorConfig) -> Result<Child> {
 
 fn spawn_proxy(config: &SupervisorConfig) -> Result<Child> {
     ensure_executable(&config.proxy_binary)?;
-    let stdout = append_log("/data/local/tmp/mobile-proxy-logs/sing-box.log")?;
+    let stdout = append_log(&format!("{RUNTIME_LOG_DIR}/sing-box.log"))?;
     let stderr = stdout.try_clone().context("failed to clone sing-box log")?;
     let child = Command::new(&config.proxy_binary)
         .args(&config.proxy_args)
@@ -143,6 +155,23 @@ fn spawn_proxy(config: &SupervisorConfig) -> Result<Child> {
 }
 
 fn append_log(path: &str) -> Result<std::fs::File> {
+    if let Some(parent) = Path::new(path).parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create runtime log directory {}",
+                parent.display()
+            )
+        })?;
+        #[cfg(unix)]
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).with_context(
+            || {
+                format!(
+                    "failed to secure runtime log directory {}",
+                    parent.display()
+                )
+            },
+        )?;
+    }
     rotate_log(path, 5 * 1024 * 1024)?;
     let file = OpenOptions::new()
         .create(true)
@@ -214,10 +243,16 @@ fn terminate_stale_pids(pattern: &str, current_pid: u32, pids: &[u32]) {
 
 #[cfg(test)]
 mod tests {
-    use super::terminate_stale_pids;
+    use super::{terminate_stale_pids, uses_reverse_tunnel};
+    use crate::config::TunnelOwner;
 
     #[test]
     fn stale_termination_skips_current_pid() {
         terminate_stale_pids("test-pattern", std::process::id(), &[std::process::id()]);
+    }
+
+    #[test]
+    fn android_egress_runs_the_reverse_tunnel_proxy_chain() {
+        assert!(uses_reverse_tunnel(TunnelOwner::FirstPartyAndroidEgress));
     }
 }

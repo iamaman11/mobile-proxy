@@ -2,8 +2,13 @@
 /.run/
 /.secrets/
 /mobile-target-check/
+.DS_Store
+.idea/
+.vscode/
+gha-creds-*.json
 __pycache__/
 *.py[cod]
+.pytest_cache/
 /apps/android-app/.gradle/
 /apps/android-app/.kotlin/
 /apps/android-app/app/build/

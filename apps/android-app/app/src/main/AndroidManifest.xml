@@ -18,7 +18,8 @@
         android:theme="@style/Theme.MobileProxy">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -37,6 +38,16 @@
                 android:value="mobile proxy relay tunnel" />
         </service>
 
+        <service
+            android:name=".CellularEgressService"
+            android:exported="false"
+            android:directBootAware="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="authenticated cellular proxy data-plane" />
+        </service>
+
         <receiver
             android:name=".TunnelCommandReceiver"
             android:exported="false"
@@ -46,6 +57,9 @@
                 <action android:name="com.example.mobileproxy.action.SET_LOCAL_CONTROL_TOKEN" />
                 <action android:name="com.example.mobileproxy.action.START_TUNNEL" />
                 <action android:name="com.example.mobileproxy.action.STOP_TUNNEL" />
+                <action android:name="com.example.mobileproxy.action.SET_EGRESS_CONFIG" />
+                <action android:name="com.example.mobileproxy.action.START_CELLULAR_EGRESS" />
+                <action android:name="com.example.mobileproxy.action.STOP_CELLULAR_EGRESS" />
             </intent-filter>
         </receiver>
 

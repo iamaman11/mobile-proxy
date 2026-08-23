@@ -7,7 +7,11 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use proxy_core::{HealthRecord, JobRecord, ProxyRuntimeRecord, RotateRequest, RuntimeStatusRecord};
+use mobile_proxy_foundation::{DeadlineWindow, IdempotencyKey};
+use proxy_core::{
+    DesiredState, DeviceRecord, HealthRecord, IssueCommandRequest, JobRecord, ProxyRuntimeRecord,
+    RecoveryIntent, RotateRequest, RuntimeStatusRecord,
+};
 use reverse_tunnel::{
     TunnelActiveTransport, TunnelDisconnectReason, TunnelEventCounters, TunnelFailoverReason,
     TunnelTransportTransition,
@@ -16,8 +20,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::auth::{ApiError, authorize, authorize_ui};
-use crate::rotation::start_rotation;
 use crate::state::AppState;
+use crate::{control_plane, rotation::start_rotation};
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -56,13 +60,31 @@ async fn get_ui_status(
     headers: HeaderMap,
 ) -> Result<Json<UiStatus>, ApiError> {
     authorize_ui(&headers, state.ui_control_token.as_deref())?;
-    let runtime = state.runtime.lock().await;
+    let config = state.control_plane_sync.as_ref().ok_or_else(|| {
+        ApiError(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "VM control is not configured".into(),
+        )
+    })?;
+    let device_id = { state.runtime.lock().await.health.node_id.clone() };
+    let client = control_plane::client(config).map_err(vm_error)?;
+    let device: DeviceRecord = client
+        .get(format!("{}/api/v1/ui/devices/{device_id}", config.base_url))
+        .bearer_auth(&config.ui_token)
+        .send()
+        .await
+        .map_err(vm_error)?
+        .error_for_status()
+        .map_err(vm_error)?
+        .json()
+        .await
+        .map_err(vm_error)?;
     Ok(Json(UiStatus {
-        public_ip: runtime.health.last_public_ip.clone(),
-        readiness: runtime.health.readiness_state.clone(),
-        serving: runtime.health.serving,
-        tunnel_owner: runtime.health.tunnel_owner.clone(),
-        rotation_in_progress: runtime.current_job.is_some(),
+        public_ip: device.last_public_ip,
+        readiness: device.readiness_state,
+        serving: device.serving,
+        tunnel_owner: device.tunnel_owner,
+        rotation_in_progress: device.current_job.is_some(),
     }))
 }
 
@@ -71,10 +93,47 @@ async fn rotate_ip_from_ui(
     headers: HeaderMap,
 ) -> Result<Json<proxy_core::RotateAccepted>, ApiError> {
     authorize_ui(&headers, state.ui_control_token.as_deref())?;
-    let mut request = proxy_core::default_rotate_request();
-    request.reason = "android-ui".into();
-    let accepted = start_rotation(&state, request).await?;
-    Ok(Json(accepted))
+    let config = state.control_plane_sync.as_ref().ok_or_else(|| {
+        ApiError(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "VM control is not configured".into(),
+        )
+    })?;
+    let device_id = { state.runtime.lock().await.health.node_id.clone() };
+    let request = IssueCommandRequest {
+        desired_state: DesiredState::HealthyServing,
+        recovery_intent: RecoveryIntent::RotateRecovery,
+        deadline_secs: DeadlineWindow::new(240).expect("constant deadline is valid"),
+        idempotency_key: IdempotencyKey::parse(format!("android-ui-{}", Uuid::new_v4()))
+            .expect("generated idempotency key is valid"),
+    };
+    let client = control_plane::client(config).map_err(vm_error)?;
+    let command: proxy_core::DeviceCommand = client
+        .post(format!(
+            "{}/api/v1/ui/devices/{device_id}/commands",
+            config.base_url
+        ))
+        .bearer_auth(&config.ui_token)
+        .json(&request)
+        .send()
+        .await
+        .map_err(vm_error)?
+        .error_for_status()
+        .map_err(vm_error)?
+        .json()
+        .await
+        .map_err(vm_error)?;
+    Ok(Json(proxy_core::RotateAccepted {
+        job_id: command.command_id.as_uuid(),
+        accepted: true,
+    }))
+}
+
+fn vm_error(error: impl std::fmt::Display) -> ApiError {
+    ApiError(
+        axum::http::StatusCode::BAD_GATEWAY,
+        format!("VM control request failed: {error}"),
+    )
 }
 
 async fn get_ui_job(
@@ -473,6 +532,7 @@ mod tests {
         let state = AppState {
             admin_token: "admin-secret".into(),
             ui_control_token: Some("ui-control-secret".into()),
+            control_plane_sync: None,
             runtime: Arc::new(Mutex::new(RuntimeState::new(
                 test_health(),
                 false,

@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -9,6 +11,50 @@ use tokio::time::sleep;
 const STOCK_WIREGUARD_PACKAGE: &str = "com.wireguard.android";
 const STOCK_WIREGUARD_TUNNEL: &str = "WiGandroid";
 const APP_OWNED_PACKAGE: &str = "com.example.mobileproxy";
+const APP_EGRESS_FILES_DIR: &str = "/data/user_de/0/com.example.mobileproxy/files";
+pub fn provision_android_egress(port: u16, username: &str, password: &str) -> Result<()> {
+    let uid = package_uid(APP_OWNED_PACKAGE)?.context("Android egress package is not installed")?;
+    write_android_egress_config(uid, port, username, password)?;
+    run_as_uid(
+        uid,
+        "am start-foreground-service --user 0 -n com.example.mobileproxy/.CellularEgressService",
+    )?;
+    Ok(())
+}
+
+fn write_android_egress_config(uid: u32, port: u16, username: &str, password: &str) -> Result<()> {
+    if !(1024..=65535).contains(&port)
+        || username.is_empty()
+        || username.len() > 256
+        || password.len() < 16
+    {
+        bail!("Android egress configuration is invalid")
+    }
+    let directory = Path::new(APP_EGRESS_FILES_DIR);
+    fs::create_dir_all(directory)
+        .with_context(|| format!("failed to create {}", directory.display()))?;
+    let target = directory.join("cellular-egress.json");
+    let temporary = directory.join("cellular-egress.json.tmp");
+    let body = serde_json::to_vec(&serde_json::json!({
+        "port": port,
+        "username": username,
+        "password": password,
+    }))?;
+    fs::write(&temporary, body)
+        .with_context(|| format!("failed to write {}", temporary.display()))?;
+    #[cfg(unix)]
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+    run_command(
+        "chown",
+        &[
+            &format!("{uid}:{uid}"),
+            temporary.to_string_lossy().as_ref(),
+        ],
+    )?;
+    fs::rename(&temporary, &target)
+        .with_context(|| format!("failed to activate {}", target.display()))?;
+    Ok(())
+}
 
 pub async fn kick_stock_wireguard_bridge() {
     let _ = run_shell("settings put secure always_on_vpn_app com.wireguard.android");
@@ -47,7 +93,7 @@ pub fn push_local_ui_control_token(token: Option<&str>) -> Result<()> {
         bail!("local UI control token is invalid")
     }
     let Some(uid) = package_uid(APP_OWNED_PACKAGE)? else {
-        return Ok(());
+        bail!("Android app is not installed")
     };
     run_as_uid(
         uid,
@@ -95,6 +141,12 @@ pub fn ensure_cellular_default_route() -> Result<()> {
     args.extend(["dev", dev.as_str(), "table", "main"]);
     run_ip(&args).context("failed to replace main default route")?;
     Ok(())
+}
+
+pub fn cellular_interface() -> Result<String> {
+    cellular_route_hint()?
+        .map(|(device, _)| device)
+        .context("no cellular route hint found")
 }
 
 pub fn bootstrap_cellular_data() -> Result<()> {

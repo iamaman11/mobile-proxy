@@ -17,6 +17,7 @@ use serde_json::json;
 
 const ADMIN_TOKEN: &str = "process-admin-token";
 const DEVICE_TOKEN: &str = "process-device-token";
+const UI_TOKEN: &str = "process-ui-token";
 const DEVICE_ID: &str = "device-1";
 
 static NEXT_DIRECTORY_ID: AtomicU64 = AtomicU64::new(1);
@@ -65,6 +66,8 @@ impl Daemon {
             .arg(ADMIN_TOKEN)
             .arg("--device-token")
             .arg(DEVICE_TOKEN)
+            .arg("--ui-token")
+            .arg(UI_TOKEN)
             .arg("--state-path")
             .arg(state_path)
             .stdin(Stdio::null())
@@ -257,6 +260,8 @@ fn default_sqlite_startup_fails_closed_for_a_missing_database() {
         .arg(ADMIN_TOKEN)
         .arg("--device-token")
         .arg(DEVICE_TOKEN)
+        .arg("--ui-token")
+        .arg(UI_TOKEN)
         .arg("--state-path")
         .arg(&missing)
         .stdin(Stdio::null())
@@ -288,6 +293,8 @@ fn retired_state_backend_option_is_rejected_before_state_access() {
         .arg(ADMIN_TOKEN)
         .arg("--device-token")
         .arg(DEVICE_TOKEN)
+        .arg("--ui-token")
+        .arg(UI_TOKEN)
         .arg("--state-backend")
         .arg("json")
         .arg("--state-path")

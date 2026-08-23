@@ -68,8 +68,8 @@ REL={release}
 TMP={staging}
 BOOT='/data/adb/service.d/99-mobile-proxy-runtime.sh'
 TARGET="$ROOT/releases/$REL"
-mkdir -p "$ROOT/releases" "$ROOT/logs" /data/adb/service.d
-chmod 0700 "$ROOT" "$ROOT/releases" "$ROOT/logs"
+mkdir -p "$ROOT/releases" "$ROOT/logs" "$ROOT/state" /data/adb/service.d
+chmod 0700 "$ROOT" "$ROOT/releases" "$ROOT/logs" "$ROOT/state"
 if command -v pkill >/dev/null 2>&1; then
   pkill -f /data/local/tmp/mobile-proxy-logs/runtime-watchdog.sh || true
   pkill -f "$ROOT/.*/bin/runtime-supervisor" || true

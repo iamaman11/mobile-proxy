@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '05:00'
+      timezone: Europe/Minsk
+    open-pull-requests-limit: 5
+    groups:
+      rust-dependencies:
+        patterns:
+          - '*'
+
+  - package-ecosystem: gradle
+    directory: /apps/android-app
+    schedule:
+      interval: weekly
+      day: monday
+      time: '05:30'
+      timezone: Europe/Minsk
+    open-pull-requests-limit: 5
+    groups:
+      android-dependencies:
+        patterns:
+          - '*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Minsk
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - '*'

@@ -107,7 +107,7 @@ pub async fn reconcile_wireguard(config: &SupervisorConfig) {
                 warn!("first-party VPN tunnel kick failed: {error:#}");
             }
         }
-        TunnelOwner::FirstPartyReverseTunnel => {}
+        TunnelOwner::FirstPartyReverseTunnel | TunnelOwner::FirstPartyAndroidEgress => {}
     }
 }
 
@@ -138,11 +138,21 @@ pub async fn reconcile_health(
                     warn!("first-party VPN tunnel kick failed: {error:#}");
                 }
             }
-            TunnelOwner::FirstPartyReverseTunnel => {}
+            TunnelOwner::FirstPartyReverseTunnel | TunnelOwner::FirstPartyAndroidEgress => {}
         }
     }
 
     if health.cellular_route_ready != Some(false) {
+        // Android keeps cellular defaults in per-network policy tables. A
+        // root-owned direct proxy socket does not inherit an app UID's
+        // netd mark, so it needs a matching main-table default as well. The
+        // health projection can correctly observe a cellular policy route
+        // while that main route is absent; repair it idempotently before
+        // declaring the route sufficient for the native reverse-tunnel
+        // runtime.
+        if let Err(error) = ensure_cellular_default_route() {
+            warn!("cellular main-route reconciliation failed: {error:#}");
+        }
         reconcile_reverse_tunnel_cellular_bootstrap(config, state, health);
         return Ok(());
     }
@@ -195,7 +205,11 @@ fn reconcile_reverse_tunnel_cellular_bootstrap(
     let Some(reason) = health.degradation_reason_code.as_deref() else {
         return;
     };
-    if !matches!(reason, "public_probe_failed" | "reverse_tunnel_not_ready") {
+    // A failed VM-side public probe is not evidence that the phone's cellular
+    // route is broken. Re-running `svc data enable` for it drops an otherwise
+    // healthy QUIC session, so the public probe can never catch up. Cellular
+    // bootstrap is reserved for a tunnel that is actually unavailable.
+    if reason != "reverse_tunnel_not_ready" {
         return;
     }
     if !route_repair_allowed(config, state) {

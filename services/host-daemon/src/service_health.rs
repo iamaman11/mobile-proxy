@@ -23,8 +23,10 @@ async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 fn readiness_document(runtime: &RuntimeState) -> (StatusCode, Value) {
-    let tunnel_worker_required =
-        runtime.tunnel_owner.as_deref() == Some("first_party_reverse_tunnel");
+    let tunnel_worker_required = matches!(
+        runtime.tunnel_owner.as_deref(),
+        Some("first_party_reverse_tunnel" | "first_party_android_egress")
+    );
     let tunnel_worker_ready = !tunnel_worker_required || runtime.reverse_tunnel_restart.is_some();
     let counter_store_healthy = runtime.reverse_tunnel_counter_persistence_healthy;
     let ready = tunnel_worker_ready && counter_store_healthy;

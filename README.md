@@ -16,7 +16,9 @@ root/Magisk boot service
               -> relay VM public proxy ports
 ```
 
-The primary tunnel owner is always `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. The rooted runtime also supports two explicit compatibility owners: `stock_wireguard_bridge` for stock WireGuard rollback and `first_party_vpn_service` for the app-owned Android `VpnService` path. Unknown, missing or contradictory tunnel ownership fails closed.
+The default tunnel owner is `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. The rooted runtime also supports explicit carrier and rollback owners. Unknown, missing or contradictory tunnel ownership fails closed.
+
+On carriers that do not route root-owned sockets through the validated INTERNET data network, use `first_party_android_egress`. The authenticated reverse tunnel and server control plane remain authoritative, while both proxy upstream sockets and the pinned TLS reserve are created through the app's `Network.bindSocket()` cellular egress. This mode does not create an Android VPN.
 
 The Android project under `apps/android-app` remains optional for the primary rooted runtime, but it is now the supported owner for the app-owned WireGuard compatibility path. Normal native reverse-tunnel packaging, installation and verification still do not require an active Android VPN.
 
@@ -32,7 +34,9 @@ The relay preserves:
 - explicit stock WireGuard rollback;
 - app-owned WireGuard compatibility path.
 
-All public proxy paths require authentication. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
+All public proxy paths require authentication. The reverse-tunnel control frame carries the selected proxy protocol, so SOCKS5 streams terminate at the phone's dedicated `1081` inbound and HTTP/CONNECT streams at `3128`; the mixed public port is detected before forwarding. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
+
+Use the dedicated `3128` endpoint for production HTTP/HTTPS clients. Port `1080` remains a mixed SOCKS5/HTTP compatibility endpoint and should not be selected when the consumer can choose a dedicated protocol port.
 
 ## Repository layout
 
@@ -86,10 +90,21 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+For the exact local gate, use:
+
+```bash
+scripts/quality-gate.sh       # full code and Android gate
+scripts/quality-gate.sh fast  # architecture, Python tests, formatting and diff hygiene
+```
+
+GitHub runs one aggregate required check named `Quality Gate`. It executes policy, Rust,
+supply-chain and Android checks in parallel and publishes a compact
+`quality-summary-<git-sha>` artifact. Agents should read that summary before loading large
+job logs. The pinned toolchain is defined in `rust-toolchain.toml`.
+
 The mandatory GitHub quality workflows additionally run:
 
-- RustSec advisory audit;
-- cargo-deny advisories, licenses, bans and sources checks;
+- RustSec advisories, dependency licenses, bans and sources through pinned cargo-deny;
 - Android scaffold unit tests;
 - Android lint with warnings as errors;
 - Android debug assembly;
@@ -98,6 +113,17 @@ The mandatory GitHub quality workflows additionally run:
 - forced QUIC failure, pinned TLS/TCP reserve and QUIC recovery;
 - mixed `1080`, SOCKS5 `1081`, HTTP and CONNECT proxy coverage.
 
+## Git delivery
+
+Code reaches production only through an annotated semantic-version tag that passed
+`Quality Gate` and produced a published GitHub Release. `Deploy Production` resolves that
+tag to one immutable SHA, waits for approval in the `production` environment, then uses the
+dedicated runner to deploy and verify the VM followed by the Android device.
+
+Operational secrets stay in the local Secret Vault on the trusted runner and are injected only
+into child deployment processes. See [Git delivery and production control](docs/GIT_DELIVERY.md)
+for repository settings, release commands, rollback and runner setup.
+
 ## Prepare runtime binaries
 
 ```bash
@@ -105,6 +131,13 @@ cargo run -p operator-cli -- prepare-runtime-binaries
 ```
 
 Generated runtime binaries are intentionally not committed. The packaging command verifies the expected Android ARM ELF architecture before creating a release.
+
+The sing-box version, upstream GitHub asset SHA-256 provenance and typed BLAKE3 content
+digests are pinned in `deploy/sing-box-artifacts.lock.json`. Preparation fails closed when
+the requested version, archive size, content digest, executable version or rendered
+production configuration does not match. A successfully validated candidate is installed
+atomically and the previous local binary is retained as `sing-box.rollback` in the ignored
+binary directory.
 
 ## Generate reverse-tunnel identity
 
@@ -157,7 +190,44 @@ cargo run --release -p operator-cli -- provision-vm \
 
 The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional WireGuard compatibility backend used by both the stock rollback path and the app-owned VPN path.
 
+The production `optimized-hybrid` route keeps public `1080`, `1081` and `3128` on the proven phone
+mixed-proxy path through the pinned TLS reverse tunnel to Android cellular egress. The port numbers
+and client protocols remain unchanged. VM sing-box termination remains an explicit comparison and
+rollback mode, but is not in the production data path.
+The TLS fallback maintains eight authenticated idle data streams per phone session, so a burst
+of five consumers reuses established cellular connections instead of starting five simultaneous
+TCP and TLS handshakes. Capacity remains bounded and the legacy on-demand stream remains a
+compatible overflow path. Activated streams are replenished immediately instead of waiting for the
+proxied request to finish.
+
 ## Rotate cellular identity
+
+For agents and remote operators, install `scripts/mobile-proxy-ip` on `PATH` and provision the
+mode-`600` client config shown in `deploy/client/mobile-proxy-ip.env.example` once. Rotation is then
+one command, uses no ADB, and does not expose admin or UI credentials:
+
+```bash
+mobile-proxy-ip
+```
+
+On the operator host, the wrapper automatically consumes the existing `mobile-proxy.rotation-token`
+and certificate records from Secret Vault, so no plaintext client config is created.
+
+For programs, select JSON output. Exit code zero means the IP changed and the public proxy plus
+fresh reverse tunnel recovered. The result contains `old_ip`, `new_ip`, elapsed time, readiness and
+both local and public serving state:
+
+```bash
+mobile-proxy-ip --format json
+```
+
+The client talks only to `/api/v1/rotation/devices/{id}` with a dedicated rotation token. It
+generates an idempotency key, safely retries transient command submission, waits for the server and
+requires a different IP, healthy readiness, public serving and a fresh reverse tunnel before
+reporting success. The legacy `rotate-server` CLI name remains available for compatibility.
+
+The older `rotate` command below targets the phone-local operator API and is intended for device
+maintenance and diagnostics:
 
 ```bash
 cargo run --release -p operator-cli -- rotate \

@@ -1,6 +1,6 @@
 # Repository Map
 
-Date: 2026-06-02
+Updated: 2026-08-23
 Workspace: `/home/bose/projects/mobile-proxy`
 
 ## Goal
@@ -12,7 +12,7 @@ The working rule is simple:
 - executable products live in `apps/` and `services/`
 - deployable runtime bundles live in `deploy/`
 - local/operator automation lives in `apps/operator-cli`
-- architecture and operations documents live as root-level `*.md` files
+- current entry documents live at the root; detailed architecture, operations and history live under `docs/`
 
 ## Current Top-Level Ownership
 
@@ -73,7 +73,12 @@ The working rule is simple:
   - local environment examples for services and operators
 
 - root `*.md` documents
-  - repository map, architecture plan, runtime layout, quick reference
+  - current repository map, implementation entry point, runtime layout and quick reference
+
+- `docs/`
+  - active architecture and operations documents
+  - Git delivery policy
+  - dated or superseded material under `docs/history/`
 
 ## Required Layering
 
@@ -205,8 +210,9 @@ Corrective rule:
 ## Immediate Cleanup Standard
 
 From this point forward:
-- architecture and ops documents stay at repository root
-- root markdown files are the only place for persistent repo documentation
+- the root contains only current entry-point documents
+- detailed architecture and ops documents live under `docs/`
+- completed studies and superseded plans live under `docs/history/`
 - runtime policy must stay out of `service.sh`; persistent PowerShell operator automation is no longer part of the active tree
 - persistent `*.ps1` operator scripts have been removed from the active tree
 - each new responsibility must have one obvious owner directory

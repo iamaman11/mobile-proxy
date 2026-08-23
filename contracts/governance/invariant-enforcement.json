@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "status": "normative",
-  "audit_revision": "2026-07-24",
+  "audit_revision": "2026-08-23",
   "baseline_main_sha": "e8ce5be9cfc0c8eb05ea05945e3bdda423e6183c",
   "allowed_statuses": [
     "enforced",
@@ -38,14 +38,14 @@
   },
   "workflows": {
     "RQ-A": {
-      "path": ".github/workflows/rust-quality.yml",
-      "job": "rust-quality",
-      "step": "Enforce architecture boundaries"
+      "path": ".github/workflows/quality.yml",
+      "job": "policy",
+      "step": "Enforce repository contracts"
     },
     "RQ-T": {
-      "path": ".github/workflows/rust-quality.yml",
-      "job": "rust-quality",
-      "step": "Run workspace tests"
+      "path": ".github/workflows/quality.yml",
+      "job": "rust",
+      "step": "Run complete workspace tests"
     }
   },
   "columns": [
@@ -1299,7 +1299,7 @@
       "enforced",
       "developer-experience",
       [
-        ".github/workflows/rust-quality.yml"
+        ".github/workflows/quality.yml"
       ],
       [
         "RQ-A",

@@ -541,6 +541,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "mobile-proxy-foundation",
  "proxy-core",
  "reqwest",
  "reverse-tunnel",

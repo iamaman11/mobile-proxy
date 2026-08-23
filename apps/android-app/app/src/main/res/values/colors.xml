@@ -4,4 +4,8 @@
     <color name="colorOnPrimary">#FFFFFF</color>
     <color name="colorBackground">#FFFFFF</color>
     <color name="colorOnBackground">#111827</color>
+    <color name="colorSurfaceMuted">#F3F5F7</color>
+    <color name="colorIpCard">#EAF2FF</color>
+    <color name="colorIpCardStroke">#B9D2F4</color>
+    <color name="colorStatusBadge">#DCEAFE</color>
 </resources>

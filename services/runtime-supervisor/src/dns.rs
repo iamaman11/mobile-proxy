@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use tracing::info;
 
+use crate::android::cellular_interface;
 use crate::config::SupervisorConfig;
 
 pub fn reconcile_cellular_dns(config: &SupervisorConfig) -> Result<bool> {
@@ -55,6 +56,36 @@ pub fn reconcile_cellular_dns(config: &SupervisorConfig) -> Result<bool> {
     fs::rename(&temp, &config.proxy_config)
         .with_context(|| format!("failed to replace {}", config.proxy_config.display()))?;
     info!(dns_servers = ?addresses, "updated proxy DNS from validated cellular network");
+    Ok(true)
+}
+
+pub fn reconcile_cellular_proxy_interface(config: &SupervisorConfig) -> Result<bool> {
+    let interface = cellular_interface()?;
+    let body = fs::read_to_string(&config.proxy_config)
+        .with_context(|| format!("failed to read {}", config.proxy_config.display()))?;
+    let mut document: Value = serde_json::from_str(&body)
+        .with_context(|| format!("failed to parse {}", config.proxy_config.display()))?;
+    let Some(outbounds) = document.get_mut("outbounds").and_then(Value::as_array_mut) else {
+        bail!("sing-box configuration has no outbound inventory");
+    };
+    let mut changed = false;
+    for outbound in outbounds {
+        if outbound.get("type").and_then(Value::as_str) == Some("direct")
+            && outbound.get("bind_interface").and_then(Value::as_str) != Some(&interface)
+        {
+            outbound["bind_interface"] = Value::String(interface.clone());
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(false);
+    }
+    let temp = config.proxy_config.with_extension("json.tmp");
+    fs::write(&temp, serde_json::to_vec_pretty(&document)?)
+        .with_context(|| format!("failed to write {}", temp.display()))?;
+    fs::rename(&temp, &config.proxy_config)
+        .with_context(|| format!("failed to replace {}", config.proxy_config.display()))?;
+    info!(%interface, "bound direct proxy outbound to cellular interface");
     Ok(true)
 }
 

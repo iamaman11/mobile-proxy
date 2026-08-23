@@ -5,17 +5,24 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tokio::time::{Instant, timeout_at};
 use uuid::Uuid;
 
-use crate::model::{ServerFrame, ServerSessionSnapshot};
+use crate::model::{ProxyProtocol, ServerFrame, ServerSessionSnapshot};
 
-const TCP_PROXY_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
+// A reserve TLS data stream may spend up to four seconds establishing its
+// transport TCP connection and another four seconds completing TLS. Under a
+// cellular burst those phases can approach their individual bounds, so the
+// server must not retire the pending request at the old five-second mark.
+// Keep the deadline finite and pair it with the per-node capacity below.
+const TCP_PROXY_STREAM_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_PENDING_TCP_STREAMS: usize = 256;
 // A fixed per-device ceiling prevents one unavailable phone from monopolizing
 // the global reserve-tunnel budget while still allowing a bounded burst.
 const MAX_PENDING_TCP_STREAMS_PER_NODE: usize = 32;
+const MAX_RESERVED_TCP_STREAMS_PER_NODE: usize = 16;
+const TCP_RESERVED_STREAM_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
 // Session selection tolerates multiple missed heartbeats while remaining bounded.
 // Freshness is checked lazily on every routing/acceptance decision; no sweeper is spawned.
 const DEFAULT_SESSION_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -32,6 +39,13 @@ pub(crate) struct TcpControlChannel {
     pub(crate) session_id: Uuid,
     pub(crate) authority_id: Uuid,
     pub(crate) sender: mpsc::Sender<ServerFrame>,
+    reserve_capable: bool,
+}
+
+pub(crate) struct ReservedTcpStream {
+    session_id: Uuid,
+    authority_id: Uuid,
+    stream: TcpStream,
 }
 
 #[derive(Clone)]
@@ -107,6 +121,8 @@ pub struct ReverseTunnelServerState {
     pub(crate) connections: Arc<Mutex<HashMap<String, SessionBound<quinn::Connection>>>>,
     pub(crate) tcp_controls: Arc<Mutex<HashMap<String, TcpControlChannel>>>,
     pub(crate) pending_tcp: Arc<StdMutex<PendingTcpMap>>,
+    reserved_tcp: Arc<Mutex<HashMap<String, Vec<ReservedTcpStream>>>>,
+    reserved_tcp_ready: Arc<Notify>,
     session_liveness: Arc<Mutex<HashMap<String, SessionLiveness>>>,
     heartbeat_timeout: Duration,
 }
@@ -118,6 +134,8 @@ impl Default for ReverseTunnelServerState {
             connections: Arc::default(),
             tcp_controls: Arc::default(),
             pending_tcp: Arc::default(),
+            reserved_tcp: Arc::default(),
+            reserved_tcp_ready: Arc::default(),
             session_liveness: Arc::default(),
             heartbeat_timeout: DEFAULT_SESSION_HEARTBEAT_TIMEOUT,
         }
@@ -226,14 +244,16 @@ impl ReverseTunnelServerState {
             .select_active_target(node_id)
             .await
             .context("no unambiguous authenticated reverse tunnel is active")?;
-        self.open_tcp_proxy_for_target(&target).await
+        self.open_tcp_proxy_for_target(&target, ProxyProtocol::Mixed)
+            .await
     }
 
     pub(crate) async fn open_tcp_proxy_for_target(
         &self,
         target: &ActiveSessionTarget,
+        protocol: ProxyProtocol,
     ) -> Result<TcpStream> {
-        self.open_tcp_proxy_for_target_with_timeout(target, TCP_PROXY_STREAM_TIMEOUT)
+        self.open_tcp_proxy_for_target_with_timeout(target, protocol, TCP_PROXY_STREAM_TIMEOUT)
             .await
     }
 
@@ -247,15 +267,39 @@ impl ReverseTunnelServerState {
             .select_active_target(node_id)
             .await
             .context("no unambiguous authenticated reverse tunnel is active")?;
-        self.open_tcp_proxy_for_target_with_timeout(&target, wait)
+        self.open_tcp_proxy_for_target_with_timeout(&target, ProxyProtocol::Mixed, wait)
             .await
     }
 
     async fn open_tcp_proxy_for_target_with_timeout(
         &self,
         target: &ActiveSessionTarget,
+        protocol: ProxyProtocol,
         wait: Duration,
     ) -> Result<TcpStream> {
+        if self.target_supports_reserved_tcp(target).await {
+            let reserve_deadline = Instant::now() + TCP_RESERVED_STREAM_WAIT_TIMEOUT;
+            loop {
+                let ready = self.reserved_tcp_ready.notified();
+                while let Some(mut stream) = self.take_reserved_tcp_stream(target).await {
+                    if crate::tunnel::write_server_frame(
+                        &mut stream,
+                        &ServerFrame::OpenProxy {
+                            stream_id: Uuid::new_v4(),
+                            protocol,
+                        },
+                    )
+                    .await
+                    .is_ok()
+                    {
+                        return Ok(stream);
+                    }
+                }
+                if timeout_at(reserve_deadline, ready).await.is_err() {
+                    break;
+                }
+            }
+        }
         let control = self
             .select_tcp_control_for_target(target)
             .await
@@ -295,10 +339,16 @@ impl ReverseTunnelServerState {
             pending: self.pending_tcp.clone(),
         };
 
-        if timeout_at(deadline, control.send(ServerFrame::OpenProxy { stream_id }))
-            .await
-            .context("TCP reverse tunnel control send timed out")?
-            .is_err()
+        if timeout_at(
+            deadline,
+            control.send(ServerFrame::OpenProxy {
+                stream_id,
+                protocol,
+            }),
+        )
+        .await
+        .context("TCP reverse tunnel control send timed out")?
+        .is_err()
         {
             self.remove_tcp_control_for_authority(
                 &target.node_id,
@@ -318,6 +368,75 @@ impl ReverseTunnelServerState {
             .await
             .context("TCP reverse tunnel proxy stream timed out")?
             .context("TCP reverse tunnel proxy stream was cancelled")
+    }
+
+    async fn target_supports_reserved_tcp(&self, target: &ActiveSessionTarget) -> bool {
+        self.tcp_controls
+            .lock()
+            .await
+            .get(&target.node_id)
+            .is_some_and(|control| {
+                control.session_id == target.session_id
+                    && control.authority_id == target.authority_id
+                    && control.reserve_capable
+            })
+    }
+
+    async fn take_reserved_tcp_stream(&self, target: &ActiveSessionTarget) -> Option<TcpStream> {
+        let mut reserves = self.reserved_tcp.lock().await;
+        let streams = reserves.get_mut(&target.node_id)?;
+        while let Some(reserved) = streams.pop() {
+            if reserved.session_id == target.session_id
+                && reserved.authority_id == target.authority_id
+            {
+                return Some(reserved.stream);
+            }
+        }
+        reserves.remove(&target.node_id);
+        None
+    }
+
+    pub(crate) async fn register_reserved_tcp_stream(
+        &self,
+        node_id: &str,
+        session_id: Uuid,
+        stream: TcpStream,
+    ) -> Result<()> {
+        let authority_id = {
+            let sessions = self.sessions.lock().await;
+            let liveness = self.session_liveness.lock().await;
+            let mut controls = self.tcp_controls.lock().await;
+            let session = sessions
+                .get(node_id)
+                .filter(|session| session.connected && session.session_id == session_id)
+                .context("reserved TCP stream session is not active")?;
+            let live = liveness
+                .get(node_id)
+                .filter(|live| live.session_id == session.session_id)
+                .context("reserved TCP stream authority is not active")?;
+            let control = controls
+                .get_mut(node_id)
+                .filter(|control| {
+                    control.session_id == session_id
+                        && control.authority_id == live.authority_id
+                        && !control.sender.is_closed()
+                })
+                .context("reserved TCP stream control is not active")?;
+            control.reserve_capable = true;
+            live.authority_id
+        };
+        let mut reserves = self.reserved_tcp.lock().await;
+        let streams = reserves.entry(node_id.to_owned()).or_default();
+        if streams.len() >= MAX_RESERVED_TCP_STREAMS_PER_NODE {
+            bail!("reserved TCP stream capacity reached");
+        }
+        streams.push(ReservedTcpStream {
+            session_id,
+            authority_id,
+            stream,
+        });
+        self.reserved_tcp_ready.notify_one();
+        Ok(())
     }
 
     #[cfg(test)]
@@ -464,6 +583,7 @@ impl ReverseTunnelServerState {
             let mut liveness = self.session_liveness.lock().await;
             let mut connections = self.connections.lock().await;
             let mut controls = self.tcp_controls.lock().await;
+            let mut reserves = self.reserved_tcp.lock().await;
             let mut pending = lock_pending(&self.pending_tcp);
 
             let previous_session = sessions.get(&node_id).map(|session| session.session_id);
@@ -487,6 +607,7 @@ impl ReverseTunnelServerState {
 
             let displaced_connection = connections.remove(&node_id);
             controls.remove(&node_id);
+            reserves.remove(&node_id);
             liveness.remove(&node_id);
             sessions.insert(
                 node_id.clone(),
@@ -524,6 +645,7 @@ impl ReverseTunnelServerState {
                             session_id,
                             authority_id,
                             sender,
+                            reserve_capable: false,
                         },
                     );
                 }
@@ -551,6 +673,7 @@ impl ReverseTunnelServerState {
             let mut liveness = self.session_liveness.lock().await;
             let mut connections = self.connections.lock().await;
             let mut controls = self.tcp_controls.lock().await;
+            let mut reserves = self.reserved_tcp.lock().await;
             let mut pending = lock_pending(&self.pending_tcp);
 
             let current_session = sessions
@@ -574,6 +697,7 @@ impl ReverseTunnelServerState {
             }) {
                 controls.remove(node_id);
             }
+            reserves.remove(node_id);
             pending.retain(|_, request| {
                 request.expected_node_id != node_id
                     || request.expected_session_id != session_id
@@ -601,6 +725,7 @@ impl ReverseTunnelServerState {
                 session_id,
                 authority_id: session_id,
                 sender,
+                reserve_capable: false,
             },
         );
     }
@@ -627,6 +752,7 @@ impl ReverseTunnelServerState {
             control.session_id == session_id && control.authority_id == authority_id
         }) {
             controls.remove(node_id);
+            self.reserved_tcp.lock().await.remove(node_id);
         }
     }
 
@@ -742,6 +868,7 @@ impl ReverseTunnelServerState {
             .map(|(node_id, control)| (node_id, control.session_id))
             .collect();
         lock_pending(&self.pending_tcp).clear();
+        self.reserved_tcp.lock().await.clear();
         for (node_id, session_id) in controls {
             if let Some(session) = self.sessions.lock().await.get_mut(&node_id)
                 && session.session_id == session_id
@@ -909,6 +1036,40 @@ mod tests {
             .expect("request must receive proxy stream");
 
         assert_eq!(state.pending_tcp_len(), 0);
+        drop(delivered);
+        drop(peer);
+    }
+
+    #[tokio::test]
+    async fn reserve_capable_session_waits_for_replenishment_before_legacy_fallback() {
+        let state = ReverseTunnelServerState::default();
+        let session_id = Uuid::new_v4();
+        let mut control = register_session(&state, "phone-a", session_id).await;
+        let (first_reserved, first_peer) = tcp_pair().await;
+        state
+            .register_reserved_tcp_stream("phone-a", session_id, first_reserved)
+            .await
+            .unwrap();
+        let first = state
+            .open_tcp_proxy_with_timeout(Some("phone-a"), Duration::from_secs(1))
+            .await
+            .unwrap();
+        drop(first);
+        drop(first_peer);
+
+        let request = spawn_request(&state, "phone-a").await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), control.recv())
+                .await
+                .is_err(),
+            "reserve-capable sessions must not immediately use legacy on-demand TLS"
+        );
+        let (replenished, peer) = tcp_pair().await;
+        state
+            .register_reserved_tcp_stream("phone-a", session_id, replenished)
+            .await
+            .unwrap();
+        let delivered = request.await.unwrap().unwrap();
         drop(delivered);
         drop(peer);
     }
@@ -1464,7 +1625,7 @@ mod tests {
 
     async fn open_stream_id(control: &mut mpsc::Receiver<ServerFrame>) -> Uuid {
         let frame = control.recv().await.expect("open request must be sent");
-        let ServerFrame::OpenProxy { stream_id } = frame;
+        let ServerFrame::OpenProxy { stream_id, .. } = frame;
         stream_id
     }
 

@@ -87,7 +87,7 @@ These are not theoretical concerns. They are visible in the current codebase.
 
 10. Architecture decision on `2026-06-04`: choose the app-owned tunnel architecture, not a production companion for stock WireGuard.
    Decision:
-   - final target is option 3 from [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](/home/bose/projects/mobile-proxy/ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)
+   - final target is option 3 from [ANDROID_TUNNEL_ARCHITECTURE_DECISION.md](ANDROID_TUNNEL_ARCHITECTURE_DECISION.md)
    - `apps/android-app` must become the first-party `VpnService` owner
    - `runtime-supervisor` remains the Rust policy owner
    - sing-box/libbox or a Rust tunnel engine may be used inside our APK boundary
@@ -105,7 +105,7 @@ These are not theoretical concerns. They are visible in the current codebase.
    - process tree is `runtime-supervisor -> host-daemon + sing-box`
    - health returned `healthy`, `serving=true`, `cellular_route_ready=true`, `tun0_present=true`
    - single `4s` rotation changed IP and returned to `healthy`
-   - full programmatic timing matrix completed; see [AIRPLANE_TIMING_STUDY_2026_06_03.md](/home/bose/projects/mobile-proxy/AIRPLANE_TIMING_STUDY_2026_06_03.md)
+   - full programmatic timing matrix completed; see [AIRPLANE_TIMING_STUDY_2026_06_03.md](AIRPLANE_TIMING_STUDY_2026_06_03.md)
    - phone was migrated to the newly created VM endpoint `34.118.88.54`; control-plane reported `healthy`, `serving=true`, `publicly_serving=true`
 
 

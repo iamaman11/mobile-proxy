@@ -7,12 +7,13 @@ use proxy_core::{
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::warn;
 
-use crate::state::SharedRuntime;
+use crate::{rotation::start_rotation_for_runtime, state::SharedRuntime};
 
 #[derive(Debug, Clone)]
 pub struct ControlPlaneSyncConfig {
     pub base_url: String,
     pub device_token: String,
+    pub ui_token: String,
     pub server_name: Option<String>,
     pub server_addr: Option<std::net::SocketAddr>,
     pub server_cert_der: Option<Vec<u8>>,
@@ -20,7 +21,7 @@ pub struct ControlPlaneSyncConfig {
     pub poll_interval_secs: u64,
 }
 
-pub async fn run_control_plane_sync(runtime_arc: SharedRuntime, config: ControlPlaneSyncConfig) {
+pub fn client(config: &ControlPlaneSyncConfig) -> anyhow::Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(5));
     if let (Some(server_name), Some(server_addr)) = (&config.server_name, config.server_addr) {
         builder = builder.resolve(server_name, server_addr);
@@ -29,15 +30,18 @@ pub async fn run_control_plane_sync(runtime_arc: SharedRuntime, config: ControlP
         match reqwest::Certificate::from_der(cert_der) {
             Ok(cert) => builder = builder.add_root_certificate(cert),
             Err(err) => {
-                warn!("control-plane sync disabled: invalid pinned certificate: {err}");
-                return;
+                anyhow::bail!("invalid pinned control-plane certificate: {err}");
             }
         }
     }
-    let client = match builder.build() {
+    builder.build().map_err(Into::into)
+}
+
+pub async fn run_control_plane_sync(runtime_arc: SharedRuntime, config: ControlPlaneSyncConfig) {
+    let client = match client(&config) {
         Ok(client) => client,
         Err(err) => {
-            warn!("control-plane sync disabled: failed to create client: {err}");
+            warn!("control-plane sync disabled: {err}");
             return;
         }
     };
@@ -160,10 +164,10 @@ async fn poll_and_ack_command(
         return Ok(());
     };
 
-    apply_command(runtime_arc.clone(), &command).await;
+    let result = apply_command(runtime_arc.clone(), &command).await;
     let ack = CommandAckRequest {
-        ok: true,
-        message: None,
+        ok: result.is_ok(),
+        message: result.err(),
     };
     client
         .post(format!(
@@ -178,7 +182,20 @@ async fn poll_and_ack_command(
     Ok(())
 }
 
-async fn apply_command(runtime_arc: SharedRuntime, command: &DeviceCommand) {
+async fn apply_command(runtime_arc: SharedRuntime, command: &DeviceCommand) -> Result<(), String> {
+    // A rotation is a real, long-running runtime operation.  Do not merely
+    // project a successful-looking status into the control plane: that would
+    // acknowledge a VM-issued command while leaving the carrier connection
+    // untouched.
+    if matches!(command.recovery_intent, RecoveryIntent::RotateRecovery) {
+        let mut request = proxy_core::default_rotate_request();
+        request.reason = "control-plane-command".into();
+        return start_rotation_for_runtime(runtime_arc, request)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.1);
+    }
+
     let mut runtime = runtime_arc.lock().await;
     runtime.health.readiness_state = match command.desired_state {
         DesiredState::HealthyServing => RuntimeReadiness::Healthy.to_string(),
@@ -206,10 +223,7 @@ async fn apply_command(runtime_arc: SharedRuntime, command: &DeviceCommand) {
             runtime.health.local_serving_ready = Some(true);
             runtime.health.last_proxy_error = None;
         }
-        RecoveryIntent::RotateRecovery => {
-            runtime.health.degradation_reason_code = Some("rotation_in_progress".into());
-            runtime.health.serving_failure_reason =
-                Some("rotation recovery command accepted".into());
-        }
+        RecoveryIntent::RotateRecovery => unreachable!("handled before acquiring runtime state"),
     }
+    Ok(())
 }

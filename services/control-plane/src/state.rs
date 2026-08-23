@@ -267,6 +267,18 @@ impl AppState {
         {
             return Err(IssueCommandError::IdempotencyConflict);
         }
+        if input.request.recovery_intent == proxy_core::RecoveryIntent::RotateRecovery
+            && (devices
+                .get(&input.device_id)
+                .is_some_and(|device| device.current_job.is_some())
+                || commands.queues.get(&input.device_id).is_some_and(|queue| {
+                    queue.iter().any(|command| {
+                        command.recovery_intent == proxy_core::RecoveryIntent::RotateRecovery
+                    })
+                }))
+        {
+            return Err(IssueCommandError::CapacityExceeded);
+        }
         if pending_command_count(&commands) >= MAX_PENDING_COMMANDS
             || commands
                 .queues

@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use mobile_proxy_foundation::{ContentDigest, DigestDomain};
 use serde::Deserialize;
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::cli::PackageDeviceReleaseArgs;
 use crate::device_support::{
-    APP_OWNED_TUNNEL_OWNER, PRIMARY_TUNNEL_OWNER, STOCK_WIREGUARD_OWNER, validate_release_id,
-    validate_tunnel_owner,
+    ANDROID_EGRESS_TUNNEL_OWNER, APP_OWNED_TUNNEL_OWNER, PRIMARY_TUNNEL_OWNER,
+    STOCK_WIREGUARD_OWNER, validate_release_id, validate_tunnel_owner,
 };
 use crate::release_integrity::{verify_integrity_manifest, write_integrity_manifest};
 
@@ -105,6 +105,9 @@ echo "$(date '+%Y-%m-%dT%H:%M:%S%z') result:fail" >> "$LOG_FILE" 2>/dev/null || 
 exit 1
 "#;
 
+const UI_CONTROL_TOKEN_DOMAIN: DigestDomain =
+    DigestDomain::new("mobile-proxy/local-ui-control-token/v1");
+
 #[derive(Debug, Deserialize)]
 struct DeviceManifest {
     #[serde(rename = "deviceId")]
@@ -125,6 +128,8 @@ struct ManifestTokens {
     admin_token_env: String,
     #[serde(rename = "deviceTokenEnv")]
     device_token_env: String,
+    #[serde(rename = "uiTokenEnv")]
+    ui_token_env: String,
     #[serde(rename = "relayUserEnv")]
     relay_user_env: String,
     #[serde(rename = "relayPasswordEnv")]
@@ -171,15 +176,17 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
     let admin_token = required_env(&manifest.tokens.admin_token_env)?;
     let device_token = required_env(&manifest.tokens.device_token_env)?;
+    let control_plane_ui_token = required_env(&manifest.tokens.ui_token_env)?;
     let relay_user = required_env(&manifest.tokens.relay_user_env)?;
     let relay_password = required_env(&manifest.tokens.relay_password_env)?;
-    let ui_control_token = Uuid::new_v4().to_string();
+    let ui_control_token = stable_ui_control_token(&manifest.device_id, &admin_token);
 
     let bin_dir = root.join("deploy/device-runtime/bin");
     let runtime_supervisor_bin = bin_dir.join("runtime-supervisor");
     let host_daemon_bin = bin_dir.join("host-daemon");
     let sing_box_bin = bin_dir.join("sing-box");
     ensure_android_arm_binary(&runtime_supervisor_bin)?;
+    ensure_runtime_owner_support(&runtime_supervisor_bin, &args.tunnel_owner)?;
     ensure_android_arm_binary(&host_daemon_bin)?;
     ensure_android_arm_binary(&sing_box_bin)?;
 
@@ -230,11 +237,24 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ("CONTROL_PLANE_URL", manifest.control_plane_url.as_str()),
             ("CONTROL_PLANE_RESOLVE_ADDR", &format!("{relay_host}:8443")),
             ("DEVICE_TOKEN", device_token.as_str()),
+            ("CONTROL_PLANE_UI_TOKEN", control_plane_ui_token.as_str()),
             ("OPERATOR_PROFILE", profile.operator_profile.as_str()),
             ("TUNNEL_OWNER", args.tunnel_owner.as_str()),
             (
                 "PROXY_LISTEN_ADDRESS",
                 proxy_listen_address(&args.tunnel_owner),
+            ),
+            (
+                "LOCAL_PROXY_ADDRESS",
+                proxy_listen_address(&args.tunnel_owner),
+            ),
+            (
+                "LOCAL_SOCKS5_ADDRESS",
+                if args.tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+                    "127.0.0.1:18080"
+                } else {
+                    "127.0.0.1:1081"
+                },
             ),
             (
                 "REVERSE_TUNNEL_ADDR",
@@ -257,11 +277,24 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
             ),
             (
                 "REVERSE_TUNNEL_ENABLED",
-                bool_literal(args.tunnel_owner == PRIMARY_TUNNEL_OWNER),
+                bool_literal(uses_reverse_tunnel(&args.tunnel_owner)),
             ),
             (
                 "AIRPLANE_HOLD_SECS",
                 &profile.airplane_hold_secs.to_string(),
+            ),
+            ("APP_EGRESS_PORT", "18080"),
+            (
+                "REVERSE_TUNNEL_QUIC_ENABLED",
+                bool_literal(args.tunnel_owner != ANDROID_EGRESS_TUNNEL_OWNER),
+            ),
+            (
+                "REVERSE_TUNNEL_SOCKS5_ADDR",
+                if args.tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+                    "\"127.0.0.1:18080\""
+                } else {
+                    "null"
+                },
             ),
         ];
         let body = render_json_template(&template, &strings, &raw)?;
@@ -276,6 +309,11 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
     } else {
         let template =
             fs::read_to_string(root.join("deploy/device-runtime/templates/sing-box.base.json"))?;
+        let outbound = sing_box_outbound(
+            &args.tunnel_owner,
+            relay_user.as_str(),
+            relay_password.as_str(),
+        );
         render_json_template(
             &template,
             &[
@@ -285,8 +323,12 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                     "SING_BOX_LISTEN_HOST",
                     sing_box_listen_host(&args.tunnel_owner),
                 ),
+                (
+                    "SING_BOX_FINAL_OUTBOUND",
+                    sing_box_final_outbound(&args.tunnel_owner),
+                ),
             ],
-            &[],
+            &[("PROXY_OUTBOUND", outbound.as_str())],
         )?
     };
 
@@ -323,6 +365,17 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
 
     println!("{}", release_root.display());
     Ok(())
+}
+
+fn stable_ui_control_token(device_id: &str, admin_token: &str) -> String {
+    ContentDigest::derive(
+        UI_CONTROL_TOKEN_DOMAIN,
+        [device_id.as_bytes(), admin_token.as_bytes()],
+    )
+    .as_bytes()
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect()
 }
 
 fn render_json_template(
@@ -390,7 +443,11 @@ fn validate_host_config(body: &str, expected_owner: &str) -> Result<()> {
         .and_then(Value::as_bool)
         .context("host-daemon reverse_tunnel.enabled is missing")?;
     match expected_owner {
-        PRIMARY_TUNNEL_OWNER if !wireguard_enabled && reverse_enabled => Ok(()),
+        PRIMARY_TUNNEL_OWNER | ANDROID_EGRESS_TUNNEL_OWNER
+            if !wireguard_enabled && reverse_enabled =>
+        {
+            Ok(())
+        }
         STOCK_WIREGUARD_OWNER | APP_OWNED_TUNNEL_OWNER if wireguard_enabled && !reverse_enabled => {
             Ok(())
         }
@@ -498,7 +555,7 @@ fn bool_literal(value: bool) -> &'static str {
 }
 
 fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
-    if tunnel_owner == PRIMARY_TUNNEL_OWNER {
+    if uses_reverse_tunnel(tunnel_owner) {
         "127.0.0.1:1080"
     } else {
         "10.66.66.2:1080"
@@ -506,26 +563,53 @@ fn proxy_listen_address(tunnel_owner: &str) -> &'static str {
 }
 
 fn sing_box_listen_host(tunnel_owner: &str) -> &'static str {
-    if tunnel_owner == PRIMARY_TUNNEL_OWNER {
+    if uses_reverse_tunnel(tunnel_owner) {
         "127.0.0.1"
     } else {
         "10.66.66.2"
     }
 }
 
+fn sing_box_final_outbound(tunnel_owner: &str) -> &'static str {
+    if tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+        "cellular-egress"
+    } else {
+        "direct"
+    }
+}
+
+fn sing_box_outbound(tunnel_owner: &str, username: &str, password: &str) -> String {
+    if tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+        serde_json::json!({
+            "type": "socks",
+            "tag": "cellular-egress",
+            "server": "127.0.0.1",
+            "server_port": 18080,
+            "version": "5",
+            "username": username,
+            "password": password
+        })
+        .to_string()
+    } else {
+        serde_json::json!({"type": "direct", "tag": "direct"}).to_string()
+    }
+}
+
 fn reverse_tunnel_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
+    if !uses_reverse_tunnel(tunnel_owner) {
         return Ok("127.0.0.1:18090".into());
     }
     let relay = manifest
         .relay
         .as_ref()
         .context("first_party_reverse_tunnel requires relay host in device manifest")?;
-    Ok(format!("{}:18090", relay.host))
+    // UDP/443 gives QUIC the best chance of crossing carrier networks. TCP/443
+    // remains an independently pinned TLS fallback when UDP is unavailable.
+    Ok(format!("{}:443", relay.host))
 }
 
 fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
+    if !uses_reverse_tunnel(tunnel_owner) {
         return Ok("127.0.0.1:443".into());
     }
     let relay = manifest
@@ -536,7 +620,7 @@ fn reverse_tunnel_tcp_addr(manifest: &DeviceManifest, tunnel_owner: &str) -> Res
 }
 
 fn reverse_tunnel_cert_der_b64(manifest: &DeviceManifest, tunnel_owner: &str) -> Result<String> {
-    if tunnel_owner != PRIMARY_TUNNEL_OWNER {
+    if !uses_reverse_tunnel(tunnel_owner) {
         return Ok(String::new());
     }
     required_env(
@@ -545,6 +629,13 @@ fn reverse_tunnel_cert_der_b64(manifest: &DeviceManifest, tunnel_owner: &str) ->
             .reverse_tunnel_cert_der_b64_env
             .as_deref()
             .unwrap_or("MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64"),
+    )
+}
+
+fn uses_reverse_tunnel(tunnel_owner: &str) -> bool {
+    matches!(
+        tunnel_owner,
+        PRIMARY_TUNNEL_OWNER | ANDROID_EGRESS_TUNNEL_OWNER
     )
 }
 
@@ -596,6 +687,28 @@ fn ensure_android_arm_binary(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn ensure_runtime_owner_support(path: &Path, tunnel_owner: &str) -> Result<()> {
+    let binary = fs::read(path)
+        .with_context(|| format!("failed to read runtime binary {}", path.display()))?;
+    if !binary_contains_marker(&binary, tunnel_owner.as_bytes()) {
+        bail!(
+            "runtime-supervisor does not support tunnel owner {tunnel_owner}; rebuild runtime binaries before packaging"
+        )
+    }
+    if tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER
+        && !binary_contains_marker(&binary, b"android-egress-mixed-proxy-v1")
+    {
+        bail!(
+            "runtime-supervisor does not contain the Android egress mixed-proxy feature; rebuild runtime binaries before packaging"
+        )
+    }
+    Ok(())
+}
+
+fn binary_contains_marker(binary: &[u8], marker: &[u8]) -> bool {
+    !marker.is_empty() && binary.windows(marker.len()).any(|window| window == marker)
+}
+
 fn is_android_arm_elf_header(header: &[u8; 20]) -> bool {
     let magic = &header[0..4] == b"\x7FELF";
     let elf32 = header[4] == 1;
@@ -607,8 +720,9 @@ fn is_android_arm_elf_header(header: &[u8; 20]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_android_arm_elf_header, render_json_template, validate_host_config,
-        validate_profile_name,
+        binary_contains_marker, is_android_arm_elf_header, proxy_listen_address,
+        render_json_template, sing_box_final_outbound, sing_box_listen_host, sing_box_outbound,
+        validate_host_config, validate_profile_name,
     };
 
     #[test]
@@ -654,5 +768,27 @@ mod tests {
         assert!(is_android_arm_elf_header(&header));
         header[4] = 2;
         assert!(!is_android_arm_elf_header(&header));
+    }
+
+    #[test]
+    fn runtime_owner_marker_rejects_stale_binary() {
+        let binary = b"first_party_reverse_tunnel\0first_party_android_egress\0";
+        assert!(binary_contains_marker(
+            binary,
+            b"first_party_android_egress"
+        ));
+        assert!(!binary_contains_marker(binary, b"stock_wireguard_bridge"));
+    }
+
+    #[test]
+    fn android_egress_keeps_mixed_proxy_in_front_of_cellular_socks() {
+        let owner = "first_party_android_egress";
+        assert_eq!(proxy_listen_address(owner), "127.0.0.1:1080");
+        assert_eq!(sing_box_listen_host(owner), "127.0.0.1");
+        assert_eq!(sing_box_final_outbound(owner), "cellular-egress");
+        let outbound: serde_json::Value =
+            serde_json::from_str(&sing_box_outbound(owner, "user", "password")).unwrap();
+        assert_eq!(outbound["type"], "socks");
+        assert_eq!(outbound["server_port"], 18080);
     }
 }

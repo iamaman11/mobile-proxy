@@ -65,6 +65,8 @@ async fn liveness_survives_without_a_phone_and_readiness_tracks_sqlite() {
             "admin-secret",
             "--device-token",
             "device-secret",
+            "--ui-token",
+            "ui-secret",
             "--state-path",
             state_path.to_str().unwrap(),
         ])

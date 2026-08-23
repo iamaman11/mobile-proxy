@@ -6,25 +6,24 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class LocalRuntimeStatus(
     val publicIp: String?,
     val readiness: String,
     val serving: Boolean,
     val rotationInProgress: Boolean,
-)
-
-data class LocalRotationJob(
-    val status: String,
-    val oldPublicIp: String?,
-    val newPublicIp: String?,
-    val changed: Boolean?,
+    val tunnelOwner: String?,
 )
 
 class LocalRuntimeClient(private val context: Context) {
-    private val executor = Executors.newSingleThreadExecutor()
+    // Rotation monitoring can run for several minutes. Keep a second worker
+    // available so a manual status refresh never queues behind that loop.
+    private val executor = Executors.newFixedThreadPool(2)
+    private val closed = AtomicBoolean(false)
 
     fun close() {
+        closed.set(true)
         executor.shutdownNow()
     }
 
@@ -34,20 +33,52 @@ class LocalRuntimeClient(private val context: Context) {
         }
     }
 
-    fun rotate(callback: (Result<LocalRotationJob>) -> Unit) {
+    fun rotateAndMonitor(
+        oldIp: String?,
+        issueCommand: Boolean,
+        onStatus: (LocalRuntimeStatus) -> Unit,
+        callback: (Result<RotationDecision>) -> Unit,
+    ) {
         executor.execute {
-            callback(runCatching {
-                val accepted = JSONObject(request("/v1/ui/ip/rotate", "POST"))
-                val jobId = accepted.getString("job_id")
-                repeat(90) {
-                    Thread.sleep(1_000)
-                    val job = parseJob(request("/v1/ui/jobs/$jobId", "GET"))
-                    if (job.status != "running") {
-                        return@runCatching job
+            val result = runCatching {
+                if (issueCommand) request("/v1/ui/ip/rotate", "POST")
+                val startedAt = System.currentTimeMillis()
+                while (!closed.get()) {
+                    val elapsed = System.currentTimeMillis() - startedAt
+                    val status = try {
+                        parseStatus(request("/v1/ui/status", "GET"))
+                    } catch (error: RuntimeRequestException) {
+                        if (error.statusCode == 401) throw error
+                        if (elapsed >= RotationTracker.TIMEOUT_MILLIS) {
+                            throw IOException(
+                                "rotation status was unavailable until timeout",
+                                error,
+                            )
+                        }
+                        Thread.sleep(POLL_INTERVAL_MILLIS)
+                        continue
+                    } catch (error: IOException) {
+                        if (elapsed >= RotationTracker.TIMEOUT_MILLIS) {
+                            throw IOException(
+                                "rotation status was unavailable until timeout",
+                                error,
+                            )
+                        }
+                        Thread.sleep(POLL_INTERVAL_MILLIS)
+                        continue
                     }
+                    onStatus(status)
+                    val decision = RotationTracker.evaluate(
+                        oldIp,
+                        status,
+                        elapsed,
+                    )
+                    if (decision !is RotationDecision.Waiting) return@runCatching decision
+                    Thread.sleep(POLL_INTERVAL_MILLIS)
                 }
-                throw IOException("rotation timed out")
-            })
+                throw IOException("operation cancelled")
+            }
+            if (!closed.get()) callback(result)
         }
     }
 
@@ -73,7 +104,10 @@ class LocalRuntimeClient(private val context: Context) {
             }
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (connection.responseCode !in 200..299) {
-                throw IOException("runtime request failed (${connection.responseCode}): ${body.take(120)}")
+                throw RuntimeRequestException(
+                    connection.responseCode,
+                    "runtime request failed (" + connection.responseCode + "): " + body.take(120),
+                )
             }
             return body
         } finally {
@@ -88,19 +122,19 @@ class LocalRuntimeClient(private val context: Context) {
             readiness = json.optString("readiness", "unknown"),
             serving = json.optBoolean("serving", false),
             rotationInProgress = json.optBoolean("rotation_in_progress", false),
+            tunnelOwner = json.optNullableString("tunnel_owner"),
         )
     }
 
-    private fun parseJob(body: String): LocalRotationJob {
-        val json = JSONObject(body)
-        return LocalRotationJob(
-            status = json.optString("status", "failed"),
-            oldPublicIp = json.optNullableString("old_public_ip"),
-            newPublicIp = json.optNullableString("new_public_ip"),
-            changed = if (json.isNull("changed")) null else json.optBoolean("changed"),
-        )
+    private companion object {
+        const val POLL_INTERVAL_MILLIS = 2_000L
     }
 }
+
+private class RuntimeRequestException(
+    val statusCode: Int,
+    message: String,
+) : IOException(message)
 
 private fun JSONObject.optNullableString(name: String): String? =
     if (isNull(name)) null else optString(name).takeIf { it.isNotBlank() }

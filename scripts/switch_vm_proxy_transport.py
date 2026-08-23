@@ -9,6 +9,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -17,7 +18,17 @@ class SwitchFailure(RuntimeError):
 
 
 _CONFIG_VERSION = 1
-_CONFIGS = {
+_TLS_REVERSE_TUNNEL_INGRESS = """server {
+    listen 0.0.0.0:443 ssl;
+    ssl_certificate /etc/mobile-relaycontrolpoint/control-plane.crt;
+    ssl_certificate_key /etc/mobile-relaycontrolpoint/control-plane.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    proxy_pass 127.0.0.1:18091;
+}
+"""
+
+_PROXY_CONFIGS = {
     "reverse-tunnel": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14128; }
@@ -26,6 +37,18 @@ server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14128; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:11081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:13128; }
 """,
+    "server-termination": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:12080; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:12081; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
+""",
+    "optimized-hybrid": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:14080; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:14080; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14080; }
+""",
+}
+_CONFIGS = {
+    mode: proxy_config + _TLS_REVERSE_TUNNEL_INGRESS
+    for mode, proxy_config in _PROXY_CONFIGS.items()
 }
 _REMOTE_CONFIG = "/etc/nginx/stream-available/mobile-public-proxy.conf"
 _SUCCESS_MARKER = "exact-config-match"
@@ -33,11 +56,12 @@ _SUCCESS_MARKER = "exact-config-match"
 
 def remote_command(mode: str) -> str:
     encoded = base64.b64encode(_CONFIGS[mode].encode()).decode()
-    required_services = (
-        "wg-quick@wg0.service mobile-public-proxy.service"
-        if mode == "wireguard"
-        else "mobile-reverse-tunnel-server.service"
-    )
+    if mode == "wireguard":
+        required_services = "wg-quick@wg0.service mobile-public-proxy.service"
+    elif mode in {"server-termination", "optimized-hybrid"}:
+        required_services = "mobile-public-proxy.service mobile-reverse-tunnel-server.service"
+    else:
+        required_services = "mobile-reverse-tunnel-server.service"
     temporary = f"{_REMOTE_CONFIG}.candidate.$$"
     expected = f"{_REMOTE_CONFIG}.expected.$$"
     backup = f"{_REMOTE_CONFIG}.backup.$$"
@@ -57,15 +81,24 @@ cleanup() {{
   sudo rm -f "$TEMP" "$EXPECTED" "$BACKUP"
 }}
 trap cleanup EXIT
-sudo cp "$CONFIG" "$BACKUP"
 printf %s {shlex.quote(encoded)} | base64 -d | sudo tee "$TEMP" >/dev/null
 sudo cp "$TEMP" "$EXPECTED"
 sudo chmod 0644 "$TEMP" "$EXPECTED"
+verify_runtime() {{
+  sudo systemctl is-active {required_services}
+  sudo ss -lnt | grep -E ':(443|1080|1081|3128) '
+}}
+if sudo cmp -s -- "$CONFIG" "$EXPECTED"; then
+  verify_runtime
+  printf '{_SUCCESS_MARKER}\n'
+  COMMITTED=1
+  exit 0
+fi
+sudo cp "$CONFIG" "$BACKUP"
 sudo mv "$TEMP" "$CONFIG"
 sudo nginx -t
 sudo systemctl reload nginx
-sudo systemctl is-active {required_services}
-sudo ss -lnt | grep -E ':(1080|1081|3128) '
+verify_runtime
 sudo cmp -s -- "$CONFIG" "$EXPECTED"
 printf '{_SUCCESS_MARKER}\\n'
 COMMITTED=1
@@ -92,10 +125,20 @@ def switch(args: argparse.Namespace) -> dict[str, object]:
         "--command",
         remote_command(args.mode),
     ]
-    try:
-        completed = subprocess.run(command, check=True, capture_output=True, text=True)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise SwitchFailure("VM public proxy transport switch failed") from error
+    completed = None
+    last_error = None
+    for attempt in range(args.ssh_attempts):
+        try:
+            completed = subprocess.run(command, check=True, capture_output=True, text=True)
+            break
+        except (OSError, subprocess.CalledProcessError) as error:
+            last_error = error
+            if attempt + 1 < args.ssh_attempts:
+                time.sleep(min(2 ** attempt, 5))
+    if completed is None:
+        raise SwitchFailure(
+            f"VM public proxy transport switch failed after {args.ssh_attempts} attempts"
+        ) from last_error
     if not exact_match_returned(completed.stdout):
         raise SwitchFailure("VM public proxy transport config was not verified byte-for-byte")
     return {
@@ -117,12 +160,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--instance", required=True)
     parser.add_argument("--ssh-user", required=True)
     parser.add_argument("--ssh-key", required=True)
+    parser.add_argument("--ssh-attempts", type=int, default=3)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.ssh_attempts < 1 or args.ssh_attempts > 10:
+        print("VM proxy transport switch failed: ssh-attempts must be between 1 and 10", file=sys.stderr)
+        return 2
     try:
         report = switch(args)
         args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

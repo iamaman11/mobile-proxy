@@ -1,10 +1,10 @@
-use crate::auth::{AuthConfig, require_admin, require_device};
+use crate::auth::{AuthConfig, require_admin, require_device, require_rotation, require_ui};
 use crate::projection::now_unix_secs;
 use crate::{request_context::attach_request_context, state::AppState};
 use axum::{
     Json, Router,
     extract::{Extension, Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     middleware,
     routing::{get, post},
 };
@@ -14,7 +14,7 @@ use mobile_proxy_application::{
     PollCommandError, PollCommandInput, PollCommandPort, PublicProbeError, PublicProbeInput,
     PublicProbePort, RegisterDeviceError, RegisterDeviceInput, RegisterDevicePort,
 };
-use mobile_proxy_foundation::{CommandId, RequestContext};
+use mobile_proxy_foundation::{CommandId, DeadlineWindow, IdempotencyKey, RequestContext};
 use proxy_core::{
     CommandAckRequest, DeviceCommand, DeviceRecord, HeartbeatRequest, IssueCommandRequest,
     PublicProbeReport, RegisterDeviceRequest,
@@ -38,8 +38,25 @@ pub fn router(state: AppState, auth: AuthConfig) -> Router {
             post(ack_command),
         )
         .route_layer(middleware::from_fn(attach_request_context))
-        .route_layer(middleware::from_fn_with_state(auth, require_device));
-    Router::new().merge(admin).merge(device).with_state(state)
+        .route_layer(middleware::from_fn_with_state(auth.clone(), require_device));
+    let ui = Router::new()
+        .route("/api/v1/ui/devices/{id}", get(get_ui_device))
+        .route("/api/v1/ui/devices/{id}/commands", post(issue_command))
+        .route_layer(middleware::from_fn(attach_request_context))
+        .route_layer(middleware::from_fn_with_state(auth.clone(), require_ui));
+    let rotation = Router::new()
+        .route(
+            "/api/v1/rotation/devices/{id}",
+            get(get_ui_device).post(rotate_device),
+        )
+        .route_layer(middleware::from_fn(attach_request_context))
+        .route_layer(middleware::from_fn_with_state(auth, require_rotation));
+    Router::new()
+        .merge(admin)
+        .merge(device)
+        .merge(ui)
+        .merge(rotation)
+        .with_state(state)
 }
 
 async fn get_ip() -> (StatusCode, Json<serde_json::Value>) {
@@ -66,6 +83,24 @@ async fn list_ready_devices(State(state): State<AppState>) -> Json<Vec<DeviceRec
             .filter(|device| device.availability == "ready")
             .collect(),
     )
+}
+
+async fn get_ui_device(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<DeviceRecord>, ControlPlaneRouteError> {
+    let devices = state.devices.lock().await;
+    devices
+        .get(&id)
+        .cloned()
+        .map(mark_stale)
+        .map(Json)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error":"device_not_found"})),
+            )
+        })
 }
 
 async fn register_device(
@@ -331,6 +366,90 @@ async fn issue_command(
     }
 }
 
+async fn rotate_device(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<serde_json::Value>), ControlPlaneRouteError> {
+    let idempotency_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| IdempotencyKey::parse(value.to_owned()).ok())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error":"missing_or_invalid_idempotency_key"})),
+            )
+        })?;
+    let old_ip = {
+        let devices = state.devices.lock().await;
+        let device = devices.get(&id).ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error":"device_not_found"})),
+            )
+        })?;
+        device.last_public_ip.clone().ok_or_else(|| {
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"error":"current_public_ip_unavailable"})),
+            )
+        })?
+    };
+    let request = IssueCommandRequest {
+        desired_state: proxy_core::DesiredState::HealthyServing,
+        recovery_intent: proxy_core::RecoveryIntent::RotateRecovery,
+        deadline_secs: DeadlineWindow::new(240).expect("fixed rotation deadline is valid"),
+        idempotency_key,
+    };
+    match state
+        .issue_command(IssueCommandInput {
+            device_id: id.clone(),
+            request,
+        })
+        .await
+    {
+        Ok(outcome) => {
+            let (classification, command) = outcome.into_parts();
+            tracing::info!(
+                request_id = %context.request_id(),
+                correlation_id = %context.correlation_id(),
+                command_id = %command.command_id,
+                device_id = %id,
+                classification,
+                "remote IP rotation accepted"
+            );
+            Ok((
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "accepted": true,
+                    "command_id": command.command_id,
+                    "device_id": id,
+                    "old_ip": old_ip,
+                    "status_url": format!("/api/v1/rotation/devices/{}", command.device_id)
+                })),
+            ))
+        }
+        Err(IssueCommandError::IdempotencyConflict) => Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error":"idempotency_conflict"})),
+        )),
+        Err(IssueCommandError::CapacityExceeded) => Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error":"rotation_already_in_progress"})),
+        )),
+        Err(IssueCommandError::StateConflict) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error":"command_state_conflict"})),
+        )),
+        Err(IssueCommandError::Persistence) => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error":"state_persistence_failed"})),
+        )),
+    }
+}
+
 async fn next_command(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
@@ -465,7 +584,14 @@ mod tests {
         ));
         router(
             AppState::load(path).await.unwrap(),
-            AuthConfig::new("admin-token".into(), "device-token".into()).unwrap(),
+            AuthConfig::new_with_rotation(
+                "admin-token".into(),
+                "device-token".into(),
+                "ui-token".into(),
+                "rotation-token".into(),
+                true,
+            )
+            .unwrap(),
         )
     }
 
@@ -501,6 +627,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wrong_role.status(), StatusCode::UNAUTHORIZED);
+
+        let ui = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/ui/devices/device-1")
+                    .header("authorization", "Bearer ui-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ui.status(), StatusCode::NOT_FOUND);
+
+        let ui_with_admin_token = test_app()
+            .await
+            .oneshot(
+                Request::get("/api/v1/ui/devices/device-1")
+                    .header("authorization", "Bearer admin-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ui_with_admin_token.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -702,6 +852,111 @@ mod tests {
             .unwrap();
         let second_command: DeviceCommand = serde_json::from_slice(&second_body).unwrap();
         assert_eq!(second_command.command_id, first_command.command_id);
+    }
+
+    #[tokio::test]
+    async fn ui_token_can_issue_a_vm_delivered_rotation_command() {
+        const PAYLOAD: &str = r#"{
+            "desired_state":"healthy_serving",
+            "recovery_intent":"rotate_recovery",
+            "deadline_secs":30,
+            "idempotency_key":"ui-rotate-123"
+        }"#;
+        let app = test_app().await;
+        let issued = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/ui/devices/device-1/commands")
+                    .header("authorization", "Bearer ui-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(PAYLOAD))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(issued.status(), StatusCode::OK);
+
+        let denied = app
+            .oneshot(
+                Request::post("/api/v1/ui/devices/device-1/commands")
+                    .header("authorization", "Bearer device-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(PAYLOAD))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn rotation_token_has_a_minimal_idempotent_surface() {
+        let app = test_app().await;
+        let heartbeat = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/devices/heartbeat")
+                    .header("authorization", "Bearer device-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "node_id":"device-1",
+                            "node_name":"device",
+                            "readiness_state":"healthy",
+                            "serving":true,
+                            "proxy_status":"running",
+                            "last_public_ip":"198.51.100.10"
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(heartbeat.status(), StatusCode::OK);
+
+        let rotate = |token: &'static str, key: &'static str| {
+            Request::post("/api/v1/rotation/devices/device-1")
+                .header("authorization", token)
+                .header("idempotency-key", key)
+                .body(Body::empty())
+                .unwrap()
+        };
+        let first = app
+            .clone()
+            .oneshot(rotate("Bearer rotation-token", "consumer-request-1"))
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::ACCEPTED);
+        let first_body = axum::body::to_bytes(first.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let first_json: serde_json::Value = serde_json::from_slice(&first_body).unwrap();
+        assert_eq!(first_json["old_ip"], "198.51.100.10");
+
+        let replay = app
+            .clone()
+            .oneshot(rotate("Bearer rotation-token", "consumer-request-1"))
+            .await
+            .unwrap();
+        assert_eq!(replay.status(), StatusCode::ACCEPTED);
+        let replay_body = axum::body::to_bytes(replay.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        let replay_json: serde_json::Value = serde_json::from_slice(&replay_body).unwrap();
+        assert_eq!(replay_json["command_id"], first_json["command_id"]);
+
+        let concurrent = app
+            .clone()
+            .oneshot(rotate("Bearer rotation-token", "consumer-request-2"))
+            .await
+            .unwrap();
+        assert_eq!(concurrent.status(), StatusCode::CONFLICT);
+
+        let denied = app
+            .oneshot(rotate("Bearer ui-token", "consumer-request-3"))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

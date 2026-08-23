@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -21,6 +22,7 @@ use crate::state::{RotationCommands, RuntimeState};
 const PRIMARY_OWNER: &str = "first_party_reverse_tunnel";
 const ROLLBACK_OWNER: &str = "stock_wireguard_bridge";
 const APP_OWNED_OWNER: &str = "first_party_vpn_service";
+const ANDROID_EGRESS_OWNER: &str = "first_party_android_egress";
 const MAX_SECRET_LENGTH: usize = 4096;
 const MAX_URLS: usize = 8;
 
@@ -43,6 +45,8 @@ pub struct FileConfig {
 #[derive(Debug, Deserialize, Clone)]
 struct FileOperatorProfiles {
     default_profile: Option<String>,
+    #[serde(default)]
+    by_plmn: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -77,6 +81,10 @@ struct FileReverseTunnelConfig {
     server_addr: Option<String>,
     tcp_fallback_addr: Option<String>,
     local_proxy_addr: Option<String>,
+    local_socks5_addr: Option<String>,
+    local_http_addr: Option<String>,
+    quic_enabled: Option<bool>,
+    transport_socks5_addr: Option<String>,
     server_name: Option<String>,
     server_cert_der_b64: Option<String>,
     auth_token: Option<String>,
@@ -91,6 +99,7 @@ struct FileReverseTunnelConfig {
 struct FileControlPlaneConfig {
     base_url: Option<String>,
     device_token: Option<String>,
+    ui_token: Option<String>,
     server_name: Option<String>,
     server_addr: Option<SocketAddr>,
     server_cert_der_b64: Option<String>,
@@ -176,11 +185,7 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
         .unwrap_or_else(|| proxy_core::NODE_NAME.to_string());
     validate_identifier("node_name", &node_name, 128)?;
 
-    let active_profile = file_config
-        .operator_profiles
-        .as_ref()
-        .and_then(|profiles| profiles.default_profile.clone())
-        .unwrap_or_else(|| "default".into());
+    let active_profile = active_operator_profile(file_config.operator_profiles.as_ref());
     validate_identifier("operator profile", &active_profile, 64)?;
 
     let wireguard = file_config
@@ -239,7 +244,13 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     };
 
     let control_plane_sync = control_plane_config(&file_config)?;
-    let reverse_tunnel = reverse_tunnel_config(&file_config, &node_id, &tunnel_owner)?;
+    let reverse_tunnel = reverse_tunnel_config(
+        &file_config,
+        &node_id,
+        &tunnel_owner,
+        &proxy_username,
+        &proxy_password,
+    )?;
     let reverse_tunnel_counter_state_path = reverse_tunnel.as_ref().map(|_| {
         file_config
             .reverse_tunnel
@@ -306,6 +317,27 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     })
 }
 
+fn active_operator_profile(profiles: Option<&FileOperatorProfiles>) -> String {
+    let fallback = profiles
+        .and_then(|profiles| profiles.default_profile.clone())
+        .unwrap_or_else(|| "default".into());
+    let Some(profiles) = profiles else {
+        return fallback;
+    };
+    let Ok(output) = std::process::Command::new("getprop")
+        .arg("gsm.operator.numeric")
+        .output()
+    else {
+        return fallback;
+    };
+    let values = String::from_utf8_lossy(&output.stdout);
+    values
+        .split(',')
+        .map(str::trim)
+        .find_map(|plmn| profiles.by_plmn.get(plmn).cloned())
+        .unwrap_or(fallback)
+}
+
 fn control_plane_config(file_config: &FileConfig) -> Result<Option<ControlPlaneSyncConfig>> {
     let Some(config) = file_config.control_plane.as_ref() else {
         return Ok(None);
@@ -325,6 +357,11 @@ fn control_plane_config(file_config: &FileConfig) -> Result<Option<ControlPlaneS
         .or_else(|| env::var("HOST_DAEMON_DEVICE_TOKEN").ok())
         .context("control_plane.device_token is required")?;
     validate_secret("control_plane.device_token", &device_token)?;
+    let ui_token = config
+        .ui_token
+        .clone()
+        .context("control_plane.ui_token is required")?;
+    validate_secret("control_plane.ui_token", &ui_token)?;
     let server_name = config
         .server_name
         .clone()
@@ -354,6 +391,7 @@ fn control_plane_config(file_config: &FileConfig) -> Result<Option<ControlPlaneS
     Ok(Some(ControlPlaneSyncConfig {
         base_url,
         device_token,
+        ui_token,
         server_name: Some(server_name),
         server_addr: Some(server_addr),
         server_cert_der: Some(server_cert_der),
@@ -366,6 +404,8 @@ fn reverse_tunnel_config(
     file_config: &FileConfig,
     node_id: &str,
     tunnel_owner: &str,
+    proxy_username: &str,
+    proxy_password: &str,
 ) -> Result<Option<ReverseTunnelClientConfig>> {
     let config = file_config.reverse_tunnel.as_ref();
     if matches!(tunnel_owner, ROLLBACK_OWNER | APP_OWNED_OWNER) {
@@ -402,6 +442,32 @@ fn reverse_tunnel_config(
     if !local_proxy_addr.ip().is_loopback() {
         bail!("reverse_tunnel.local_proxy_addr must be loopback")
     }
+    let parse_optional_loopback = |name: &str, value: Option<&str>| -> Result<Option<SocketAddr>> {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let address: SocketAddr = value
+            .parse()
+            .with_context(|| format!("reverse_tunnel.{name} is invalid"))?;
+        if !address.ip().is_loopback() {
+            bail!("reverse_tunnel.{name} must be loopback")
+        }
+        Ok(Some(address))
+    };
+    let local_socks5_addr =
+        parse_optional_loopback("local_socks5_addr", config.local_socks5_addr.as_deref())?;
+    let local_http_addr =
+        parse_optional_loopback("local_http_addr", config.local_http_addr.as_deref())?;
+    let transport_socks5_addr = parse_optional_loopback(
+        "transport_socks5_addr",
+        config.transport_socks5_addr.as_deref(),
+    )?;
+    let transport_socks5 =
+        transport_socks5_addr.map(|server_addr| reverse_tunnel::TransportSocks5Config {
+            server_addr,
+            username: proxy_username.to_string(),
+            password: proxy_password.to_string(),
+        });
     let auth_token = config
         .auth_token
         .clone()
@@ -449,6 +515,10 @@ fn reverse_tunnel_config(
         server_addr,
         tcp_fallback_addr: Some(tcp_fallback_addr),
         local_proxy_addr,
+        local_socks5_addr,
+        local_http_addr,
+        quic_enabled: config.quic_enabled.unwrap_or(true),
+        transport_socks5,
         auth_token,
         transport: TunnelTransport::Hybrid {
             server_name,
@@ -492,8 +562,9 @@ fn load_file_config(path: Option<&str>) -> Result<(Option<FileConfig>, Option<Co
 
 fn validate_owner_flags(owner: &str, wireguard_enabled: bool) -> Result<()> {
     match (owner, wireguard_enabled) {
-        (PRIMARY_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
+        (PRIMARY_OWNER, false) | (ANDROID_EGRESS_OWNER, false) | (ROLLBACK_OWNER, true) => Ok(()),
         (PRIMARY_OWNER, true) => bail!("native reverse-tunnel owner must disable WireGuard"),
+        (ANDROID_EGRESS_OWNER, true) => bail!("Android egress owner must disable WireGuard"),
         (ROLLBACK_OWNER, false) => bail!("stock rollback owner must enable WireGuard"),
         (APP_OWNED_OWNER, true) => bail!(
             "first_party_vpn_service is disabled after physical validation on July 26, 2026: Android VpnService did not expose a routable 10.66.66.2 listener for the rooted proxy runtime"
@@ -595,6 +666,8 @@ mod tests {
                 "server_addr": "127.0.0.1:18090",
                 "tcp_fallback_addr": "127.0.0.1:443",
                 "local_proxy_addr": "127.0.0.1:1080",
+                "local_socks5_addr": "127.0.0.1:1081",
+                "local_http_addr": "127.0.0.1:3128",
                 "server_name": "mobile-proxy-relay",
                 "server_cert_der_b64": "MAA=",
                 "auth_token": "reverse-token-00000000000000000000000001",
@@ -635,7 +708,15 @@ mod tests {
             loaded.runtime_state.health.tunnel_owner.as_deref(),
             Some("first_party_reverse_tunnel")
         );
-        assert!(loaded.reverse_tunnel.is_some());
+        let reverse_tunnel = loaded.reverse_tunnel.as_ref().unwrap();
+        assert_eq!(
+            reverse_tunnel.local_socks5_addr,
+            Some("127.0.0.1:1081".parse().unwrap())
+        );
+        assert_eq!(
+            reverse_tunnel.local_http_addr,
+            Some("127.0.0.1:3128".parse().unwrap())
+        );
         assert!(
             loaded
                 .runtime_state

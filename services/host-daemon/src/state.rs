@@ -6,10 +6,13 @@ use reverse_tunnel::{ClientSnapshot, TunnelEventCounters};
 use tokio::sync::{Mutex, watch};
 use uuid::Uuid;
 
+use crate::control_plane::ControlPlaneSyncConfig;
+
 #[derive(Clone)]
 pub struct AppState {
     pub admin_token: String,
     pub ui_control_token: Option<String>,
+    pub control_plane_sync: Option<ControlPlaneSyncConfig>,
     pub runtime: SharedRuntime,
 }
 
