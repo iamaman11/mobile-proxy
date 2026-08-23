@@ -4,6 +4,12 @@ set -euo pipefail
 runner_dir="/home/bose/.local/share/actions-runner/mobile-proxy-production"
 
 unset ALL_PROXY all_proxy HTTPS_PROXY https_proxy HTTP_PROXY http_proxy
+proxy_host="$(ip route show default | awk 'NR == 1 { print $3 }')"
+if [[ -n "$proxy_host" ]] && timeout 2 bash -c "</dev/tcp/$proxy_host/17890" 2>/dev/null; then
+  export HTTP_PROXY="http://$proxy_host:17890"
+  export HTTPS_PROXY="$HTTP_PROXY"
+  export NO_PROXY="localhost,127.0.0.1,::1"
+fi
 export PATH="/home/bose/.local/bin:/home/bose/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
 
 cd "$runner_dir"

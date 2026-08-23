@@ -74,7 +74,10 @@ On the production workstation the runner lives at
 `/home/bose/.local/share/actions-runner/mobile-proxy-production`. Its GitHub registration token
 is minted only inside `scripts/register-production-runner` under Secret Vault. Windows Task
 Scheduler starts `scripts/run-production-runner` through WSL at logon and restarts it after a
-failure. The launcher uses an explicit toolchain path and removes inherited proxy variables.
+failure. The launcher uses an explicit toolchain path, removes inherited proxy variables and
+uses the workstation proxy on port `17890` only when a bounded reachability probe succeeds.
+Otherwise it falls back to direct GitHub connectivity. The WSL gateway is resolved at every
+runner start instead of persisting an address that changes across WSL restarts.
 `scripts/adb-windows` delegates to the Windows SDK ADB server so the runner and the operator see
 the same attached phone.
 
