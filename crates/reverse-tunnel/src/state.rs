@@ -21,7 +21,7 @@ const MAX_PENDING_TCP_STREAMS: usize = 256;
 // A fixed per-device ceiling prevents one unavailable phone from monopolizing
 // the global reserve-tunnel budget while still allowing a bounded burst.
 const MAX_PENDING_TCP_STREAMS_PER_NODE: usize = 32;
-const MAX_RESERVED_TCP_STREAMS_PER_NODE: usize = 16;
+const MAX_RESERVED_TCP_STREAMS_PER_NODE: usize = 24;
 // Session selection tolerates multiple missed heartbeats while remaining bounded.
 // Freshness is checked lazily on every routing/acceptance decision; no sweeper is spawned.
 const DEFAULT_SESSION_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);

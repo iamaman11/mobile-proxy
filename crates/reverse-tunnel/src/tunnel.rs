@@ -29,8 +29,8 @@ const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 // handshake. Keep the control-plane failover fast, but allow each transport
 // phase to complete within the server's bounded twelve-second pending window.
 const TCP_DATA_STREAM_CONNECT_TIMEOUT_FLOOR: Duration = Duration::from_secs(4);
-const TCP_RESERVED_STREAM_WORKERS: usize = 8;
-const TCP_RESERVED_STREAM_RETRY_DELAY: Duration = Duration::from_millis(500);
+const TCP_RESERVED_STREAM_WORKERS: usize = 16;
+const TCP_RESERVED_STREAM_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 pub async fn run_client(
     config: ReverseTunnelClientConfig,
