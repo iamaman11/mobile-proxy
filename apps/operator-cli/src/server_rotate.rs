@@ -107,6 +107,11 @@ fn build_client(args: &RotateServerArgs) -> Result<reqwest::Client> {
     let cert = reqwest::Certificate::from_der(&cert_der)
         .context("invalid pinned control-plane DER certificate")?;
     reqwest::Client::builder()
+        // The rotation control channel must never depend on the mobile proxy
+        // it is about to restart. WSL commonly exports HTTP(S)_PROXY and
+        // ALL_PROXY globally; bypass them for this certificate-pinned client.
+        .no_proxy()
+        .proxy(reqwest::Proxy::custom(|_| None::<&'static str>))
         .timeout(Duration::from_secs(10))
         .resolve(&args.control_plane_name, args.control_plane_addr)
         .add_root_certificate(cert)
