@@ -2,6 +2,26 @@
 
 Git is the source of truth for code, dependency locks, release versions, quality evidence and the exact revision deployed to production. Secrets and mutable runtime state remain outside Git.
 
+## Live GitHub governance
+
+As of 2026-08-23:
+
+- `main` requires a pull request, a current successful `Quality Gate`, resolved review
+  threads, and rejects force-push and deletion;
+- `v*` release tags reject force updates and deletion;
+- Dependabot security updates, secret scanning and push protection are enabled;
+- the `production` environment requires approval by `iamaman11` and accepts only `v*`
+  tags;
+- production device, tunnel-owner and SSH-user values are environment variables, not
+  duplicated in workflow code;
+- no self-hosted runner is registered while this repository is public.
+
+The last point is intentional. A persistent self-hosted runner attached to a public repository
+can be targeted by untrusted pull-request workflow changes. Before Git-based deployment is
+activated, either make this repository private or move `Deploy Production` to a separate
+private deployment repository. Until then the workflow is a reviewed, non-runnable contract;
+existing operator deployment remains authoritative.
+
 ## Delivery chain
 
     topic branch
@@ -46,7 +66,11 @@ Create a production environment:
 - define PRODUCTION_TUNNEL_OWNER as first_party_android_egress;
 - optionally define PRODUCTION_SSH_USER; bose is the default.
 
-Register a dedicated Linux self-hosted runner with labels Linux, X64 and mobile-proxy-production. It must run as the local bose user and have ADB, gcloud, Rust, Android NDK/SDK, Java and the local Secret Vault available. Do not assign this runner to pull-request workflows. Use a private repository or restrict fork workflows because deployment jobs execute repository code with production access.
+After selecting a private trust boundary, register a dedicated Linux self-hosted runner with
+labels `Linux`, `X64` and `mobile-proxy-production`. It must run as the local `bose`
+user and have ADB, gcloud, Rust, Android NDK/SDK, Java and the local Secret Vault available.
+Do not register a persistent production runner directly on this public repository: changing the
+current workflow labels is not a sufficient security boundary for fork pull requests.
 
 ## Normal change
 
