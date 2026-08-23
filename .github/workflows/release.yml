@@ -132,9 +132,10 @@ jobs:
               }],
           }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY
-          python3 - "$RELEASE_TAG" "$RELEASE_SHA" "$checksum" <<'PY'
+          python3 - "$RELEASE_TAG" "$RELEASE_SHA" <<'PY'
           import json, os, pathlib, sys
-          tag, sha, checksum = sys.argv[1:]
+          tag, sha = sys.argv[1:]
+          checksum = pathlib.Path("SHA256SUMS").read_text(encoding="utf-8").split()[0]
           pathlib.Path("provenance.json").write_text(json.dumps({
               "artifact": f"mobile-proxy-linux-x86_64-{tag}.tar.gz",
               "artifact_sha256": checksum,
