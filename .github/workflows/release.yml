@@ -76,8 +76,11 @@ jobs:
           install -m 0755 target/release/reverse-tunnel-server "$stage/bin/"
           cp Cargo.lock "$stage/"
           python3 scripts/repository_context.py --format json --output "$stage/repository-context.json"
-          tar -C release -czf "release/mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" \
-            "mobile-proxy-linux-x86_64-$RELEASE_TAG"
+          source_date_epoch=$(git show -s --format=%ct HEAD)
+          python3 scripts/create_release_archive.py \
+            --root "$stage" \
+            --output "release/mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" \
+            --source-date-epoch "$source_date_epoch"
           cd release
           sha256sum "mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" > SHA256SUMS
           python3 - "$RELEASE_TAG" "$RELEASE_SHA" <<'PY'
