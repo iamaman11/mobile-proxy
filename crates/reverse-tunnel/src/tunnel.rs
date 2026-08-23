@@ -602,6 +602,9 @@ async fn connect_and_pump_quic(
                 endpoint.close(0_u32.into(), b"shutdown");
                 return Ok(());
             }
+            closed = connection.closed() => {
+                return Err(anyhow::anyhow!("QUIC connection closed: {closed}"));
+            }
             maybe_line = read_optional_line(&mut reader) => {
                 let line = maybe_line?;
                 if line.is_none() {
