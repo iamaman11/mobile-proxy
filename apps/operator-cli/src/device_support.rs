@@ -12,7 +12,6 @@ use proxy_core::HealthRecord;
 use reqwest::Proxy;
 use serde::Deserialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use tokio::time::sleep;
 
 pub(crate) const PRIMARY_TUNNEL_OWNER: &str = "first_party_reverse_tunnel";
@@ -215,29 +214,22 @@ pub(crate) fn verify_installed_release_files(
             .as_str()
             .context("release integrity path is invalid")?;
         validate_relative_release_path(relative)?;
-        let local = fs::read(root.join(relative))
-            .with_context(|| format!("failed to read packaged release file {relative}"))?;
+        let local_path = root.join(relative);
+        let local = local_path
+            .to_str()
+            .context("packaged release path is not UTF-8")?;
         let remote = format!("{}/current/{}", device_root.trim_end_matches('/'), relative);
-        // Do not stream release binaries (or secret-bearing configs) through
-        // Windows adb from WSL: that path can hang or alter binary stdout.
-        // Android's sha256sum gives us a fixed-size, non-secret comparison.
-        let remote_command = format!("sha256sum '{remote}'");
-        let deployed = adb(device_serial, &["shell", "su", "-c", &remote_command])?;
-        let deployed_digest = deployed
-            .split_whitespace()
-            .next()
-            .context("device sha256sum returned no digest")?;
-        if deployed_digest.len() != 64
-            || !deployed_digest
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        {
-            bail!("device sha256sum returned an invalid digest")
-        }
-        let local_digest = format!("{:x}", Sha256::digest(&local));
-        if local_digest != deployed_digest {
-            bail!("deployed device release file differs: {relative}")
-        }
+        let staged = format!(
+            "/data/local/tmp/mobile-proxy-verify-{}-{}",
+            std::process::id(),
+            relative.replace('/', "_")
+        );
+        adb(device_serial, &["push", local, &staged])?;
+        let compare = format!("chmod 0600 '{staged}' && cmp -s -- '{staged}' '{remote}'");
+        let result = adb(device_serial, &["shell", "su", "0", "sh", "-c", &compare]);
+        let cleanup = adb(device_serial, &["shell", "rm", "-f", &staged]);
+        cleanup.context("failed to remove staged release verification file")?;
+        result.with_context(|| format!("deployed device release file differs: {relative}"))?;
     }
     Ok(())
 }

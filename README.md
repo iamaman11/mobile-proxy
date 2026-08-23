@@ -110,6 +110,13 @@ cargo run -p operator-cli -- prepare-runtime-binaries
 
 Generated runtime binaries are intentionally not committed. The packaging command verifies the expected Android ARM ELF architecture before creating a release.
 
+The sing-box version, upstream GitHub asset SHA-256 provenance and typed BLAKE3 content
+digests are pinned in `deploy/sing-box-artifacts.lock.json`. Preparation fails closed when
+the requested version, archive size, content digest, executable version or rendered
+production configuration does not match. A successfully validated candidate is installed
+atomically and the previous local binary is retained as `sing-box.rollback` in the ignored
+binary directory.
+
 ## Generate reverse-tunnel identity
 
 ```bash

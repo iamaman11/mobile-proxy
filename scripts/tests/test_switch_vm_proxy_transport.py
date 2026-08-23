@@ -26,13 +26,23 @@ class VmProxyTransportSwitchTests(unittest.TestCase):
     def test_modes_use_distinct_exact_upstreams(self):
         reverse = MODULE._CONFIGS["reverse-tunnel"]
         wireguard = MODULE._CONFIGS["wireguard"]
+        server = MODULE._CONFIGS["server-termination"]
         for port in [14080, 14081, 14128]:
             self.assertIn(str(port), reverse)
             self.assertNotIn(str(port), wireguard)
         for port in [11080, 11081, 13128]:
             self.assertIn(str(port), wireguard)
             self.assertNotIn(str(port), reverse)
-        self.assertNotEqual(reverse, wireguard)
+        for port in [12080, 12081, 12128]:
+            self.assertIn(str(port), server)
+            self.assertNotIn(str(port), reverse)
+            self.assertNotIn(str(port), wireguard)
+        self.assertEqual(len({reverse, wireguard, server}), 3)
+
+    def test_server_termination_requires_both_proxy_layers(self):
+        command = MODULE.remote_command("server-termination")
+        self.assertIn("mobile-public-proxy.service", command)
+        self.assertIn("mobile-reverse-tunnel-server.service", command)
 
     def test_remote_command_is_atomic_exact_and_reversible_on_any_failure(self):
         command = MODULE.remote_command("wireguard")

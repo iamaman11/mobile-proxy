@@ -26,6 +26,10 @@ server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:14128; }
 server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:11081; }
 server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:13128; }
 """,
+    "server-termination": """server { listen 0.0.0.0:1080; proxy_pass 127.0.0.1:12080; }
+server { listen 0.0.0.0:1081; proxy_pass 127.0.0.1:12081; }
+server { listen 0.0.0.0:3128; proxy_pass 127.0.0.1:12128; }
+""",
 }
 _REMOTE_CONFIG = "/etc/nginx/stream-available/mobile-public-proxy.conf"
 _SUCCESS_MARKER = "exact-config-match"
@@ -33,11 +37,12 @@ _SUCCESS_MARKER = "exact-config-match"
 
 def remote_command(mode: str) -> str:
     encoded = base64.b64encode(_CONFIGS[mode].encode()).decode()
-    required_services = (
-        "wg-quick@wg0.service mobile-public-proxy.service"
-        if mode == "wireguard"
-        else "mobile-reverse-tunnel-server.service"
-    )
+    if mode == "wireguard":
+        required_services = "wg-quick@wg0.service mobile-public-proxy.service"
+    elif mode == "server-termination":
+        required_services = "mobile-public-proxy.service mobile-reverse-tunnel-server.service"
+    else:
+        required_services = "mobile-reverse-tunnel-server.service"
     temporary = f"{_REMOTE_CONFIG}.candidate.$$"
     expected = f"{_REMOTE_CONFIG}.expected.$$"
     backup = f"{_REMOTE_CONFIG}.backup.$$"

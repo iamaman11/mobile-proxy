@@ -210,12 +210,18 @@ fn build_vm_release(
         reverse_tunnel_server,
         release_root.join("bin/reverse-tunnel-server"),
     )?;
-    fs::copy(sing_box, release_root.join("bin/sing-box"))?;
+    fs::copy(&sing_box, release_root.join("bin/sing-box"))?;
 
-    fs::write(
-        release_root.join("config/public-proxy.json"),
-        public_proxy_config(secrets),
-    )?;
+    let public_proxy_path = release_root.join("config/public-proxy.json");
+    fs::write(&public_proxy_path, public_proxy_config(secrets)?)?;
+    run(
+        Command::new(&sing_box)
+            .arg("check")
+            .arg("-c")
+            .arg(&public_proxy_path),
+        repo,
+    )
+    .context("sing-box rejected the rendered VM public proxy configuration")?;
     fs::write(
         release_root.join("config/wg0.conf"),
         wg_config(manifest, secrets),
@@ -461,7 +467,7 @@ fn verify_vm(args: &ProvisionVmArgs, manifest: &VmManifest, ssh_key: &Path) -> R
         args,
         manifest,
         ssh_key,
-        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service mobile-reverse-tunnel-server.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(443|1080|1081|3128|8080|14080|14081|14128) '",
+        "sudo systemctl is-active mobile-relaycontrolpoint.service mobile-relay-gate.service mobile-public-proxy.service mobile-reverse-tunnel-server.service nginx.service wg-quick@wg0.service && sudo ss -lntup | grep -E ':(443|1080|1081|3128|8080|12080|12081|12128|14080|14081|14128) '",
     )
 }
 
@@ -557,30 +563,66 @@ systemctl restart ssh || systemctl restart sshd || true
     )
 }
 
-fn public_proxy_config(secrets: &VmSecrets) -> String {
-    format!(
-        r#"{{
-  "log": {{ "level": "info", "timestamp": true }},
-  "inbounds": [
-    {{ "type": "mixed", "tag": "mixed-public", "listen": "127.0.0.1", "listen_port": 11080, "users": [{{ "username": "{}", "password": "{}" }}], "set_system_proxy": false }},
-    {{ "type": "socks", "tag": "socks-public", "listen": "127.0.0.1", "listen_port": 11081, "users": [{{ "username": "{}", "password": "{}" }}] }},
-    {{ "type": "http", "tag": "http-public", "listen": "127.0.0.1", "listen_port": 13128, "users": [{{ "username": "{}", "password": "{}" }}], "set_system_proxy": false }}
-  ],
-  "outbounds": [
-    {{ "type": "socks", "tag": "phone-upstream", "server": "10.66.66.2", "server_port": 1080, "version": "5", "username": "{}", "password": "{}" }}
-  ],
-  "route": {{ "final": "phone-upstream" }}
-}}
-"#,
-        secrets.relay_user,
-        secrets.relay_password,
-        secrets.relay_user,
-        secrets.relay_password,
-        secrets.relay_user,
-        secrets.relay_password,
-        secrets.relay_user,
-        secrets.relay_password
-    )
+fn public_proxy_config(secrets: &VmSecrets) -> Result<String> {
+    let user = || {
+        serde_json::json!({
+            "username": secrets.relay_user,
+            "password": secrets.relay_password
+        })
+    };
+    let inbound = |kind: &str, tag: &str, port: u16| {
+        serde_json::json!({
+            "type": kind,
+            "tag": tag,
+            "listen": "127.0.0.1",
+            "listen_port": port,
+            "users": [user()]
+        })
+    };
+    let config = serde_json::json!({
+        "log": { "level": "info", "timestamp": true },
+        "inbounds": [
+            inbound("mixed", "mixed-public", 11080),
+            inbound("socks", "socks-public", 11081),
+            inbound("http", "http-public", 13128),
+            inbound("mixed", "reverse-mixed-public", 12080),
+            inbound("socks", "reverse-socks-public", 12081),
+            inbound("http", "reverse-http-public", 12128)
+        ],
+        "outbounds": [
+            {
+                "type": "socks",
+                "tag": "wireguard-phone",
+                "server": "10.66.66.2",
+                "server_port": 1080,
+                "version": "5",
+                "username": secrets.relay_user,
+                "password": secrets.relay_password
+            },
+            {
+                "type": "socks",
+                "tag": "reverse-tunnel-phone",
+                "server": "127.0.0.1",
+                "server_port": 14081,
+                "version": "5",
+                "username": secrets.relay_user,
+                "password": secrets.relay_password
+            }
+        ],
+        "route": {
+            "rules": [{
+                "inbound": [
+                    "reverse-mixed-public",
+                    "reverse-socks-public",
+                    "reverse-http-public"
+                ],
+                "action": "route",
+                "outbound": "reverse-tunnel-phone"
+            }],
+            "final": "wireguard-phone"
+        }
+    });
+    Ok(serde_json::to_string_pretty(&config)?)
 }
 
 fn wg_config(manifest: &VmManifest, secrets: &VmSecrets) -> String {
@@ -813,4 +855,71 @@ fn repo_root() -> Result<PathBuf> {
         .join("../..")
         .canonicalize()
         .context("failed to resolve repo root")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{VmSecrets, public_proxy_config};
+
+    fn secrets() -> VmSecrets {
+        VmSecrets {
+            control_token: "control".into(),
+            ui_token: "ui".into(),
+            rotation_token: "rotation".into(),
+            device_token: "device".into(),
+            reverse_tunnel_cert_der_b64: "cert".into(),
+            reverse_tunnel_key_der_b64: "key".into(),
+            relay_user: "user-with-\"-quote".into(),
+            relay_password: "password-with-\\-slash".into(),
+            server_private_key: "server-key".into(),
+            phone_public_key: "phone-key".into(),
+        }
+    }
+
+    #[test]
+    fn server_termination_has_isolated_inbounds_and_reverse_tunnel_outbound() {
+        let config: serde_json::Value =
+            serde_json::from_str(&public_proxy_config(&secrets()).unwrap()).unwrap();
+        let inbounds = config["inbounds"].as_array().unwrap();
+        let ports: Vec<_> = inbounds
+            .iter()
+            .map(|inbound| inbound["listen_port"].as_u64().unwrap())
+            .collect();
+        assert_eq!(ports, [11080, 11081, 13128, 12080, 12081, 12128]);
+        assert_eq!(config["outbounds"][1]["server_port"].as_u64(), Some(14081));
+        assert_eq!(
+            config["route"]["rules"][0]["outbound"].as_str(),
+            Some("reverse-tunnel-phone")
+        );
+    }
+
+    #[test]
+    fn proxy_credentials_are_json_escaped_without_changing_their_values() {
+        let config: serde_json::Value =
+            serde_json::from_str(&public_proxy_config(&secrets()).unwrap()).unwrap();
+        assert_eq!(
+            config["inbounds"][0]["users"][0]["username"],
+            "user-with-\"-quote"
+        );
+        assert_eq!(config["outbounds"][1]["password"], "password-with-\\-slash");
+    }
+
+    #[test]
+    fn rendered_vm_proxy_config_is_accepted_by_available_sing_box() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let binary = repo.join("deploy/vm-runtime/bin/sing-box");
+        if !binary.is_file() {
+            return;
+        }
+        let config = repo.join("target/sing-box-vm-config-test.json");
+        std::fs::write(&config, public_proxy_config(&secrets()).unwrap()).unwrap();
+        let status = std::process::Command::new(binary)
+            .arg("check")
+            .arg("-c")
+            .arg(&config)
+            .status()
+            .unwrap();
+        let _ = std::fs::remove_file(config);
+        assert!(status.success());
+    }
 }

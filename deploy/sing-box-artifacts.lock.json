@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "version": "1.13.12",
+  "artifacts": {
+    "android-arm": {
+      "size": 18350858,
+      "upstream_sha256": "50f0c71c711b5f5398b0416a0a7fe2b0813a85b42cae43c6f1cac9c881cbf8a4",
+      "content_digest": "b3:31e0a220c174d681153c8388afeeed61436b86ed024dc76e825061cb361be2ec"
+    },
+    "linux-amd64-glibc": {
+      "size": 24594492,
+      "upstream_sha256": "11cf6d5fb93c60525771bc5652b46b734ee033ef72831056735fc658243e1fdb",
+      "content_digest": "b3:2d27b4f55144b571540dfc225c3aff471474826de431c2c81632020db0e2c1be"
+    }
+  }
+}

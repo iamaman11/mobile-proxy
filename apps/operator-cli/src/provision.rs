@@ -249,6 +249,14 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 proxy_listen_address(&args.tunnel_owner),
             ),
             (
+                "LOCAL_SOCKS5_ADDRESS",
+                if args.tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+                    "127.0.0.1:18080"
+                } else {
+                    "127.0.0.1:1081"
+                },
+            ),
+            (
                 "REVERSE_TUNNEL_ADDR",
                 &reverse_tunnel_addr(&manifest, &args.tunnel_owner)?,
             ),

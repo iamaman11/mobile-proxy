@@ -34,7 +34,7 @@
     "server_addr": "{{REVERSE_TUNNEL_ADDR}}",
     "tcp_fallback_addr": "{{REVERSE_TUNNEL_TCP_ADDR}}",
     "local_proxy_addr": "{{LOCAL_PROXY_ADDRESS}}",
-    "local_socks5_addr": "127.0.0.1:1081",
+    "local_socks5_addr": "{{LOCAL_SOCKS5_ADDRESS}}",
     "local_http_addr": "127.0.0.1:3128",
     "quic_enabled": {{REVERSE_TUNNEL_QUIC_ENABLED}},
     "transport_socks5_addr": {{REVERSE_TUNNEL_SOCKS5_ADDR}},

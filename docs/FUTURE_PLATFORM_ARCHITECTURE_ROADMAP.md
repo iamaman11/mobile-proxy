@@ -292,7 +292,7 @@ physical baseline unless the baseline is deliberately restarted.
 
 ### Supply chain
 
-- verify sing-box archives with pinned upstream checksums before extraction;
+- keep sing-box archives fail-closed against the committed upstream asset size and SHA-256 lock;
 - produce SBOMs;
 - sign release manifests and images;
 - record build provenance;

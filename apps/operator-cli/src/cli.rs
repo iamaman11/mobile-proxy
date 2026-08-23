@@ -175,6 +175,8 @@ pub struct AirplaneStudyArgs {
 pub struct PrepareRuntimeBinariesArgs {
     #[arg(long, default_value = "1.13.12")]
     pub sing_box_version: String,
+    #[arg(long, default_value = "deploy/sing-box-artifacts.lock.json")]
+    pub sing_box_lock_file: String,
     #[arg(long, default_value = "/usr/lib/android-ndk")]
     pub android_ndk: String,
     #[arg(long, default_value_t = false)]
