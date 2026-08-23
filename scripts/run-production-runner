@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+runner_dir="/home/bose/.local/share/actions-runner/mobile-proxy-production"
+
+unset ALL_PROXY all_proxy HTTPS_PROXY https_proxy HTTP_PROXY http_proxy
+export PATH="/home/bose/.local/bin:/home/bose/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+
+cd "$runner_dir"
+exec ./run.sh
