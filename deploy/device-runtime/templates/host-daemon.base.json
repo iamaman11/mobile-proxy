@@ -36,6 +36,8 @@
     "local_proxy_addr": "{{LOCAL_PROXY_ADDRESS}}",
     "local_socks5_addr": "127.0.0.1:1081",
     "local_http_addr": "127.0.0.1:3128",
+    "quic_enabled": {{REVERSE_TUNNEL_QUIC_ENABLED}},
+    "transport_socks5_addr": {{REVERSE_TUNNEL_SOCKS5_ADDR}},
     "server_name": "{{REVERSE_TUNNEL_SERVER_NAME}}",
     "server_cert_der_b64": "{{REVERSE_TUNNEL_CERT_DER_B64}}",
     "auth_token": "{{DEVICE_TOKEN}}",

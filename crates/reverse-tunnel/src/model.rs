@@ -49,12 +49,21 @@ pub struct ReverseTunnelClientConfig {
     pub local_proxy_addr: SocketAddr,
     pub local_socks5_addr: Option<SocketAddr>,
     pub local_http_addr: Option<SocketAddr>,
+    pub quic_enabled: bool,
+    pub transport_socks5: Option<TransportSocks5Config>,
     pub auth_token: String,
     pub transport: TunnelTransport,
     pub connect_timeout: Duration,
     pub heartbeat_interval: Duration,
     pub reconnect_floor: Duration,
     pub reconnect_ceiling: Duration,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransportSocks5Config {
+    pub server_addr: SocketAddr,
+    pub username: String,
+    pub password: String,
 }
 #[derive(Debug, Clone)]
 pub struct ReverseTunnelServerConfig {
@@ -118,6 +127,8 @@ mod protocol_routing_tests {
             local_proxy_addr: "127.0.0.1:1080".parse().unwrap(),
             local_socks5_addr: Some("127.0.0.1:1081".parse().unwrap()),
             local_http_addr: Some("127.0.0.1:3128".parse().unwrap()),
+            quic_enabled: true,
+            transport_socks5: None,
             auth_token: "token".into(),
             transport: TunnelTransport::Tcp,
             connect_timeout: Duration::from_secs(1),

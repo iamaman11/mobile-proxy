@@ -275,6 +275,9 @@ async fn connect_and_pump(
         return connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await;
     }
     if matches!(config.transport, TunnelTransport::Hybrid { .. }) {
+        if !config.quic_enabled {
+            return connect_and_pump_tls_tcp(config, session_id, shutdown, snapshot, status).await;
+        }
         match connect_and_pump_quic(config, session_id, shutdown, snapshot, status).await {
             Ok(()) => return Ok(()),
             Err(error) => {
@@ -480,16 +483,88 @@ async fn tls_tcp_connect_with_timeout(
     let connector = TlsConnector::from(Arc::new(tls));
     let name =
         ServerName::try_from(server_name.clone()).context("invalid TLS fallback server name")?;
-    let tcp = timeout(
-        connect_timeout,
-        TcpStream::connect(config.tcp_fallback_addr.unwrap_or(config.server_addr)),
-    )
-    .await
-    .context("TLS/TCP connect timed out")??;
+    let target = config.tcp_fallback_addr.unwrap_or(config.server_addr);
+    let tcp = timeout(connect_timeout, connect_transport_tcp(config, target))
+        .await
+        .context("TLS/TCP connect timed out")??;
     timeout(connect_timeout, connector.connect(name, tcp))
         .await
         .context("TLS/TCP handshake timed out")?
         .context("TLS/TCP handshake failed")
+}
+
+async fn connect_transport_tcp(
+    config: &ReverseTunnelClientConfig,
+    target: SocketAddr,
+) -> Result<TcpStream> {
+    let Some(proxy) = &config.transport_socks5 else {
+        return TcpStream::connect(target)
+            .await
+            .context("TCP connect failed");
+    };
+    let mut stream = TcpStream::connect(proxy.server_addr)
+        .await
+        .context("transport SOCKS5 connect failed")?;
+    socks5_connect(&mut stream, target, &proxy.username, &proxy.password).await?;
+    Ok(stream)
+}
+
+async fn socks5_connect(
+    stream: &mut TcpStream,
+    target: SocketAddr,
+    username: &str,
+    password: &str,
+) -> Result<()> {
+    if username.is_empty() || username.len() > 255 || password.is_empty() || password.len() > 255 {
+        bail!("transport SOCKS5 credentials are invalid");
+    }
+    stream.write_all(&[5, 1, 2]).await?;
+    let mut response = [0_u8; 2];
+    stream.read_exact(&mut response).await?;
+    if response != [5, 2] {
+        bail!("transport SOCKS5 authentication method was rejected");
+    }
+    let mut auth = Vec::with_capacity(username.len() + password.len() + 3);
+    auth.extend_from_slice(&[1, username.len() as u8]);
+    auth.extend_from_slice(username.as_bytes());
+    auth.push(password.len() as u8);
+    auth.extend_from_slice(password.as_bytes());
+    stream.write_all(&auth).await?;
+    stream.read_exact(&mut response).await?;
+    if response != [1, 0] {
+        bail!("transport SOCKS5 authentication failed");
+    }
+    let mut request = vec![5, 1, 0];
+    match target.ip() {
+        std::net::IpAddr::V4(ip) => {
+            request.push(1);
+            request.extend_from_slice(&ip.octets());
+        }
+        std::net::IpAddr::V6(ip) => {
+            request.push(4);
+            request.extend_from_slice(&ip.octets());
+        }
+    }
+    request.extend_from_slice(&target.port().to_be_bytes());
+    stream.write_all(&request).await?;
+    let mut head = [0_u8; 4];
+    stream.read_exact(&mut head).await?;
+    if head[0] != 5 || head[1] != 0 {
+        bail!("transport SOCKS5 connection failed");
+    }
+    let address_len = match head[3] {
+        1 => 4,
+        4 => 16,
+        3 => {
+            let mut length = [0_u8; 1];
+            stream.read_exact(&mut length).await?;
+            usize::from(length[0])
+        }
+        _ => bail!("transport SOCKS5 returned an invalid address type"),
+    };
+    let mut remainder = vec![0_u8; address_len + 2];
+    stream.read_exact(&mut remainder).await?;
+    Ok(())
 }
 
 async fn open_tcp_client_proxy_stream(
@@ -1626,6 +1701,8 @@ mod tests {
             local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
             local_socks5_addr: None,
             local_http_addr: None,
+            quic_enabled: true,
+            transport_socks5: None,
             auth_token: "test-token".into(),
             transport: TunnelTransport::Tcp,
             connect_timeout: Duration::from_millis(100),
@@ -1653,6 +1730,8 @@ mod tests {
             local_proxy_addr: "127.0.0.1:9".parse().unwrap(),
             local_socks5_addr: None,
             local_http_addr: None,
+            quic_enabled: true,
+            transport_socks5: None,
             auth_token: "test-token".into(),
             transport: TunnelTransport::Quic {
                 server_name: "localhost".into(),

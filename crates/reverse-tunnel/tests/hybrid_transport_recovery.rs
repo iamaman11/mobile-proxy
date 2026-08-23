@@ -73,6 +73,8 @@ async fn hybrid_client_falls_back_then_recovers_quic_on_same_session() {
             local_proxy_addr: phone_proxy.addr,
             local_socks5_addr: None,
             local_http_addr: None,
+            quic_enabled: true,
+            transport_socks5: None,
             auth_token: AUTH_TOKEN.into(),
             transport: TunnelTransport::Hybrid {
                 server_name: "localhost".into(),

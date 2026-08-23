@@ -83,6 +83,8 @@ struct FileReverseTunnelConfig {
     local_proxy_addr: Option<String>,
     local_socks5_addr: Option<String>,
     local_http_addr: Option<String>,
+    quic_enabled: Option<bool>,
+    transport_socks5_addr: Option<String>,
     server_name: Option<String>,
     server_cert_der_b64: Option<String>,
     auth_token: Option<String>,
@@ -242,7 +244,13 @@ pub fn load_runtime_config(cli: &Cli) -> Result<LoadedConfig> {
     };
 
     let control_plane_sync = control_plane_config(&file_config)?;
-    let reverse_tunnel = reverse_tunnel_config(&file_config, &node_id, &tunnel_owner)?;
+    let reverse_tunnel = reverse_tunnel_config(
+        &file_config,
+        &node_id,
+        &tunnel_owner,
+        &proxy_username,
+        &proxy_password,
+    )?;
     let reverse_tunnel_counter_state_path = reverse_tunnel.as_ref().map(|_| {
         file_config
             .reverse_tunnel
@@ -396,6 +404,8 @@ fn reverse_tunnel_config(
     file_config: &FileConfig,
     node_id: &str,
     tunnel_owner: &str,
+    proxy_username: &str,
+    proxy_password: &str,
 ) -> Result<Option<ReverseTunnelClientConfig>> {
     let config = file_config.reverse_tunnel.as_ref();
     if matches!(tunnel_owner, ROLLBACK_OWNER | APP_OWNED_OWNER) {
@@ -448,6 +458,16 @@ fn reverse_tunnel_config(
         parse_optional_loopback("local_socks5_addr", config.local_socks5_addr.as_deref())?;
     let local_http_addr =
         parse_optional_loopback("local_http_addr", config.local_http_addr.as_deref())?;
+    let transport_socks5_addr = parse_optional_loopback(
+        "transport_socks5_addr",
+        config.transport_socks5_addr.as_deref(),
+    )?;
+    let transport_socks5 =
+        transport_socks5_addr.map(|server_addr| reverse_tunnel::TransportSocks5Config {
+            server_addr,
+            username: proxy_username.to_string(),
+            password: proxy_password.to_string(),
+        });
     let auth_token = config
         .auth_token
         .clone()
@@ -497,6 +517,8 @@ fn reverse_tunnel_config(
         local_proxy_addr,
         local_socks5_addr,
         local_http_addr,
+        quic_enabled: config.quic_enabled.unwrap_or(true),
+        transport_socks5,
         auth_token,
         transport: TunnelTransport::Hybrid {
             server_name,

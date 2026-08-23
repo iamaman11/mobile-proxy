@@ -276,6 +276,18 @@ pub fn package_device_release(args: &PackageDeviceReleaseArgs) -> Result<()> {
                 &profile.airplane_hold_secs.to_string(),
             ),
             ("APP_EGRESS_PORT", "18080"),
+            (
+                "REVERSE_TUNNEL_QUIC_ENABLED",
+                bool_literal(args.tunnel_owner != ANDROID_EGRESS_TUNNEL_OWNER),
+            ),
+            (
+                "REVERSE_TUNNEL_SOCKS5_ADDR",
+                if args.tunnel_owner == ANDROID_EGRESS_TUNNEL_OWNER {
+                    "\"127.0.0.1:18080\""
+                } else {
+                    "null"
+                },
+            ),
         ];
         let body = render_json_template(&template, &strings, &raw)?;
         validate_host_config(&body, &args.tunnel_owner)?;
