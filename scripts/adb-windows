@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec /mnt/c/Users/Bose/AppData/Local/Android/Sdk/platform-tools/adb.exe "$@"

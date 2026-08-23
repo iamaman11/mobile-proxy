@@ -14,13 +14,13 @@ As of 2026-08-23:
   tags;
 - production device, tunnel-owner and SSH-user values are environment variables, not
   duplicated in workflow code;
-- no self-hosted runner is registered while this repository is public.
+- the repository is private and the dedicated `mobile-proxy-production` runner is the
+  only host allowed to access local ADB, gcloud and Secret Vault state.
 
-The last point is intentional. A persistent self-hosted runner attached to a public repository
-can be targeted by untrusted pull-request workflow changes. Before Git-based deployment is
-activated, either make this repository private or move `Deploy Production` to a separate
-private deployment repository. Until then the workflow is a reviewed, non-runnable contract;
-existing operator deployment remains authoritative.
+The private repository is the production trust boundary. Pull-request jobs continue to run on
+GitHub-hosted runners; only the manually dispatched, production-environment-gated job can
+target the persistent production runner. The runner starts with inherited proxy variables
+removed so a stale local proxy cannot break GitHub control-plane traffic.
 
 ## Delivery chain
 
@@ -69,8 +69,19 @@ Create a production environment:
 After selecting a private trust boundary, register a dedicated Linux self-hosted runner with
 labels `Linux`, `X64` and `mobile-proxy-production`. It must run as the local `bose`
 user and have ADB, gcloud, Rust, Android NDK/SDK, Java and the local Secret Vault available.
-Do not register a persistent production runner directly on this public repository: changing the
-current workflow labels is not a sufficient security boundary for fork pull requests.
+
+On the production workstation the runner lives at
+`/home/bose/.local/share/actions-runner/mobile-proxy-production`. Its GitHub registration token
+is minted only inside `scripts/register-production-runner` under Secret Vault. Windows Task
+Scheduler starts `scripts/run-production-runner` through WSL at logon and restarts it after a
+failure. The launcher uses an explicit toolchain path and removes inherited proxy variables.
+`scripts/adb-windows` delegates to the Windows SDK ADB server so the runner and the operator see
+the same attached phone.
+
+The current runner bootstrap is GitHub Actions Runner 2.336.0 for Linux x64, verified against
+the SHA-256 digest published by the GitHub release API. When upgrading it, verify the new
+official digest before replacing the installation; the runner's own automatic update remains
+enabled for urgent compatibility updates.
 
 ## Normal change
 
@@ -98,7 +109,15 @@ The compact repository snapshot is available at any revision:
 
 ## Production deployment
 
-Run Deploy Production from GitHub Actions and select the published tag. Validation resolves the annotated tag to one commit and requires an existing GitHub Release. The production environment pauses for approval, then the dedicated runner checks out that exact SHA.
+Run Deploy Production from GitHub Actions using the published tag as both the workflow ref and
+the `release_tag` input. For example, the CLI form is:
+
+    gh workflow run deploy-production.yml --ref v0.1.0 -f release_tag=v0.1.0
+
+Using `main` as the workflow ref is rejected because the production environment accepts only
+protected `v*` tags. Validation resolves the annotated tag to one commit and requires an
+existing GitHub Release. The production environment pauses for approval where the GitHub plan
+enforces required reviewers, then the dedicated runner checks out that exact SHA.
 
 The runner obtains operational values through scripts/with-production-secrets. GitHub does not receive the proxy password, control tokens, tunnel private key or WireGuard keys. VM deployment completes and verifies before device deployment starts. The device installer verifies the installed bytes, runtime owner, health and proxy smoke test.
 

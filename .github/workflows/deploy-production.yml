@@ -42,6 +42,8 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = "$RELEASE_TAG"
           sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)
           object_type=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.type)
           test "$object_type" = tag
@@ -73,7 +75,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
           test -z "$(git status --porcelain)"
           command -v adb
+          command -v cargo
           command -v gcloud
+          command -v java
           test -x /home/bose/projects/secret-vault/bin/secret-vault
           scripts/with-production-secrets true
       - name: Prepare pinned runtime binaries
