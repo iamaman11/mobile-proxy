@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-client_config_path="${MOBILE_PROXY_CLIENT_ENV:-${XDG_CONFIG_HOME:-${HOME}/.config}/mobile-proxy/client.env}"
+# Agent shells can preserve the `bose` UID while replacing HOME with an
+# isolated directory. The installed production client has one canonical,
+# owner-only credential file; callers may still override it explicitly.
+client_config_path="${MOBILE_PROXY_CLIENT_ENV:-${XDG_CONFIG_HOME:-/home/bose/.config}/mobile-proxy/client.env}"
 if [[ -f "${client_config_path}" ]]; then
   config_owner="$(stat -c '%u' "${client_config_path}")"
   config_mode="$(stat -c '%a' "${client_config_path}")"

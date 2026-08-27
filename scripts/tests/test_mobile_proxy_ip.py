@@ -35,6 +35,7 @@ printf '%s\n' '{"success":true}'
             environment = os.environ.copy()
             environment.update(
                 {
+                    "MOBILE_PROXY_CLIENT_ENV": str(Path(directory) / "missing.env"),
                     "MOBILE_PROXY_OPERATOR_CLI": str(fake_operator),
                     "MOBILE_PROXY_ROTATION_TOKEN": "test-rotation-token",
                     "MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64": "test-certificate",
@@ -88,6 +89,7 @@ exec "$@"
             environment.update(
                 {
                     "HOME": str(Path(directory) / "isolated-home"),
+                    "MOBILE_PROXY_CLIENT_ENV": str(Path(directory) / "missing.env"),
                     "MOBILE_PROXY_OPERATOR_CLI": str(fake_operator),
                     "MOBILE_PROXY_SECRET_VAULT": str(fake_vault),
                 }
@@ -103,6 +105,14 @@ exec "$@"
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(completed.stdout.strip(), '{"success":true}')
+
+    def test_default_client_config_is_independent_of_callers_home(self) -> None:
+        wrapper = WRAPPER.read_text(encoding="utf-8")
+
+        self.assertIn(
+            '${XDG_CONFIG_HOME:-/home/bose/.config}/mobile-proxy/client.env',
+            wrapper,
+        )
 
 
 if __name__ == "__main__":
