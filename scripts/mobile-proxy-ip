@@ -31,13 +31,19 @@ if [[ ! -x "${operator_binary}" ]]; then
 fi
 
 secret_vault_binary="${MOBILE_PROXY_SECRET_VAULT:-/home/bose/projects/secret-vault/bin/secret-vault}"
+secret_vault_root="${MOBILE_PROXY_SECRET_VAULT_ROOT:-/home/bose/projects/secret-vault}"
+secret_vault_gnupg_home="${MOBILE_PROXY_SECRET_VAULT_GNUPGHOME:-/home/bose/.local/share/codex-secret-vault/gnupg}"
+vault_env=(env
+  "SECRET_VAULT_ROOT=${secret_vault_root}"
+  "SECRET_VAULT_GNUPGHOME=${secret_vault_gnupg_home}")
 direct_env=(env
   -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY
   -u http_proxy -u https_proxy -u all_proxy -u no_proxy)
 if [[ -z "${MOBILE_PROXY_ROTATION_TOKEN:-}" || -z "${MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64:-}" ]]; then
   if [[ -x "${secret_vault_binary}" ]]; then
-    exec "${secret_vault_binary}" run mobile-proxy.rotation-token MOBILE_PROXY_ROTATION_TOKEN -- \
-      "${secret_vault_binary}" run mobile-proxy.reverse-tunnel-cert-der-b64 \
+    exec "${vault_env[@]}" "${secret_vault_binary}" run \
+      mobile-proxy.rotation-token MOBILE_PROXY_ROTATION_TOKEN -- \
+      "${vault_env[@]}" "${secret_vault_binary}" run mobile-proxy.reverse-tunnel-cert-der-b64 \
       MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64 -- "${direct_env[@]}" "${operator_binary}" ip "$@"
   fi
   echo "Missing rotation client credentials; provision ${client_config_path} or configure the secret vault" >&2
