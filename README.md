@@ -211,8 +211,10 @@ one command, uses no ADB, and does not expose admin or UI credentials:
 mobile-proxy-ip
 ```
 
-On the operator host, the wrapper automatically consumes the existing `mobile-proxy.rotation-token`
-and certificate records from Secret Vault, so no plaintext client config is created.
+On the operator host, provision the owner-only `/home/bose/.config/mobile-proxy/client.env` once.
+Routine calls then require neither GPG nor Secret Vault, which keeps isolated agent shells reliable.
+If the client file is absent, an interactive operator shell can still consume the existing
+`mobile-proxy.rotation-token` and certificate records directly from Secret Vault.
 
 For programs, select JSON output. Exit code zero means the IP changed and the public proxy plus
 fresh reverse tunnel recovered. The result contains `old_ip`, `new_ip`, elapsed time, readiness and
