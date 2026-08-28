@@ -227,7 +227,12 @@ mobile-proxy-ip --format json
 The client talks only to `/api/v1/rotation/devices/{id}` with a dedicated rotation token. It
 generates an idempotency key, safely retries transient command submission, waits for the server and
 requires a different IP, healthy readiness, public serving and a fresh reverse tunnel before
-reporting success. The legacy `rotate-server` CLI name remains available for compatibility.
+reporting success. The server's atomic command response supplies the old IP, avoiding a redundant
+preflight request. Submission uses up to five bounded exponential-backoff attempts with the same
+idempotency key. JSON mode also returns a parseable `success: false` object on runtime failure while
+preserving a non-zero exit code. A local non-blocking lock rejects concurrent callers with exit code `75` and
+`{"success":false,"error":"rotation_already_running"}` in JSON mode instead of performing an
+unexpected second rotation. The legacy `rotate-server` CLI name remains available for compatibility.
 
 The older `rotate` command below targets the phone-local operator API and is intended for device
 maintenance and diagnostics:
