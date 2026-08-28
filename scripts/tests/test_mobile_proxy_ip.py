@@ -1,4 +1,6 @@
 import os
+import fcntl
+import json
 import stat
 import subprocess
 import tempfile
@@ -36,6 +38,7 @@ printf '%s\n' '{"success":true}'
             environment.update(
                 {
                     "MOBILE_PROXY_CLIENT_ENV": str(Path(directory) / "missing.env"),
+                    "MOBILE_PROXY_ROTATION_LOCK": str(Path(directory) / "rotation.lock"),
                     "MOBILE_PROXY_OPERATOR_CLI": str(fake_operator),
                     "MOBILE_PROXY_ROTATION_TOKEN": "test-rotation-token",
                     "MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64": "test-certificate",
@@ -90,6 +93,7 @@ exec "$@"
                 {
                     "HOME": str(Path(directory) / "isolated-home"),
                     "MOBILE_PROXY_CLIENT_ENV": str(Path(directory) / "missing.env"),
+                    "MOBILE_PROXY_ROTATION_LOCK": str(Path(directory) / "rotation.lock"),
                     "MOBILE_PROXY_OPERATOR_CLI": str(fake_operator),
                     "MOBILE_PROXY_SECRET_VAULT": str(fake_vault),
                 }
@@ -113,6 +117,36 @@ exec "$@"
             '${XDG_CONFIG_HOME:-/home/bose/.config}/mobile-proxy/client.env',
             wrapper,
         )
+
+    def test_concurrent_rotation_fails_fast_with_machine_readable_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_operator = self.write_fake_operator(directory)
+            lock_path = Path(directory) / "rotation.lock"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "MOBILE_PROXY_CLIENT_ENV": str(Path(directory) / "missing.env"),
+                    "MOBILE_PROXY_OPERATOR_CLI": str(fake_operator),
+                    "MOBILE_PROXY_ROTATION_LOCK": str(lock_path),
+                    "MOBILE_PROXY_ROTATION_TOKEN": "test-rotation-token",
+                    "MOBILE_PROXY_REVERSE_TUNNEL_CERT_DER_B64": "test-certificate",
+                }
+            )
+            with lock_path.open("w", encoding="utf-8") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                completed = subprocess.run(
+                    [str(WRAPPER), "--format", "json"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+
+            self.assertEqual(completed.returncode, 75, completed.stderr)
+            self.assertEqual(
+                json.loads(completed.stdout),
+                {"success": False, "error": "rotation_already_running"},
+            )
 
 
 if __name__ == "__main__":

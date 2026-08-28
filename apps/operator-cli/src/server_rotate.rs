@@ -28,16 +28,38 @@ struct ServerRotationResult {
 #[derive(Debug, Deserialize)]
 struct RotationAccepted {
     command_id: String,
+    old_ip: String,
 }
 
 pub async fn run(args: &RotateServerArgs) -> Result<()> {
+    match run_inner(args).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if args.format == StatusFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "success": false,
+                        "error": "ip_rotation_failed",
+                        "message": format!("{error:#}"),
+                    })
+                );
+            }
+            Err(error)
+        }
+    }
+}
+
+async fn run_inner(args: &RotateServerArgs) -> Result<()> {
+    // Measure the whole user-visible operation, including transient failures
+    // while submitting the idempotent command.
+    let started = Instant::now();
     let client = build_client(args)?;
-    let old = fetch_device(&client, args).await?;
-    let old_ip = old
-        .last_public_ip
-        .clone()
-        .context("control plane does not report the current public IP")?;
     let command = issue_rotation(&client, args).await?;
+    // The POST snapshots this value within the server command boundary. Using
+    // it removes a redundant preflight GET and cannot race a natural carrier
+    // IP change between status retrieval and command acceptance.
+    let old_ip = command.old_ip;
 
     if args.format == StatusFormat::Summary {
         eprintln!(
@@ -46,7 +68,6 @@ pub async fn run(args: &RotateServerArgs) -> Result<()> {
         );
     }
 
-    let started = Instant::now();
     let timeout = Duration::from_secs(u64::from(args.timeout_secs.max(1)));
     let poll = Duration::from_secs(args.poll_secs.max(1));
     let final_device = loop {
@@ -112,6 +133,7 @@ fn build_client(args: &RotateServerArgs) -> Result<reqwest::Client> {
         // ALL_PROXY globally; bypass them for this certificate-pinned client.
         .no_proxy()
         .proxy(reqwest::Proxy::custom(|_| None::<&'static str>))
+        .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
         .resolve(&args.control_plane_name, args.control_plane_addr)
         .add_root_certificate(cert)
@@ -148,7 +170,8 @@ async fn issue_rotation(
         args.device_id
     );
     let mut last_error = None;
-    for attempt in 1..=3 {
+    const MAX_ATTEMPTS: u64 = 5;
+    for attempt in 1..=MAX_ATTEMPTS {
         match client
             .post(&url)
             .bearer_auth(&args.rotation_token)
@@ -162,9 +185,24 @@ async fn issue_rotation(
                     .await
                     .context("invalid rotation command response");
             }
-            Ok(response) if response.status().is_server_error() && attempt < 3 => {
+            Ok(response)
+                if (response.status().is_server_error()
+                    || response.status() == reqwest::StatusCode::REQUEST_TIMEOUT
+                    || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS)
+                    && attempt < MAX_ATTEMPTS =>
+            {
                 last_error = Some(anyhow::anyhow!(
                     "control plane temporarily returned {}",
+                    response.status()
+                ));
+            }
+            Ok(response)
+                if response.status().is_server_error()
+                    || response.status() == reqwest::StatusCode::REQUEST_TIMEOUT
+                    || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS =>
+            {
+                return Err(anyhow::anyhow!(
+                    "control plane remained unavailable after {MAX_ATTEMPTS} attempts; last status was {}",
                     response.status()
                 ));
             }
@@ -174,10 +212,20 @@ async fn issue_rotation(
                     .expect_err("non-success response must produce an error"))
                 .context("control plane rejected rotation command");
             }
-            Err(error) if attempt < 3 => last_error = Some(error.into()),
-            Err(error) => return Err(error).context("failed to send rotation command"),
+            Err(error) if attempt < MAX_ATTEMPTS => last_error = Some(error.into()),
+            Err(error) => {
+                return Err(error).context(format!(
+                    "failed to send rotation command after {MAX_ATTEMPTS} attempts"
+                ));
+            }
         }
-        sleep(Duration::from_secs(attempt)).await;
+        if args.format == StatusFormat::Summary {
+            eprintln!(
+                "control-plane temporarily unavailable; retrying rotation request ({}/{MAX_ATTEMPTS})",
+                attempt + 1
+            );
+        }
+        sleep(Duration::from_secs(1 << (attempt - 1))).await;
     }
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("rotation request failed")))
 }
@@ -196,7 +244,7 @@ fn rotation_complete(device: &DeviceRecord, old_ip: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::rotation_complete;
+    use super::{RotationAccepted, rotation_complete};
     use proxy_core::DeviceRecord;
     use uuid::Uuid;
 
@@ -264,5 +312,16 @@ mod tests {
         let mut stale_tunnel = device("198.51.100.2");
         stale_tunnel.reverse_tunnel_freshness = Some("stale".into());
         assert!(!rotation_complete(&stale_tunnel, "198.51.100.1"));
+    }
+
+    #[test]
+    fn accepted_rotation_carries_the_servers_atomic_old_ip_snapshot() {
+        let accepted: RotationAccepted = serde_json::from_value(serde_json::json!({
+            "command_id": "2f611098-4d65-4486-8685-dd03890ad4ac",
+            "old_ip": "198.51.100.1"
+        }))
+        .unwrap();
+
+        assert_eq!(accepted.old_ip, "198.51.100.1");
     }
 }

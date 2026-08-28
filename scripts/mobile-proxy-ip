@@ -1,6 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+json_output=false
+previous_argument=""
+for argument in "$@"; do
+  if [[ "${argument}" == "--format=json" ]] || \
+    [[ "${previous_argument}" == "--format" && "${argument}" == "json" ]]; then
+    json_output=true
+  fi
+  previous_argument="${argument}"
+done
+
+# Only one local consumer may rotate a device at a time. Fail fast instead of
+# queuing a surprise second airplane bounce after the first caller completes.
+rotation_lock_path="${MOBILE_PROXY_ROTATION_LOCK:-/home/bose/.local/state/mobile-proxy/ip-rotation.lock}"
+rotation_lock_directory="$(dirname "${rotation_lock_path}")"
+install -d -m 700 "${rotation_lock_directory}"
+touch "${rotation_lock_path}"
+chmod 600 "${rotation_lock_path}"
+exec {rotation_lock_fd}>"${rotation_lock_path}"
+if ! flock -n "${rotation_lock_fd}"; then
+  if [[ "${json_output}" == true ]]; then
+    printf '%s\n' '{"success":false,"error":"rotation_already_running"}'
+  else
+    echo "IP rotation is already running" >&2
+  fi
+  exit 75
+fi
+
 # Agent shells can preserve the `bose` UID while replacing HOME with an
 # isolated directory. The installed production client has one canonical,
 # owner-only credential file; callers may still override it explicitly.
