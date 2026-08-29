@@ -6,18 +6,28 @@ The only canonical repository for project information is:
 
 `https://github.com/iamaman11/mobile-proxy`
 
-Start with:
+If context is missing, start with:
 
-1. `AGENTS.md`
-2. `IMPLEMENTATION_PLAN.md`
-3. `docs/PRODUCTION_BASELINE_PLAN.md`
-4. `docs/operations/project-authority.md`
-5. `docs/GIT_DELIVERY.md`
+1. `AGENTS.md` — repository operating contract and source-of-truth rules;
+2. `IMPLEMENTATION_PLAN.md` — temporary current execution checkpoint plus the pointer to the sole active roadmap;
+3. `docs/PRODUCTION_BASELINE_PLAN.md` — active scope, delivery order, stop conditions and context-loss recovery protocol;
+4. `REPOSITORY_MAP.md` — module and ownership map;
+5. `RUNTIME_LAYOUT.md` — production runtime topology;
+6. `docs/operations/project-authority.md` — canonical/private-satellite boundary;
+7. `docs/GIT_DELIVERY.md` — protected Git/release/deployment flow.
 
 The canonical GitOps migration/status tracker is Issue #90 in this repository.
 
 `iamaman11/mobile-proxy-production` is a **private execution satellite only**. Its Issue #1 is a
 reserved phone command/audit transport, not a roadmap or source of project truth.
+
+## Current execution focus
+
+The near-term objective is to produce, exercise and accept a functional Production Baseline candidate before doing more non-essential architecture/governance expansion.
+
+The detailed sequencing decision lives **only** in the temporary `Current execution checkpoint` section of `IMPLEMENTATION_PLAN.md`. That section is subordinate to the Production Baseline Plan and current repository state, and must be deleted after software-complete release-candidate acceptance rather than retained as a permanent roadmap or copied into `docs/history/`.
+
+Do not create a competing short-term plan here. In particular, bulk governance JSON -> Protocol Buffers migration, gRPC activation, generic plugin frameworks and broad theoretical-purity refactors are not current baseline work unless a demonstrated blocker requires them.
 
 ## Current GitHub control boundary
 
