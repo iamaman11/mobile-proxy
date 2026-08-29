@@ -55,6 +55,16 @@ proxy-core = "1"
             (crate / "src").mkdir(parents=True)
             (crate / "Cargo.toml").write_text(manifest, encoding="utf-8")
             (crate / "src/lib.rs").write_text(source, encoding="utf-8")
+        source_root = SCRIPT.parents[1]
+        for relative in (
+            "contracts/governance/vm-ownership-v1.json",
+            "docs/architecture/vm-ownership-boundary.md",
+        ):
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                (source_root / relative).read_text(encoding="utf-8"), encoding="utf-8"
+            )
         return root
 
     def check_fixture(self, root: Path):

@@ -190,6 +190,16 @@ cargo run --release -p operator-cli -- provision-vm \
 
 The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional WireGuard compatibility backend used by both the stock rollback path and the app-owned VPN path.
 
+### VM ownership boundary
+
+A cloud account may contain neighbouring infrastructure. Any future shared-account VM provider
+adapter must bind its provider-assigned immutable VM UUID in durable owner-controlled state, require
+the exact `project=mobile-proxy` and `managed-by=mobile-proxy` tags before every management,
+snapshot or deletion operation, and fail closed on an absent binding, UUID mismatch or tag mismatch.
+Recreate verifies a tagged replacement and atomically advances the UUID binding generation. See
+[`contracts/governance/vm-ownership-v1.json`](contracts/governance/vm-ownership-v1.json) and
+[`docs/architecture/vm-ownership-boundary.md`](docs/architecture/vm-ownership-boundary.md).
+
 The production `optimized-hybrid` route keeps public `1080`, `1081` and `3128` on the proven phone
 mixed-proxy path through the pinned TLS reverse tunnel to Android cellular egress. The port numbers
 and client protocols remain unchanged. VM sing-box termination remains an explicit comparison and
