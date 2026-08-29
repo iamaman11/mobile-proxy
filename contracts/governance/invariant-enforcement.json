@@ -20,7 +20,7 @@
       "blob_sha": "01d013996a5173d1336c7603f932db2e2b077d26"
     },
     "A2": {
-      "path": "docs/architecture/ADR-002-cryptographic-hashing-password-hashing-and-kdf-policy.md",
+      "path": "docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md",
       "blob_sha": "3746b424d28edc1ba381f02dc0b69a50d533f8cc"
     },
     "F": {
