@@ -2,6 +2,19 @@
 
 /.github/ @iamaman11
 /contracts/ @iamaman11
+/docs/architecture/ @iamaman11
+/scripts/ @iamaman11
 /deploy/ @iamaman11
+/crates/foundation/ @iamaman11
+/crates/runtime-domain/ @iamaman11
+/crates/proxy-core/ @iamaman11
+/crates/application/ @iamaman11
+/crates/control-plane-sqlite/ @iamaman11
+/crates/reverse-tunnel/ @iamaman11
+/apps/operator-cli/ @iamaman11
+/apps/android-app/ @iamaman11
 /services/control-plane/ @iamaman11
+/services/host-daemon/ @iamaman11
+/services/relay-gate/ @iamaman11
 /services/reverse-tunnel-server/ @iamaman11
+/services/runtime-supervisor/ @iamaman11

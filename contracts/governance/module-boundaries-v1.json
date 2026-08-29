@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "status": "normative",
+  "architecture_standard": "docs/architecture/ARCHITECTURE_STANDARD.md",
+  "workspace_manifest": "Cargo.toml",
+  "policies": {
+    "unknown_workspace_member": "reject",
+    "undeclared_internal_dependency": "reject",
+    "stale_allowed_dependency": "reject",
+    "dependency_cycle": "reject"
+  },
+  "modules": [
+    {
+      "path": "crates/foundation",
+      "package": "mobile-proxy-foundation",
+      "role": "foundation",
+      "allowed_internal_dependencies": []
+    },
+    {
+      "path": "crates/runtime-domain",
+      "package": "runtime-domain",
+      "role": "domain",
+      "allowed_internal_dependencies": []
+    },
+    {
+      "path": "crates/proxy-core",
+      "package": "proxy-core",
+      "role": "domain-contracts",
+      "allowed_internal_dependencies": [
+        "mobile-proxy-foundation"
+      ]
+    },
+    {
+      "path": "crates/application",
+      "package": "mobile-proxy-application",
+      "role": "application",
+      "allowed_internal_dependencies": [
+        "mobile-proxy-foundation",
+        "proxy-core"
+      ]
+    },
+    {
+      "path": "crates/control-plane-sqlite",
+      "package": "mobile-proxy-control-plane-sqlite",
+      "role": "infrastructure-adapter",
+      "allowed_internal_dependencies": [
+        "mobile-proxy-application",
+        "mobile-proxy-foundation",
+        "proxy-core"
+      ]
+    },
+    {
+      "path": "crates/reverse-tunnel",
+      "package": "reverse-tunnel",
+      "role": "infrastructure-protocol",
+      "allowed_internal_dependencies": []
+    },
+    {
+      "path": "apps/operator-cli",
+      "package": "operator-cli",
+      "role": "delivery-composition",
+      "allowed_internal_dependencies": [
+        "mobile-proxy-foundation",
+        "proxy-core"
+      ]
+    },
+    {
+      "path": "services/control-plane",
+      "package": "control-plane",
+      "role": "delivery-composition",
+      "allowed_internal_dependencies": [
+        "mobile-proxy-application",
+        "mobile-proxy-control-plane-sqlite",
+        "mobile-proxy-foundation",
+        "proxy-core"
+      ]
+    },
+    {
+      "path": "services/host-daemon",
+      "package": "host-daemon",
+      "role": "delivery-composition",
+      "allowed_internal_dependencies": [
+        "mobile-proxy-foundation",
+        "proxy-core",
+        "reverse-tunnel"
+      ]
+    },
+    {
+      "path": "services/relay-gate",
+      "package": "relay-gate",
+      "role": "delivery-composition",
+      "allowed_internal_dependencies": [
+        "proxy-core"
+      ]
+    },
+    {
+      "path": "services/reverse-tunnel-server",
+      "package": "reverse-tunnel-server",
+      "role": "delivery-composition",
+      "allowed_internal_dependencies": [
+        "reverse-tunnel"
+      ]
+    },
+    {
+      "path": "services/runtime-supervisor",
+      "package": "runtime-supervisor",
+      "role": "delivery-composition",
+      "allowed_internal_dependencies": [
+        "proxy-core",
+        "runtime-domain"
+      ]
+    }
+  ]
+}
