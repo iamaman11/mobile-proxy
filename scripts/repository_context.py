@@ -60,6 +60,14 @@ def build_context() -> dict[str, Any]:
             ),
             "sha": _git("rev-parse", "HEAD"),
         },
+        "current_execution": {
+            "context_entrypoint": "QUICK_REFERENCE.md",
+            "temporary_checkpoint": "IMPLEMENTATION_PLAN.md#current-execution-checkpoint",
+            "active_roadmap": "docs/PRODUCTION_BASELINE_PLAN.md",
+            "acceptance_matrix": "TEN_OUT_OF_TEN_VALIDATION_PLAN.md",
+            "architecture_standard": "docs/architecture/ARCHITECTURE_STANDARD.md",
+            "future_direction": "docs/future/ (non-active)",
+        },
         "release": {
             "version": version,
             "expected_tag": f"v{version}",
@@ -75,14 +83,16 @@ def build_context() -> dict[str, Any]:
         },
         "architecture": {
             "primary_runtime": "first_party_reverse_tunnel",
-            "production_phone_owner": "first_party_android_egress",
+            "production_phone_owner": "first_party_reverse_tunnel",
+            "default_tunnel_owner": "first_party_reverse_tunnel",
+            "carrier_specific_egress_owner": "first_party_android_egress",
             "public_proxy_ports": {
                 "1080": "mixed SOCKS5/HTTP compatibility",
                 "1081": "SOCKS5",
                 "3128": "HTTP including CONNECT",
             },
             "production_data_path": (
-                "nginx -> Rust reverse-tunnel server -> Android cellular egress"
+                "public relay edge -> Rust reverse-tunnel server -> phone-local proxy -> Android cellular egress"
             ),
             "rollback_only": [
                 "sing-box VM termination",
@@ -114,15 +124,23 @@ def build_context() -> dict[str, Any]:
         },
         "authoritative_docs": [
             "README.md",
+            "QUICK_REFERENCE.md",
             "AGENTS.md",
             "IMPLEMENTATION_PLAN.md",
             "docs/PRODUCTION_BASELINE_PLAN.md",
+            "TEN_OUT_OF_TEN_VALIDATION_PLAN.md",
+            "REPOSITORY_MAP.md",
+            "RUNTIME_LAYOUT.md",
+            "docs/architecture/ARCHITECTURE_STANDARD.md",
+            "docs/architecture/invariant-enforcement.md",
             "docs/GIT_DELIVERY.md",
             "docs/operations/project-authority.md",
             "docs/operations/github-bootstrap.md",
             "docs/operations/secret-boundaries.md",
-            "RUNTIME_LAYOUT.md",
             "contracts/governance/invariant-enforcement.json",
+            "contracts/governance/module-boundaries-v1.json",
+            "contracts/governance/state-ownership-v1.json",
+            "contracts/compatibility/proxy-surface-v1.json",
             "contracts/operations/project-authority-v1.json",
             "contracts/operations/github-control-plane-v1.json",
             "contracts/operations/production-topology-v1.json",
@@ -134,6 +152,7 @@ def build_context() -> dict[str, Any]:
 def to_markdown(context: dict[str, Any]) -> str:
     project = context["project_authority"]
     git = context["git"]
+    current = context["current_execution"]
     release = context["release"]
     workspace = context["workspace"]
     quality = context["quality"]
@@ -147,10 +166,13 @@ def to_markdown(context: dict[str, Any]) -> str:
             f"- SHA: {git['sha']}",
             f"- Branch: {git['branch']}",
             f"- Tracked worktree clean: {str(git['clean_tracked']).lower()}",
+            f"- Context entrypoint: {current['context_entrypoint']}",
+            f"- Current checkpoint: {current['temporary_checkpoint']}",
+            f"- Active roadmap: {current['active_roadmap']}",
             f"- Version/tag: {release['version']} / {release['expected_tag']}",
             f"- Workspace members: {workspace['member_count']}",
             f"- Required check: {quality['required_check']}",
-            "- Production path: nginx -> Rust reverse tunnel -> Android cellular egress",
+            "- Production path: public relay edge -> Rust reverse tunnel -> phone-local proxy -> Android cellular egress",
             "- Deployable unit: published annotated tag resolved to one immutable SHA",
             "- Satellite authority: execution-only; canonical repository wins on conflict",
             "",
