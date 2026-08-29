@@ -1,0 +1,255 @@
+name: Production Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-gate:
+    name: Validate protected release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.gate.outputs.sha }}
+    steps:
+      - name: Validate protected v* release tag
+        id: gate
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          reason_file="$RUNNER_TEMP/release-gate-reason"
+          rm -f "$reason_file"
+
+          fail() {
+            printf '%s\n' "$1" > "$reason_file"
+            exit 1
+          }
+
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] || fail "workflow was not dispatched from a tag"
+          [[ "$GITHUB_REF_NAME" == v* ]] || fail "release tag does not match v*"
+          [[ "$REF_PROTECTED" == "true" ]] || fail "release tag is not protected"
+          printf 'sha=%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Write safe release-gate summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=PASS
+          reason_file="$RUNNER_TEMP/release-gate-reason"
+          if [[ "${{ steps.gate.outcome }}" != "success" ]]; then
+            status=FAIL
+          fi
+          {
+            printf -- '- SHA: %s\n' "$GITHUB_SHA"
+            printf -- '- Runner name: %s\n' "$RUNNER_NAME"
+            printf -- '- Preflight: %s\n' "$status"
+            if [[ "$status" == FAIL ]]; then
+              reason="release gate failed"
+              [[ -s "$reason_file" ]] && reason=$(<"$reason_file")
+              printf -- '- Reason: %s\n' "$reason"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  vultr-preflight:
+    name: Vultr read-only preflight
+    needs: release-gate
+    runs-on: ubuntu-latest
+    environment: production-vultr
+    timeout-minutes: 10
+    env:
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      VULTR_SSH_PRIVATE_KEY: ${{ secrets.VULTR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Validate Vultr access and SSH private key
+        id: vultr
+        shell: bash
+        run: |
+          set -euo pipefail
+          reason_file="$RUNNER_TEMP/vultr-preflight-reason"
+          versions_file="$RUNNER_TEMP/vultr-preflight-versions"
+          rm -f "$reason_file" "$versions_file"
+
+          fail() {
+            printf '%s\n' "$1" > "$reason_file"
+            exit 1
+          }
+
+          [[ -n "${VULTR_API_KEY:-}" ]] || fail "VULTR_API_KEY is unavailable or empty"
+          [[ -n "${VULTR_SSH_PRIVATE_KEY:-}" ]] || fail "VULTR_SSH_PRIVATE_KEY is unavailable or empty"
+          command -v curl >/dev/null 2>&1 || fail "curl is unavailable"
+          command -v ssh-keygen >/dev/null 2>&1 || fail "ssh-keygen is unavailable"
+          command -v ssh >/dev/null 2>&1 || fail "OpenSSH client is unavailable"
+
+          curl_version=$(curl --version | sed -n '1p')
+          openssh_version=$(ssh -V 2>&1)
+          printf 'curl: %s\nOpenSSH: %s\n' "$curl_version" "$openssh_version" > "$versions_file"
+
+          umask 077
+          key_file=$(mktemp "$RUNNER_TEMP/vultr-key.XXXXXX")
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$VULTR_SSH_PRIVATE_KEY" > "$key_file"
+          ssh-keygen -y -f "$key_file" >/dev/null 2>&1 || fail "VULTR_SSH_PRIVATE_KEY is not a valid private key"
+
+          if ! http_code=$(curl \
+            --silent \
+            --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${VULTR_API_KEY}" \
+            --header 'Accept: application/json' \
+            'https://api.vultr.com/v2/account'); then
+            fail "Vultr /v2/account request failed"
+          fi
+          [[ "$http_code" =~ ^2[0-9][0-9]$ ]] || fail "Vultr /v2/account did not return 2xx"
+
+      - name: Write safe Vultr summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=PASS
+          reason_file="$RUNNER_TEMP/vultr-preflight-reason"
+          versions_file="$RUNNER_TEMP/vultr-preflight-versions"
+          if [[ "${{ steps.vultr.outcome }}" != "success" ]]; then
+            status=FAIL
+          fi
+          {
+            printf -- '- SHA: %s\n' "$GITHUB_SHA"
+            printf -- '- Runner name: %s\n' "$RUNNER_NAME"
+            printf -- '- Preflight: Vultr %s\n' "$status"
+            if [[ -s "$versions_file" ]]; then
+              while IFS= read -r version_line; do
+                printf -- '- Tool version: %s\n' "$version_line"
+              done < "$versions_file"
+            fi
+            if [[ "$status" == FAIL ]]; then
+              reason="Vultr preflight failed"
+              [[ -s "$reason_file" ]] && reason=$(<"$reason_file")
+              printf -- '- Reason: %s\n' "$reason"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  phone-preflight:
+    name: Phone read-only preflight
+    needs: release-gate
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - android-production
+    timeout-minutes: 10
+    steps:
+      - name: Check out immutable release SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release-gate.outputs.sha }}
+          clean: true
+
+      - name: Validate runner tools and allowlisted phone
+        id: phone
+        shell: bash
+        run: |
+          set -euo pipefail
+          reason_file="$RUNNER_TEMP/phone-preflight-reason"
+          versions_file="$RUNNER_TEMP/phone-preflight-versions"
+          rm -f "$reason_file" "$versions_file"
+
+          fail() {
+            printf '%s\n' "$1" > "$reason_file"
+            exit 1
+          }
+
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || fail "checkout SHA does not match release SHA"
+          [[ -z "$(git status --porcelain)" ]] || fail "checkout is not clean"
+          [[ -x scripts/adb-windows ]] || fail "scripts/adb-windows is unavailable or not executable"
+          command -v java >/dev/null 2>&1 || fail "Java is unavailable"
+          command -v rustc >/dev/null 2>&1 || fail "rustc is unavailable"
+          command -v cargo >/dev/null 2>&1 || fail "Cargo is unavailable"
+
+          if ! adb_version_output=$(scripts/adb-windows version 2>/dev/null | tr -d '\r'); then
+            fail "ADB is unavailable through scripts/adb-windows"
+          fi
+          adb_version=$(printf '%s\n' "$adb_version_output" | sed -n '1p')
+          adb_build=$(printf '%s\n' "$adb_version_output" | sed -n '2p')
+          [[ -n "$adb_version" ]] || fail "ADB version could not be determined"
+
+          java_version=$(java -version 2>&1 | sed -n '1p')
+          rust_version=$(rustc --version)
+          cargo_version=$(cargo --version)
+
+          sdk_root=""
+          if [[ -n "${ANDROID_SDK_ROOT:-}" && -n "${ANDROID_HOME:-}" && "$ANDROID_SDK_ROOT" != "$ANDROID_HOME" ]]; then
+            fail "ANDROID_SDK_ROOT and ANDROID_HOME disagree"
+          fi
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          [[ -n "$sdk_root" && -d "$sdk_root" ]] || fail "Android SDK is unavailable"
+          [[ -f "$sdk_root/platform-tools/source.properties" ]] || fail "Android SDK platform-tools metadata is unavailable"
+          sdk_platform_tools=$(sed -n 's/^Pkg.Revision[[:space:]]*=[[:space:]]*//p' "$sdk_root/platform-tools/source.properties" | sed -n '1p')
+          [[ -n "$sdk_platform_tools" ]] || fail "Android SDK platform-tools version could not be determined"
+
+          if [[ -n "${ANDROID_NDK_HOME:-}" && -n "${ANDROID_NDK_ROOT:-}" && "$ANDROID_NDK_HOME" != "$ANDROID_NDK_ROOT" ]]; then
+            fail "ANDROID_NDK_HOME and ANDROID_NDK_ROOT disagree"
+          fi
+          ndk_root="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
+          if [[ -z "$ndk_root" ]]; then
+            shopt -s nullglob
+            ndk_candidates=("$sdk_root"/ndk/*/source.properties)
+            if [[ ${#ndk_candidates[@]} -eq 0 && -f "$sdk_root/ndk-bundle/source.properties" ]]; then
+              ndk_candidates=("$sdk_root/ndk-bundle/source.properties")
+            fi
+            [[ ${#ndk_candidates[@]} -eq 1 ]] || fail "Android NDK is missing or ambiguously configured"
+            ndk_root=$(dirname "${ndk_candidates[0]}")
+          fi
+          [[ -d "$ndk_root" && -f "$ndk_root/source.properties" ]] || fail "Android NDK is unavailable"
+          ndk_version=$(sed -n 's/^Pkg.Revision[[:space:]]*=[[:space:]]*//p' "$ndk_root/source.properties" | sed -n '1p')
+          [[ -n "$ndk_version" ]] || fail "Android NDK version could not be determined"
+
+          if ! adb_devices_output=$(scripts/adb-windows devices 2>/dev/null | tr -d '\r'); then
+            fail "adb devices failed"
+          fi
+          mapfile -t device_rows < <(printf '%s\n' "$adb_devices_output" | awk 'NR > 1 && NF {print $1 "\t" $2}')
+          [[ ${#device_rows[@]} -eq 1 ]] || fail "ADB device set is not exactly one allowed phone"
+          [[ "${device_rows[0]}" == $'R58T10QKGBE\tdevice' ]] || fail "the sole ADB device is not the allowlisted phone in device state"
+
+          {
+            printf 'ADB: %s' "$adb_version"
+            [[ -n "$adb_build" ]] && printf ' / %s' "$adb_build"
+            printf '\nJava: %s\nRust: %s\nCargo: %s\nAndroid SDK platform-tools: %s\nAndroid NDK: %s\n' \
+              "$java_version" "$rust_version" "$cargo_version" "$sdk_platform_tools" "$ndk_version"
+          } > "$versions_file"
+
+      - name: Write safe phone summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=PASS
+          reason_file="$RUNNER_TEMP/phone-preflight-reason"
+          versions_file="$RUNNER_TEMP/phone-preflight-versions"
+          if [[ "${{ steps.phone.outcome }}" != "success" ]]; then
+            status=FAIL
+          fi
+          {
+            printf -- '- SHA: %s\n' "$GITHUB_SHA"
+            printf -- '- Runner name: %s\n' "$RUNNER_NAME"
+            printf -- '- Preflight: Phone %s\n' "$status"
+            if [[ -s "$versions_file" ]]; then
+              while IFS= read -r version_line; do
+                printf -- '- Tool version: %s\n' "$version_line"
+              done < "$versions_file"
+            fi
+            if [[ "$status" == FAIL ]]; then
+              reason="phone preflight failed"
+              [[ -s "$reason_file" ]] && reason=$(<"$reason_file")
+              printf -- '- Reason: %s\n' "$reason"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
