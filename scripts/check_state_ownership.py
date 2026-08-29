@@ -34,12 +34,12 @@ def _within(path: str, root: str) -> bool:
         return False
 
 
-def validate_repository(root: Path) -> list[str]:
+def validate_repository(root: Path, contract_path: Path | None = None) -> list[str]:
     root = root.resolve()
     errors: list[str] = []
-    contract_file = root / CONTRACT_PATH
+    contract_file = contract_path or root / CONTRACT_PATH
     if not contract_file.is_file():
-        return [f"missing state-ownership contract: {CONTRACT_PATH}"]
+        return [f"missing state-ownership contract: {contract_file}"]
     try:
         contract = _load_json(contract_file)
     except (OSError, json.JSONDecodeError) as exc:
