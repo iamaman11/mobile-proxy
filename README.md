@@ -14,6 +14,19 @@ the public fork/PR trust boundary. If satellite state, chat history, workstation
 state conflicts with this repository, production fails closed and the canonical repository is
 reconciled first. See [project authority](docs/operations/project-authority.md).
 
+## Start here after context loss
+
+A developer, operator or agent opening the repository without prior chat/context should not reconstruct intent from Git history or guess from individual source files. Read in this order:
+
+1. [Quick Reference](QUICK_REFERENCE.md) — two-minute orientation and current control boundary;
+2. [Agent operating contract](AGENTS.md) — required repository workflow and sources of truth when making changes;
+3. [Implementation Plan](IMPLEMENTATION_PLAN.md) — the temporary current execution checkpoint and pointer to the sole active roadmap;
+4. [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md) — active scope, delivery order, invariants, stop conditions and context-loss recovery protocol;
+5. [Repository Map](REPOSITORY_MAP.md) and [Runtime Layout](RUNTIME_LAYOUT.md) — ownership, module placement and runtime topology;
+6. [Git delivery](docs/GIT_DELIVERY.md) — protected merge, release and production-control path.
+
+The short-term execution focus is intentionally stored only in `IMPLEMENTATION_PLAN.md` and is temporary. It does not replace the Production Baseline Plan and must be deleted after the software-complete release-candidate checkpoint is reached. Architecture, state ownership and exact module rules remain long-lived normative controls under `docs/architecture/` and `contracts/governance/`.
+
 ## Production architecture
 
 The normal device runtime does **not** use Android `VpnService`.
