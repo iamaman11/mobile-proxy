@@ -49,9 +49,9 @@ jobs:
             status=FAIL
           fi
           {
-            printf -- '- SHA: `%s`\n' "$GITHUB_SHA"
-            printf -- '- Runner name: `%s`\n' "$RUNNER_NAME"
-            printf -- '- Preflight: `%s`\n' "$status"
+            printf -- '- SHA: %s\n' "$GITHUB_SHA"
+            printf -- '- Runner name: %s\n' "$RUNNER_NAME"
+            printf -- '- Preflight: %s\n' "$status"
             if [[ "$status" == FAIL ]]; then
               reason="release gate failed"
               [[ -s "$reason_file" ]] && reason=$(<"$reason_file")
@@ -123,9 +123,9 @@ jobs:
             status=FAIL
           fi
           {
-            printf -- '- SHA: `%s`\n' "$GITHUB_SHA"
-            printf -- '- Runner name: `%s`\n' "$RUNNER_NAME"
-            printf -- '- Preflight: `Vultr %s`\n' "$status"
+            printf -- '- SHA: %s\n' "$GITHUB_SHA"
+            printf -- '- Runner name: %s\n' "$RUNNER_NAME"
+            printf -- '- Preflight: Vultr %s\n' "$status"
             if [[ -s "$versions_file" ]]; then
               while IFS= read -r version_line; do
                 printf -- '- Tool version: %s\n' "$version_line"
@@ -239,9 +239,9 @@ jobs:
             status=FAIL
           fi
           {
-            printf -- '- SHA: `%s`\n' "$GITHUB_SHA"
-            printf -- '- Runner name: `%s`\n' "$RUNNER_NAME"
-            printf -- '- Preflight: `Phone %s`\n' "$status"
+            printf -- '- SHA: %s\n' "$GITHUB_SHA"
+            printf -- '- Runner name: %s\n' "$RUNNER_NAME"
+            printf -- '- Preflight: Phone %s\n' "$status"
             if [[ -s "$versions_file" ]]; then
               while IFS= read -r version_line; do
                 printf -- '- Tool version: %s\n' "$version_line"
