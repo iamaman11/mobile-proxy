@@ -39,7 +39,7 @@ Current execution order:
 6. Run the documented physical-phone acceptance on the same candidate when the physical execution boundary is available.
 7. Only after the functional baseline is accepted, perform a fresh architecture re-audit and authorize further refactoring only for demonstrated problems or measured change cost.
 
-At activation time, known incomplete evidence includes the remaining SQLite integrity/clean backup-restore acceptance represented by `PERSIST-002`, the health-surface split represented by `OPS-003`, and any later Production Baseline acceptance items that remain incomplete. This sentence is orientation only, not a second backlog: the Production Baseline Plan, invariant matrix and current repository state always win.
+At activation time, known incomplete evidence includes the remaining explicit SQLite startup/integrity-corruption check represented by `PERSIST-002`, the health-surface split represented by `OPS-003`, and any later Production Baseline acceptance items that remain incomplete. Backup plus clean restore/process recovery already have permanent test coverage; this sentence is orientation only, not a second backlog. The Production Baseline Plan, invariant matrix and current repository state always win.
 
 ### Temporary architecture freeze
 
