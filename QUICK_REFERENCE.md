@@ -31,8 +31,6 @@ The detailed sequencing decision lives **only** in the temporary `Current execut
 
 Do not create a competing short-term plan here. In particular, bulk governance JSON -> Protocol Buffers migration, gRPC activation, generic plugin frameworks and broad theoretical-purity refactors are not current baseline work unless a demonstrated blocker requires them.
 
-Known audit-snapshot drift after the merged state-ownership slice is tracked in Issue #100: the current repository already has the owner registry and permanent clean backup/restore process coverage even though two rows in the 2026-08-30 invariant audit still describe the earlier state. Repository state wins; #100 is a bounded semantic correction and does not authorize more architecture expansion.
-
 ## Current GitHub control boundary
 
 - canonical repository: public;
