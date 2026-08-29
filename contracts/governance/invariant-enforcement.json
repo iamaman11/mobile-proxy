@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-08-30",
-  "baseline_main_sha": "40ecf59f7807a776c8604bbc1489d0c47b2246f6",
+  "baseline_main_sha": "02067df89c5f7dc34198ef2d29d2405a21beb791",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -345,13 +345,20 @@
       "P",
       "§7.2, §7.5, §8",
       "Every current mutable behavior and state has one authoritative owner",
-      "planned",
+      "partially_enforced",
       "architecture",
-      [],
-      [],
-      "current-state-owner-boundary-audit",
+      [
+        "contracts/governance/state-ownership-v1.json",
+        "scripts/check_state_ownership.py",
+        "scripts/tests/test_state_ownership.py",
+        "scripts/check_architecture_boundaries.py"
+      ],
+      [
+        "RQ-A"
+      ],
+      "authoritative-state-discovery-gate",
       "",
-      "No aggregate owner registry or cross-context mutation scanner exists.",
+      "Current registered authoritative and operational mutable state has one declared authority; duplicate resources, unknown owners, writer escapes and durable state without a persistence owner fail closed. The remaining gap is semantic discovery: a newly invented state concept in arbitrary source could still be omitted from the explicit registry.",
       ""
     ],
     [
@@ -485,14 +492,16 @@
       [
         "crates/control-plane-sqlite/src/lib.rs",
         "crates/control-plane-sqlite/src/snapshot_compare_and_swap.rs",
-        "crates/control-plane-sqlite/src/snapshot_store_tests.rs"
+        "crates/control-plane-sqlite/src/snapshot_store_tests.rs",
+        "services/control-plane/src/bin/control-plane-state-backup.rs",
+        "services/control-plane/tests/state_backup_cli.rs"
       ],
       [
         "RQ-T"
       ],
-      "sqlite-backup-integrity-acceptance",
+      "sqlite-integrity-startup-acceptance",
       "",
-      "WAL, foreign keys, a five-second busy timeout, synchronous FULL and immediate bounded write transactions are permanent code/test behavior; VACUUM INTO backup support exists, but a permanent integrity-check plus clean backup/restore acceptance gate is still absent.",
+      "WAL, foreign keys, a five-second busy timeout, synchronous FULL and immediate bounded write transactions are permanent behavior. Backup, verification, clean restore and process startup from restored state are permanently exercised. The remaining gap is an explicit complete SQLite integrity/corruption check during startup or verification.",
       ""
     ],
     [
