@@ -46,6 +46,40 @@ class GithubControlPlaneTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("production-vultr boundary" in error for error in errors))
 
+    def test_satellite_cannot_become_a_second_source_of_truth(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(ROOT / "contracts", root / "contracts")
+            shutil.copytree(ROOT / "docs", root / "docs")
+            (root / ".github/workflows").mkdir(parents=True)
+            shutil.copy2(
+                ROOT / ".github/workflows/deploy-production.yml",
+                root / ".github/workflows/deploy-production.yml",
+            )
+            path = root / "contracts/operations/project-authority-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["execution_satellites"][0]["authority"] = "canonical"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("execution satellite authority" in error for error in errors))
+
+    def test_mutable_release_authority_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(ROOT / "contracts", root / "contracts")
+            shutil.copytree(ROOT / "docs", root / "docs")
+            (root / ".github/workflows").mkdir(parents=True)
+            shutil.copy2(
+                ROOT / ".github/workflows/deploy-production.yml",
+                root / ".github/workflows/deploy-production.yml",
+            )
+            path = root / "contracts/operations/project-authority-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["release_identity"]["mutable_branch_authority"] = "allowed"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("release identity" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

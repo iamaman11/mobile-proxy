@@ -2,6 +2,18 @@
 
 Rust-first mobile relay for exposing authenticated proxy services through a rooted Android device and its cellular connection.
 
+## Project authority
+
+`https://github.com/iamaman11/mobile-proxy` is the **only canonical repository for project
+information**: source, product behavior, architecture, roadmap/scope, contracts, desired state,
+release identity, workflow logic and acceptance policy.
+
+The private `iamaman11/mobile-proxy-production` repository is not a second project. It is an
+execution satellite used only to keep the physical `android-production` self-hosted runner outside
+the public fork/PR trust boundary. If satellite state, chat history, workstation state or provider
+state conflicts with this repository, production fails closed and the canonical repository is
+reconciled first. See [project authority](docs/operations/project-authority.md).
+
 ## Production architecture
 
 The normal device runtime does **not** use Android `VpnService`.
@@ -44,14 +56,18 @@ Use the dedicated `3128` endpoint for production HTTP/HTTPS clients. Port `1080`
 - `crates/application` — transport-independent application ports;
 - `crates/control-plane-sqlite` — canonical durable SQLite state and migrations;
 - `crates/reverse-tunnel` — QUIC/TLS transport and proxy forwarding;
-- `apps/operator-cli` — packaging, deployment, verification, rotation and rollback;
+- `apps/operator-cli` — packaging, deployment, verification, rotation and rollback primitives;
 - `services/runtime-supervisor` — rooted phone process and recovery owner;
 - `services/host-daemon` — phone-local health, rotation and control-plane synchronization;
 - `services/control-plane` — durable device/command control plane;
 - `services/reverse-tunnel-server` — relay-side reverse-tunnel endpoint;
 - `services/relay-gate` — relay readiness gate;
 - `deploy` — reproducible runtime templates and manifests;
+- `contracts` — compatibility, governance, project-authority and production-control invariants;
 - `scripts` — permanent architecture, digest and acceptance gates.
+
+The private execution satellite is intentionally not another source tree and must not duplicate this
+layout.
 
 ## Cryptographic policy
 
@@ -65,20 +81,22 @@ They are derived through `mobile-proxy-foundation::ContentDigest` with a version
 
 SHA-256 remains only where an external standard requires it, such as TLS/certificate fingerprints, Cargo registry checksums, GitHub artifact digests, OCI/SBOM/signature formats or other interoperability contracts. Passwords are not content-hashed; protocol KDF/MAC/signature/encryption algorithms are not replaced with BLAKE3.
 
-Release roots contain a sorted `integrity-manifest.json` covering every packaged file with typed BLAKE3 and exact sizes. Deployment acceptance first verifies that manifest, then compares active phone and VM files byte-for-byte with the immutable local package.
+Release roots contain a sorted `integrity-manifest.json` covering every packaged file with typed BLAKE3 and exact sizes. Deployment acceptance first verifies that manifest, then compares active phone and VM files byte-for-byte with the immutable package.
 
 ## Prerequisites
 
 For the primary device runtime:
 
 - rooted Android device;
-- ADB access with `adb shell su 0 sh -c id` returning `uid=0`;
 - architecture-correct `runtime-supervisor`, `host-daemon` and `sing-box` binaries prepared under `deploy/device-runtime/bin`;
 - device and relay manifests;
-- required secrets provided only through environment variables;
+- required secrets supplied only through their permitted protected runtime boundaries;
 - generated reverse-tunnel certificate identity and phone certificate pin.
 
 The Android APK and stock WireGuard are not primary-runtime prerequisites. Stock WireGuard is needed only to exercise the documented rollback gate.
+
+Physical root/ADB prerequisites are verified by the private production runner once the canonical
+phone workflow is implemented. Raw/manual ADB is not the standard production control path.
 
 ## Build and quality
 
@@ -115,16 +133,24 @@ The mandatory GitHub quality workflows additionally run:
 
 ## Git delivery
 
-Code reaches production only through an annotated semantic-version tag that passed
-`Quality Gate` and produced a published GitHub Release. The public source repository has no
-self-hosted runner: future Vultr lifecycle work runs on GitHub-hosted infrastructure through the
-tag-only `production-vultr` environment. Physical-phone orchestration belongs to the separate
-private `iamaman11/mobile-proxy-production` control repository.
+Code reaches production only through an annotated semantic-version tag that passed `Quality Gate`
+and resolved to one immutable canonical SHA and verified release artifacts/provenance.
 
-The legacy deployment workflow is fail-closed while this split is implemented. See
-[Git delivery and production control](docs/GIT_DELIVERY.md),
-[GitHub bootstrap](docs/operations/github-bootstrap.md) and
-[secret boundaries](docs/operations/secret-boundaries.md).
+The public canonical repository has no self-hosted runner. Vultr lifecycle work belongs on
+GitHub-hosted infrastructure through tag-only `production-vultr`. Physical-phone execution belongs
+to the private `iamaman11/mobile-proxy-production` satellite, but canonical phone workflow logic,
+release contracts and desired state remain in this repository.
+
+Both VM and phone use the same immutable release tuple: tag, full SHA, artifact name/digest,
+provenance identity and deployment ID `mobile-proxy-<tag>-<first12sha>`. There is no production
+meaning for `latest` or a mutable branch.
+
+The legacy deployment workflow is fail-closed while this split is implemented. See:
+
+- [Project authority](docs/operations/project-authority.md)
+- [Git delivery and production control](docs/GIT_DELIVERY.md)
+- [GitHub bootstrap](docs/operations/github-bootstrap.md)
+- [Secret boundaries](docs/operations/secret-boundaries.md)
 
 ## Prepare runtime binaries
 
@@ -148,11 +174,17 @@ cargo run -p operator-cli -- generate-reverse-tunnel-identity \
   --output-env-file .secrets/reverse-tunnel.env
 ```
 
-`.secrets/` is ignored by Git. Secret files are local-only and permission-restricted.
+`.secrets/` is ignored by Git. This command is a development/bootstrap primitive, not an
+authorised substitute for the protected production secret path.
 
-## Package and install the primary device runtime
+## Package and install primitives
 
-`first_party_reverse_tunnel` is the default; passing it explicitly is optional but useful in runbooks:
+The following `operator-cli` commands are reusable implementation/diagnostic primitives. During the
+current GitOps migration they are **not** an authorised workstation-driven production path. The
+final production workflow must invoke the required behavior through the canonical tagged/release
+control plane.
+
+`first_party_reverse_tunnel` is the default:
 
 ```bash
 cargo run --release -p operator-cli -- package-device-release \
@@ -169,7 +201,7 @@ cargo run --release -p operator-cli -- install-device-stack \
 
 Packaging requires a clean Git worktree, validates and JSON-escapes all template values, rejects unresolved placeholders, writes exact Git SHA metadata and verifies the finished BLAKE3 manifest. Installation validates root-shell inputs, copies the release, restarts the rooted runtime and compares deployed files byte-for-byte.
 
-## Verify the primary runtime
+## Verify the primary runtime primitive
 
 ```bash
 cargo run --release -p operator-cli -- verify-device \
@@ -178,9 +210,9 @@ cargo run --release -p operator-cli -- verify-device \
   --required-tunnel-owner first_party_reverse_tunnel
 ```
 
-Verification requires healthy serving state, the exact native owner, no active Android VPN and a successful authenticated public proxy smoke test unless explicitly skipped for a bounded diagnostic reason.
+Verification requires healthy serving state, the exact native owner, no active Android VPN and a successful authenticated public proxy smoke test unless explicitly skipped for a bounded diagnostic reason. Production verification will call the equivalent behavior only through the private runner boundary once enabled.
 
-## Provision the relay VM
+## Legacy VM provisioning primitive
 
 ```bash
 cargo run --release -p operator-cli -- provision-vm \
@@ -190,15 +222,19 @@ cargo run --release -p operator-cli -- provision-vm \
   --ssh-key <absolute-key-path>
 ```
 
+This documents the legacy GCP/workstation implementation primitive only. It is not the new
+production deployment path and must not be used to bypass the fail-closed migration gate. The
+target production provider is Vultr through GitHub-hosted Actions and the typed ownership contract.
+
 The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional WireGuard compatibility backend used by both the stock rollback path and the app-owned VPN path.
 
 ### VM ownership boundary
 
-A cloud account may contain neighbouring infrastructure. Any future shared-account VM provider
-adapter must bind its provider-assigned immutable VM UUID in durable owner-controlled state, require
-the exact `project=mobile-proxy` and `managed-by=mobile-proxy` tags before every management,
-snapshot or deletion operation, and fail closed on an absent binding, UUID mismatch or tag mismatch.
-Recreate verifies a tagged replacement and atomically advances the UUID binding generation. See
+A cloud account may contain neighbouring infrastructure. Any shared-account VM provider adapter
+must bind its provider-assigned immutable VM UUID in durable owner-controlled state, require the
+exact `project=mobile-proxy` and `managed-by=mobile-proxy` tags before every management, snapshot or
+deletion operation, and fail closed on an absent binding, UUID mismatch or tag mismatch. Recreate
+verifies a tagged replacement and atomically advances the UUID binding generation. See
 [`contracts/governance/vm-ownership-v1.json`](contracts/governance/vm-ownership-v1.json) and
 [`docs/architecture/vm-ownership-boundary.md`](docs/architecture/vm-ownership-boundary.md).
 
@@ -215,22 +251,17 @@ mobile-operator change.
 
 ## Rotate cellular identity
 
-For agents and remote operators, install `scripts/mobile-proxy-ip` on `PATH` and provision the
-mode-`600` client config shown in `deploy/client/mobile-proxy-ip.env.example` once. Rotation is then
-one command, uses no ADB, and does not expose admin or UI credentials:
+For agents and remote operators, `scripts/mobile-proxy-ip` is the existing authenticated rotation
+client. Its current operator-host configuration is legacy operational infrastructure; canonical
+contracts and application behavior live in this repository, while credential values remain outside
+Git.
 
 ```bash
 mobile-proxy-ip
 ```
 
-On the operator host, provision the owner-only `/home/bose/.config/mobile-proxy/client.env` once.
-Routine calls then require neither GPG nor Secret Vault, which keeps isolated agent shells reliable.
-If the client file is absent, an interactive operator shell can still consume the existing
-`mobile-proxy.rotation-token` and certificate records directly from Secret Vault.
-
 For programs, select JSON output. Exit code zero means the IP changed and the public proxy plus
-fresh reverse tunnel recovered. The result contains `old_ip`, `new_ip`, elapsed time, readiness and
-both local and public serving state:
+fresh reverse tunnel recovered. The result contains bounded status fields:
 
 ```bash
 mobile-proxy-ip --format json
@@ -240,14 +271,12 @@ The client talks only to `/api/v1/rotation/devices/{id}` with a dedicated rotati
 generates an idempotency key, safely retries transient command submission, waits for the server and
 requires a different IP, healthy readiness, public serving and a fresh reverse tunnel before
 reporting success. The server's atomic command response supplies the old IP, avoiding a redundant
-preflight request. Submission uses up to five bounded exponential-backoff attempts with the same
-idempotency key. JSON mode also returns a parseable `success: false` object on runtime failure while
-preserving a non-zero exit code. A local non-blocking lock rejects concurrent callers with exit code `75` and
-`{"success":false,"error":"rotation_already_running"}` in JSON mode instead of performing an
-unexpected second rotation. The legacy `rotate-server` CLI name remains available for compatibility.
+preflight request. Submission uses bounded exponential-backoff attempts with the same idempotency
+key. JSON mode returns a parseable failure object while preserving a non-zero exit code. A local
+non-blocking lock rejects concurrent callers rather than performing an unexpected second rotation.
 
-The older `rotate` command below targets the phone-local operator API and is intended for device
-maintenance and diagnostics:
+The older `rotate` command targets the phone-local operator API and is intended for maintenance and
+diagnostics, not as a replacement for the GitHub production deployment control plane:
 
 ```bash
 cargo run --release -p operator-cli -- rotate \
@@ -257,9 +286,7 @@ cargo run --release -p operator-cli -- rotate \
 
 A rotation is successful only when the public IP changes as required and the native reverse tunnel returns fresh and serving. A healthy phone-local process alone is insufficient.
 
-## Rollback
-
-Release rollback performs a full runtime restart rather than only changing a symlink:
+## Rollback primitive
 
 ```bash
 cargo run --release -p operator-cli -- rollback-device \
@@ -268,7 +295,10 @@ cargo run --release -p operator-cli -- rollback-device \
   --release-id <installed-release-id>
 ```
 
-Stock WireGuard rollback is exercised only through the immutable physical acceptance runbook. After that stage, the same already-installed native release must be reactivated without rebuilding, `tun0` must disappear and fresh QUIC service must return.
+The command remains an implementation primitive. Normal production rollback must be initiated and
+evidenced through the canonical release/private-execution workflow once that path is enabled.
+
+Stock WireGuard rollback is exercised only through the immutable physical acceptance policy. After that stage, the same already-installed native release must be reactivated without rebuilding, `tun0` must disappear and fresh QUIC service must return.
 
 ## Release status terminology
 
@@ -277,4 +307,6 @@ Stock WireGuard rollback is exercised only through the immutable physical accept
 
 Software evidence must never claim the baseline is complete. A source change invalidates the candidate and requires all software evidence to be regenerated before physical testing.
 
-The canonical implementation scope is `docs/PRODUCTION_BASELINE_PLAN.md`. The executable device procedure is `docs/physical-phone-acceptance-runbook.md`.
+The canonical implementation scope is `docs/PRODUCTION_BASELINE_PLAN.md`. The physical acceptance
+policy/runbook remains canonical in this repository and must ultimately be executed through the
+private phone runner rather than a workstation shortcut.

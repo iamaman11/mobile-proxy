@@ -6,6 +6,15 @@ The sole canonical roadmap for current development is:
 
 All work must begin by reading that document. It defines the active delivery order, protected compatibility surface, system invariants, module responsibilities, strict development protocol, Definition of Done and context-loss recovery procedure.
 
+Project-level authority is defined separately by:
+
+- [Project Authority and Execution Satellites](docs/operations/project-authority.md)
+- [Machine-readable Project Authority Contract](contracts/operations/project-authority-v1.json)
+
+`iamaman11/mobile-proxy` is the only canonical repository for project information. The private
+`iamaman11/mobile-proxy-production` repository is an execution satellite only and cannot expand,
+replace or reinterpret this roadmap.
+
 The previous broad platform roadmap is retained only as distant-future product direction:
 
 - [Distant-Future Ultimate Implementation Plan](docs/future/ULTIMATE_IMPLEMENTATION_PLAN.md)
@@ -23,4 +32,4 @@ Related bounded normative artifacts:
 - [Machine-readable Invariant Enforcement Matrix](contracts/governance/invariant-enforcement.json)
 - [Protected Proxy Compatibility Contract](contracts/compatibility/proxy-surface-v1.json)
 
-Repository state and the canonical baseline plan take precedence over external checkpoints, chat history or remembered intent.
+Repository state and the canonical baseline plan take precedence over external checkpoints, chat history, private execution-satellite content or remembered intent.

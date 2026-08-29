@@ -1,0 +1,78 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "canonical_repository": {
+    "name": "iamaman11/mobile-proxy",
+    "url": "https://github.com/iamaman11/mobile-proxy",
+    "authority": "sole_project_source_of_truth",
+    "canonical_gitops_issue": 90
+  },
+  "non_authoritative_sources": [
+    "chat_history",
+    "local_notes",
+    "workstation_state",
+    "provider_console_state",
+    "satellite_repository_policy_or_docs"
+  ],
+  "conflict_policy": "fail_closed_and_reconcile_in_canonical_repository_first",
+  "execution_satellites": [
+    {
+      "repository": "iamaman11/mobile-proxy-production",
+      "visibility": "private",
+      "authority": "execution_only",
+      "control_issue": 1,
+      "allowed": [
+        "thin_github_actions_caller_or_shim",
+        "private_android_runner_wiring",
+        "bounded_private_execution_evidence",
+        "command_and_audit_transport"
+      ],
+      "forbidden": [
+        "independent_project_roadmap",
+        "independent_architecture_decision",
+        "independent_release_policy",
+        "independent_provider_desired_state",
+        "independent_acceptance_policy",
+        "application_source_copy",
+        "canonical_manifest_copy",
+        "vultr_credentials_or_lifecycle"
+      ]
+    }
+  ],
+  "release_identity": {
+    "repository": "iamaman11/mobile-proxy",
+    "tag": "vMAJOR.MINOR.PATCH",
+    "tag_kind": "annotated",
+    "required_fields": [
+      "release_tag",
+      "git_sha",
+      "artifact_name",
+      "artifact_digest",
+      "provenance_identity"
+    ],
+    "deployment_id_rule": "mobile-proxy-<tag>-<first12sha>",
+    "mutable_branch_authority": "forbidden"
+  },
+  "evidence": {
+    "canonical_safe_summary_location": "iamaman11/mobile-proxy",
+    "private_raw_evidence": "supporting_only",
+    "secret_or_device_sensitive_values_in_public": "forbidden"
+  },
+  "external_runtime_state": {
+    "allowed_external_values": [
+      "secret_values",
+      "private_keys",
+      "runner_online_or_busy_state",
+      "physical_usb_or_adb_state",
+      "unsafe_to_publish_provider_bindings",
+      "raw_sensitive_logs"
+    ],
+    "canonical_repository_must_define": [
+      "schema",
+      "invariant",
+      "expected_name",
+      "allowed_location",
+      "safe_evidence_format"
+    ]
+  }
+}
