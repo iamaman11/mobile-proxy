@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "status": "normative",
+  "scope": "current_authoritative_and_operational_mutable_state",
+  "architecture_standard": "docs/architecture/ARCHITECTURE_STANDARD.md",
+  "module_boundaries": "contracts/governance/module-boundaries-v1.json",
+  "policies": {
+    "duplicate_resource_owner": "reject",
+    "unknown_owner_module": "reject",
+    "writer_outside_owner": "reject",
+    "durable_state_without_persistence_owner": "reject"
+  },
+  "state_groups": [
+    {
+      "id": "control-plane-canonical-state",
+      "authority_module": "services/control-plane",
+      "storage": "sqlite",
+      "persistence_owner_module": "crates/control-plane-sqlite",
+      "policy_modules": [
+        "crates/application",
+        "crates/foundation",
+        "crates/proxy-core"
+      ],
+      "resources": [
+        "device_registry",
+        "device_runtime_projection",
+        "pending_commands",
+        "command_results",
+        "idempotency_replay_evidence"
+      ],
+      "writer_paths": [
+        "services/control-plane/src/state.rs"
+      ],
+      "persistence_writer_paths": [
+        "crates/control-plane-sqlite/src"
+      ],
+      "migration_writer_paths": [
+        "services/control-plane/src/bin/control-plane-state-migrate.rs"
+      ],
+      "evidence_paths": [
+        "services/control-plane/src/state.rs",
+        "crates/control-plane-sqlite/src/snapshot_compare_and_swap.rs",
+        "services/control-plane/tests/sqlite_backend_process_acceptance.rs"
+      ]
+    },
+    {
+      "id": "reverse-tunnel-server-session-state",
+      "authority_module": "crates/reverse-tunnel",
+      "storage": "ephemeral",
+      "persistence_owner_module": null,
+      "policy_modules": [],
+      "resources": [
+        "reverse_tunnel_session_snapshots",
+        "reverse_tunnel_session_liveness",
+        "reverse_tunnel_active_connections",
+        "reverse_tunnel_tcp_control_channels",
+        "reverse_tunnel_pending_tcp_requests",
+        "reverse_tunnel_reserved_tcp_streams"
+      ],
+      "writer_paths": [
+        "crates/reverse-tunnel/src/state.rs"
+      ],
+      "persistence_writer_paths": [],
+      "migration_writer_paths": [],
+      "evidence_paths": [
+        "crates/reverse-tunnel/src/state.rs",
+        "crates/reverse-tunnel/tests/hybrid_tls_fallback.rs"
+      ]
+    },
+    {
+      "id": "host-daemon-local-runtime-state",
+      "authority_module": "services/host-daemon",
+      "storage": "ephemeral",
+      "persistence_owner_module": null,
+      "policy_modules": [
+        "crates/proxy-core",
+        "crates/reverse-tunnel"
+      ],
+      "resources": [
+        "host_health_projection",
+        "host_rotation_jobs",
+        "host_current_job",
+        "host_proxy_process_projection",
+        "host_reverse_tunnel_projection"
+      ],
+      "writer_paths": [
+        "services/host-daemon/src"
+      ],
+      "persistence_writer_paths": [],
+      "migration_writer_paths": [],
+      "evidence_paths": [
+        "services/host-daemon/src/state.rs",
+        "services/host-daemon/src/main.rs"
+      ]
+    },
+    {
+      "id": "host-daemon-tunnel-event-counters",
+      "authority_module": "services/host-daemon",
+      "storage": "durable_file",
+      "persistence_owner_module": "services/host-daemon",
+      "policy_modules": [
+        "crates/reverse-tunnel"
+      ],
+      "resources": [
+        "reverse_tunnel_event_counters"
+      ],
+      "writer_paths": [
+        "services/host-daemon/src/reverse_tunnel.rs"
+      ],
+      "persistence_writer_paths": [
+        "services/host-daemon/src/tunnel_counters.rs"
+      ],
+      "migration_writer_paths": [],
+      "evidence_paths": [
+        "services/host-daemon/src/tunnel_counters.rs"
+      ]
+    },
+    {
+      "id": "runtime-supervisor-operational-state",
+      "authority_module": "services/runtime-supervisor",
+      "storage": "ephemeral",
+      "persistence_owner_module": null,
+      "policy_modules": [
+        "crates/runtime-domain"
+      ],
+      "resources": [
+        "runtime_lifecycle_projection",
+        "runtime_route_repair_cooldown",
+        "runtime_proxy_restart_cooldown",
+        "runtime_tunnel_readiness_projection"
+      ],
+      "writer_paths": [
+        "services/runtime-supervisor/src/health.rs"
+      ],
+      "persistence_writer_paths": [],
+      "migration_writer_paths": [],
+      "evidence_paths": [
+        "crates/runtime-domain/src/lib.rs",
+        "services/runtime-supervisor/src/health.rs",
+        "services/runtime-supervisor/src/main.rs"
+      ]
+    }
+  ]
+}
