@@ -13,6 +13,10 @@ second architecture, roadmap, manifest or product-code source. See
 The repository must be readable as a layered system rather than a collection of workstation
 scripts or runtime snapshots.
 
+The normative architecture quality rules are in `docs/architecture/ARCHITECTURE_STANDARD.md`.
+The exact current Rust workspace dependency graph is machine-readable in
+`contracts/governance/module-boundaries-v1.json` and is enforced by the required Quality Gate.
+
 ## Top-level ownership
 
 - `crates/foundation`
@@ -71,21 +75,41 @@ at an immutable ref or delivered as a verified immutable release artifact.
 
 ## Layering rules
 
-### Domain/foundation
+### Foundation/domain/contracts
 
-Pure rules and bounded values. No HTTP, filesystem, database, Android or process dependencies.
+Pure rules, bounded values and canonical contracts. No HTTP, database, provider, Android, filesystem
+or process ownership. Existing narrower pure-crate restrictions remain independently enforced.
 
 ### Application
 
 Use cases and sequencing over explicit ports. Owns orchestration semantics, not platform commands.
 
-### Infrastructure
+### Infrastructure/adapters
 
-HTTP/database/process/Android/provider adapters behind typed application/domain boundaries.
+HTTP/database/process/Android/provider implementations behind typed application/domain boundaries.
 
-### Delivery
+### Composition/delivery
 
-Packaging and GitHub-controlled deployment. Delivery files do not become business-logic owners.
+Executable services, packaging and GitHub-controlled deployment. Composition roots may wire concrete
+implementations but do not become alternative domain owners.
+
+## Machine-enforced Rust module graph
+
+`contracts/governance/module-boundaries-v1.json` declares every current Rust workspace member, its
+architectural role and the exact internal package dependencies it currently uses.
+
+The policy gate fails closed when:
+
+- a Cargo workspace member is added without classification;
+- a declared module disappears or names a different Cargo package;
+- a module introduces an internal dependency not present in its allowlist;
+- the allowlist contains a stale edge no longer present in Cargo metadata;
+- an allowed dependency points to an unknown module;
+- the internal graph contains a cycle.
+
+The contract describes existing justified edges; it is not blanket permission to add every edge
+that a layer could theoretically tolerate. New edges must still satisfy the architecture standard
+and the smallest-current-design rule.
 
 ## Where new work belongs
 
@@ -101,6 +125,10 @@ Packaging and GitHub-controlled deployment. Delivery files do not become busines
   workstation script shortcut;
 - production workflow logic: canonical repository first; private phone repo only gets the minimum
   execution shim GitHub requires.
+
+A new crate or service is exceptional, not the default response to a new feature. Reuse an existing
+owner when that preserves cohesion; create a new module only when it establishes a real independent
+responsibility and document its dependency/ownership/deletion boundaries in the same pull request.
 
 ## Current production-control status
 
