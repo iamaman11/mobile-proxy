@@ -26,6 +26,8 @@ All normative sources below live in the canonical repository:
 - Product and operator behavior: README.md
 - Current implementation roadmap: IMPLEMENTATION_PLAN.md -> docs/PRODUCTION_BASELINE_PLAN.md
 - Runtime topology: RUNTIME_LAYOUT.md
+- Architecture quality standard: docs/architecture/ARCHITECTURE_STANDARD.md
+- Exact Rust workspace module graph: contracts/governance/module-boundaries-v1.json
 - Git delivery and release policy: docs/GIT_DELIVERY.md
 - Project authority and cross-repository boundary: docs/operations/project-authority.md
 - GitHub bootstrap and control-plane split: docs/operations/github-bootstrap.md
@@ -41,6 +43,9 @@ Documents under docs/history describe completed investigations or superseded pla
 
 - Work on a topic branch; do not deploy an uncommitted tree.
 - Keep Cargo.lock and the pinned Rust toolchain synchronized.
+- Every Rust workspace member and internal dependency edge must match `contracts/governance/module-boundaries-v1.json`; do not add a crate or dependency edge without classifying it in the same change.
+- Architecture-significant changes must justify complexity, identify ownership and rollback/deletion path, and add/update an ADR when they establish or materially change a long-lived architectural decision.
+- Do not create abstractions, services, runtime components or generic extension mechanisms for hypothetical future use; prefer the smallest design that satisfies the current accepted requirement.
 - Do not commit target directories, APK/build outputs, runtime binaries, credentials, generated GitHub credentials or raw acceptance logs.
 - Secret values never belong in Git. `production-vultr` GitHub Environment secrets are the standard Vultr runtime source; local Secret Vault is bootstrap/recovery only and must not be reintroduced into the normal production path.
 - The public repository has no self-hosted runner. Phone execution belongs only to the private
