@@ -16,6 +16,8 @@ If context is missing, start with:
 6. `docs/operations/project-authority.md` — canonical/private-satellite boundary;
 7. `docs/GIT_DELIVERY.md` — protected Git/release/deployment flow.
 
+`TEN_OUT_OF_TEN_VALIDATION_PLAN.md` is the normative **acceptance matrix**, not a competing implementation roadmap. `docs/future/` is non-active future direction. After reading the entry documents, inspect current `main`, open PRs and the latest permanent workflow results as required by the Production Baseline context-loss protocol.
+
 The canonical GitOps migration/status tracker is Issue #90 in this repository.
 
 `iamaman11/mobile-proxy-production` is a **private execution satellite only**. Its Issue #1 is a
