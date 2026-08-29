@@ -1,22 +1,58 @@
 # Git delivery and production control
 
-Git is the public source of truth for desired configuration, source, dependency locks, release
-versions, quality evidence, contracts and workflow definitions. Credential values, private keys,
-mutable provider bindings and physical-device secrets remain outside Git.
+`iamaman11/mobile-proxy` is the only canonical repository for project information: desired
+configuration, source, dependency locks, release versions, quality evidence, contracts, workflow
+logic, architecture decisions and acceptance policy. Credential values, private keys, mutable
+provider bindings and sensitive physical-device state remain outside Git.
+
+See [project authority](operations/project-authority.md) for the rule that satellite repositories,
+chat history, provider consoles and workstation state are non-authoritative when they conflict with
+this repository.
 
 ## Control-plane split
 
 | Boundary | Required responsibility |
 | --- | --- |
-| `iamaman11/mobile-proxy` | Public source repository; CI, release source and future GitHub-hosted Vultr orchestration. It has zero self-hosted runners. |
+| `iamaman11/mobile-proxy` | Canonical public project repository; CI, release source, reusable workflow logic, safe evidence index and GitHub-hosted Vultr orchestration. It has zero self-hosted runners. |
 | `production-vultr` | GitHub Environment that admits only tag `v*`; no reviewer, wait timer or administrator bypass. It provides encrypted provider credentials only to GitHub-hosted jobs. |
-| `iamaman11/mobile-proxy-production` | Private phone-control repository; Actions, Issues, phone workflows, evidence and rollback. |
+| `iamaman11/mobile-proxy-production` | Private execution satellite only; thin phone caller/shim, private runner access, bounded private execution evidence and command/audit transport. It is not a source of project truth. |
 | `android-production` | The private-repository runner for the registered physical phone. It has no Vultr credential and no administrative OS privilege for normal jobs. |
 
-The exact machine-readable desired state is
-[`github-control-plane-v1.json`](../contracts/operations/github-control-plane-v1.json) and
-[`production-topology-v1.json`](../contracts/operations/production-topology-v1.json). Bootstrap
-and recovery guidance is [GitHub bootstrap](operations/github-bootstrap.md).
+The exact machine-readable desired state is:
+
+- [`project-authority-v1.json`](../contracts/operations/project-authority-v1.json)
+- [`github-control-plane-v1.json`](../contracts/operations/github-control-plane-v1.json)
+- [`production-topology-v1.json`](../contracts/operations/production-topology-v1.json)
+
+Bootstrap and recovery guidance is [GitHub bootstrap](operations/github-bootstrap.md).
+
+## One project across two repositories
+
+The private repository exists solely to keep the physical self-hosted runner outside the public
+fork/PR trust boundary. It must not duplicate application source, manifests, architecture,
+roadmaps, release policy or acceptance rules.
+
+The preferred phone architecture is a thin private caller invoking canonical workflow logic from
+`iamaman11/mobile-proxy` at an immutable ref, or executing a verified immutable artifact produced by
+this repository. GitHub supports a private caller invoking a reusable workflow from a public
+repository; self-hosted runner assignment is then evaluated in the caller's context.
+
+Every production action across both trust zones uses one immutable release tuple:
+
+- repository `iamaman11/mobile-proxy`;
+- annotated semantic tag `vMAJOR.MINOR.PATCH`;
+- full Git SHA;
+- artifact name and digest;
+- provenance/attestation identity;
+- deployment ID `mobile-proxy-<tag>-<first12sha>`.
+
+There is no production meaning for "latest". A mutable branch, approximate version, unverified
+artifact or conflicting satellite state fails closed.
+
+`iamaman11/mobile-proxy#90` is the canonical GitOps architecture/status tracker.
+`iamaman11/mobile-proxy-production#1` is only the private command/audit transport. Meaningful safe
+results are referenced back to the canonical project; private raw evidence is supporting evidence,
+not an independent decision record.
 
 ## Public GitHub governance
 
@@ -28,6 +64,7 @@ and recovery guidance is [GitHub bootstrap](operations/github-bootstrap.md).
   write token or secret.
 - Secret scanning, push protection, Dependabot alerts and Dependabot security updates are enabled
   where GitHub provides them for public repositories.
+- Public workflows do not target self-hosted runners or execute ADB.
 
 ## Delivery chain
 
@@ -35,52 +72,68 @@ and recovery guidance is [GitHub bootstrap](operations/github-bootstrap.md).
       -> pull request
       -> Quality Gate
       -> protected main
-      -> annotated vMAJOR.MINOR.PATCH tag
-      -> verified GitHub Release and provenance
+      -> agent-invokable release control
+      -> protected annotated vMAJOR.MINOR.PATCH tag
+      -> verified GitHub Release + checksum/SBOM/provenance
       -> GitHub-hosted Vultr workflow
       -> verified owned VM
-      -> private phone-control workflow
+      -> private phone execution command
+      -> verify canonical release tuple
+      -> canonical reusable workflow/artifact on android-production
       -> verified Android device
-
-The release ID is `git-<first 12 characters of tag commit SHA>`. It lets an operator identify the
-deployed revision without relying on mutable branch names.
+      -> bounded safe evidence back to canonical tracking
 
 ## Current migration state
 
-Production deployment is **blocked fail-closed**. The checked-in legacy public deployment route
-combines a workstation runner with a GCP adapter and is not the target architecture. It must be
-replaced, in reviewed Git changes, by:
+Production deployment is **blocked fail-closed**. The historical public deployment route combined
+a workstation runner with a GCP adapter and is not the target architecture. The checked-in
+migration-gate workflow intentionally refuses deployment.
 
-1. a GitHub-hosted `production-vultr` workflow and a typed Vultr adapter that satisfies the
+The remaining implementation work is:
+
+1. agent-invokable GitHub-native release control that creates/uses one protected annotated tag
+   without requiring a manual UI button;
+2. draft -> assets -> checksum/SBOM/attestation -> publish release ordering, followed by enabling
+   release immutability;
+3. GitHub-hosted `production-vultr` workflows and a typed Vultr adapter satisfying the
    [VM ownership boundary](architecture/vm-ownership-boundary.md);
-2. a private `mobile-proxy-production` phone workflow that targets only the registered device;
-3. tag-bound verification, evidence and deterministic rollback across both boundaries.
+4. read-only live Vultr preflight proving environment-secret availability without exposing values;
+5. canonical phone preflight/deploy/verify/rollback logic invoked only through the private
+   execution satellite and exact `android-production` runner;
+6. read-only live phone preflight proving runner/tool/device state before mutation;
+7. signed APK/release identity handling without blindly replacing an existing Android signing key;
+8. bounded evidence and deterministic rollback across both targets.
 
-Until then no release event, manual dispatch, SSH, raw ADB or provider CLI is an authorised
-shortcut for deployment. Do not create a VM or install an APK merely to test bootstrap.
+Until the relevant target path is implemented and verified, no release event, manual dispatch,
+SSH, raw ADB, provider CLI or workstation command is an authorised production shortcut. Do not
+create a VM or install an APK merely to test bootstrap.
 
 ## Normal development and release
 
-1. Create a topic branch from current `main`.
+1. Create a topic branch from current protected `main`.
 2. Commit a bounded change with tests and open a pull request.
 3. Merge only after the aggregate `Quality Gate` succeeds.
-4. Change the workspace version in a reviewed pull request, then create exactly one annotated tag
-   matching that version.
-5. Let the release workflow attach release artifacts, checksums, SBOM and provenance before
-   publishing the release.
+4. For a release, change the workspace version in a reviewed pull request.
+5. Create exactly one annotated protected tag matching that version through the canonical release
+   control path once implemented.
+6. Build immutable artifacts, checksums, SBOM and provenance/attestation before publication.
+7. Never move or reuse a release tag; fix forward with a new patch release.
 
-Release immutability remains disabled until the release workflow implements that draft → asset →
-checksum/SBOM/attestation → publish order. Never move or reuse a release tag; fix forward with a
-new patch release.
+Release immutability remains disabled until the release workflow implements draft -> asset ->
+checksum/SBOM/attestation -> publish ordering.
 
 ## Secret and evidence policy
 
-See [secret boundaries](operations/secret-boundaries.md). A workflow may report safe metadata
-such as tag, SHA, workflow run URL and pass/fail checks. It must never report a secret value,
-length, hash, prefix/suffix, SSH material or unverified provider resource identifier.
+See [secret boundaries](operations/secret-boundaries.md). A workflow may report safe metadata such
+as tag, SHA, deployment ID, workflow run URL and bounded pass/fail checks. It must never report a
+secret value, length, hash, prefix/suffix, SSH material or unverified provider resource identifier.
 
 If secret scanning reports a genuine credential, treat it as disclosed: revoke or rotate at the
 provider first, then remove it from source/history and record only the safe remediation result.
+
+Exact live secrets, runner online/busy state, physical USB/ADB state and unsafe-to-publish provider
+bindings are external runtime values. The canonical repository remains authoritative for their
+schema, required names, allowed locations, invariants and safe evidence format.
 
 ## Token and time economy
 
@@ -88,3 +141,4 @@ provider first, then remove it from source/history and record only the safe reme
 - One aggregate Quality Gate avoids duplicate test work and exposes a compact summary artifact.
 - Versioned contracts prevent agents from rediscovering repository, runner and secret boundaries.
 - Raw physical acceptance logs remain outside public Git; publish only bounded non-secret evidence.
+- Private satellite content stays minimal so context recovery always starts from this repository.

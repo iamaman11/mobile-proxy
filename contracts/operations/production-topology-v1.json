@@ -1,48 +1,89 @@
 {
   "contract_version": 1,
   "status": "protected",
+  "project_authority": {
+    "canonical_repository": "iamaman11/mobile-proxy",
+    "canonical_gitops_issue": 90,
+    "satellite_conflict_policy": "fail_closed_and_reconcile_canonical_repository_first"
+  },
   "control_planes": {
     "source": {
       "repository": "iamaman11/mobile-proxy",
       "visibility": "public",
+      "authority": "canonical",
       "responsibilities": [
         "source",
+        "project_documentation",
+        "architecture_and_roadmap",
         "quality",
         "release",
+        "reusable_workflow_logic",
+        "safe_evidence_index",
         "github-hosted_vultr_orchestration"
       ]
     },
     "phone": {
       "repository": "iamaman11/mobile-proxy-production",
       "visibility": "private",
+      "authority": "execution_only",
+      "control_issue": 1,
       "responsibilities": [
-        "phone_orchestration",
-        "physical_acceptance",
-        "deployment_evidence",
-        "phone_rollback"
+        "thin_phone_workflow_caller_or_shim",
+        "private_runner_access",
+        "private_physical_execution",
+        "bounded_private_supporting_evidence",
+        "phone_rollback_execution"
+      ],
+      "forbidden_responsibilities": [
+        "project_source_of_truth",
+        "application_source",
+        "architecture",
+        "roadmap",
+        "release_policy",
+        "provider_desired_state",
+        "acceptance_policy"
       ]
     }
   },
   "execution": {
     "vultr": "GitHub-hosted runner in production-vultr",
-    "phone": "private-repository self-hosted runner with android-production label"
+    "phone": "private-repository caller context with android-production self-hosted runner",
+    "phone_logic": "canonical reusable workflow pinned to immutable ref or verified canonical release artifact"
+  },
+  "release_link": {
+    "source_repository": "iamaman11/mobile-proxy",
+    "required_identity": [
+      "annotated_release_tag",
+      "full_git_sha",
+      "artifact_name",
+      "artifact_digest",
+      "provenance_identity"
+    ],
+    "deployment_id_rule": "mobile-proxy-<tag>-<first12sha>",
+    "latest_or_mutable_branch": "forbidden"
   },
   "state_boundaries": {
-    "version_control": "desired configuration, contracts, workflow source and non-secret evidence schema",
+    "canonical_version_control": "desired configuration, contracts, architecture, roadmap, workflow logic, release identity and non-secret evidence schema/index",
     "github_environment": "encrypted provider credentials and deployment protection",
-    "provider": "VM resources and snapshots",
-    "private_phone_control_repository": "phone workflow state and evidence",
+    "provider": "VM resources, snapshots and runtime provider state",
+    "private_phone_control_repository": "execution transport and supporting private evidence only",
     "forbidden_in_public_source": [
       "credential_values",
       "private_keys",
-      "mutable_vm_binding",
+      "unsafe_to_publish_mutable_vm_binding",
       "phone_control_secrets",
+      "raw_device_sensitive_logs",
       "workstation_specific_runner_paths"
     ]
   },
   "migration_status": {
+    "canonical_authority": "documented_and_contract_enforced",
+    "phone_execution_satellite": "initialized_without_production_workflow",
     "vultr_adapter": "not_implemented",
-    "phone_workflows": "not_implemented_in_private_control_repository",
+    "vultr_live_preflight": "not_proven",
+    "phone_workflows": "not_implemented",
+    "phone_live_preflight": "not_proven",
+    "agent_release_control": "not_implemented",
     "legacy_public_deployment": "blocked_until_split_workflows_are_implemented_and_verified"
   }
 }

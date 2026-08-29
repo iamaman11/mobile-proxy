@@ -1,219 +1,124 @@
 # Repository Map
 
-Updated: 2026-08-23
-Workspace: `/home/bose/projects/mobile-proxy`
+Updated: 2026-08-30  
+Canonical repository: `iamaman11/mobile-proxy`
 
-## Goal
+## Authority
 
-This repository must be readable as a layered system, not as a pile of scripts and binaries.
+This repository is the only canonical repository for project information. The private
+`iamaman11/mobile-proxy-production` repository is an execution satellite only and must not become a
+second architecture, roadmap, manifest or product-code source. See
+`docs/operations/project-authority.md`.
 
-The working rule is simple:
-- shared contracts live in `crates/`
-- executable products live in `apps/` and `services/`
-- deployable runtime bundles live in `deploy/`
-- local/operator automation lives in `apps/operator-cli`
-- current entry documents live at the root; detailed architecture, operations and history live under `docs/`
+The repository must be readable as a layered system rather than a collection of workstation
+scripts or runtime snapshots.
 
-## Current Top-Level Ownership
+## Top-level ownership
 
+- `crates/foundation`
+  - validated identifiers, digests and other bounded primitives;
+- `crates/application`
+  - transport-independent application ports and orchestration boundaries;
+- `crates/control-plane-sqlite`
+  - canonical durable SQLite state and migrations;
 - `crates/proxy-core`
-  - shared contracts, enums, DTOs, runtime projection rules, default rotate settings
-  - now split into `constants`, `runtime`, `commands`, `records`, and `endpoints`
-  - this is the current source of truth for cross-service API shapes
-
-- `services/host-daemon`
-  - phone-local runtime API, rotation executor, control-plane sync, and health probe
-  - now split into focused modules for `api`, `auth`, `config`, `rotation`, `control_plane`, `health`, and `state`
-  - health is fail-closed and policy-routing aware: a cellular default route in Android policy tables counts as route-ready, but serving is not accepted without proxy bind and public observer success
-
-- `services/control-plane`
-  - VM-side registry, desired-state, command queue baseline
-  - now split into focused modules for `routes`, `projection`, `cli`, and `state`
-  - target state remains durable control-plane with persistence and restart recovery
-
-- `services/relay-gate`
-  - VM-side public readiness/probe gate
-  - should stay narrowly focused on public exposure and probe reporting
-
-- `services/reverse-tunnel-server`
-  - VM-side first-party reverse tunnel ingress
-  - owns QUIC/TLS phone session acceptance, token-authenticated hello validation, heartbeat tracking, and VM-side public TCP forward listeners
-  - public VM ports are exposed by nginx and forwarded to Rust loopback listeners for the first-party reverse-tunnel path
-
-- `apps/operator-cli`
-  - operator-facing Rust CLI
-  - now split into `cli`, `commands`, and `http`
-  - target home for provision, verify, rotate, rollback, fleet, and timing-study commands
-
+  - shared proxy/runtime compatibility contracts still being narrowed over time;
 - `crates/runtime-domain`
-  - pure runtime state machine baseline
-  - current home for deterministic runtime transition logic
-
+  - pure runtime state transitions;
 - `crates/reverse-tunnel`
-  - first-party Rust userspace reverse tunnel core
-  - current tests cover reconnect after server drop, reconnect after VM listener restart, stable session identity, QUIC/TLS heartbeat, wrong-token rejection, and VM TCP listener to phone-local proxy byte forwarding
-  - target home for transport framing, heartbeat, reconnect policy, stream contracts, and future compact binary frame encoding
-
+  - reverse-tunnel protocol, sessions, QUIC/TLS transport and forwarding rules;
+- `services/control-plane`
+  - control-plane service using the durable application/persistence boundary;
+- `services/reverse-tunnel-server`
+  - relay-side authenticated phone-session ingress and public stream forwarding;
+- `services/relay-gate`
+  - narrowly scoped relay readiness gate;
 - `services/runtime-supervisor`
-  - phone-side supervision process
-  - owns `host-daemon` and `sing-box` lifecycle, health reconciliation, WireGuard kick attempts, route repair attempts, and data-bounce fallback
-
-- `apps/android-app`
-  - thin Android shell only
-  - should not become the primary home for business logic
-
-- `deploy/device-runtime`
-  - phone runtime bundle layout, Magisk bootstrap, config templates, release payload structure
-  - `service.sh` is bootstrap-only and starts the versioned Rust supervisor
-
-- `deploy/manifests/devices`
-  - per-device declarations and rollout inputs
-
-- `config/*.example.env`
-  - local environment examples for services and operators
-
-- root `*.md` documents
-  - current repository map, implementation entry point, runtime layout and quick reference
-
-- `docs/`
-  - active architecture and operations documents
-  - Git delivery policy
-  - dated or superseded material under `docs/history/`
-
-## Required Layering
-
-### Layer 1. Domain
-
-Purpose:
-- pure rules
-- state transitions
-- intent derivation
-- failure classification
-
-Placement:
-- target new crates under `crates/`, for example:
-  - `crates/runtime-domain`
-  - `crates/control-domain`
-
-Rule:
-- no shell calls
-- no HTTP
-- no file IO
-- deterministic tests only
-
-### Layer 2. Application
-
-Purpose:
-- orchestrate workflows
-- run state machines
-- sequence retries, deadlines, and reconciliation loops
-
-Placement:
-- service-local modules or dedicated crates, for example:
-  - `services/runtime-supervisor`
-  - `services/control-plane`
-  - `apps/operator-cli`
-
-Rule:
-- depends on domain
-- issues commands to infrastructure
-- owns use cases, not OS-specific details
-
-### Layer 3. Infrastructure
-
-Purpose:
-- Android/system calls
-- HTTP adapters
-- persistence
-- process supervision
-- route inspection and repair
-
-Placement:
-- target new crates or service modules, for example:
-  - `crates/android-infra`
-  - `crates/control-plane-store`
-  - `crates/runtime-probes`
-
-Rule:
-- hide platform details behind typed interfaces
-- keep translation code local
-
-### Layer 4. Delivery and Deploy
-
-Purpose:
-- package binaries
-- version configs
-- deploy to VM and phone
-- bootstrap startup hooks
-
-Placement:
-- `deploy/`
+  - rooted phone process/recovery supervisor;
+- `services/host-daemon`
+  - phone-local health, control-plane synchronization and rotation/runtime integration;
 - `apps/operator-cli`
-
-Rule:
-- deployment layout must not become a source of business logic
-
-## Where To Put New Code
-
-- new shared request/response types: `crates/proxy-core`
-- new pure runtime state machine: new crate under `crates/`
-- new reverse-tunnel protocol or reconnect policy: `crates/reverse-tunnel`
-- new VM registry persistence: crate under `crates/` or focused module inside `services/control-plane`
-- new phone supervision loop: `services/runtime-supervisor`
-- new operator commands: `apps/operator-cli`
-- new deployment template or bundle artifact: `deploy/`
-- temporary/manual ops workaround: add an `operator-cli` command or a documented root-level runbook; do not add new persistent shell/PowerShell automation
-
-## Naming Rules
-
-- `proxy-core`: shared contracts only
-- `*-domain`: pure logic only
-- `*-infra`: OS/network/process/storage adapters
-- `*-supervisor`: long-running orchestration process
-- `operator-cli`: human-operated entrypoint
-- `relay-gate`: public readiness gate only
-
-## Local Directory Rules
-
-The root should stay easy to scan.
-
-Allowed top-level groups:
-- `apps/`
-- `crates/`
-- `services/`
+  - operator/application orchestration commands and reusable deployment primitives;
+- `apps/android-app`
+  - Android application boundary for Android-owned capabilities; not a home for generic domain logic;
 - `deploy/`
-- `config/`
-- root `*.md` docs
+  - versioned deployable layouts, templates and manifests;
+- `contracts/`
+  - machine-readable compatibility, governance, project-authority and production-control invariants;
+- `docs/`
+  - canonical architecture/operations documents; superseded material belongs under `docs/history/`;
+- `.github/workflows/`
+  - public CI/release/GitHub-hosted orchestration only; no public self-hosted runner/ADB path.
 
-Do not add new top-level folders for one-off experiments.
-Put experiments under one of:
-- a dedicated crate/app/service if it is real product code
-- a root markdown document if it is architecture or operations knowledge
+## Project control-plane boundary
 
-## Codebase Findings That Must Be Fixed
+```text
+iamaman11/mobile-proxy (PUBLIC, canonical)
+  -> PR / Quality Gate / protected main
+  -> annotated protected release tag
+  -> release artifacts + provenance
+  -> GitHub-hosted Vultr execution
+  -> private phone execution command
 
-The major monolithic `main.rs` problem has been reduced further, but structural work is not finished.
+iamaman11/mobile-proxy-production (PRIVATE, execution-only)
+  -> thin caller/shim
+  -> android-production self-hosted runner
+```
 
-Concrete problems:
-- `crates/proxy-core` still contains projection policy together with shared contracts
-- `services/runtime-supervisor` is now the real phone-side process supervisor, but it still needs live reboot/airplane/kill validation on the phone
-- phone packaging/install/verify/rollback have Rust CLI coverage
-- VM from-zero provisioning has Rust CLI coverage
-- control-plane now has JSON-backed restart persistence; stronger transactional storage remains a future hardening step
-- device-runtime convergence still depends on live cellular/SIM availability
+The private repository is not represented as an application/source module here because it is not a
+second source tree. Canonical phone workflow logic should remain in this repository and be invoked
+at an immutable ref or delivered as a verified immutable release artifact.
 
-Corrective rule:
-- one file or module should have one clear responsibility
-- each executable should keep `main.rs` as composition root only
-- domain policy should move into dedicated crates/modules, not stay embedded in HTTP binaries
+## Layering rules
 
-## Immediate Cleanup Standard
+### Domain/foundation
 
-From this point forward:
-- the root contains only current entry-point documents
-- detailed architecture and ops documents live under `docs/`
-- completed studies and superseded plans live under `docs/history/`
-- runtime policy must stay out of `service.sh`; persistent PowerShell operator automation is no longer part of the active tree
-- persistent `*.ps1` operator scripts have been removed from the active tree
-- each new responsibility must have one obvious owner directory
-- each executable should be split into `config`, `state`, `api`, `application`, and `infra` modules before it grows further
+Pure rules and bounded values. No HTTP, filesystem, database, Android or process dependencies.
+
+### Application
+
+Use cases and sequencing over explicit ports. Owns orchestration semantics, not platform commands.
+
+### Infrastructure
+
+HTTP/database/process/Android/provider adapters behind typed application/domain boundaries.
+
+### Delivery
+
+Packaging and GitHub-controlled deployment. Delivery files do not become business-logic owners.
+
+## Where new work belongs
+
+- shared bounded types: `crates/foundation` or the existing owning contract crate;
+- application use case/port: `crates/application`;
+- durable control-plane persistence: `crates/control-plane-sqlite`;
+- reverse-tunnel protocol/session behavior: `crates/reverse-tunnel`;
+- phone process supervision: `services/runtime-supervisor`;
+- phone-local service behavior: `services/host-daemon`;
+- relay ingress: `services/reverse-tunnel-server`;
+- operator orchestration primitive: `apps/operator-cli`;
+- provider/device adapter: the layer selected by the canonical architecture/roadmap, never a
+  workstation script shortcut;
+- production workflow logic: canonical repository first; private phone repo only gets the minimum
+  execution shim GitHub requires.
+
+## Current production-control status
+
+The codebase has a working legacy runtime and canonical SQLite/reverse-tunnel components, but the
+new production-control migration is intentionally incomplete:
+
+- public GitHub governance and trust-zone contracts are established;
+- legacy public deployment is blocked fail-closed;
+- typed Vultr provider lifecycle is still pending;
+- live read-only Vultr preflight is pending;
+- private phone execution workflow and live read-only phone preflight are pending;
+- autonomous release-control entrypoint and corrected immutable-release publication are pending.
+
+Do not interpret existing `operator-cli`, GCP manifests or historical ADB/SSH procedures as an
+authorised production shortcut while those gates are pending.
+
+## Root-document rule
+
+The root contains only current navigation/contract entry points. Detailed architecture and
+operations belong under `docs/`; historical workstation/provider observations belong under
+`docs/history/` or Git history and are non-authoritative.

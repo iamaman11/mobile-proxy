@@ -1,9 +1,11 @@
 {
   "contract_version": 1,
   "status": "protected",
+  "project_authority_contract": "contracts/operations/project-authority-v1.json",
   "source_repository": {
     "name": "iamaman11/mobile-proxy",
     "visibility": "public",
+    "authority": "sole_project_source_of_truth",
     "self_hosted_runners": "forbidden"
   },
   "rulesets": {
@@ -46,6 +48,10 @@
   "phone_control_repository": {
     "name": "iamaman11/mobile-proxy-production",
     "visibility": "private",
+    "authority": "execution_only",
+    "canonical_source": "iamaman11/mobile-proxy",
+    "control_issue": 1,
+    "preferred_logic_source": "canonical_reusable_workflow_or_verified_release_artifact",
     "required_runner_labels": [
       "self-hosted",
       "Linux",
@@ -56,14 +62,28 @@
       "VULTR_API_KEY",
       "VULTR_SSH_PRIVATE_KEY",
       "unrelated_github_pat"
+    ],
+    "must_not_define": [
+      "project_roadmap",
+      "architecture",
+      "release_policy",
+      "provider_desired_state",
+      "acceptance_policy",
+      "application_source_copy"
     ]
   },
   "release_immutability": "not_enabled_until_draft_asset_checksum_sbom_attestation_publish_order_is_implemented",
+  "runtime_verification": {
+    "vultr_secret_access": "pending_actions_preflight",
+    "android_runner_and_device": "pending_private_actions_preflight"
+  },
   "forbidden": [
     "public_repository_self_hosted_runner",
-    "public_repository_phone_or_vultr_secret",
+    "phone_secret_in_public_source_or_public_workflow",
+    "vultr_secret_value_outside_production_vultr_environment_or_consuming_github_hosted_job",
     "public_repository_phone_adb_workflow",
     "vultr_lifecycle_before_vm_ownership_contract_implementation",
-    "manual_production_ssh_or_adb_as_standard_delivery_path"
+    "manual_production_ssh_or_adb_as_standard_delivery_path",
+    "satellite_repository_as_project_source_of_truth"
   ]
 }

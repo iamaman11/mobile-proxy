@@ -1,92 +1,112 @@
 # Runtime Layout
 
+This document describes the canonical runtime topology and safe operational facts. Exact live
+provider identifiers, device serials, secret values and workstation paths are intentionally kept out
+of the public repository. Their schemas and invariants are versioned here; their live values remain
+inside the protected runtime boundary.
+
+For project/repository authority see `docs/operations/project-authority.md`.
+
 ## Phone
 
-Current observed device:
+The production phone is a registered rooted Android target reached only through the private
+`iamaman11/mobile-proxy-production` execution satellite and its `android-production` self-hosted
+runner. The public repository must never target that runner directly.
 
-- model: `SM-A022G`
-- runtime owner: Magisk module `mobile-proxy-node`
-- active processes:
-  - `runtime-supervisor`
-  - `host-daemon`
-  - `sing-box`
-- current release path pattern:
-  - `/data/adb/mobile-proxy-node/releases/<release-id>`
-- active pointer:
-  - `/data/adb/mobile-proxy-node/current`
+Runtime ownership:
 
-Boot behavior:
+- Magisk/root boot service starts the active versioned release;
+- `runtime-supervisor` supervises `host-daemon` and `sing-box`;
+- `host-daemon` owns control-plane synchronization, health and the native reverse tunnel;
+- `sing-box` provides the phone-local proxy inbounds used by the reverse tunnel;
+- active release path follows `/data/adb/mobile-proxy-node/releases/<release-id>` with an active
+  pointer under `/data/adb/mobile-proxy-node/current`.
 
-- `/data/adb/service.d/99-mobile-proxy-runtime.sh` is a minimal boot hook that starts the active runtime release
-- `service.sh` is bootstrap-only and starts `bin/runtime-supervisor`
-- `runtime-supervisor` starts and supervises `host-daemon` and `sing-box`
-- `runtime-supervisor` attempts WireGuard activation only when an optional WireGuard backend is enabled
-- when WireGuard is enabled, `runtime-supervisor` defers `sing-box` startup until `tun0` exists so proxy bind failures do not mask a missing optional tunnel
-- in the required `first_party_reverse_tunnel` path, `runtime-supervisor` starts `sing-box` on loopback and `host-daemon` owns the QUIC/TLS reverse tunnel to the VM
-- `runtime-supervisor` attempts route repair, mobile-data enable, and data bounce when health reports cellular or public reachability degradation
-- `service.sh` validates the watchdog PID by checking `/proc/<pid>/cmdline`, not only `kill -0`, so a stale PID reused by another Android process cannot block runtime startup
-- `host-daemon` reports health from real probes: cellular route, proxy TCP bind, public IP observer, `tun0`, and WireGuard gateway reachability
-- cellular route detection is Android policy-routing aware and accepts default routes in tables such as `rmnet*`, not only `main`
-- public serving is exposed only after VM gate confirms readiness
-- legacy shell route guards such as `/data/adb/service.d/99-mobile-proxy-routefix.sh` must not exist after a Rust-managed install
-- stock WireGuard and Android `VpnService` are optional backends, not the required production traffic path
-- current remaining recovery gap on `SM-A022G`: after full phone reboot, Android/MTS cellular Internet becomes usable roughly 135-145 seconds after reboot in live tests, so the system recovers automatically but does not yet meet the target p95 `<60s` phone-reboot threshold
+The required normal path is `first_party_reverse_tunnel`; `first_party_android_egress` is the
+validated carrier-specific egress owner where Android `Network.bindSocket()` is required. Stock
+WireGuard remains an explicit rollback path. Unknown or contradictory ownership fails closed.
 
-## VM
+Phone deployment/verification is currently **not GitOps-enabled** in the new split control plane.
+Until the canonical private-caller workflow is implemented and proven, manual/raw ADB is not an
+authorised production shortcut.
 
-Current observed layout:
+## Relay VM
 
-- host: `34.118.88.54`
-- GCP project: `project-56ecc519-f3ab-429a-b0a`
-- GCP instance: `mobile-relaycontrolpoint-v2`
-- GCP zone: `europe-central2-a`
-- control plane binary:
-  - `/opt/mobile-relaycontrolpoint/current/control-plane`
-- control plane state:
-  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.sqlite3` (canonical runtime)
-  - `/var/lib/mobile-relaycontrolpoint/control-plane-state.json` (preserved migration input only)
-  - `/var/lib/mobile-relaycontrolpoint/control-plane-state-rollback.json` (operator-created current-state artifact consumed only by the previous accepted release during rollback)
-- relay gate binary:
-  - `/opt/mobile-relaycontrolpoint/current/relay-gate`
-- public proxy backend:
-  - `/opt/mobile-public-proxy/sing-box run -c /opt/mobile-public-proxy/config.json`
+The currently running relay is a legacy pre-Vultr deployment. Its exact provider account, host,
+instance name, zone/address and SSH recovery details are external operational state and are not
+canonical desired state for the next production path.
 
-Active services:
+Logical runtime layout remains:
 
-- `mobile-relaycontrolpoint.service`
-- `mobile-relay-gate.service`
-- `mobile-reverse-tunnel-server.service`
-- `mobile-public-proxy.service`
-- `nginx.service`
+- control plane service;
+- reverse-tunnel server;
+- relay readiness gate;
+- public proxy edge;
+- canonical SQLite control-plane state;
+- public compatibility listeners `1080`, `1081` and `3128`;
+- QUIC primary reverse transport with certificate-pinned TLS/TCP reserve.
 
-Current access status:
+The target VM control plane is Vultr through a GitHub-hosted Actions job in `production-vultr`.
+Before any provider lifecycle operation is enabled, the typed adapter must satisfy
+`contracts/governance/vm-ownership-v1.json`: immutable provider UUID binding, exact
+`project=mobile-proxy` and `managed-by=mobile-proxy` tags, generation/CAS semantics and fail-closed
+behavior on ambiguity or mismatch.
 
-- GCP API can identify and describe the instance
-- HTTP control-plane endpoint is reachable and returns `401` without a bearer token
-- SSH access was recovered on `2026-06-03` with local user `bose` and sudo
-- recovery snapshot: `mobile-relaycontrolpoint-pre-ssh-recovery-20260603`
-- `operator-cli provision-vm` successfully re-provisioned the VM release `vm-hard-check-20260603`
-- public proxy ports `1080`, `1081`, `3128` and control-plane port `8080` were verified listening after reprovision
+The legacy GCP/workstation provisioning path is retained only as historical implementation context;
+it is not the standard production control plane and the public deploy workflow intentionally blocks
+it during migration.
 
-Current exposure model:
+## Public data path
 
-- internal proxy listeners:
-  - `127.0.0.1:11080`
-  - `127.0.0.1:11081`
-  - `127.0.0.1:13128`
-- public listeners:
-  - `0.0.0.0:1080`
-  - `0.0.0.0:1081`
-  - `0.0.0.0:3128`
-- nginx stream publishes the public ports
-- relay-gate enables exposure only when the phone is actually ready
+The protected logical production path remains:
 
-## Current Product Truth
+```text
+client
+  -> public relay edge
+  -> reverse-tunnel server
+  -> authenticated fresh phone session
+  -> phone-local proxy
+  -> Android cellular egress
+```
 
-- current operator profile: `mts_by`
-- `rotate_ip` works on `MTS BY`
-- `airplane_bounce` waits for the Android Connectivity Service to confirm activation, holds it for 2 seconds, then disables it
-- current deployment is effectively IPv4-only
-- public relay is fail-closed
-- required live tunnel owner: `first_party_reverse_tunnel`
-- optional WireGuard backend remains installable for experiments/fallback, but is not required for production traffic
+Compatibility surface:
+
+- `1080`: mixed SOCKS5/HTTP compatibility;
+- `1081`: SOCKS5;
+- `3128`: HTTP including CONNECT;
+- QUIC: primary reverse transport;
+- pinned TLS/TCP: automatic reserve;
+- stock WireGuard: explicit rollback.
+
+A reported connected state alone is insufficient. Serving authority requires the exact registered
+phone/session identity, freshness and successful bounded readiness/proxy checks.
+
+## Control-plane trust zones
+
+```text
+PUBLIC canonical: iamaman11/mobile-proxy
+  - source / docs / contracts / Quality / releases
+  - GitHub-hosted Vultr orchestration
+  - safe evidence index
+
+PRIVATE execution satellite: iamaman11/mobile-proxy-production
+  - thin caller/shim only
+  - android-production runner access
+  - private physical execution/supporting evidence
+```
+
+Both targets are correlated by one immutable canonical release tuple and deployment ID defined in
+`contracts/operations/project-authority-v1.json`.
+
+## Current migration status
+
+- public GitHub governance/control-plane split: documented and contract-enforced;
+- legacy public production deployment: blocked fail-closed;
+- private phone execution satellite: initialized, no production command workflow enabled;
+- live Vultr preflight: pending;
+- typed Vultr lifecycle: pending;
+- live phone runner/device preflight: pending;
+- phone deploy/verify/rollback: pending;
+- release-control command channel and corrected immutable release publication flow: pending.
+
+No item in this status authorizes a VM or phone mutation outside the reviewed GitHub Actions path.

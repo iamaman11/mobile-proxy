@@ -41,7 +41,18 @@ def build_context() -> dict[str, Any]:
         )
     )
     return {
-        "format_version": 1,
+        "format_version": 2,
+        "project_authority": {
+            "canonical_repository": "iamaman11/mobile-proxy",
+            "canonical_url": "https://github.com/iamaman11/mobile-proxy",
+            "canonical_gitops_issue": 90,
+            "execution_satellite": "iamaman11/mobile-proxy-production",
+            "execution_satellite_control_issue": 1,
+            "authority_rule": (
+                "canonical repository wins; conflicts fail closed and are reconciled here first"
+            ),
+            "chat_history_authority": "none",
+        },
         "git": {
             "branch": _git("branch", "--show-current") or "(detached)",
             "clean_tracked": not bool(
@@ -53,6 +64,14 @@ def build_context() -> dict[str, Any]:
             "version": version,
             "expected_tag": f"v{version}",
             "release_id_rule": "git-<first 12 characters of tag commit SHA>",
+            "cross_repository_deployment_id_rule": "mobile-proxy-<tag>-<first12sha>",
+            "identity_fields": [
+                "annotated release tag",
+                "full Git SHA",
+                "artifact name",
+                "artifact digest",
+                "provenance identity",
+            ],
         },
         "architecture": {
             "primary_runtime": "first_party_reverse_tunnel",
@@ -86,17 +105,25 @@ def build_context() -> dict[str, Any]:
             "release_workflow": ".github/workflows/release.yml",
             "deployment_workflow": ".github/workflows/deploy-production.yml",
             "vultr_environment": "production-vultr (tag-only; GitHub-hosted)",
-            "phone_control_repository": "iamaman11/mobile-proxy-production (private)",
+            "phone_control_repository": (
+                "iamaman11/mobile-proxy-production (private execution satellite only)"
+            ),
+            "phone_control_issue": "iamaman11/mobile-proxy-production#1",
             "deployment_status": "blocked until split GitOps workflows are implemented",
+            "release_immutability": "not enabled until publish ordering is corrected",
         },
         "authoritative_docs": [
             "README.md",
             "AGENTS.md",
+            "IMPLEMENTATION_PLAN.md",
+            "docs/PRODUCTION_BASELINE_PLAN.md",
             "docs/GIT_DELIVERY.md",
+            "docs/operations/project-authority.md",
             "docs/operations/github-bootstrap.md",
             "docs/operations/secret-boundaries.md",
             "RUNTIME_LAYOUT.md",
             "contracts/governance/invariant-enforcement.json",
+            "contracts/operations/project-authority-v1.json",
             "contracts/operations/github-control-plane-v1.json",
             "contracts/operations/production-topology-v1.json",
         ],
@@ -105,6 +132,7 @@ def build_context() -> dict[str, Any]:
 
 
 def to_markdown(context: dict[str, Any]) -> str:
+    project = context["project_authority"]
     git = context["git"]
     release = context["release"]
     workspace = context["workspace"]
@@ -113,6 +141,9 @@ def to_markdown(context: dict[str, Any]) -> str:
         [
             "## Repository context",
             "",
+            f"- Canonical repository: {project['canonical_repository']}",
+            f"- Canonical GitOps issue: #{project['canonical_gitops_issue']}",
+            f"- Execution satellite: {project['execution_satellite']}",
             f"- SHA: {git['sha']}",
             f"- Branch: {git['branch']}",
             f"- Tracked worktree clean: {str(git['clean_tracked']).lower()}",
@@ -121,6 +152,7 @@ def to_markdown(context: dict[str, Any]) -> str:
             f"- Required check: {quality['required_check']}",
             "- Production path: nginx -> Rust reverse tunnel -> Android cellular egress",
             "- Deployable unit: published annotated tag resolved to one immutable SHA",
+            "- Satellite authority: execution-only; canonical repository wins on conflict",
             "",
         ]
     )
