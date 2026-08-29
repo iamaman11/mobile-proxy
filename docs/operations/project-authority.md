@@ -103,7 +103,7 @@ evidence format for those values. External systems own only the runtime value.
 
 ## Current checkpoint
 
-As of the GitHub control-plane reconciliation after PR #92:
+As of the canonical-authority checkpoint completed by PR #94:
 
 - the canonical repository is public and protected by the `Quality Gate`/PR ruleset;
 - `v*` tags have an active no-bypass deletion/non-fast-forward ruleset;
