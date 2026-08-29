@@ -116,13 +116,15 @@ The mandatory GitHub quality workflows additionally run:
 ## Git delivery
 
 Code reaches production only through an annotated semantic-version tag that passed
-`Quality Gate` and produced a published GitHub Release. `Deploy Production` resolves that
-tag to one immutable SHA, waits for approval in the `production` environment, then uses the
-dedicated runner to deploy and verify the VM followed by the Android device.
+`Quality Gate` and produced a published GitHub Release. The public source repository has no
+self-hosted runner: future Vultr lifecycle work runs on GitHub-hosted infrastructure through the
+tag-only `production-vultr` environment. Physical-phone orchestration belongs to the separate
+private `iamaman11/mobile-proxy-production` control repository.
 
-Operational secrets stay in the local Secret Vault on the trusted runner and are injected only
-into child deployment processes. See [Git delivery and production control](docs/GIT_DELIVERY.md)
-for repository settings, release commands, rollback and runner setup.
+The legacy deployment workflow is fail-closed while this split is implemented. See
+[Git delivery and production control](docs/GIT_DELIVERY.md),
+[GitHub bootstrap](docs/operations/github-bootstrap.md) and
+[secret boundaries](docs/operations/secret-boundaries.md).
 
 ## Prepare runtime binaries
 

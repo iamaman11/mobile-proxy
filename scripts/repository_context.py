@@ -85,17 +85,20 @@ def build_context() -> dict[str, Any]:
         "delivery": {
             "release_workflow": ".github/workflows/release.yml",
             "deployment_workflow": ".github/workflows/deploy-production.yml",
-            "production_environment": "production",
-            "secret_source": (
-                "local Secret Vault on the trusted production runner"
-            ),
+            "vultr_environment": "production-vultr (tag-only; GitHub-hosted)",
+            "phone_control_repository": "iamaman11/mobile-proxy-production (private)",
+            "deployment_status": "blocked until split GitOps workflows are implemented",
         },
         "authoritative_docs": [
             "README.md",
             "AGENTS.md",
             "docs/GIT_DELIVERY.md",
+            "docs/operations/github-bootstrap.md",
+            "docs/operations/secret-boundaries.md",
             "RUNTIME_LAYOUT.md",
             "contracts/governance/invariant-enforcement.json",
+            "contracts/operations/github-control-plane-v1.json",
+            "contracts/operations/production-topology-v1.json",
         ],
         "workflows": workflows,
     }

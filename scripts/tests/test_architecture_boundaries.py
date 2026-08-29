@@ -70,6 +70,7 @@ proxy-core = "1"
     def check_fixture(self, root: Path):
         with (
             patch.object(MODULE, "check_digest_policy", return_value=[]),
+            patch.object(MODULE, "check_github_control_plane", return_value=[]),
             patch.object(MODULE, "check_invariant_enforcement", return_value=[]),
         ):
             return MODULE.check_repository(root)
