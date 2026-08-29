@@ -13,6 +13,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from check_digest_policy import check_repository as check_digest_policy
+from check_github_control_plane import check_repository as check_github_control_plane
 from check_invariant_enforcement import validate_repository as check_invariant_enforcement
 from check_native_runtime_policy import check_repository as check_native_runtime_policy
 from check_vm_ownership_contract import check_repository as check_vm_ownership_contract
@@ -96,6 +97,7 @@ def check_repository(root: Path) -> list[str]:
                         f"{source.relative_to(root)}: forbidden pure-crate token {token!r}"
                     )
     errors.extend(check_digest_policy(root))
+    errors.extend(check_github_control_plane(root))
     errors.extend(check_invariant_enforcement(root))
     errors.extend(check_native_runtime_policy(root))
     errors.extend(check_vm_ownership_contract(root))

@@ -1,134 +1,29 @@
-name: Deploy Production
+name: Production deployment migration gate
 
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Published annotated tag, for example v0.1.0
+        description: Published tag being inspected; no deployment is performed.
         required: true
         type: string
-      deploy_vm:
-        description: Deploy relay VM
-        required: true
-        default: true
-        type: boolean
-      deploy_device:
-        description: Deploy the attached Android device
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: read
 
-env:
-  RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
-  DEPLOY_VM: ${{ github.event_name == 'release' || inputs.deploy_vm }}
-  DEPLOY_DEVICE: ${{ github.event_name == 'release' || inputs.deploy_device }}
-
 concurrency:
-  group: production
+  group: production-migration-gate
   cancel-in-progress: false
 
 jobs:
-  validate:
-    name: Validate published release
+  blocked:
+    name: Fail closed until split GitOps delivery exists
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      sha: ${{ steps.release.outputs.sha }}
+    timeout-minutes: 5
     steps:
-      - name: Resolve published release tag
-        id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
+      - name: Explain the intentional migration gate
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$GITHUB_REF_TYPE" = tag
-          test "$GITHUB_REF_NAME" = "$RELEASE_TAG"
-          sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)
-          object_type=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.type)
-          test "$object_type" = tag
-          sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq .object.sha)
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
-  deploy:
-    name: Deploy approved immutable SHA
-    needs: validate
-    environment: production
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - mobile-proxy-production
-    timeout-minutes: 120
-    steps:
-      - name: Check out approved SHA
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-          clean: true
-      - name: Verify immutable checkout and local prerequisites
-        env:
-          APPROVED_SHA: ${{ needs.validate.outputs.sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$APPROVED_SHA"
-          test -z "$(git status --porcelain)"
-          command -v adb
-          command -v cargo
-          command -v gcloud
-          command -v java
-          test -x /home/bose/projects/secret-vault/bin/secret-vault
-          scripts/with-production-secrets true
-      - name: Prepare pinned runtime binaries
-        if: env.DEPLOY_VM == 'true' || env.DEPLOY_DEVICE == 'true'
-        run: cargo run --release --locked -p operator-cli -- prepare-runtime-binaries
-      - name: Deploy and verify relay VM
-        if: env.DEPLOY_VM == 'true'
-        env:
-          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
-        run: |
-          set -euo pipefail
-          release_id="git-${RELEASE_SHA:0:12}"
-          scripts/with-production-secrets \
-            cargo run --release --locked -p operator-cli -- provision-vm \
-              --manifest-path deploy/manifests/vms/example-gcp-relay.json \
-              --release-id "$release_id" \
-              --ssh-user "${PRODUCTION_SSH_USER:-bose}"
-      - name: Deploy and verify Android device
-        if: env.DEPLOY_DEVICE == 'true'
-        env:
-          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-          PRODUCTION_DEVICE_SERIAL: ${{ vars.PRODUCTION_DEVICE_SERIAL }}
-          PRODUCTION_TUNNEL_OWNER: ${{ vars.PRODUCTION_TUNNEL_OWNER }}
-        run: |
-          set -euo pipefail
-          test -n "$PRODUCTION_DEVICE_SERIAL"
-          release_id="git-${RELEASE_SHA:0:12}"
-          owner="${PRODUCTION_TUNNEL_OWNER:-first_party_android_egress}"
-          scripts/with-production-secrets \
-            cargo run --release --locked -p operator-cli -- install-device-stack \
-              --manifest-path deploy/manifests/devices/example-device.json \
-              --release-id "$release_id" \
-              --device-serial "$PRODUCTION_DEVICE_SERIAL" \
-              --tunnel-owner "$owner"
-      - name: Record deployment evidence
-        if: always()
-        env:
-          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-        run: |
-          {
-            echo '## Production deployment'
-            echo "- Tag: $RELEASE_TAG"
-            echo "- SHA: $RELEASE_SHA"
-            echo "- VM requested: $DEPLOY_VM"
-            echo "- Device requested: $DEPLOY_DEVICE"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Production deployment is blocked by architecture migration." >&2
+          echo "Implement the GitHub-hosted Vultr adapter/workflow and private phone-control workflow first." >&2
+          exit 1

@@ -1,0 +1,69 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "source_repository": {
+    "name": "iamaman11/mobile-proxy",
+    "visibility": "public",
+    "self_hosted_runners": "forbidden"
+  },
+  "rulesets": {
+    "main": {
+      "required_check": "Quality Gate",
+      "pull_request_required": true,
+      "required_approvals": 0,
+      "review_thread_resolution_required": true,
+      "branch_must_be_up_to_date": true,
+      "deletion_forbidden": true,
+      "non_fast_forward_forbidden": true,
+      "bypass_actors": "none"
+    },
+    "release_tags": {
+      "pattern": "v*",
+      "deletion_forbidden": true,
+      "non_fast_forward_forbidden": true,
+      "bypass_actors": "none"
+    }
+  },
+  "actions_security": {
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false,
+    "fork_pull_request_approval": "all_external_contributors",
+    "fork_write_token_or_secrets": "forbidden"
+  },
+  "vultr_environment": {
+    "name": "production-vultr",
+    "allowed_ref_type": "tag",
+    "allowed_ref_pattern": "v*",
+    "required_reviewers": "forbidden",
+    "wait_timer": "forbidden",
+    "admin_bypass": "forbidden",
+    "required_secret_names": [
+      "VULTR_API_KEY",
+      "VULTR_SSH_PRIVATE_KEY"
+    ],
+    "executor": "github-hosted"
+  },
+  "phone_control_repository": {
+    "name": "iamaman11/mobile-proxy-production",
+    "visibility": "private",
+    "required_runner_labels": [
+      "self-hosted",
+      "Linux",
+      "X64",
+      "android-production"
+    ],
+    "runner_must_not_receive": [
+      "VULTR_API_KEY",
+      "VULTR_SSH_PRIVATE_KEY",
+      "unrelated_github_pat"
+    ]
+  },
+  "release_immutability": "not_enabled_until_draft_asset_checksum_sbom_attestation_publish_order_is_implemented",
+  "forbidden": [
+    "public_repository_self_hosted_runner",
+    "public_repository_phone_or_vultr_secret",
+    "public_repository_phone_adb_workflow",
+    "vultr_lifecycle_before_vm_ownership_contract_implementation",
+    "manual_production_ssh_or_adb_as_standard_delivery_path"
+  ]
+}

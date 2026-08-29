@@ -1,0 +1,48 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "control_planes": {
+    "source": {
+      "repository": "iamaman11/mobile-proxy",
+      "visibility": "public",
+      "responsibilities": [
+        "source",
+        "quality",
+        "release",
+        "github-hosted_vultr_orchestration"
+      ]
+    },
+    "phone": {
+      "repository": "iamaman11/mobile-proxy-production",
+      "visibility": "private",
+      "responsibilities": [
+        "phone_orchestration",
+        "physical_acceptance",
+        "deployment_evidence",
+        "phone_rollback"
+      ]
+    }
+  },
+  "execution": {
+    "vultr": "GitHub-hosted runner in production-vultr",
+    "phone": "private-repository self-hosted runner with android-production label"
+  },
+  "state_boundaries": {
+    "version_control": "desired configuration, contracts, workflow source and non-secret evidence schema",
+    "github_environment": "encrypted provider credentials and deployment protection",
+    "provider": "VM resources and snapshots",
+    "private_phone_control_repository": "phone workflow state and evidence",
+    "forbidden_in_public_source": [
+      "credential_values",
+      "private_keys",
+      "mutable_vm_binding",
+      "phone_control_secrets",
+      "workstation_specific_runner_paths"
+    ]
+  },
+  "migration_status": {
+    "vultr_adapter": "not_implemented",
+    "phone_workflows": "not_implemented_in_private_control_repository",
+    "legacy_public_deployment": "blocked_until_split_workflows_are_implemented_and_verified"
+  }
+}

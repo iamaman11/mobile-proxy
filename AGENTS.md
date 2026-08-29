@@ -12,6 +12,9 @@ The generated context is the bounded source for the current SHA, workspace layou
 - Product and operator behavior: README.md
 - Runtime topology: RUNTIME_LAYOUT.md
 - Git delivery and release policy: docs/GIT_DELIVERY.md
+- GitHub bootstrap and control-plane split: docs/operations/github-bootstrap.md
+- GitHub desired-state contract: contracts/operations/github-control-plane-v1.json
+- Production topology contract: contracts/operations/production-topology-v1.json
 - Enforced architecture rules: contracts/governance/invariant-enforcement.json
 - Current code and tests, not historical plans
 
@@ -23,6 +26,11 @@ Documents under docs/history describe completed investigations or superseded pla
 - Keep Cargo.lock and the pinned Rust toolchain synchronized.
 - Do not commit target directories, APK/build outputs, runtime binaries, credentials, generated GitHub credentials or raw acceptance logs.
 - Use Secret Vault wrappers for operational secrets. Never print secret values.
+- The public repository has no self-hosted runner. Phone orchestration belongs only to the private
+  `iamaman11/mobile-proxy-production` control repository; future Vultr lifecycle work belongs on
+  a GitHub-hosted job in tag-only `production-vultr`.
+- Production deployment is currently blocked fail-closed until the split workflows and typed
+  Vultr adapter are implemented. Do not revive a workstation/ADB/GCP deployment shortcut.
 - Keep production ports and client protocols compatible unless the user explicitly authorizes a breaking change.
 - A production deployment is identified by an annotated semantic-version tag and its immutable commit SHA.
 
