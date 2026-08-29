@@ -41,7 +41,7 @@ def build_context() -> dict[str, Any]:
         )
     )
     return {
-        "format_version": 2,
+        "format_version": 1,
         "project_authority": {
             "canonical_repository": "iamaman11/mobile-proxy",
             "canonical_url": "https://github.com/iamaman11/mobile-proxy",
