@@ -115,7 +115,9 @@ def _load_json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _row_to_dict(columns: list[str], row: object, index: int, errors: list[str]) -> dict[str, object]:
+def _row_to_dict(
+    columns: list[str], row: object, index: int, errors: list[str]
+) -> dict[str, object]:
     if not isinstance(row, list):
         errors.append(f"invariant row {index} must be an array")
         return {}
@@ -125,6 +127,52 @@ def _row_to_dict(columns: list[str], row: object, index: int, errors: list[str])
         )
         return {}
     return dict(zip(columns, row, strict=True))
+
+
+def _validate_external_verification(
+    control_id: str,
+    control: dict[str, object],
+    audit_revision: object,
+    errors: list[str],
+) -> None:
+    verification = control.get("verification")
+    if not isinstance(verification, dict):
+        errors.append(f"{control_id}: verification must be an object")
+        return
+
+    if verification.get("kind") != "external_snapshot":
+        errors.append(f"{control_id}: verification kind must be external_snapshot")
+
+    verified_at = verification.get("verified_at")
+    subject = verification.get("subject")
+    freshness_policy = verification.get("freshness_policy")
+    continuous = verification.get("continuous_ci_verification")
+
+    if not isinstance(subject, str) or not subject:
+        errors.append(f"{control_id}: verification subject must be non-empty")
+    if freshness_policy != "reverify_on_every_audit_revision":
+        errors.append(
+            f"{control_id}: freshness_policy must be reverify_on_every_audit_revision"
+        )
+    if not isinstance(continuous, bool):
+        errors.append(
+            f"{control_id}: continuous_ci_verification must be a boolean"
+        )
+
+    try:
+        revision = date.fromisoformat(str(audit_revision))
+        verification_date = date.fromisoformat(str(verified_at))
+        if verification_date != revision:
+            errors.append(
+                f"{control_id}: external snapshot must be reverified on audit revision {revision.isoformat()}"
+            )
+    except ValueError:
+        errors.append(f"{control_id}: invalid external verification date")
+
+    if control.get("status") == "enforced" and continuous is not True:
+        errors.append(
+            f"{control_id}: enforced external control requires continuous CI verification"
+        )
 
 
 def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str]:
@@ -205,7 +253,9 @@ def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str
             errors.append(f"workflow {workflow_id} step does not exist: {step}")
 
     required_ids = matrix.get("required_invariant_ids")
-    if not isinstance(required_ids, list) or any(not isinstance(item, str) for item in required_ids):
+    if not isinstance(required_ids, list) or any(
+        not isinstance(item, str) for item in required_ids
+    ):
         errors.append("required_invariant_ids must be a string array")
         required_id_set: set[str] = set()
     else:
@@ -250,7 +300,9 @@ def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str
         activation = invariant.get("activation_condition")
         evidence_note = invariant.get("evidence_note")
         expires_on = invariant.get("expires_on")
-        if not isinstance(enforcement, list) or any(not isinstance(item, str) for item in enforcement):
+        if not isinstance(enforcement, list) or any(
+            not isinstance(item, str) for item in enforcement
+        ):
             errors.append(f"{invariant_id}: enforcement must be a string array")
             enforcement = []
         if not isinstance(ci, list) or any(not isinstance(item, str) for item in ci):
@@ -259,12 +311,17 @@ def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str
         if status == "enforced" and (not enforcement or not ci):
             errors.append(f"{invariant_id}: enforced requires evidence paths and CI references")
         if status == "partially_enforced" and (
-            not enforcement or not ci or not isinstance(planned_slice, str) or not planned_slice
+            not enforcement
+            or not ci
+            or not isinstance(planned_slice, str)
+            or not planned_slice
         ):
             errors.append(
                 f"{invariant_id}: partially_enforced requires evidence, CI and planned_slice"
             )
-        if status == "planned" and (not isinstance(planned_slice, str) or not planned_slice):
+        if status == "planned" and (
+            not isinstance(planned_slice, str) or not planned_slice
+        ):
             errors.append(f"{invariant_id}: planned requires planned_slice")
         if status == "not_applicable_yet" and (
             not isinstance(planned_slice, str)
@@ -276,7 +333,10 @@ def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str
                 f"{invariant_id}: not_applicable_yet requires planned_slice and activation_condition"
             )
         if status == "review_only":
-            if not all(isinstance(value, str) and value for value in (planned_slice, evidence_note, expires_on)):
+            if not all(
+                isinstance(value, str) and value
+                for value in (planned_slice, evidence_note, expires_on)
+            ):
                 errors.append(
                     f"{invariant_id}: review_only requires planned_slice, evidence_note and expires_on"
                 )
@@ -324,13 +384,23 @@ def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str
             for field in ("scope", "owner", "planned_slice", "evidence_note"):
                 if not isinstance(control.get(field), str) or not control[field]:
                     errors.append(f"{control_id}: {field} must be non-empty")
+            _validate_external_verification(
+                control_id, control, matrix.get("audit_revision"), errors
+            )
 
     document = root / DOCUMENT_PATH
     if not document.is_file():
         errors.append(f"missing explanatory document: {DOCUMENT_PATH}")
     else:
         body = document.read_text(encoding="utf-8")
-        for required_text in ("enforced", "partially_enforced", "review_only", "planned", "not_applicable_yet", "GITHUB-001"):
+        for required_text in (
+            "enforced",
+            "partially_enforced",
+            "review_only",
+            "planned",
+            "not_applicable_yet",
+            "GITHUB-001",
+        ):
             if required_text not in body:
                 errors.append(f"explanatory document omits {required_text}")
     return errors
