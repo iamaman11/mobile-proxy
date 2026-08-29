@@ -15,7 +15,9 @@ scripts or runtime snapshots.
 
 The normative architecture quality rules are in `docs/architecture/ARCHITECTURE_STANDARD.md`.
 The exact current Rust workspace dependency graph is machine-readable in
-`contracts/governance/module-boundaries-v1.json` and is enforced by the required Quality Gate.
+`contracts/governance/module-boundaries-v1.json`. Current authoritative/operational mutable-state
+ownership is registered in `contracts/governance/state-ownership-v1.json`. Both are enforced by the
+required Quality Gate.
 
 ## Top-level ownership
 
@@ -111,6 +113,30 @@ The contract describes existing justified edges; it is not blanket permission to
 that a layer could theoretically tolerate. New edges must still satisfy the architecture standard
 and the smallest-current-design rule.
 
+## Mutable-state ownership
+
+`contracts/governance/state-ownership-v1.json` assigns one authority to each currently registered
+canonical or operational mutable-state group. It distinguishes the behavior owner from policy/type
+modules and, for durable state, from the persistence adapter.
+
+The current registry covers:
+
+- canonical control-plane devices, runtime projections, commands/results and replay/idempotency state;
+- relay reverse-tunnel session/liveness/connection/control/pending/reserve state;
+- host-daemon local health/job/proxy/tunnel runtime projection;
+- durable host-daemon reverse-tunnel event counters;
+- runtime-supervisor lifecycle/readiness and repair-cooldown state.
+
+The policy gate rejects duplicate resource ownership, unknown owner modules, state writers outside
+the declared authority, and durable state without a declared persistence owner. A policy crate such
+as `runtime-domain` may define deterministic transitions without becoming a second mutable-state
+owner.
+
+This registry is an explicit inventory, not a magical semantic scanner. A future source file could
+still invent a new mutable state concept without the checker understanding its meaning; that residual
+discovery gap remains recorded in the invariant-enforcement matrix rather than being disguised as
+fully solved.
+
 ## Where new work belongs
 
 - shared bounded types: `crates/foundation` or the existing owning contract crate;
@@ -129,6 +155,8 @@ and the smallest-current-design rule.
 A new crate or service is exceptional, not the default response to a new feature. Reuse an existing
 owner when that preserves cohesion; create a new module only when it establishes a real independent
 responsibility and document its dependency/ownership/deletion boundaries in the same pull request.
+New authoritative or operational mutable state must be added to the ownership registry in the same
+change.
 
 ## Current production-control status
 
