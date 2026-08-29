@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "status": "normative",
-  "audit_revision": "2026-08-23",
-  "baseline_main_sha": "e8ce5be9cfc0c8eb05ea05945e3bdda423e6183c",
+  "audit_revision": "2026-08-30",
+  "baseline_main_sha": "40ecf59f7807a776c8604bbc1489d0c47b2246f6",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -134,18 +134,25 @@
   "external_controls": [
     {
       "id": "GITHUB-001",
-      "scope": "main branch protection or ruleset requires Rust Quality before merge",
-      "status": "planned",
+      "scope": "Active Protect main ruleset requires a pull request, resolved review threads, an up-to-date branch and the Quality Gate status check; deletion and non-fast-forward updates are rejected and no bypass actor exists",
+      "status": "partially_enforced",
       "owner": "repository-admin",
-      "planned_slice": "configure-and-export-main-ruleset",
-      "evidence_note": "The available GitHub connector exposes repository, PR, review and workflow data but not branch protection or rulesets. This control is not claimed as verified."
+      "planned_slice": "github-ruleset-live-drift-verification",
+      "evidence_note": "Desired state is versioned in contracts/operations/github-control-plane-v1.json and the live GitHub ruleset 21243704 was verified on 2026-08-30. Repository CI validates the desired contract and workflow shape, but it does not continuously query GitHub-hosted ruleset state on every PR, so this external control is not claimed as fully enforced by repository CI.",
+      "verification": {
+        "kind": "external_snapshot",
+        "verified_at": "2026-08-30",
+        "subject": "github-ruleset:21243704",
+        "freshness_policy": "reverify_on_every_audit_revision",
+        "continuous_ci_verification": false
+      }
     }
   ],
   "invariants": [
     [
       "PLATFORM-001",
       "P",
-      "\u00a71, \u00a73, \u00a75",
+      "§1, §3, §5",
       "Canonical near-term design remains application-neutral and contains no consumer-specific mandatory concept",
       "partially_enforced",
       "architecture",
@@ -163,7 +170,7 @@
     [
       "COMPAT-001",
       "P",
-      "\u00a72, \u00a77.1",
+      "§2, §7.1",
       "Mixed proxy remains public on port 1080",
       "enforced",
       "proxy-access",
@@ -182,7 +189,7 @@
     [
       "COMPAT-002",
       "P",
-      "\u00a72, \u00a77.1",
+      "§2, §7.1",
       "SOCKS5 remains public on port 1081",
       "enforced",
       "proxy-access",
@@ -201,7 +208,7 @@
     [
       "COMPAT-003",
       "P",
-      "\u00a72, \u00a77.1",
+      "§2, §7.1",
       "HTTP including CONNECT remains public on port 3128",
       "enforced",
       "proxy-access",
@@ -220,7 +227,7 @@
     [
       "COMPAT-004",
       "P",
-      "\u00a72, \u00a77.3",
+      "§2, §7.3",
       "Reverse tunnel remains QUIC-first",
       "enforced",
       "tunnel-session",
@@ -239,7 +246,7 @@
     [
       "COMPAT-005",
       "P",
-      "\u00a72, \u00a77.3",
+      "§2, §7.3",
       "Certificate-pinned TLS/TCP reserve on port 443 remains available",
       "enforced",
       "tunnel-session",
@@ -258,7 +265,7 @@
     [
       "COMPAT-006",
       "P",
-      "\u00a72, \u00a77.1, \u00a77.3",
+      "§2, §7.1, §7.3",
       "WireGuard remains controlled compatibility and rollback until explicit accepted deprecation",
       "enforced",
       "tunnel-session",
@@ -277,7 +284,7 @@
     [
       "COMPAT-007",
       "P",
-      "\u00a72, \u00a77.1",
+      "§2, §7.1",
       "Operator CLI and operator/admin APIs remain preserved",
       "partially_enforced",
       "operations",
@@ -295,21 +302,23 @@
     [
       "ARCH-001",
       "P",
-      "\u00a77.5, \u00a78",
+      "§7.5, §8",
       "Dependencies point inward from foundation through composition roots",
-      "partially_enforced",
+      "enforced",
       "architecture",
       [
+        "contracts/governance/module-boundaries-v1.json",
+        "scripts/check_module_boundaries.py",
+        "scripts/tests/test_module_boundaries.py",
         "scripts/check_architecture_boundaries.py",
-        "scripts/tests/test_architecture_boundaries.py",
-        "crates/application/Cargo.toml"
+        "scripts/tests/test_architecture_boundaries.py"
       ],
       [
         "RQ-A"
       ],
-      "workspace-layer-dependency-graph",
       "",
-      "Foundation, runtime-domain and the first application crate have layer-specific dependency and vocabulary gates; the complete target graph is not present.",
+      "",
+      "Every current Rust workspace member and internal edge is classified exactly; unknown members, undeclared or stale edges and cycles fail closed, while pure-crate dependency/vocabulary restrictions remain independently enforced.",
       ""
     ],
     [
@@ -334,7 +343,7 @@
     [
       "ARCH-003",
       "P",
-      "\u00a77.2, \u00a77.5, \u00a78",
+      "§7.2, §7.5, §8",
       "Every current mutable behavior and state has one authoritative owner",
       "planned",
       "architecture",
@@ -348,7 +357,7 @@
     [
       "ARCH-004",
       "P",
-      "\u00a74 Phase A, \u00a77.5, \u00a78",
+      "§4 Phase A, §7.5, §8",
       "Other contexts mutate aggregate state only through typed application ports",
       "enforced",
       "application",
@@ -366,7 +375,7 @@
       ],
       "",
       "",
-      "All current control-plane mutations\u2014command issuance and acknowledgement, device registration, heartbeat and public probe\u2014enter through typed application ports; query handlers remain read-only.",
+      "All current control-plane mutations—command issuance and acknowledgement, device registration, heartbeat and public probe—enter through typed application ports; query handlers remain read-only.",
       ""
     ],
     [
@@ -396,7 +405,7 @@
     [
       "ARCH-006",
       "P",
-      "\u00a74 Phase A, \u00a77.5",
+      "§4 Phase A, §7.5",
       "SQL and business transitions are absent from HTTP handlers",
       "partially_enforced",
       "architecture",
@@ -428,7 +437,7 @@
       [],
       "change-scope-governance",
       "",
-      "Process rule is documented but not machine-enforced.",
+      "The architecture standard and PR template now require complexity justification and bounded changes, but no machine rule can reliably prove semantic change size without unjustified tooling.",
       ""
     ],
     [
@@ -448,70 +457,91 @@
     [
       "PERSIST-001",
       "P",
-      "\u00a74 Phase B, \u00a77.2",
+      "§4 Phase B, §7.2",
       "Canonical mutable state is durable and not only memory, JSON, YAML, SharedPreferences, process tables or queues",
-      "planned",
+      "enforced",
       "persistence",
-      [],
-      [],
-      "sqlite-canonical-state-foundation",
+      [
+        "crates/control-plane-sqlite",
+        "services/control-plane/src/state.rs",
+        "services/control-plane/tests/sqlite_backend_process_acceptance.rs",
+        "docs/architecture/control-plane-sqlite-runtime-retirement.md"
+      ],
+      [
+        "RQ-T"
+      ],
       "",
-      "Control-plane state is still JSON backed with in-memory maps.",
+      "",
+      "The control-plane daemon is SQLite-only; JSON is restricted to import, diagnostic export and previous-release rollback artifacts. Restart/replay process acceptance proves acknowledged durable state survives process restart.",
       ""
     ],
     [
       "PERSIST-002",
       "P",
-      "\u00a74 Phase B, \u00a77.2, \u00a77.6",
+      "§4 Phase B, §7.2, §7.6",
       "SQLite uses WAL, foreign keys, busy timeout, single-writer discipline, short transactions, backup and integrity checks",
-      "not_applicable_yet",
+      "partially_enforced",
       "persistence",
-      [],
-      [],
-      "sqlite-canonical-state-foundation",
-      "Canonical SQLite storage is introduced.",
+      [
+        "crates/control-plane-sqlite/src/lib.rs",
+        "crates/control-plane-sqlite/src/snapshot_compare_and_swap.rs",
+        "crates/control-plane-sqlite/src/snapshot_store_tests.rs"
+      ],
+      [
+        "RQ-T"
+      ],
+      "sqlite-backup-integrity-acceptance",
       "",
+      "WAL, foreign keys, a five-second busy timeout, synchronous FULL and immediate bounded write transactions are permanent code/test behavior; VACUUM INTO backup support exists, but a permanent integrity-check plus clean backup/restore acceptance gate is still absent.",
       ""
     ],
     [
       "PERSIST-003",
       "P",
-      "\u00a74 Phase B, \u00a77.2",
+      "§4 Phase B, §7.2",
       "Device, command, replay evidence and affected projections commit atomically when one operation changes them",
-      "partially_enforced",
+      "enforced",
       "persistence",
       [
-        "crates/application/src/command_issue.rs",
-        "crates/application/src/command_delivery.rs",
         "services/control-plane/src/state.rs",
-        "crates/application/src/device_registration.rs"
+        "crates/control-plane-sqlite/src/snapshot_compare_and_swap.rs",
+        "crates/control-plane-sqlite/src/snapshot_compare_and_swap_tests.rs",
+        "services/control-plane/tests/sqlite_backend_process_acceptance.rs"
       ],
       [
         "RQ-T"
       ],
-      "sqlite-command-and-device-transaction-boundaries",
       "",
-      "JSON-era command and registration candidates publish durably before memory; SQLite must preserve the same ordering for the closed baseline inventory.",
+      "",
+      "Each control-plane candidate is compare-and-swapped as one immediate SQLite transaction, verified for post-write parity, committed before in-memory publication, and stale writers fail closed; restart/replay behavior is covered by process acceptance.",
       ""
     ],
     [
       "PERSIST-004",
       "P",
-      "\u00a74 Phase B, \u00a77.2, \u00a77.6",
+      "§4 Phase B, §7.2, §7.6",
       "JSON migration performs import, parity validation, write switch, diagnostic export, compatibility window and retirement",
-      "planned",
+      "enforced",
       "persistence",
-      [],
-      [],
-      "json-to-sqlite-migration",
+      [
+        "crates/control-plane-sqlite/src/legacy_json_import.rs",
+        "services/control-plane/src/bin/control-plane-state-migrate.rs",
+        "services/control-plane/tests/state_migration_cli.rs",
+        "services/control-plane/tests/sqlite_backend_process_acceptance.rs",
+        "docs/architecture/control-plane-sqlite-runtime-retirement.md"
+      ],
+      [
+        "RQ-T"
+      ],
       "",
       "",
+      "Import validates legacy state before write, rehydrates canonical SQLite for parity/diagnostic output, the production daemon is SQLite-only, and rollback-export round-trips latest state through the previous-release JSON contract in process acceptance.",
       ""
     ],
     [
       "CONTRACT-001",
       "P",
-      "\u00a77.4, \u00a77.5",
+      "§7.4, §7.5",
       "Statuses, IDs, error codes, proxy protocols, tunnel transports, strategies, principals, permissions and release reasons are typed",
       "partially_enforced",
       "architecture",
@@ -530,7 +560,7 @@
     [
       "CONTRACT-002",
       "P",
-      "\u00a77.4, \u00a77.5",
+      "§7.4, §7.5",
       "Raw strings are accepted only at transport boundaries and converted immediately",
       "planned",
       "architecture",
@@ -544,7 +574,7 @@
     [
       "CONTRACT-003",
       "P",
-      "\u00a75",
+      "§5",
       "Generated protobuf models remain outside domain crates if canonical protobuf contracts are separately activated",
       "not_applicable_yet",
       "architecture",
@@ -558,7 +588,7 @@
     [
       "CONTRACT-004",
       "P",
-      "\u00a77.1, \u00a77.4",
+      "§7.1, §7.4",
       "Every external request has protocol version, request ID, correlation ID and deadline; mutations add idempotency",
       "partially_enforced",
       "application",
@@ -579,7 +609,7 @@
     [
       "DIGEST-001",
       "A2",
-      "Decision summary, \u00a71",
+      "Decision summary, §1",
       "New internal content, config and binary fingerprints default to full BLAKE3-256 through typed shared wrappers",
       "enforced",
       "security",
@@ -603,7 +633,7 @@
     [
       "DIGEST-002",
       "A2",
-      "\u00a72",
+      "§2",
       "New internal persisted/public digest text is b3-prefixed full lowercase 64-hex and never bare hex",
       "enforced",
       "foundation",
@@ -622,7 +652,7 @@
     [
       "DIGEST-003",
       "A2",
-      "\u00a73",
+      "§3",
       "Every deterministic internal digest uses a static versioned non-user-controlled context and semantic changes bump its version",
       "enforced",
       "foundation",
@@ -642,7 +672,7 @@
     [
       "DIGEST-004",
       "A2",
-      "\u00a74",
+      "§4",
       "Raw concatenation is forbidden and each input part uses unsigned u64 big-endian length framing",
       "enforced",
       "foundation",
@@ -661,7 +691,7 @@
     [
       "DIGEST-005",
       "A2",
-      "\u00a74",
+      "§4",
       "Structured digest inputs use deterministic versioned canonical bytes and never pretty JSON or Debug output",
       "partially_enforced",
       "security",
@@ -680,7 +710,7 @@
     [
       "DIGEST-006",
       "A2",
-      "\u00a78, \u00a79, \u00a714",
+      "§8, §9, §14",
       "Legacy SHA-256 is classified before migration; migration defines reads, writes, conflicts, replay, rollback, retention and persisted fixtures",
       "partially_enforced",
       "security",
@@ -919,7 +949,7 @@
     [
       "TUNNEL-001",
       "P",
-      "\u00a74 Phase C, \u00a77.3",
+      "§4 Phase C, §7.3",
       "Pending TCP stream entries are removed on success, cancellation and timeout",
       "enforced",
       "tunnel-session",
@@ -938,7 +968,7 @@
     [
       "TUNNEL-002",
       "P",
-      "\u00a74 Phase C, \u00a77.3",
+      "§4 Phase C, §7.3",
       "Global and per-device pending stream counts are bounded and registrations expire",
       "enforced",
       "tunnel-session",
@@ -957,7 +987,7 @@
     [
       "TUNNEL-003",
       "P",
-      "\u00a74 Phase C, \u00a77.3",
+      "§4 Phase C, §7.3",
       "Routing never chooses an arbitrary device and binds accepted streams to expected device and session",
       "enforced",
       "tunnel-session",
@@ -976,7 +1006,7 @@
     [
       "TUNNEL-004",
       "P",
-      "\u00a74 Phase C, \u00a75",
+      "§4 Phase C, §5",
       "Runtime generation is added to stream authority only if current session identity and freshness checks leave a demonstrated stale-session gap",
       "not_applicable_yet",
       "tunnel-session",
@@ -990,7 +1020,7 @@
     [
       "TUNNEL-005",
       "P",
-      "\u00a75",
+      "§5",
       "Per-device tunnel credentials remain future-only",
       "not_applicable_yet",
       "security",
@@ -1004,7 +1034,7 @@
     [
       "TUNNEL-006",
       "P",
-      "\u00a74 Phase C, \u00a77.3",
+      "§4 Phase C, §7.3",
       "Primary/reserve transport state and bounded failover reason are tracked",
       "enforced",
       "tunnel-session",
@@ -1023,7 +1053,7 @@
     [
       "TUNNEL-007",
       "P",
-      "\u00a74 Phase C, \u00a77.3",
+      "§4 Phase C, §7.3",
       "Routing requires heartbeat freshness rather than a stored connected flag",
       "enforced",
       "tunnel-session",
@@ -1041,7 +1071,7 @@
     [
       "TUNNEL-008",
       "P",
-      "\u00a74 Phase C, \u00a75, \u00a77.3",
+      "§4 Phase C, §5, §7.3",
       "Transport failover and recovery expose bounded state and reason evidence; durable audit and quarantine remain future-only",
       "partially_enforced",
       "tunnel-session",
@@ -1060,7 +1090,7 @@
     [
       "TUNNEL-009",
       "P",
-      "\u00a74 Phase C, \u00a77.3",
+      "§4 Phase C, §7.3",
       "Reserve acceptance proves all proxy protocols, UDP block fallback to TLS/TCP 443, heartbeat, mobile IP and return to QUIC",
       "partially_enforced",
       "tunnel-session",
@@ -1078,7 +1108,7 @@
     [
       "SEC-001",
       "P",
-      "\u00a77.4",
+      "§7.4",
       "Current admin and device trust boundaries use separate authentication paths and protected metadata is trusted only after authentication",
       "partially_enforced",
       "identity-access",
@@ -1097,7 +1127,7 @@
     [
       "SEC-002",
       "A2",
-      "\u00a75",
+      "§5",
       "Persisted bearer-token verifiers use keyed BLAKE3 behind a security port with key ID, rotation and constant-time comparison",
       "not_applicable_yet",
       "security",
@@ -1111,7 +1141,7 @@
     [
       "SEC-003",
       "A2",
-      "\u00a76",
+      "§6",
       "Human passwords use Argon2id with random salts and upgradable parameters; fast or unsalted password hashes are forbidden",
       "not_applicable_yet",
       "security",
@@ -1125,7 +1155,7 @@
     [
       "SEC-004",
       "A2",
-      "\u00a77, \u00a78",
+      "§7, §8",
       "Protocol-mandated HKDF, HMAC, TLS, signature, AEAD, TLS pin and standardized digest algorithms are preserved exactly",
       "partially_enforced",
       "security",
@@ -1145,7 +1175,7 @@
     [
       "SEC-005",
       "A2",
-      "\u00a710, \u00a711",
+      "§10, §11",
       "MD5, SHA-1, implementation-defined hashes, security CRC, unkeyed token hashes, raw concatenation and undocumented crypto dependencies are rejected",
       "partially_enforced",
       "security",
@@ -1164,7 +1194,7 @@
     [
       "OPS-001",
       "P",
-      "\u00a77.4, \u00a710",
+      "§7.4, §10",
       "Structured logs carry operational lineage and never contain secrets",
       "partially_enforced",
       "operations",
@@ -1183,7 +1213,7 @@
     [
       "OPS-002",
       "P",
-      "\u00a77.4, \u00a710",
+      "§7.4, §10",
       "Metrics cover bounded operational state and high-cardinality IDs are not permanent labels",
       "partially_enforced",
       "operations",
@@ -1201,7 +1231,7 @@
     [
       "OPS-003",
       "P",
-      "\u00a74 Phase D, \u00a77.4, \u00a77.6",
+      "§4 Phase D, §7.4, §7.6",
       "Liveness, readiness, durable-store health, tunnel state and phone availability are separated; liveness does not depend on a phone",
       "planned",
       "operations",
@@ -1215,7 +1245,7 @@
     [
       "OPS-004",
       "P",
-      "\u00a73, \u00a77.3, \u00a710",
+      "§3, §7.3, §10",
       "Queues, maps and task spawning are bounded",
       "partially_enforced",
       "reliability",
@@ -1234,7 +1264,7 @@
     [
       "UPGRADE-001",
       "P",
-      "\u00a75",
+      "§5",
       "Protobuf field numbers are never reused, removed fields are reserved, and buf lint and breaking are mandatory",
       "not_applicable_yet",
       "contracts",
@@ -1248,21 +1278,21 @@
     [
       "UPGRADE-002",
       "P",
-      "\u00a74 Phase B, \u00a77.2, \u00a77.6",
+      "§4 Phase B, §7.2, §7.6",
       "Database changes use expand-migrate-contract and rollback remains possible after expansion",
-      "not_applicable_yet",
+      "planned",
       "persistence",
       [],
       [],
       "migration-validation-and-rollback",
-      "Canonical database migrations are introduced.",
       "",
+      "Canonical SQLite migrations now exist and the initial v1 bootstrap is transactional, while rollback-export preserves previous-release state compatibility; no schema-version evolution has yet demonstrated expand-migrate-contract and rollback after an expansion.",
       ""
     ],
     [
       "UPGRADE-003",
       "P",
-      "\u00a710",
+      "§10",
       "Acceptance and release evidence identifies one immutable Git SHA and required compatibility state",
       "planned",
       "operations",
@@ -1276,7 +1306,7 @@
     [
       "UPGRADE-004",
       "P",
-      "\u00a75, \u00a710",
+      "§5, §10",
       "Existing release-integrity controls remain protected; signing, staging, canary and fleet rollout are future-only",
       "enforced",
       "release",
@@ -1294,7 +1324,7 @@
     [
       "DELIVERY-001",
       "P",
-      "\u00a79, \u00a710",
+      "§9, §10",
       "Permanent CI runs architecture and Python regressions, formatting, strict Clippy and workspace tests",
       "enforced",
       "developer-experience",
@@ -1313,7 +1343,7 @@
     [
       "DELIVERY-002",
       "P",
-      "\u00a73, \u00a75, \u00a710",
+      "§3, §5, §10",
       "Permanent CI expands only when an active baseline invariant cannot be reliably enforced by existing controls",
       "planned",
       "developer-experience",
@@ -1327,7 +1357,7 @@
     [
       "DELIVERY-003",
       "P",
-      "\u00a79, \u00a710",
+      "§9, §10",
       "A completed baseline slice names the risk and invariant, preserves ownership and compatibility, tests applicable failure semantics, and records immutable-SHA evidence",
       "planned",
       "architecture",
@@ -1341,7 +1371,7 @@
     [
       "DELIVERY-004",
       "P",
-      "\u00a78, \u00a710",
+      "§8, §10",
       "Application behavior is not complete until composed through the production boundary required by its slice",
       "planned",
       "architecture",

@@ -1,142 +1,140 @@
 # Invariant enforcement audit
 
 Status: normative governance companion  
-Baseline `main`: `d49a9208f5a586a5d51017547b2e17f9470bb2e8`
+Audit revision: `2026-08-30`  
+Baseline `main`: `40ecf59f7807a776c8604bbc1489d0c47b2246f6`  
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
 
-Architecture documents define required behavior, but prose alone is not enforcement. This audit records which requirements are protected by permanent CI, which are only partially protected, and which remain explicit implementation work. It must not be used to claim production guarantees that the referenced gate or test does not actually prove.
+Architecture prose is not enforcement by itself. The matrix records which active requirements are protected by permanent repository controls, which are only partially protected, which remain planned work and which future concepts are not applicable yet.
 
-The matrix covers the normative requirements extracted from:
+The audit must never promote a requirement beyond the evidence named by its row. A source-controlled test can prove repository behavior; it cannot by itself prove mutable GitHub-hosted settings, a live phone, a provider account or other external state.
 
-- `docs/PRODUCTION_BASELINE_PLAN.md`;
-- `docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md`;
-- `docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md`;
-- `docs/architecture/foundation-primitives.md`;
-- `docs/architecture/digest-inventory-and-migration.md`;
-- `contracts/compatibility/proxy-surface-v1.json`.
-
-Each source is pinned by its Git blob SHA. Any edit to one of those files makes the permanent validator fail until the audit is deliberately repeated and both the source catalog and invariant catalog are updated.
+The source catalog is pinned by Git blob SHA. Editing a pinned normative source fails the permanent validator until the audit is deliberately repeated.
 
 ## Status semantics
 
-- `enforced`: the active rule has repository evidence and a referenced permanent CI workflow step. A document-only statement or an optional local test is insufficient.
-- `partially_enforced`: permanent CI proves only the stated subset. The row must also name the bounded follow-up slice that closes the remaining scope.
-- `review_only`: a temporary human control. It is allowed only with an owner, evidence note, planned slice and expiry no more than 180 days after the audit revision. There are currently no `review_only` rows.
-- `planned`: the rule is active but has no adequate machine enforcement yet. The matrix must name the planned bounded slice.
-- `not_applicable_yet`: the target production concept is not present yet. The row must state the activation condition and the planned slice; the status is not a waiver after that condition becomes true.
+- `enforced`: permanent repository evidence and a referenced CI step prove the complete row scope.
+- `partially_enforced`: permanent CI proves a strict subset and the row names the bounded remaining slice.
+- `review_only`: temporary human control with explicit owner, evidence, bounded follow-up and expiry within 180 days of the audit revision.
+- `planned`: the requirement is active but adequate machine enforcement is not yet present.
+- `not_applicable_yet`: the production concept is absent; the row names the exact activation condition. It is invalid once that condition becomes true.
+
+There are no `review_only` rows in this revision.
 
 ## Baseline result
 
-The audit contains 67 grouped invariant IDs:
+The audit contains 67 invariant IDs:
 
 | Status | Count |
 | --- | ---: |
-| `enforced` | 27 |
-| `partially_enforced` | 20 |
-| `planned` | 12 |
-| `not_applicable_yet` | 8 |
+| `enforced` | 31 |
+| `partially_enforced` | 19 |
+| `planned` | 11 |
+| `not_applicable_yet` | 6 |
 | `review_only` | 0 |
 
-Grouping is deliberate: one ID may cover a coherent normative rule repeated in several sections, but its source anchor and scope must remain specific enough to review. The validator carries an independent required-ID set, so deleting a row and deleting it from the JSON catalog does not silently pass.
+The validator has an independent required-ID set, so deleting an invariant from both a row list and a JSON catalog does not silently pass.
 
-The matrix now pins the canonical Production Baseline Plan directly. The temporary compatibility-pointer waiver has been removed, and future-only concepts are recorded only as inactive activation conditions rather than active implementation commitments.
+## 2026-08-30 semantic re-audit
 
-## What is currently machine-enforced
+This revision re-audited only controls whose implementation or external evidence materially changed. It does not bulk-promote unrelated rows.
 
-The permanent `Rust Quality` workflow proves only the controls referenced by matrix rows, including:
+### Full Rust workspace graph — `ARCH-001`
 
-- protected mixed `1080`, SOCKS5 `1081` and HTTP/CONNECT `3128` compatibility;
-- QUIC-first behavior, certificate-pinned TLS/TCP reserve and WireGuard compatibility inventory;
-- layer-specific dependency and vocabulary restrictions for foundation, runtime-domain and the first application crate;
-- typed foundation validation, request lineage, deadline and command-boundary behavior;
-- typed BLAKE3 formatting, static domain separation and length framing;
-- fail-closed device and VM release integrity manifests;
-- typed runtime config and binary fingerprints with real canonical producers;
-- rejection of the legacy binary-fingerprint environment producer and raw `String` fingerprint fields;
-- isolated rolling legacy readers, fail-closed unknown-prefix handling and restart-safe persisted-state cleanup;
-- bounded and expiring reverse-tunnel pending streams, device/session binding and heartbeat freshness;
-- the currently implemented formatting, strict Clippy and workspace test suite.
+PR #96 introduced `contracts/governance/module-boundaries-v1.json` and `scripts/check_module_boundaries.py` into the required architecture policy gate. Every current Rust workspace member and every current internal dependency edge is classified exactly. The policy rejects:
 
-This list is not a claim that every rule in ADR-001 or the Production Baseline Plan is enforced.
+- an unclassified workspace member;
+- a package/path mismatch;
+- an undeclared internal dependency;
+- a stale allowlisted internal dependency;
+- an edge to an unknown module;
+- a dependency cycle.
+
+Existing pure-crate dependency and vocabulary restrictions remain independent additional checks. `ARCH-001` is therefore `enforced` for the current workspace graph rather than the previous partial three-crate coverage.
+
+### Canonical SQLite state — `PERSIST-001`
+
+The production control-plane daemon is SQLite-only. JSON is no longer a mutable runtime backend; it is limited to deterministic import, diagnostic export and previous-release rollback artifacts. Process acceptance proves state mutation, termination, restart, replay and conflict behavior against SQLite. `PERSIST-001` is `enforced`.
+
+### SQLite operating discipline — `PERSIST-002`
+
+The SQLite store permanently establishes:
+
+- WAL mode;
+- foreign-key enforcement;
+- a five-second busy timeout;
+- `synchronous=FULL`;
+- immediate bounded write transactions;
+- fail-closed schema/version validation;
+- `VACUUM INTO` backup support.
+
+The complete invariant also requires integrity checks and exercised clean backup/restore acceptance. That proof is not present, so `PERSIST-002` is deliberately only `partially_enforced` under follow-up `sqlite-backup-integrity-acceptance`.
+
+### Atomic state mutation — `PERSIST-003`
+
+The state layer builds one candidate projection, the SQLite adapter compare-and-swaps the complete relational state in one immediate transaction, verifies post-write parity, commits, and only then publishes the candidate in memory. Stale expected state fails closed. Process tests prove restart/replay behavior. `PERSIST-003` is `enforced`.
+
+### JSON-to-SQLite migration lifecycle — `PERSIST-004`
+
+The migration utility validates legacy JSON before writes, imports it through the isolated adapter, rehydrates canonical SQLite for parity/diagnostic output, and provides `rollback-export` for the previous accepted release. The current daemon has retired JSON runtime selection. Process acceptance round-trips the latest post-mutation rollback artifact back through the accepted importer. `PERSIST-004` is `enforced`.
+
+### Database upgrade discipline — `UPGRADE-002`
+
+This row can no longer be `not_applicable_yet`: canonical SQLite migrations now exist. The initial v1 migration is transactional and previous-release state compatibility is exercised, but no schema-version evolution has yet demonstrated an expand-migrate-contract sequence and rollback after expansion. The active rule is therefore `planned`, not prematurely enforced.
+
+## External controls and freshness
+
+Repository-hosted CI and mutable platform configuration are different evidence classes.
+
+`GITHUB-001` now records the actual `Protect main` ruleset instead of the obsolete `Rust Quality` assertion. On `2026-08-30`, ruleset `21243704` was verified to require:
+
+- a pull request;
+- resolved review threads;
+- an up-to-date branch;
+- the required `Quality Gate` check;
+- no branch deletion;
+- no non-fast-forward update;
+- no bypass actor.
+
+The desired state is versioned in `contracts/operations/github-control-plane-v1.json`, and repository policy checks validate that desired contract and workflow shape. However, the required PR Quality job does not continuously query live GitHub ruleset state. Therefore `GITHUB-001` is `partially_enforced`, not `enforced`.
+
+Every external snapshot control now carries a `verification` object with:
+
+- `kind=external_snapshot`;
+- the exact verification date;
+- the external subject identity;
+- `freshness_policy=reverify_on_every_audit_revision`;
+- whether continuous CI verification exists.
+
+The validator requires an external snapshot's `verified_at` date to equal the current `audit_revision`. An externally mutable control cannot claim `enforced` unless continuous CI verification is explicitly true. This prevents an old one-time observation from silently becoming permanent truth.
 
 ## Material open gaps
 
-The highest-impact active gaps remain explicit in the matrix:
+The matrix, not this prose summary, is authoritative for exact ownership and follow-up names. The highest-impact remaining gaps include:
 
-- Phase A closeout review confirming the current mutating route inventory and documenting the stop-and-reassess decision;
-- review-backed prohibition of SQL or business transitions in HTTP handlers without adding an unjustified AST framework;
-- the closed SQLite baseline inventory, transaction boundaries, JSON migration and exercised rollback;
-- repository-wide typed status/error taxonomies where current baseline behavior still uses raw strings;
-- application-specific canonical-field detection;
-- repository-wide bounded queue/map/task enforcement;
-- secret-bearing `Debug` and log detection;
-- removal of runtime fingerprint legacy readers after the accepted compatibility window;
-- health-surface separation, backup/restore and physical reserve-tunnel acceptance on one immutable SHA.
-
-## Command lifecycle, registration, heartbeat and public-probe application-port enforcement
-
-The existing command issue, poll, acknowledgement and device-registration capabilities now have bounded clean-dependency slices:
-
-- `mobile-proxy-application` owns typed ports and bounded outcomes;
-- command issuance retains deterministic request fingerprints, unambiguous BLAKE3 idempotency scope and exact/conflict classification;
-- Axum handlers call one use case and map only typed outcomes to bounded HTTP errors;
-- raw idempotency keys are not logged;
-- original command results are persisted separately from the bounded delivery queue, so acknowledgement or queue eviction cannot turn an exact replay into a new command;
-- legacy concatenated idempotency claims are normalized through an isolated adapter when their original queued command is recoverable, while stale claims reject reuse fail closed;
-- command queue, idempotency claim/result and device projection are fsynced and atomically renamed before in-memory publication;
-- command polling validates queue ownership and returns a typed pending-or-empty outcome without transport logic reaching into the queue;
-- successful acknowledgement removes the command and updates the device projection in one fsynced candidate before publishing either in memory;
-- negative acknowledgement preserves the pending command and the existing `{ "accepted": true }` compatibility shape;
-- device registration uses `node_id` as its natural replay key, preserves first-write metadata and bounds the JSON-era registry at 10,000 devices;
-- new and repeated registration persist the complete candidate before returning `{ "accepted": true }`;
-- a failed write returns `state_persistence_failed` and does not publish a new device in memory;
-- heartbeat replaces one exact device runtime projection through a typed application port while preserving the last public-probe fields;
-- heartbeat persists the complete candidate before publishing it in memory or returning `{ "accepted": true }`;
-- failed heartbeat persistence leaves the prior projection unchanged, and new heartbeat-created devices respect the 10,000-device bound;
-- public probe uses a typed updated-or-device-not-found outcome while preserving the existing `{ "accepted": true }` compatibility shape;
-- public-probe reports for existing devices are fsynced before in-memory publication, and failed writes leave the prior projection unchanged;
-- the server keeps authoritative probe time instead of trusting the compatibility timestamp supplied by the caller;
-- all current mutating control-plane handlers now enter through typed application ports, so `ARCH-004` and `ARCH-005` are enforced for the current route inventory.
-
-`ARCH-006` remains partially enforced: current handlers contain no persistence ordering or canonical mutation, but this is deliberately protected by focused code evidence and review rather than a new generic AST framework.
-
-## Runtime fingerprint enforcement
-
-`config_fingerprint` and `binary_fingerprint` now have field-specific typed contracts:
-
-- `ConfigFingerprint` uses `mobile-proxy/host-daemon-nonsecret-config/v1` over duplicate-safe, key-sorted, compact canonical JSON after credential redaction;
-- `BinaryFingerprint` uses `mobile-proxy/host-daemon-binary/v1` over exact running executable bytes;
-- canonical `DeviceRecord` fields are typed and preserve the existing optional JSON string representation;
-- host health and heartbeat boundaries accept bounded legacy strings only through isolated migration-input wrappers;
-- new producers can create only typed BLAKE3 values;
-- persisted legacy values are counted, replaced with `null` atomically and backfilled by typed heartbeats;
-- malformed `b3:` and unknown-prefixed values fail closed;
-- previous binaries can still deserialize new `b3:` strings or `null`, preserving software rollback;
-- no indexes, identifiers, dedupe comparisons, signatures or TLS pins depend on these fields.
-
-The compatibility reader remains intentionally `partially_enforced` work until the migration window has production acceptance evidence and a separate removal slice lands. The complete contract is in `docs/architecture/runtime-fingerprint-migration.md`.
-
-## External GitHub control
-
-`GITHUB-001` records the requirement that `main` cannot be changed without the required `Rust Quality` check. The available GitHub connector can inspect repository state, PRs, reviews, inline threads and workflow runs, but it does not expose branch protection or repository rulesets. Therefore branch protection is **not verified** and is not claimed as enforced.
-
-The control remains owned by `repository-admin` under planned slice `configure-and-export-main-ruleset`. Closure requires evidence from GitHub branch protection or a ruleset export showing that the permanent `Rust Quality` check is required for `main`.
+- aggregate mutable-state ownership auditing (`ARCH-003`);
+- review-backed SQL/business-transition isolation where generic AST tooling would not be justified (`ARCH-006`);
+- architecture change-scope and ADR supersession enforcement (`ARCH-007`, `ARCH-008`);
+- SQLite integrity plus clean backup/restore acceptance (`PERSIST-002`);
+- first real schema evolution proving expand-migrate-contract rollback (`UPGRADE-002`);
+- broader typed taxonomies and raw-string boundary enforcement;
+- repository-wide secret-log, metric-cardinality and bounded-concurrency controls;
+- health/readiness/store/tunnel/phone surface separation;
+- physical reserve-tunnel and release acceptance on one immutable SHA.
 
 ## Permanent validation
 
 `scripts/check_invariant_enforcement.py` fails closed when:
 
 - a pinned normative source changes without re-audit;
-- a required invariant ID is missing, duplicated or added only on one side of the catalog;
-- a row has an unsupported status or missing owner/source/scope;
-- `enforced` lacks evidence paths or permanent CI references;
-- `partially_enforced` lacks evidence, CI or a follow-up slice;
-- `planned` lacks a bounded planned slice;
-- `not_applicable_yet` lacks an activation condition;
-- a referenced workflow, step, test, script or evidence path does not exist;
-- a `review_only` exception is ownerless, evidence-free, unplanned, expired or longer than 180 days;
-- the external GitHub control disappears or is represented without explicit ownership and evidence state.
+- the required invariant catalog drifts or duplicates IDs;
+- a row has an unsupported or under-evidenced status;
+- an enforcement path or referenced CI step disappears;
+- a `review_only` exception is unbounded or expired;
+- an external control lacks explicit ownership/evidence state;
+- an external snapshot is not reverified on the audit revision;
+- an external snapshot claims full `enforced` status without continuous CI verification.
 
-The validator is invoked by the permanent architecture step and has regression tests under `scripts/tests`.
+The validator is invoked from the permanent architecture/policy job and has regression tests under `scripts/tests`.
