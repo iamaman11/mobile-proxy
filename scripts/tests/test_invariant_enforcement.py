@@ -98,6 +98,39 @@ class InvariantEnforcementTests(unittest.TestCase):
             any("GITHUB-001: evidence_note" in error for error in self.validate_changed(change))
         )
 
+    def test_external_snapshot_must_match_audit_revision(self):
+        def change(matrix):
+            matrix["external_controls"][0]["verification"]["verified_at"] = "2026-08-29"
+
+        self.assertTrue(
+            any(
+                "external snapshot must be reverified" in error
+                for error in self.validate_changed(change)
+            )
+        )
+
+    def test_external_control_cannot_claim_enforced_without_continuous_ci(self):
+        def change(matrix):
+            matrix["external_controls"][0]["status"] = "enforced"
+
+        self.assertTrue(
+            any(
+                "enforced external control requires continuous CI verification" in error
+                for error in self.validate_changed(change)
+            )
+        )
+
+    def test_external_snapshot_requires_explicit_freshness_policy(self):
+        def change(matrix):
+            matrix["external_controls"][0]["verification"]["freshness_policy"] = "manual"
+
+        self.assertTrue(
+            any(
+                "freshness_policy must be reverify_on_every_audit_revision" in error
+                for error in self.validate_changed(change)
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
