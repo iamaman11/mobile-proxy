@@ -1,3 +1,4 @@
 self-hosted-runner:
   labels:
     - mobile-proxy-production
+    - android-production
