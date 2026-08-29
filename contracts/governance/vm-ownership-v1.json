@@ -1,0 +1,60 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "scope": "Every provider adapter operating in an account that can contain resources not owned by mobile-proxy.",
+  "owner": "operator-cli",
+  "binding": {
+    "state_store": "durable owner-controlled state outside version control",
+    "identity": "provider-assigned immutable instance UUID",
+    "generation": "monotonically advances whenever a replacement binding is committed"
+  },
+  "required_tags": {
+    "project": "mobile-proxy",
+    "managed-by": "mobile-proxy"
+  },
+  "operations": {
+    "create": {
+      "provider_request_must_set_required_tags": true,
+      "provider_response_must_match_required_tags": true,
+      "persist_binding_before_success": true
+    },
+    "manage": {
+      "requires_persisted_binding": true,
+      "requires_exact_uuid": true,
+      "requires_exact_required_tags": true
+    },
+    "snapshot": {
+      "requires_persisted_binding": true,
+      "requires_exact_uuid": true,
+      "requires_exact_required_tags": true
+    },
+    "delete": {
+      "requires_persisted_binding": true,
+      "requires_exact_uuid": true,
+      "requires_exact_required_tags": true,
+      "clear_binding_only_after_provider_confirms_delete": true
+    },
+    "recreate": {
+      "provider_request_must_set_required_tags": true,
+      "provider_response_must_match_required_tags": true,
+      "atomically_replace_uuid_and_generation_after_verification": true
+    }
+  },
+  "fail_closed": [
+    "missing_binding",
+    "invalid_binding",
+    "provider_instance_not_found",
+    "uuid_mismatch",
+    "required_tag_missing",
+    "required_tag_mismatch",
+    "binding_compare_and_swap_conflict"
+  ],
+  "forbidden": [
+    "arbitrary_instance_uuid_from_operator_input",
+    "first_matching_instance_selection",
+    "label_or_name_as_authority",
+    "operation_after_identity_or_tag_verification_failure",
+    "unverified_binding_replacement"
+  ],
+  "activation_condition": "A shared-account provider adapter, including Vultr, must satisfy this contract before its create, manage, snapshot, delete or recreate command is exposed."
+}
