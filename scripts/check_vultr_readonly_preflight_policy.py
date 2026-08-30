@@ -54,26 +54,47 @@ def check_repository(root: Path) -> list[str]:
     if github.get("vultr_readonly_preflight_contract") != str(CONTRACT):
         errors.append("GitHub control-plane contract does not bind Vultr read-only preflight")
     environment = github.get("acceptance_vultr_environment")
-    if not isinstance(environment, dict) or any(
-        environment.get(key) != value
-        for key, value in {
+    if not isinstance(environment, dict):
+        errors.append("GitHub acceptance-vultr credential boundary is missing")
+    else:
+        expected_boundary = {
             "name": "acceptance-vultr",
-            "authority": "pre_release_acceptance_read_only",
-            "entry_workflow": str(WORKFLOW),
-            "allowed_provider_api": "GET /v2/account only",
-            "response_body_recording": "forbidden",
-            "vm_lifecycle": "forbidden",
-            "provider_mutation": "forbidden",
-            "final_production_authority": False,
+            "authority": "pre_release_acceptance_credential_boundary_not_final_production_authority",
+            "required_precondition": "verified_vultr_acceptance_authority_artifact_for_exact_candidate_sha",
             "executor": "github-hosted",
-        }.items()
-    ):
-        errors.append("GitHub acceptance-vultr boundary differs from the read-only contract")
-    if isinstance(environment, dict) and environment.get("required_secret_names") != [
-        "VULTR_API_KEY",
-        "VULTR_SSH_PRIVATE_KEY",
-    ]:
-        errors.append("acceptance-vultr secret names differ from the contract")
+            "final_production_authority": False,
+        }
+        if any(environment.get(key) != value for key, value in expected_boundary.items()):
+            errors.append("GitHub acceptance-vultr credential boundary differs from the protected contract")
+        if environment.get("required_secret_names") != [
+            "VULTR_API_KEY",
+            "VULTR_SSH_PRIVATE_KEY",
+        ]:
+            errors.append("acceptance-vultr secret names differ from the contract")
+
+        capabilities = environment.get("workflow_capabilities")
+        readonly = capabilities.get("readonly_preflight") if isinstance(capabilities, dict) else None
+        if readonly != {
+            "workflow": str(WORKFLOW),
+            "allowed_provider_api": ["GET /v2/account"],
+            "response_body_recording": "forbidden",
+            "vm_lifecycle": False,
+            "provider_mutation": False,
+        }:
+            errors.append("GitHub acceptance-vultr read-only capability differs from the read-only contract")
+
+        for legacy_flat_capability in (
+            "entry_workflow",
+            "allowed_provider_api",
+            "response_body_recording",
+            "vm_lifecycle",
+            "provider_mutation",
+        ):
+            if legacy_flat_capability in environment:
+                errors.append(
+                    "GitHub acceptance-vultr must define provider capability per workflow, not as a flat environment authority"
+                )
+                break
 
     required_workflow = (
         "github.event.issue.number == 90",
