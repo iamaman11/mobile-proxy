@@ -48,7 +48,7 @@
   "execution": {
     "vultr": "GitHub-hosted runner in production-vultr",
     "phone": "private-repository caller context with android-production self-hosted runner",
-    "phone_logic": "canonical reusable workflow pinned to immutable ref or verified canonical release artifact"
+    "phone_logic": "canonical public logic pinned to immutable SHA or verified canonical release artifact"
   },
   "release_link": {
     "source_repository": "iamaman11/mobile-proxy",
@@ -78,11 +78,11 @@
   },
   "migration_status": {
     "canonical_authority": "documented_and_contract_enforced",
-    "phone_execution_satellite": "initialized_without_production_workflow",
+    "phone_execution_satellite": "read_only_preflight_workflow_enabled",
     "vultr_adapter": "not_implemented",
     "vultr_live_preflight": "not_proven",
-    "phone_workflows": "not_implemented",
-    "phone_live_preflight": "not_proven",
+    "phone_workflows": "read_only_preflight_implemented",
+    "phone_live_preflight": "blocked_missing_registered_device_binding",
     "agent_release_control": "not_implemented",
     "legacy_public_deployment": "blocked_until_split_workflows_are_implemented_and_verified"
   }
