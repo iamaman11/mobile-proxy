@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class Item19AcceptanceLifecycleTests(unittest.TestCase):
     SHA = "a" * 40
 
-    def run(self, *, name, path, run_id, created_at, sha=None):
+    def workflow_run(self, *, name, path, run_id, created_at, sha=None):
         return {
             "id": run_id,
             "run_attempt": 1,
@@ -31,7 +31,7 @@ class Item19AcceptanceLifecycleTests(unittest.TestCase):
         }
 
     def quality_run(self):
-        return self.run(
+        return self.workflow_run(
             name="Quality",
             path=".github/workflows/quality.yml",
             run_id=100,
@@ -39,7 +39,7 @@ class Item19AcceptanceLifecycleTests(unittest.TestCase):
         )
 
     def acceptance_run(self):
-        return self.run(
+        return self.workflow_run(
             name="Vultr acceptance authority",
             path=".github/workflows/acceptance-authority.yml",
             run_id=200,
@@ -47,7 +47,7 @@ class Item19AcceptanceLifecycleTests(unittest.TestCase):
         )
 
     def preflight_run(self, run_id=300):
-        return self.run(
+        return self.workflow_run(
             name="Vultr read-only acceptance preflight",
             path=".github/workflows/vultr-readonly-preflight.yml",
             run_id=run_id,
