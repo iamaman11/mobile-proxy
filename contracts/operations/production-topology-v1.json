@@ -78,11 +78,11 @@
   },
   "migration_status": {
     "canonical_authority": "documented_and_contract_enforced",
-    "phone_execution_satellite": "read_only_preflight_workflow_enabled",
+    "phone_execution_satellite": "read_only_preflight_workflow_enabled_and_private_runner_online",
     "vultr_adapter": "not_implemented",
     "vultr_live_preflight": "not_proven",
     "phone_workflows": "read_only_preflight_implemented",
-    "phone_live_preflight": "blocked_missing_registered_device_binding",
+    "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
     "agent_release_control": "not_implemented",
     "legacy_public_deployment": "blocked_until_split_workflows_are_implemented_and_verified"
   }

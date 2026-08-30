@@ -110,10 +110,14 @@ As of the canonical-authority checkpoint completed by PR #94:
 - public repository workflows are forbidden from using self-hosted runners or ADB;
 - `production-vultr` is the intended tag-only GitHub-hosted Vultr boundary;
 - `iamaman11/mobile-proxy-production` exists privately as the phone execution satellite;
-- private Production Control Issue #1 is reserved but no command workflow is enabled yet;
+- private Production Control Issue #1 is the command/audit transport and a thin read-only caller is enabled;
+- the private Linux `android-production` runner has passed its bounded read-only Actions preflight
+  against exactly the registered phone, without publishing the identifier or mutating the phone;
 - legacy public production deployment is blocked fail-closed;
-- live Vultr and phone preflight proofs are still pending;
-- the typed Vultr lifecycle and final phone deploy/verify/rollback workflows are still pending;
+- live Vultr preflight proof is still pending;
+- the typed Vultr lifecycle and final mutable phone deploy/verify/rollback workflows are still pending;
+- the signing identity of the currently installed Android application has not been recovered into
+  the private GitHub execution boundary, so Android update/rollback is intentionally unavailable;
 - release immutability remains disabled until draft -> assets -> checksum/SBOM/attestation -> publish ordering is implemented.
 
 This checkpoint records architecture and control boundaries only. It does not authorize VM or phone

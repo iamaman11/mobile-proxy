@@ -91,6 +91,20 @@ PR #107 therefore integrates immutable candidate evidence into the existing `Qua
 
 The first exact-head proof on PR #107 produced `software-release-candidate-4d236d689ccd4eeba8345025250554b3255e4053`; its evidence identifies that exact SHA, `git_worktree_clean=true`, `workflow=Quality`, `physical_phone_acceptance_required=true` and `baseline_complete=false`. This proves the permanent mechanism while keeping physical acceptance separate. `UPGRADE-003` is therefore `enforced`. A software-complete release candidate is not declared until the final merged `main` SHA itself passes the full gate and produces fresh evidence for that SHA.
 
+### Private phone GitOps preflight — Phase D item 15
+
+The canonical production-baseline plan now records a completed private Actions preflight for the
+exact registered phone. The evidence is bounded and read-only: it proves runner labels, required
+tools, exact device binding, `adb get-state` and a shell probe, while publishing neither the raw
+identifier nor a mutable result. No application install, update, rollback, network mutation or
+provider lifecycle action was performed.
+
+This re-audit does not promote mutable phone delivery to `enforced`. The remaining active gates are
+recovery of the installed Android signing identity, signed immutable artifact retention,
+certificate-continuity validation and canonical private-caller lifecycle workflows. The existing
+delivery and upgrade invariant statuses therefore remain unchanged; Phase D merely advances from
+"phone preflight pending" to "phone preflight proven, mutations fail-closed".
+
 ## External controls and freshness
 
 Repository-hosted CI and mutable platform configuration are different evidence classes.

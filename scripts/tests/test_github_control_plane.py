@@ -65,6 +65,40 @@ class GithubControlPlaneTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("registered-device binding" in error for error in errors))
 
+    def test_phone_signing_secret_contract_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(ROOT / "contracts", root / "contracts")
+            shutil.copytree(ROOT / "docs", root / "docs")
+            (root / ".github/workflows").mkdir(parents=True)
+            shutil.copy2(
+                ROOT / ".github/workflows/deploy-production.yml",
+                root / ".github/workflows/deploy-production.yml",
+            )
+            path = root / "contracts/operations/github-control-plane-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["phone_control_repository"]["reserved_android_signing_secret_names"] = []
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("signing-secret" in error for error in errors))
+
+    def test_phone_preflight_checkpoint_is_rejected_if_stale(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(ROOT / "contracts", root / "contracts")
+            shutil.copytree(ROOT / "docs", root / "docs")
+            (root / ".github/workflows").mkdir(parents=True)
+            shutil.copy2(
+                ROOT / ".github/workflows/deploy-production.yml",
+                root / ".github/workflows/deploy-production.yml",
+            )
+            path = root / "contracts/operations/production-topology-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["migration_status"]["phone_live_preflight"] = "not_proven"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("phone preflight checkpoint" in error for error in errors))
+
     def test_satellite_cannot_become_a_second_source_of_truth(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

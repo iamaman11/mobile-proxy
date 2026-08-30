@@ -89,6 +89,12 @@ Production deployment is **blocked fail-closed**. The historical public deployme
 a workstation runner with a GCP adapter and is not the target architecture. The checked-in
 migration-gate workflow intentionally refuses deployment.
 
+The phone execution foundation is proven and recorded in
+[phone GitOps runtime](operations/phone-gitops-runtime.md): the private Linux runner is online,
+the private read-only preflight passed on the registered device at one immutable canonical SHA, and
+the bounded report confirms `mutation_performed=false`. This does **not** authorize installation,
+network changes, restart, rollback or any other phone mutation.
+
 The remaining implementation work is:
 
 1. agent-invokable GitHub-native release control that creates/uses one protected annotated tag
@@ -98,10 +104,12 @@ The remaining implementation work is:
 3. GitHub-hosted `production-vultr` workflows and a typed Vultr adapter satisfying the
    [VM ownership boundary](architecture/vm-ownership-boundary.md);
 4. read-only live Vultr preflight proving environment-secret availability without exposing values;
-5. canonical phone preflight/deploy/verify/rollback logic invoked only through the private
+5. canonical phone install/update/verify/rollback logic invoked only through the private
    execution satellite and exact `android-production` runner;
-6. read-only live phone preflight proving runner/tool/device state before mutation;
-7. signed APK/release identity handling without blindly replacing an existing Android signing key;
+6. recovery of the existing Android signing identity, followed by private GitHub-secret delivery
+   of that identity without exposing it to the public repository, logs or evidence;
+7. signed immutable APK handling, certificate-continuity validation and deterministic rollback to
+   a previously accepted signed artifact (never a blind rebuild of an old source revision);
 8. bounded evidence and deterministic rollback across both targets.
 
 Until the relevant target path is implemented and verified, no release event, manual dispatch,

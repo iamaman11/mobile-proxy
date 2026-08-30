@@ -53,6 +53,12 @@
     "control_issue": 1,
     "preferred_logic_source": "canonical_public_logic_pinned_to_immutable_sha_or_verified_release_artifact",
     "required_device_binding_secret": "ANDROID_PRODUCTION_SERIAL",
+    "reserved_android_signing_secret_names": [
+      "ANDROID_RELEASE_KEYSTORE_B64",
+      "ANDROID_RELEASE_KEYSTORE_PASSWORD",
+      "ANDROID_RELEASE_KEY_ALIAS",
+      "ANDROID_RELEASE_KEY_PASSWORD"
+    ],
     "required_runner_labels": [
       "self-hosted",
       "Linux",
@@ -76,7 +82,7 @@
   "release_immutability": "not_enabled_until_draft_asset_checksum_sbom_attestation_publish_order_is_implemented",
   "runtime_verification": {
     "vultr_secret_access": "pending_actions_preflight",
-    "android_runner_and_device": "private_runner_reachable_registered_device_binding_missing"
+    "android_runner_and_device": "passed_private_actions_read_only_preflight_on_registered_device; mutable_phone_operations_remain_blocked"
   },
   "forbidden": [
     "public_repository_self_hosted_runner",

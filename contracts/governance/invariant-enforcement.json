@@ -13,7 +13,7 @@
   "sources": {
     "P": {
       "path": "docs/PRODUCTION_BASELINE_PLAN.md",
-      "blob_sha": "fdbf5140f0ada03d340bba666dd275f0dc7e5493"
+      "blob_sha": "c301db13913f9fa1ba3ba2d513dfa9f267f5b1a0"
     },
     "A1": {
       "path": "docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md",

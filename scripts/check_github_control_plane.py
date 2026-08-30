@@ -152,6 +152,23 @@ def check_repository(root: Path) -> list[str]:
                 errors.append("phone execution logic source is not immutable and canonical")
             if phone.get("required_device_binding_secret") != "ANDROID_PRODUCTION_SERIAL":
                 errors.append("phone registered-device binding differs from the contract")
+            if phone.get("reserved_android_signing_secret_names") != [
+                "ANDROID_RELEASE_KEYSTORE_B64",
+                "ANDROID_RELEASE_KEYSTORE_PASSWORD",
+                "ANDROID_RELEASE_KEY_ALIAS",
+                "ANDROID_RELEASE_KEY_PASSWORD",
+            ]:
+                errors.append("phone Android signing-secret contract differs")
+
+        runtime = github.get("runtime_verification")
+        if runtime != {
+            "vultr_secret_access": "pending_actions_preflight",
+            "android_runner_and_device": (
+                "passed_private_actions_read_only_preflight_on_registered_device; "
+                "mutable_phone_operations_remain_blocked"
+            ),
+        }:
+            errors.append("GitHub runtime-verification checkpoint differs from the contract")
 
     if topology:
         project_authority = topology.get("project_authority")
@@ -177,6 +194,19 @@ def check_repository(root: Path) -> list[str]:
             }.items()
         ):
             errors.append("production topology execution split differs from the contract")
+        migration = topology.get("migration_status")
+        if not isinstance(migration, dict) or any(
+            migration.get(key) != value
+            for key, value in {
+                "phone_execution_satellite": (
+                    "read_only_preflight_workflow_enabled_and_private_runner_online"
+                ),
+                "phone_live_preflight": (
+                    "passed_private_actions_read_only_preflight_on_registered_device"
+                ),
+            }.items()
+        ):
+            errors.append("production topology phone preflight checkpoint differs")
 
     for relative in REQUIRED_DOCS:
         if not (root / relative).is_file():
