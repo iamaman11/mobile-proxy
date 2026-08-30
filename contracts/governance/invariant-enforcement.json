@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-08-30",
-  "baseline_main_sha": "955d8dd67d212c1f0e89d29a8a90beebeb31b29d",
+  "baseline_main_sha": "213b25a5b8bc82752e32e28ae48ee85ff808613a",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -1245,13 +1245,21 @@
       "P",
       "§4 Phase D, §7.4, §7.6",
       "Liveness, readiness, durable-store health, tunnel state and phone availability are separated; liveness does not depend on a phone",
-      "planned",
+      "enforced",
       "operations",
-      [],
-      [],
-      "health-surface-split",
+      [
+        "services/control-plane/src/health.rs",
+        "services/control-plane/tests/health_process.rs",
+        "services/host-daemon/src/service_health.rs",
+        "services/host-daemon/src/health.rs",
+        "services/host-daemon/src/reverse_tunnel.rs"
+      ],
+      [
+        "RQ-T"
+      ],
       "",
       "",
+      "Control-plane /livez is process-only while /readyz probes canonical SQLite without creating missing state; process acceptance proves SQLite loss makes readiness 503 while liveness stays 200 and exposes no tokens. Host-daemon /livez is phone-independent; /readyz fails closed for an absent required reverse-tunnel worker or unhealthy tunnel-counter persistence, reports device availability separately, and exposes only bounded tunnel connected/active-transport/freshness values.",
       ""
     ],
     [

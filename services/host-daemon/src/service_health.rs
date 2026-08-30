@@ -89,6 +89,7 @@ fn bounded_freshness(value: Option<&str>) -> Option<&str> {
 mod tests {
     use axum::http::StatusCode;
     use proxy_core::{BinaryFingerprint, BinaryFingerprintInput, HealthRecord};
+    use tokio::sync::watch;
 
     use super::readiness_document;
     use crate::state::{RotationCommands, RuntimeState};
@@ -109,6 +110,56 @@ mod tests {
         assert_eq!(body["status"], "ready");
         assert_eq!(body["device_availability"]["serving"], false);
         assert_eq!(body["reverse_tunnel"]["connected"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn required_reverse_tunnel_worker_failure_fails_readiness_closed() {
+        let runtime = RuntimeState::new(
+            test_health(),
+            false,
+            Some("first_party_reverse_tunnel".into()),
+            "127.0.0.1:1080".into(),
+            RotationCommands::default(),
+            Vec::new(),
+        );
+
+        let (status, body) = readiness_document(&runtime);
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["status"], "not_ready");
+        assert_eq!(
+            body["critical_dependencies"]["reverse_tunnel_worker"]["required"],
+            true
+        );
+        assert_eq!(
+            body["critical_dependencies"]["reverse_tunnel_worker"]["healthy"],
+            false
+        );
+        assert_eq!(body["device_availability"]["serving"], false);
+    }
+
+    #[test]
+    fn required_tunnel_worker_reports_bounded_transport_and_freshness() {
+        let mut health = test_health();
+        health.reverse_tunnel_connected = Some(true);
+        health.reverse_tunnel_active_transport = Some("quic".into());
+        health.reverse_tunnel_freshness = Some("fresh".into());
+        let mut runtime = RuntimeState::new(
+            health,
+            false,
+            Some("first_party_reverse_tunnel".into()),
+            "127.0.0.1:1080".into(),
+            RotationCommands::default(),
+            Vec::new(),
+        );
+        let (restart_tx, _restart_rx) = watch::channel(0_u64);
+        runtime.reverse_tunnel_restart = Some(restart_tx);
+
+        let (status, body) = readiness_document(&runtime);
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], "ready");
+        assert_eq!(body["reverse_tunnel"]["connected"], true);
+        assert_eq!(body["reverse_tunnel"]["active_transport"], "quic");
+        assert_eq!(body["reverse_tunnel"]["freshness"], "fresh");
     }
 
     #[test]

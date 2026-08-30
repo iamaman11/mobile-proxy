@@ -2,7 +2,7 @@
 
 Status: normative governance companion  
 Audit revision: `2026-08-30`  
-Baseline `main`: `955d8dd67d212c1f0e89d29a8a90beebeb31b29d`  
+Baseline `main`: `213b25a5b8bc82752e32e28ae48ee85ff808613a`  
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -29,9 +29,9 @@ The audit contains 67 invariant IDs:
 
 | Status | Count |
 | --- | ---: |
-| `enforced` | 32 |
+| `enforced` | 33 |
 | `partially_enforced` | 19 |
-| `planned` | 10 |
+| `planned` | 9 |
 | `not_applicable_yet` | 6 |
 | `review_only` | 0 |
 
@@ -65,6 +65,12 @@ Backup/restore evidence is also permanent: `control-plane-state-backup` validate
 
 PR #105 adds explicit complete startup/open integrity validation with `PRAGMA integrity_check` and `PRAGMA foreign_key_check`. Adapter regression evidence deliberately writes state that violates a schema CHECK constraint with enforcement temporarily disabled and requires `StoreError::IntegrityCheckFailed` on `open_existing`; process acceptance independently proves corrupt canonical SQLite cannot keep the control-plane daemon running toward readiness. `PERSIST-002` is therefore `enforced`.
 
+### Health semantics — `OPS-003`
+
+The current production composition roots already expose separate process liveness and serving readiness surfaces. Control-plane `/livez` is process-only while `/readyz` opens and rehydrates the canonical SQLite store without creating missing state. Process acceptance proves deleting the live SQLite database changes readiness to `503 not_ready` while liveness remains `200 live`, and the health body does not disclose control-plane tokens.
+
+Host-daemon `/livez` is likewise process-only. Host readiness treats device/phone availability as an observed serving dimension rather than a process-liveness dependency, fails closed when an explicitly required reverse-tunnel worker is absent or the tunnel counter store is unhealthy, and exposes only bounded tunnel connected/transport/freshness values. Regression evidence covers the required-worker failure and accepted `quic`/`fresh` projection. `OPS-003` is therefore `enforced` without introducing a new health framework or changing runtime semantics.
+
 ### Atomic state mutation — `PERSIST-003`
 
 The state layer builds one candidate projection, the SQLite adapter compare-and-swaps the complete relational state in one immediate transaction, verifies post-write parity, commits, and only then publishes the candidate in memory. Stale expected state fails closed. Process tests prove restart/replay behavior. `PERSIST-003` is `enforced`.
@@ -97,7 +103,6 @@ The matrix, not this prose summary, is authoritative for exact ownership and fol
 - first real schema evolution proving expand-migrate-contract rollback (`UPGRADE-002`);
 - broader typed taxonomies and raw-string boundary enforcement;
 - repository-wide secret-log, metric-cardinality and bounded-concurrency controls;
-- health/readiness/store/tunnel/phone surface separation;
 - physical reserve-tunnel and release acceptance on one immutable SHA.
 
 ## Permanent validation
