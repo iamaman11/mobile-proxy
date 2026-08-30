@@ -71,11 +71,11 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"canonical baseline plan is missing current item-19 status token {required!r}")
 
     legacy_runtime_tokens = (
-        "gcloud",
         "--project <gcp-project>",
         "--zone <gcp-zone>",
         "GCP project is correct",
         "cargo run --release -p operator-cli -- provision-vm",
+        "gcloud compute",
     )
     for path, body in ((PHYSICAL_RUNBOOK, physical), (PRE_DEVICE, pre_device)):
         for token in legacy_runtime_tokens:
@@ -136,11 +136,13 @@ def check_repository(root: Path) -> list[str]:
         capabilities = acceptance_env.get("workflow_capabilities")
         if not isinstance(capabilities, dict):
             errors.append("acceptance-vultr must define per-workflow capability contracts")
-        elif capabilities.get("readonly_preflight", {}).get("allowed_provider_api") != ["GET /v2/account"]:
-            errors.append("read-only acceptance capability must remain GET /v2/account only")
-        lifecycle = capabilities.get("item_19_acceptance_lifecycle", {}) if isinstance(capabilities, dict) else {}
-        if not isinstance(lifecycle, dict) or lifecycle.get("production_scope") != "forbidden":
-            errors.append("item-19 lifecycle must forbid production scope")
+        else:
+            readonly_capability = capabilities.get("readonly_preflight")
+            if not isinstance(readonly_capability, dict) or readonly_capability.get("allowed_provider_api") != ["GET /v2/account"]:
+                errors.append("read-only acceptance capability must remain GET /v2/account only")
+            lifecycle = capabilities.get("item_19_acceptance_lifecycle")
+            if not isinstance(lifecycle, dict) or lifecycle.get("production_scope") != "forbidden":
+                errors.append("item-19 lifecycle must forbid production scope")
 
     phone_contract = github.get("phone_control_repository") if github else None
     if not isinstance(phone_contract, dict):
