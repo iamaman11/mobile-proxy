@@ -161,7 +161,7 @@ jobs:
           test -f preflight-evidence/vultr-readonly-preflight-evidence.json
           test "$(find preflight-evidence -maxdepth 2 -type f | wc -l)" -eq 1
 
-      - name: Fetch current protected main and signing-continuity gate
+      - name: Fetch current protected main
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -172,11 +172,6 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "repos/$GITHUB_REPOSITORY/branches/main" \
             > current-main.json
-          gh api \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "repos/$GITHUB_REPOSITORY/issues/115" \
-            > signing-gate.json
 
       - name: Verify ordered exact-current gate chain
         shell: bash
@@ -198,7 +193,6 @@ jobs:
             --acceptance-evidence acceptance-evidence/acceptance-authority-evidence.json \
             --preflight-run selected-preflight-run.json \
             --preflight-evidence preflight-evidence/vultr-readonly-preflight-evidence.json \
-            --signing-issue signing-gate.json \
             --output item19-admission-evidence.json
           python3 -m json.tool item19-admission-evidence.json >/dev/null
 
@@ -219,8 +213,8 @@ jobs:
             echo "- Quality run: ${{ steps.quality.outputs.run_id }}"
             echo "- Acceptance authority run: ${{ steps.acceptance.outputs.run_id }}"
             echo "- Read-only preflight run: ${{ steps.preflight.outputs.run_id }}"
-            echo '- Physical acceptance window: explicitly ready'
-            echo '- Signing continuity gate #115: closed'
+            echo '- Provider proof window: explicitly ready'
+            echo '- Phone signing-continuity gate #115: not consumed by Item 19; required before Item 20 phone mutation'
             echo '- Lifecycle scope: acceptance only'
             echo '- Final production authority: false'
             echo '- Phone mutation authorized: false'
@@ -333,7 +327,7 @@ jobs:
           printf '%s\n' "$VULTR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/item19-vultr-ssh"
           ssh-keygen -y -f "$RUNNER_TEMP/item19-vultr-ssh" >/dev/null
 
-      - name: Revalidate exact-current gate and reconcile through typed acceptance lifecycle
+      - name: Revalidate exact-current protected main and reconcile through typed acceptance lifecycle
         shell: bash
         run: |
           set -euo pipefail
@@ -345,13 +339,8 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "repos/$GITHUB_REPOSITORY/branches/main" --jq '.protected')
-          signing_state=$(gh api \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "repos/$GITHUB_REPOSITORY/issues/115" --jq '.state')
           [[ "$main_sha" == "$CANDIDATE_SHA" ]]
           [[ "$main_protected" == "true" ]]
-          [[ "$signing_state" == "closed" ]]
           item19-server-artifact/bin/item19-acceptance-lifecycle reconcile-deploy \
             --candidate-sha "$CANDIDATE_SHA" \
             --admission-evidence admission-evidence/item19-admission-evidence.json \

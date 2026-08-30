@@ -268,11 +268,11 @@ def check_repository(root: Path) -> list[str]:
                 if not isinstance(lifecycle, dict) or any(
                     lifecycle.get(key) != value
                     for key, value in {
-                        "status": "implementation_active_live_invocation_forbidden_until_all_item_19_gates",
+                        "status": "protected_live_invocation_requires_exact_item_19_provider_gates",
                         "scope": "acceptance_only",
                         "required_state": "durable_owner_controlled_acceptance_vm_lifecycle_state_outside_vcs",
                         "required_concurrency": "single_repository_wide_acceptance_lifecycle_writer_cancel_in_progress_false",
-                        "provider_mutation": "bounded_item_19_only_after_exact_gates",
+                        "provider_mutation": "bounded_item_19_only_after_exact_provider_gates",
                         "production_scope": "forbidden",
                     }.items()
                 ):
@@ -281,7 +281,7 @@ def check_repository(root: Path) -> list[str]:
                     "successful_quality_push_on_protected_main",
                     "fresh_immutable_acceptance_authority",
                     "fresh_vultr_readonly_preflight",
-                    "physical_acceptance_window_ready",
+                    "provider_proof_window_ready",
                 ]:
                     errors.append("item-19 lifecycle exact-candidate gates differ from contract")
 

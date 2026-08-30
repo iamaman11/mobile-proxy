@@ -42,11 +42,13 @@ operation was performed for this checkpoint.
 Read-only preflight is the only enabled phone production action. The old public deployment route is
 blocked, and no raw workstation ADB command is an accepted delivery shortcut.
 
-**This is a workflow-level mutation gate, not only an APK-install gate.** Until the signing-continuity
+**This is a workflow-level phone-mutation gate, not only an APK-install gate.** Until the signing-continuity
 conditions below are satisfied, the private production boundary must not enable install/update,
 release activation, reboot/restart, network mutation, rollback or another mutable phone action merely
-because that individual step does not replace the Android APK. Narrowing this policy requires an
-explicit architecture/security decision; it must not be inferred from a runbook.
+because that individual step does not replace the Android APK. This gate applies to the private phone
+execution boundary only; it does not gate the public canonical provider-only Item 19 proof, which has
+no phone credentials or phone mutation authority. Narrowing the phone gate still requires an explicit
+architecture/security decision; it must not be inferred from a runbook.
 
 The currently installed `com.example.mobileproxy` APK does not share the certificate of the local
 debug build. The existing production signing identity has not been recovered into the private
@@ -79,12 +81,16 @@ If any condition is missing, ambiguous or mismatched, the workflow must stop bef
 
 ## Item 19 / item 20 handoff
 
-Production Baseline item 19 may prepare and prove the JIT Vultr **acceptance** server only from the
-public canonical GitHub-hosted control plane. Item 19 performs no phone mutation.
+Production Baseline item 19 proves the JIT Vultr **acceptance** lifecycle only from the public
+canonical GitHub-hosted control plane. Its live proof is provider-only and ephemeral: create at most
+one controlled VM, deploy and verify the exact candidate, then deterministically delete it and commit
+the durable terminal state. Item 19 performs no phone mutation and does not consume #115.
 
-The physical item-20 window opens only after item 19 has handed off the exact accepted candidate and
-server deployment **and** this mutable-phone gate is satisfied. The fact that an item-20 stage may
-activate existing native files rather than install `apps/android-app` does not bypass the gate above.
+The physical item-20 window opens only after the Item 19 provider proof is complete **and** this
+mutable-phone gate is satisfied. Item 20 then opens a fresh one-at-a-time acceptance server session
+through the protected typed lifecycle under a distinct Item 20 ownership intent; the terminal Item 19
+proof intent is never reused. The fact that an item-20 stage may activate existing native files rather
+than install `apps/android-app` does not bypass the phone gate above.
 
 The private execution satellite consumes canonical immutable identity/evidence; it does not define
 roadmap, architecture, release policy, provider desired state or acceptance policy.

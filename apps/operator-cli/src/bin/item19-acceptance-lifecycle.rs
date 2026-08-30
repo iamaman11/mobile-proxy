@@ -30,7 +30,7 @@ const CANONICAL_REPOSITORY: &str = "iamaman11/mobile-proxy";
 const ADMISSION_AUTHORITY: &str = "item19_pre_release_acceptance_lifecycle";
 const ACCEPTANCE_ENVIRONMENT: &str = "acceptance-vultr";
 const ITEM19_ISSUE: u64 = 124;
-const SIGNING_GATE_ISSUE: u64 = 115;
+const PHONE_SIGNING_GATE_ISSUE: u64 = 115;
 const ACCEPTANCE_REGION: &str = "waw";
 const ACCEPTANCE_PLAN: &str = "vc2-1c-2gb";
 const ACCEPTANCE_OS_ID: u64 = 2284;
@@ -134,9 +134,11 @@ struct AdmissionEvidence {
     acceptance_run_attempt: String,
     preflight_run_id: String,
     preflight_run_attempt: String,
-    physical_acceptance_window_ready: bool,
-    signing_continuity_gate_issue: u64,
-    signing_continuity_gate_closed: bool,
+    provider_proof_window_ready: bool,
+    provider_proof_ephemeral: bool,
+    phone_signing_gate_issue: u64,
+    phone_signing_gate_required_for_item20: bool,
+    phone_signing_gate_consumed_by_item19: bool,
     scope: String,
     environment: String,
     final_production_authority: bool,
@@ -390,9 +392,11 @@ fn verify_admission_evidence(candidate_sha: &str, path: &Path) -> Result<()> {
         || evidence.candidate_sha != candidate_sha
         || evidence.repository != CANONICAL_REPOSITORY
         || evidence.command_issue != ITEM19_ISSUE
-        || evidence.signing_continuity_gate_issue != SIGNING_GATE_ISSUE
-        || !evidence.physical_acceptance_window_ready
-        || !evidence.signing_continuity_gate_closed
+        || evidence.phone_signing_gate_issue != PHONE_SIGNING_GATE_ISSUE
+        || !evidence.provider_proof_window_ready
+        || !evidence.provider_proof_ephemeral
+        || !evidence.phone_signing_gate_required_for_item20
+        || evidence.phone_signing_gate_consumed_by_item19
         || evidence.scope != LifecycleScope::Acceptance.as_str()
         || evidence.environment != ACCEPTANCE_ENVIRONMENT
         || evidence.final_production_authority

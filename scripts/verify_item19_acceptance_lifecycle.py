@@ -31,7 +31,7 @@ _CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
 _PREFLIGHT_WORKFLOW = "Vultr read-only acceptance preflight"
 _PREFLIGHT_WORKFLOW_PATH = ".github/workflows/vultr-readonly-preflight.yml"
 _ITEM19_ISSUE = 124
-_SIGNING_GATE_ISSUE = 115
+_PHONE_SIGNING_GATE_ISSUE = 115
 
 
 def parse_command(body: str) -> str:
@@ -100,11 +100,6 @@ def verify_main_branch(candidate_sha: str, branch: Mapping[str, object]) -> None
         or commit.get("sha") != candidate_sha
     ):
         raise ValueError("candidate is not the exact current protected main SHA")
-
-
-def verify_signing_gate(issue: Mapping[str, object]) -> None:
-    if issue.get("number") != _SIGNING_GATE_ISSUE or issue.get("state") != "closed":
-        raise ValueError("signing continuity gate #115 is not closed")
 
 
 def verify_preflight_evidence(
@@ -253,9 +248,11 @@ def build_admission_evidence(
         "command_issue": _ITEM19_ISSUE,
         "command_comment_id": comment_id,
         **identities,
-        "physical_acceptance_window_ready": True,
-        "signing_continuity_gate_issue": _SIGNING_GATE_ISSUE,
-        "signing_continuity_gate_closed": True,
+        "provider_proof_window_ready": True,
+        "provider_proof_ephemeral": True,
+        "phone_signing_gate_issue": _PHONE_SIGNING_GATE_ISSUE,
+        "phone_signing_gate_required_for_item20": True,
+        "phone_signing_gate_consumed_by_item19": False,
         "scope": "acceptance",
         "environment": "acceptance-vultr",
         "final_production_authority": False,
@@ -310,7 +307,6 @@ def main() -> int:
     verify.add_argument("--acceptance-evidence", type=Path, required=True)
     verify.add_argument("--preflight-run", type=Path, required=True)
     verify.add_argument("--preflight-evidence", type=Path, required=True)
-    verify.add_argument("--signing-issue", type=Path, required=True)
     verify.add_argument("--output", type=Path, required=True)
 
     args = parser.parse_args()
@@ -343,7 +339,6 @@ def main() -> int:
     acceptance_evidence = _load_object(args.acceptance_evidence)
     preflight_run = _load_object(args.preflight_run)
     preflight_evidence = _load_object(args.preflight_evidence)
-    signing_issue = _load_object(args.signing_issue)
 
     verify_main_branch(args.candidate_sha, main_branch)
     verify_candidate_evidence(args.candidate_sha, quality_run, candidate_evidence)
@@ -351,7 +346,6 @@ def main() -> int:
     verify_preflight_evidence(
         args.candidate_sha, preflight_run, acceptance_run, preflight_evidence
     )
-    verify_signing_gate(signing_issue)
     verify_fresh_chain(
         quality_run,
         acceptance_run,

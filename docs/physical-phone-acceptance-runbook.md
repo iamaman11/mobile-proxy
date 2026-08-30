@@ -42,6 +42,7 @@ All of the following must be true before the first mutable phone action:
    - one or zero controlled acceptance-VM semantics proven;
    - exact provider UUID/ownership/generation binding verified;
    - exact-candidate server artifact deployed and verified;
+   - deterministic provider deletion and durable terminal state proven;
    - no production authority used.
 3. The exact full lowercase 40-character candidate SHA has a successful canonical `Quality` push on protected `main` and immutable candidate evidence.
 4. Fresh immutable `/accept-candidate <sha>` authority exists for that same SHA.
@@ -78,11 +79,14 @@ Before traffic tests, verify and record bounded evidence for:
 
 Never record credentials, private keys, raw phone serials, full proxy URLs or unrestricted logs in public evidence.
 
-## 4. Acceptance VM handoff from item 19
+## 4. Fresh Item 20 acceptance session from the protected Item 19 capability
 
-Item 20 does not provision, select or adopt a VM itself.
+Item 20 does not select or adopt an arbitrary or pre-existing VM. The public canonical control plane
+opens exactly one fresh JIT acceptance VM through the protected typed lifecycle under a distinct
+Item 20 ownership intent. The terminal Item 19 proof intent is never reused.
 
-The server side is handed off from item 19 and is accepted only when the canonical item-19 lifecycle proves:
+The lifecycle capability and proof are handed off from Item 19. The fresh Item 20 server session is
+accepted only when the canonical provider lifecycle proves:
 
 - `LifecycleScope::Acceptance`;
 - exact immutable ownership intent for the candidate;
@@ -91,7 +95,9 @@ The server side is handed off from item 19 and is accepted only when the canonic
 - complete provider enumeration was used before lifecycle decisions;
 - deployed server bytes/manifest/SHA match the exact candidate;
 - public listeners and controlled probes required for the physical test are healthy;
-- the lifecycle remains under the single item-19 serialized writer.
+- the fresh session uses a distinct Item 20 ownership intent and does not reuse terminal Item 19 state;
+- the lifecycle remains under the single repository-wide serialized acceptance writer;
+- deterministic cleanup runs after the physical session and confirms provider absence before terminal CAS.
 
 IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority.
 
@@ -133,7 +139,7 @@ Before activation, verify package metadata and integrity against the exact candi
 
 ## 7. Baseline physical sequence
 
-The physical sequence is executed against the same item-19 acceptance VM and the same immutable candidate SHA throughout.
+The physical sequence is executed against the same fresh Item 20 acceptance VM and the same immutable candidate SHA throughout.
 
 ### Stage A — primary online
 

@@ -168,14 +168,9 @@ class Item19AcceptanceLifecycleTests(unittest.TestCase):
                 self.SHA, self.preflight_run(), self.acceptance_run(), wrong
             )
 
-    def test_signing_gate_must_be_closed(self):
-        MODULE.verify_signing_gate({"number": 115, "state": "closed"})
-        for issue in (
-            {"number": 115, "state": "open"},
-            {"number": 114, "state": "closed"},
-        ):
-            with self.assertRaisesRegex(ValueError, "#115"):
-                MODULE.verify_signing_gate(issue)
+    def test_item19_provider_proof_does_not_consume_phone_signing_gate(self):
+        self.assertFalse(hasattr(MODULE, "verify_signing_gate"))
+        self.assertEqual(MODULE._PHONE_SIGNING_GATE_ISSUE, 115)
 
     def test_fresh_chain_is_ordered_and_quality_bound(self):
         MODULE.verify_fresh_chain(
@@ -219,8 +214,11 @@ class Item19AcceptanceLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(evidence["scope"], "acceptance")
         self.assertEqual(evidence["environment"], "acceptance-vultr")
-        self.assertTrue(evidence["physical_acceptance_window_ready"])
-        self.assertTrue(evidence["signing_continuity_gate_closed"])
+        self.assertTrue(evidence["provider_proof_window_ready"])
+        self.assertTrue(evidence["provider_proof_ephemeral"])
+        self.assertEqual(evidence["phone_signing_gate_issue"], 115)
+        self.assertTrue(evidence["phone_signing_gate_required_for_item20"])
+        self.assertFalse(evidence["phone_signing_gate_consumed_by_item19"])
         self.assertFalse(evidence["final_production_authority"])
         self.assertFalse(evidence["production_environment_authorized"])
         self.assertFalse(evidence["phone_mutation_authorized"])
@@ -241,17 +239,17 @@ class Item19AcceptanceLifecycleTests(unittest.TestCase):
             "item19-acceptance-lifecycle reconcile-deploy",
             "item19-acceptance-lifecycle cleanup",
             "deployments: write",
-            "issues/115",
             "runs-on: ubuntu-latest",
-            "Revalidate exact-current gate and reconcile through typed acceptance lifecycle",
+            "Provider proof window: explicitly ready",
+            "Revalidate exact-current protected main and reconcile through typed acceptance lifecycle",
         ):
             self.assertIn(required, workflow)
         self.assertGreaterEqual(
             workflow.count('"repos/$GITHUB_REPOSITORY/branches/main"'), 3
         )
-        self.assertGreaterEqual(workflow.count('"repos/$GITHUB_REPOSITORY/issues/115"'), 2)
+        self.assertNotIn('"repos/$GITHUB_REPOSITORY/issues/115"', workflow)
         revalidate = workflow.index(
-            "Revalidate exact-current gate and reconcile through typed acceptance lifecycle"
+            "Revalidate exact-current protected main and reconcile through typed acceptance lifecycle"
         )
         reconcile = workflow.index(
             "item19-server-artifact/bin/item19-acceptance-lifecycle reconcile-deploy"

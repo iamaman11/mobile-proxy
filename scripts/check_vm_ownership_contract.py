@@ -247,7 +247,7 @@ def check_repository(root: Path) -> list[str]:
                 errors.append("production topology must bind the item-19 durable state boundary")
             if migration.get("vultr_typed_http_client") != "item_19_slice_a_active_acceptance_only_bounded_full_instance_enumeration":
                 errors.append("production topology must bind the item-19 typed client boundary")
-            if migration.get("vultr_live_lifecycle") != "item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_physical_window_gates":
+            if migration.get("vultr_live_lifecycle") != "item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_provider_proof_window_gates":
                 errors.append("production topology live lifecycle must remain forbidden until all item-19 live gates")
 
     if github:
