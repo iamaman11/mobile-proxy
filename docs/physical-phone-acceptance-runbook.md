@@ -1,350 +1,261 @@
 # Immutable-SHA Physical Phone Acceptance Runbook
 
-Status: executable external gate for production baseline item 15  
-Prerequisite: successful evidence v2 from the aggregate `Quality` workflow for the exact candidate SHA
+Status: **normative execution contract for Production Baseline item 20; not yet authorized for live execution while item 19 and the mutable-phone gate remain incomplete**.
 
-## 1. Freeze and verify the candidate
+Canonical roadmap: `docs/PRODUCTION_BASELINE_PLAN.md`  
+Item-19 tracker: #124  
+Phone GitOps boundary: `docs/operations/phone-gitops-runtime.md`  
+Production topology: `contracts/operations/production-topology-v1.json`
 
-Download `release-candidate-evidence.json` from the artifact named `software-release-candidate-<candidate-sha>` and use a clean detached checkout:
+## 1. Control-plane boundary
 
-```bash
-git fetch --all --tags
-git checkout --detach <candidate-sha>
-test "$(git rev-parse HEAD)" = "<candidate-sha>"
-test -z "$(git status --porcelain)"
-python3 -m json.tool release-candidate-evidence.json >/dev/null
+Physical acceptance is split across two deliberately separate execution planes:
+
+```text
+public canonical repository
+  -> GitHub-hosted item-19 Vultr acceptance lifecycle
+  -> exact accepted candidate on one controlled acceptance VM
+
+private execution satellite
+  -> android-production self-hosted runner
+  -> exact registered physical phone
 ```
 
-The evidence must state:
+The boundaries are mandatory:
 
-- `format_version=2`;
-- `primary_runtime=first_party_reverse_tunnel`;
-- `primary_runtime_requires_android_vpn=false`;
-- `rollback_runtime=stock_wireguard_bridge`;
-- `software_10_of_10_ready=true`;
-- `physical_phone_acceptance_required=true`;
-- `baseline_complete=false`.
+- `iamaman11/mobile-proxy` is the sole architecture, roadmap, release and provider authority;
+- `iamaman11/mobile-proxy-production` is an execution-only phone satellite;
+- the private phone runner must never receive `VULTR_API_KEY` or `VULTR_SSH_PRIVATE_KEY`;
+- the public Vultr job must never receive the private phone serial, ADB credentials or Android signing secrets;
+- GCP/Google Cloud, `gcloud`, workstation-managed VM lifecycle and manual provider SSH are not acceptance fallbacks;
+- provider mutation is performed only through the item-19 typed Vultr lifecycle and durable binding state;
+- phone mutation is performed only through the private `android-production` execution boundary.
 
-Record candidate SHA, workflow run, artifact identity, phone model/Android/operator, VM identity, tester and UTC timestamps. Do not record tokens, keys or proxy credentials.
+This runbook describes item 20. It does **not** authorize item-20 phone mutation while item 19 is ACTIVE or while the canonical signing-continuity gate is unresolved.
 
-## 2. Environment prerequisites
+## 2. Required gates before opening the physical window
 
-Primary runtime prerequisites:
+All of the following must be true before the first mutable phone action:
 
-- rooted phone and working ADB;
-- no active Android VPN;
-- no requirement to install `apps/android-app`;
-- relay VM provisioned from the same candidate;
-- controlled DNS or hosts entry for the pinned relay name;
-- controlled HTTP and HTTPS probes.
+1. Items 15, 16, 17 and 18 are `COMPLETE`.
+2. Item 19 is live-complete for the exact candidate used by this run:
+   - one or zero controlled acceptance-VM semantics proven;
+   - exact provider UUID/ownership/generation binding verified;
+   - exact-candidate server artifact deployed and verified;
+   - no production authority used.
+3. The exact full lowercase 40-character candidate SHA has a successful canonical `Quality` push on protected `main` and immutable candidate evidence.
+4. Fresh immutable `/accept-candidate <sha>` authority exists for that same SHA.
+5. Fresh `/vultr-readonly-preflight <sha>` evidence exists for that same SHA.
+6. The private `android-production` read-only preflight passes for exactly the registered device in the same execution window.
+7. The signing-continuity gate in #115 / `docs/operations/phone-gitops-runtime.md` is resolved sufficiently to enable a mutable phone workflow.
+8. No unresolved P0/P1 defect exists.
+9. The final protected `v*` release tag is still absent; item 20 precedes final release publication.
 
-Rollback prerequisites, used only in the WireGuard stage:
+If any gate is absent, stale, ambiguous or belongs to a different SHA, stop before phone mutation.
 
-- stock package `com.wireguard.android` installed;
-- tunnel `WiGandroid` imported and valid;
-- Android VPN consent granted;
-- VM stock WireGuard backend configured.
+### Signing gate is not APK-step-specific
 
-`operator-cli` detects Windows `adb.exe` in WSL and queries its Windows-loopback forward through PowerShell, passing the bearer token only through stdin. For manual workstation troubleshooting only, forward the phone host API:
+The current canonical phone policy states that read-only preflight is the only enabled phone production action until signing continuity is recovered and verified. Therefore the physical window cannot be opened merely because a particular test step does not install `apps/android-app`.
 
-```bash
-adb -s <adb-serial> forward tcp:18088 tcp:8088
+Changing that policy would require an explicit architecture/security decision. It must not be inferred from this runbook.
+
+## 3. Exact candidate and deployment identity
+
+The item-20 workflow must receive the exact accepted candidate SHA and immutable evidence identities from canonical GitHub evidence. It must not select `latest`, a moving branch, an arbitrary artifact or a manually entered provider resource.
+
+Before traffic tests, verify and record bounded evidence for:
+
+- exact candidate SHA;
+- canonical Quality run identity;
+- immutable candidate artifact identity and digest;
+- item-19 acceptance-authority/preflight identities;
+- item-19 acceptance lifecycle evidence identity;
+- exact server artifact identity/digest;
+- exact bound provider UUID represented only in the provider lifecycle evidence allowed by policy;
+- exact phone release/package identity;
+- private phone execution run identity;
+- tester and UTC timestamps.
+
+Never record credentials, private keys, raw phone serials, full proxy URLs or unrestricted logs in public evidence.
+
+## 4. Acceptance VM handoff from item 19
+
+Item 20 does not provision, select or adopt a VM itself.
+
+The server side is handed off from item 19 and is accepted only when the canonical item-19 lifecycle proves:
+
+- `LifecycleScope::Acceptance`;
+- exact immutable ownership intent for the candidate;
+- provider-assigned immutable UUID is the authority;
+- exact project/manager/scope/intent/generation tags;
+- complete provider enumeration was used before lifecycle decisions;
+- deployed server bytes/manifest/SHA match the exact candidate;
+- public listeners and controlled probes required for the physical test are healthy;
+- the lifecycle remains under the single item-19 serialized writer.
+
+IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority.
+
+Item 20 must not call GCP APIs, Vultr APIs, `gcloud`, a Vultr CLI or a workstation VM-provisioning script.
+
+## 5. Phone execution boundary
+
+All phone-side mutation is invoked by the private execution repository on the dedicated runner labels:
+
+```text
+[self-hosted, Linux, X64, android-production]
 ```
 
-Copy the relay control-plane public PEM certificate to the workstation, make `mobile-proxy-relay` resolve to the relay and export secrets only through environment variables:
+The private run must first re-prove, without publishing the raw serial:
 
-```bash
-export SSL_CERT_FILE="$PWD/control-plane.crt"
-export HOST_ADMIN_TOKEN='<host-daemon admin token>'
-export CONTROL_PLANE_ADMIN_TOKEN='<control-plane admin token>'
-export PROXY_USERNAME='<proxy username>'
-export PROXY_PASSWORD='<proxy password>'
-```
+- required runner labels;
+- required `adb`, Python, Git and curl tooling;
+- exactly one ADB-visible device;
+- exact match to the private registered-device binding;
+- successful read-only ADB state/shell probes.
 
-The scripts pass proxy credentials through `curl` stdin configuration, disable proxy bypass variables and do not write credentials to reports.
+The mutable workflow must serialize commands for that phone and fail closed on any target ambiguity.
 
-## 3. Build immutable variants
+Raw workstation ADB commands are troubleshooting-only and are not acceptable baseline evidence or normal delivery control.
 
-All variants must be built from the same clean detached SHA:
+## 6. Phone release preparation
 
-```bash
-RELEASE_BASE="physical-<candidate-sha-short>"
-REVERSE_RELEASE="${RELEASE_BASE}-reverse"
-WIREGUARD_RELEASE="${RELEASE_BASE}-wireguard"
-VM_RELEASE="${RELEASE_BASE}-vm"
+All phone release material must come from the exact immutable candidate and canonical/private GitOps path. Do not rebuild a different source revision during the physical sequence.
 
-cargo run --release -p operator-cli -- package-device-release \
-  --manifest-path <device-manifest> \
-  --release-id "$REVERSE_RELEASE" \
-  --tunnel-owner first_party_reverse_tunnel
+Required prepared states are:
 
-cargo run --release -p operator-cli -- package-device-release \
-  --manifest-path <device-manifest> \
-  --release-id "$WIREGUARD_RELEASE" \
-  --tunnel-owner stock_wireguard_bridge
+- primary `first_party_reverse_tunnel` release;
+- retained `stock_wireguard_bridge` rollback release/state;
+- a verified path back to the exact primary release.
 
-cargo run --release -p operator-cli -- provision-vm \
-  --manifest-path <vm-manifest> \
-  --release-id "$VM_RELEASE" \
-  --ssh-user <vm-ssh-user> \
-  --ssh-key <absolute-vm-ssh-key>
-```
+Where an Android APK is part of the selected release operation, certificate continuity and retained signed rollback artifacts must satisfy `docs/operations/phone-gitops-runtime.md`. A locally generated replacement key is forbidden.
 
-Do not modify release roots after their BLAKE3 manifests are written. Do not rebuild any variant during the physical sequence.
+Before activation, verify package metadata and integrity against the exact candidate evidence. After activation, verify the actual phone state against the expected immutable release identity.
 
-## 4. Install and prove the native primary release
+## 7. Baseline physical sequence
 
-```bash
-cargo run --release -p operator-cli -- install-device-release \
-  --manifest-path <device-manifest> \
-  --release-id "$REVERSE_RELEASE" \
-  --use-existing-release \
-  --device-serial <adb-serial> \
-  --tunnel-owner first_party_reverse_tunnel
+The physical sequence is executed against the same item-19 acceptance VM and the same immutable candidate SHA throughout.
 
-python3 scripts/switch_vm_proxy_transport.py \
-  --mode reverse-tunnel \
-  --project <gcp-project> \
-  --zone <gcp-zone> \
-  --instance <instance-name> \
-  --ssh-user <vm-ssh-user> \
-  --ssh-key <absolute-vm-ssh-key> \
-  --output physical-vm-primary-switch.json
+### Stage A — primary online
 
-python3 scripts/verify_physical_deployment.py \
-  --evidence release-candidate-evidence.json \
-  --device-release-root "target/device-releases/$REVERSE_RELEASE" \
-  --device-serial <adb-serial> \
-  --expected-tunnel-owner first_party_reverse_tunnel \
-  --vm-release-root "target/vm-releases/$VM_RELEASE" \
-  --vm-project <gcp-project> \
-  --vm-zone <gcp-zone> \
-  --vm-instance <instance-name> \
-  --vm-ssh-user <vm-ssh-user> \
-  --vm-ssh-key <absolute-vm-ssh-key> \
-  --output physical-primary-deployment.json
-```
+Required state:
 
-Acceptance requires:
-
-- local BLAKE3 manifests valid;
-- package SHA equals candidate SHA;
-- active phone and static VM files equal package files byte-for-byte;
-- VM proxy configuration equals the native mapping byte-for-byte;
-- owner `first_party_reverse_tunnel`;
-- WireGuard disabled;
+- primary owner `first_party_reverse_tunnel`;
 - no active Android VPN owner;
-- no `tun0` requirement.
+- no `tun0` requirement;
+- fresh QUIC reverse-tunnel authority;
+- durable heartbeat and serving/cellular/proxy readiness.
 
-## 5. Configure stage runner
-
-```bash
-COMMON_ARGS=(
-  --evidence release-candidate-evidence.json
-  --host-api-base http://127.0.0.1:18088
-  --control-plane-base https://mobile-proxy-relay:8443
-  --proxy-host <protected-proxy-host>
-  --http-probe-url http://<controlled-http-probe>/
-  --https-probe-url https://<controlled-https-probe>/
-  --expected-device-id <expected-node-id>
-)
-```
-
-Every stage requires the exact device, durable heartbeat, serving/cellular/proxy readiness and six authenticated paths:
+Prove all protected proxy surfaces through the real phone path:
 
 - SOCKS5 on mixed `1080`;
 - HTTP on mixed `1080`;
-- HTTPS through CONNECT on mixed `1080`;
+- HTTPS CONNECT on mixed `1080`;
 - SOCKS5 on `1081`;
 - HTTP on `3128`;
-- HTTPS through CONNECT on `3128`.
+- HTTPS CONNECT on `3128`.
 
-## 6. Native online stage
+### Stage B — phone/service reboot recovery
 
-Wait for fresh QUIC and run:
+Perform the approved bounded reboot/restart action through the private phone workflow. Do not clear canonical relay durable state.
 
-```bash
-python3 scripts/run_physical_phone_acceptance.py \
-  --stage online "${COMMON_ARGS[@]}" \
-  --output physical-online.json
+After recovery prove:
+
+- exact phone target remains the registered device;
+- expected release identity is unchanged;
+- durable state rehydrates;
+- heartbeat becomes fresh;
+- primary QUIC reconnects;
+- all six protected proxy paths pass again.
+
+### Stage C — forced TLS/TCP reserve
+
+The public item-20 server-side test helper, operating only on the already verified item-19 acceptance target, must block the QUIC path while leaving certificate-pinned TLS/TCP reserve reachable.
+
+This is a bounded test action against the verified acceptance target, not a new provider lifecycle selection.
+
+Force a new connection and prove:
+
+- fresh `tls_tcp` reserve authority;
+- no plaintext downgrade;
+- unchanged device identity;
+- all six protected proxy paths pass.
+
+### Stage D — return to QUIC
+
+Remove the bounded QUIC fault, terminate/restart the reserve connection using the approved service control for the verified acceptance target, then prove new fresh QUIC authority and all protected proxy paths.
+
+### Stage E — stock WireGuard rollback
+
+Activate the already prepared rollback state through the private phone workflow and the approved server-side configuration action on the same verified acceptance target.
+
+Prove:
+
+- Android VPN owner is `com.wireguard.android`;
+- expected WireGuard tunnel is active;
+- `tun0`/equivalent rollback interface state matches the accepted contract;
+- recent WireGuard handshake exists;
+- first-party reverse tunnel is inactive as required by rollback mode;
+- protected proxy behavior required by the rollback contract passes.
+
+### Stage F — return to exact primary
+
+Reactivate the exact previously accepted primary release/state without rebuilding it.
+
+Prove:
+
+- WireGuard is disabled;
+- Android VPN owner is absent;
+- rollback tunnel state is gone;
+- exact primary phone release identity is restored;
+- fresh QUIC authority returns;
+- all six protected proxy paths pass;
+- final server and phone identities still match the original immutable candidate.
+
+## 8. Evidence and report-set invariants
+
+The final physical acceptance summary must prove one coherent tuple:
+
+```text
+exact candidate SHA
++ immutable candidate evidence
++ item-19 acceptance authority/preflight/lifecycle evidence
++ exact server artifact identity
++ exact private phone release identity
++ one registered physical device binding
++ all required physical stages
 ```
 
-Reject if an Android VPN is active, `tun0` is present, transport is not fresh QUIC or any proxy path fails.
+Evidence from different source SHAs, different server artifact digests or a rebuilt phone release cannot be combined.
 
-## 7. Phone reboot and durable rehydration
+Public evidence must be bounded and non-secret. Private phone evidence may contain only the minimum sensitive data required for execution/debugging and must not turn the private satellite into canonical project authority.
 
-Perform a full phone reboot. Do not clear relay SQLite state. Wait for the rooted boot hook, runtime processes, durable heartbeat and fresh QUIC:
+## 9. Stop conditions
 
-```bash
-python3 scripts/run_physical_phone_acceptance.py \
-  --stage post-reboot "${COMMON_ARGS[@]}" \
-  --output physical-post-reboot.json
-```
+Reject the candidate and stop advancement for any of the following:
 
-The device ID must remain unchanged.
-
-## 8. Forced pinned TLS/TCP reserve
-
-Block only QUIC UDP `18090`. Leave pinned TLS/TCP `443` reachable. Force a new tunnel connection and wait for fresh `tls_tcp`:
-
-```bash
-python3 scripts/run_physical_phone_acceptance.py \
-  --stage fallback "${COMMON_ARGS[@]}" \
-  --output physical-fallback.json
-```
-
-Reject any plaintext fallback, stale authority, changed device identity or failed proxy path.
-
-## 9. Return to QUIC
-
-Remove the QUIC block, terminate the active reserve connection through the production service manager and wait for new fresh QUIC authority:
-
-```bash
-python3 scripts/run_physical_phone_acceptance.py \
-  --stage recovered "${COMMON_ARGS[@]}" \
-  --output physical-recovered.json
-```
-
-## 10. Explicit stock WireGuard rollback
-
-Install the already built rollback release and switch the VM public mapping:
-
-```bash
-cargo run --release -p operator-cli -- install-device-release \
-  --manifest-path <device-manifest> \
-  --release-id "$WIREGUARD_RELEASE" \
-  --use-existing-release \
-  --device-serial <adb-serial> \
-  --tunnel-owner stock_wireguard_bridge
-
-python3 scripts/switch_vm_proxy_transport.py \
-  --mode wireguard \
-  --project <gcp-project> \
-  --zone <gcp-zone> \
-  --instance <instance-name> \
-  --ssh-user <vm-ssh-user> \
-  --ssh-key <absolute-vm-ssh-key> \
-  --output physical-vm-wireguard-switch.json
-
-python3 scripts/verify_physical_deployment.py \
-  --evidence release-candidate-evidence.json \
-  --device-release-root "target/device-releases/$WIREGUARD_RELEASE" \
-  --device-serial <adb-serial> \
-  --expected-tunnel-owner stock_wireguard_bridge \
-  --vm-release-root "target/vm-releases/$VM_RELEASE" \
-  --vm-project <gcp-project> \
-  --vm-zone <gcp-zone> \
-  --vm-instance <instance-name> \
-  --vm-ssh-user <vm-ssh-user> \
-  --vm-ssh-key <absolute-vm-ssh-key> \
-  --output physical-wireguard-deployment.json
-```
-
-The verifier must identify `com.wireguard.android` as the actual Android VPN owner. Wait for owner `stock_wireguard_bridge`, `tun0_present=true`, recent handshake and inactive reverse tunnel:
-
-```bash
-python3 scripts/run_physical_phone_acceptance.py \
-  --stage wireguard "${COMMON_ARGS[@]}" \
-  --output physical-wireguard.json
-```
-
-## 11. Reactivate the exact native release
-
-Restore the VM native mapping:
-
-```bash
-python3 scripts/switch_vm_proxy_transport.py \
-  --mode reverse-tunnel \
-  --project <gcp-project> \
-  --zone <gcp-zone> \
-  --instance <instance-name> \
-  --ssh-user <vm-ssh-user> \
-  --ssh-key <absolute-vm-ssh-key> \
-  --output physical-vm-reverse-switch.json
-```
-
-Reactivate the exact previously installed native release without rebuilding or copying it:
-
-```bash
-python3 scripts/activate_device_release.py \
-  --evidence release-candidate-evidence.json \
-  --release-id "$REVERSE_RELEASE" \
-  --device-serial <adb-serial> \
-  --output physical-reverse-activation.json
-```
-
-Re-verify original package bytes and native ownership:
-
-```bash
-python3 scripts/verify_physical_deployment.py \
-  --evidence release-candidate-evidence.json \
-  --device-release-root "target/device-releases/$REVERSE_RELEASE" \
-  --device-serial <adb-serial> \
-  --expected-tunnel-owner first_party_reverse_tunnel \
-  --vm-release-root "target/vm-releases/$VM_RELEASE" \
-  --vm-project <gcp-project> \
-  --vm-zone <gcp-zone> \
-  --vm-instance <instance-name> \
-  --vm-ssh-user <vm-ssh-user> \
-  --vm-ssh-key <absolute-vm-ssh-key> \
-  --output physical-final-deployment.json
-```
-
-After WireGuard is disabled, the Android VPN owner is absent, `tun0` is gone and QUIC is fresh:
-
-```bash
-python3 scripts/run_physical_phone_acceptance.py \
-  --stage post-wireguard-recovered "${COMMON_ARGS[@]}" \
-  --output physical-post-wireguard-recovered.json
-```
-
-## 12. Verify the whole report set
-
-```bash
-python3 scripts/verify_physical_phone_acceptance_reports.py \
-  --evidence release-candidate-evidence.json \
-  --primary-deployment physical-primary-deployment.json \
-  --wireguard-deployment physical-wireguard-deployment.json \
-  --final-deployment physical-final-deployment.json \
-  --primary-switch physical-vm-primary-switch.json \
-  --wireguard-switch physical-vm-wireguard-switch.json \
-  --reverse-switch physical-vm-reverse-switch.json \
-  --reverse-activation physical-reverse-activation.json \
-  --online physical-online.json \
-  --post-reboot physical-post-reboot.json \
-  --fallback physical-fallback.json \
-  --recovered physical-recovered.json \
-  --wireguard physical-wireguard.json \
-  --post-wireguard-recovered physical-post-wireguard-recovered.json \
-  --output physical-acceptance-summary.json
-```
-
-The summary must prove one SHA, one device ID, three exact deployment checks, three exact VM mappings, exact native release reactivation and all six stages. It must set `physical_phone_acceptance_complete=true` and `accepted=true`.
-
-Attach only bounded JSON reports and operator timestamps to issue #64. Never attach tokens, keys, raw secret configuration, credential-bearing URLs or unrestricted logs.
-
-## 13. Continue to repeated 10/10 validation
-
-Passing this runbook completes the immutable physical stage but final 10/10 also requires the repeated recovery and 24-hour soak thresholds in `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`.
-
-## 14. Stop conditions
-
-Reject the candidate for any:
-
-- source, package-root or SHA change;
-- dirty checkout;
-- failed BLAKE3 integrity or exact-byte comparison;
+- source SHA or immutable artifact identity changes during the run;
+- item-19 lifecycle evidence does not match the candidate;
+- server artifact identity cannot be verified;
+- provider target would need to be selected by name, IP, list order or arbitrary UUID input;
+- more than one resource claims the acceptance ownership intent;
+- missing/wrong/conflicting ownership or generation;
+- signing-continuity or private-phone binding gate is not satisfied;
+- phone target is ambiguous or does not match the private registered binding;
 - wrong tunnel or Android VPN owner;
-- active Android VPN in a native stage;
-- missing durable heartbeat or cellular route;
-- failed authenticated proxy path;
-- stale or mismatched tunnel authority;
+- stale/mismatched tunnel authority;
 - plaintext downgrade;
-- missing/stale WireGuard handshake in rollback;
-- lingering `tun0` after native restoration;
-- failed transactional VM switch;
-- inability to return to fresh QUIC;
+- failed protected proxy path;
+- failed reboot/recovery;
+- missing/stale WireGuard rollback proof;
+- inability to return to the exact primary state;
+- any requirement to fall back to GCP, manual provider lifecycle, workstation SSH or public ADB;
 - unresolved P0/P1 defect;
 - report-set mismatch.
 
-Any source change requires a new immutable candidate, new software evidence, rebuilt variants and a complete restart of the physical procedure.
+Any source change requires a new immutable candidate and fresh evidence/authority for the new SHA.
+
+## 10. Completion boundary
+
+Successful item-20 physical acceptance authorizes work on item 21; it does not itself create the final release or grant production-Vultr authority.
+
+Item 21 may create the final immutable release evidence and protected annotated `vMAJOR.MINOR.PATCH` tag only after this physical proof succeeds. Item 22 may perform production promotion only from that accepted final release tuple.

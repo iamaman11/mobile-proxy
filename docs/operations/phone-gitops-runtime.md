@@ -42,6 +42,12 @@ operation was performed for this checkpoint.
 Read-only preflight is the only enabled phone production action. The old public deployment route is
 blocked, and no raw workstation ADB command is an accepted delivery shortcut.
 
+**This is a workflow-level mutation gate, not only an APK-install gate.** Until the signing-continuity
+conditions below are satisfied, the private production boundary must not enable install/update,
+release activation, reboot/restart, network mutation, rollback or another mutable phone action merely
+because that individual step does not replace the Android APK. Narrowing this policy requires an
+explicit architecture/security decision; it must not be inferred from a runbook.
+
 The currently installed `com.example.mobileproxy` APK does not share the certificate of the local
 debug build. The existing production signing identity has not been recovered into the private
 GitHub execution boundary. Therefore a new APK must not be installed with `adb install -r`, and a
@@ -53,21 +59,35 @@ Android APKs. They are not proof of Android application update capability.
 
 ## Required completion path
 
-Before enabling a mutable phone workflow, all conditions below must hold:
+Before enabling **any mutable phone workflow**, all conditions below must hold:
 
 1. Recover and independently verify the certificate identity of the installed Android application.
 2. Place the corresponding keystore, alias and passwords only in private GitHub Actions secrets.
    The public repository records the secret names and signing contract, never values or derivatives.
-3. Build from an annotated immutable canonical tag or verified canonical artifact, then verify the
-   release tuple, checksum/provenance and certificate continuity before ADB mutation.
-4. Allow a requested `install`, `update` or `rollback` only after the read-only preflight passes in
-   the same private run and the exact registered-device binding is re-proven.
-5. For rollback, use a retained, verified, previously accepted **signed** APK for the selected
+3. Bind the requested mutable action to one exact immutable canonical source/release tuple and verify
+   the applicable checksum/provenance and signing-continuity requirements before ADB mutation.
+4. Allow mutation only after the read-only preflight passes in the same private run and the exact
+   registered-device binding is re-proven.
+5. For APK rollback, use a retained, verified, previously accepted **signed** APK for the selected
    immutable release tuple. Rebuilding an old revision during an incident is forbidden.
-6. Serialize mutable commands per phone, verify the installed version and health after each action,
-   and write only bounded non-secret evidence.
+6. Serialize mutable commands per phone, verify the resulting installed/active state and health after
+   each action, and write only bounded non-secret evidence.
+7. Keep provider lifecycle completely outside the phone runner; the private runner must never receive
+   Vultr credentials or become provider-state authority.
 
 If any condition is missing, ambiguous or mismatched, the workflow must stop before mutation.
+
+## Item 19 / item 20 handoff
+
+Production Baseline item 19 may prepare and prove the JIT Vultr **acceptance** server only from the
+public canonical GitHub-hosted control plane. Item 19 performs no phone mutation.
+
+The physical item-20 window opens only after item 19 has handed off the exact accepted candidate and
+server deployment **and** this mutable-phone gate is satisfied. The fact that an item-20 stage may
+activate existing native files rather than install `apps/android-app` does not bypass the gate above.
+
+The private execution satellite consumes canonical immutable identity/evidence; it does not define
+roadmap, architecture, release policy, provider desired state or acceptance policy.
 
 ## Private signing-secret contract
 

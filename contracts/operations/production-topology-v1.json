@@ -46,10 +46,11 @@
     }
   },
   "execution": {
-    "vultr_acceptance": "GitHub-hosted runner under immutable pre-release acceptance authority; production-vultr forbidden before final release",
+    "vultr_acceptance": "GitHub-hosted runner under immutable pre-release acceptance authority; acceptance-vultr is a credential boundary and concrete workflow contracts determine read-only versus bounded item-19 lifecycle capability; production-vultr remains forbidden before final release",
     "vultr_production": "GitHub-hosted runner in production-vultr from protected final v* release only",
     "phone": "private-repository caller context with android-production self-hosted runner",
-    "phone_logic": "canonical public logic pinned to immutable SHA or verified canonical release artifact"
+    "phone_logic": "canonical public logic pinned to immutable SHA or verified canonical release artifact",
+    "cross_boundary_secret_rule": "private phone runner never receives Vultr credentials and public Vultr jobs never receive raw phone identifiers or phone-control secrets"
   },
   "release_link": {
     "source_repository": "iamaman11/mobile-proxy",
@@ -65,10 +66,10 @@
   },
   "state_boundaries": {
     "canonical_version_control": "desired configuration, contracts, architecture, roadmap, workflow logic, release identity and non-secret evidence schema/index",
-    "github_environment": "encrypted provider credentials and deployment protection",
+    "github_environment": "encrypted provider credentials and deployment protection only; environment identity does not itself grant endpoint capability",
     "provider": "VM resources, snapshots and runtime provider state",
     "private_phone_control_repository": "execution transport and supporting private evidence only",
-    "vm_binding": "durable owner-controlled runtime state outside version control; typed provider identity plus exact ownership intent and generation, updated only by compare-and-swap",
+    "vm_binding": "durable owner-controlled GitHub Deployment lifecycle ledger outside version control; exact provider UUID plus immutable acceptance intent/generation; states distinguish empty, create-prepared, create-dispatched, bound, delete-prepared, delete-dispatched and terminal; serialized compare-append-verify transitions fail closed on forks",
     "forbidden_in_public_source": [
       "credential_values",
       "private_keys",
@@ -82,13 +83,16 @@
     "canonical_authority": "documented_and_contract_enforced",
     "phone_execution_satellite": "read_only_preflight_workflow_enabled_and_private_runner_online",
     "acceptance_authority": "implemented_candidate_quality_evidence_gate",
-    "vultr_readonly_preflight_workflow": "implemented_live_proof_passed",
-    "vultr_adapter": "implemented_typed_provider_neutral_ownership_and_generation_cas_non_mutating_item18",
-    "vultr_live_preflight": "passed_read_only_account_and_key_preflight",
-    "vultr_live_lifecycle": "forbidden_until_item_19",
+    "vultr_readonly_preflight_workflow": "implemented_live_proof_passed_and_remains_read_only",
+    "vultr_adapter": "implemented_typed_provider_neutral_ownership_and_generation_policy",
+    "vultr_durable_acceptance_state": "item_19_slice_a_active_crash_safe_dispatch_fencing_no_live_entrypoint",
+    "vultr_typed_http_client": "item_19_slice_a_active_acceptance_only_bounded_full_instance_enumeration",
+    "vultr_live_preflight": "passed_read_only_account_and_key_preflight_on_prior_candidate; fresh exact-current proof required before first item_19 mutation",
+    "vultr_live_lifecycle": "item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_physical_window_gates",
     "phone_workflows": "read_only_preflight_implemented",
     "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
+    "phone_mutation": "blocked_by_signing_continuity_gate_issue_115",
     "agent_release_control": "not_implemented",
-    "legacy_public_deployment": "blocked_until_split_workflows_are_implemented_and_verified"
+    "legacy_public_deployment": "not_an_acceptance_or_production_fallback"
   }
 }

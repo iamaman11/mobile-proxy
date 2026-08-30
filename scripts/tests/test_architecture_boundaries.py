@@ -78,6 +78,8 @@ proxy-core = "1"
             patch.object(MODULE, "check_digest_policy", return_value=[]),
             patch.object(MODULE, "check_github_control_plane", return_value=[]),
             patch.object(MODULE, "check_invariant_enforcement", return_value=[]),
+            patch.object(MODULE, "check_vm_ownership_contract", return_value=[]),
+            patch.object(MODULE, "check_item19_consistency", return_value=[]),
         ):
             return MODULE.check_repository(root)
 
