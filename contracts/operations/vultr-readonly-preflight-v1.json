@@ -1,0 +1,74 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "authority": "pre_release_acceptance_read_only",
+  "canonical_repository": "iamaman11/mobile-proxy",
+  "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
+  "command": {
+    "issue": 90,
+    "syntax": "/vultr-readonly-preflight <full_sha>",
+    "authorized_actor": "repository_owner"
+  },
+  "candidate_identity": {
+    "kind": "full_git_sha",
+    "pattern": "^[0-9a-f]{40}$",
+    "mutable_or_approximate_refs_forbidden": [
+      "main",
+      "latest",
+      "branch_name",
+      "short_sha"
+    ]
+  },
+  "acceptance_evidence": {
+    "workflow": "Vultr acceptance authority",
+    "workflow_path": ".github/workflows/acceptance-authority.yml",
+    "required_event": "issue_comment",
+    "required_branch": "main",
+    "required_status": "completed",
+    "required_conclusion": "success",
+    "artifact_name_template": "vultr-acceptance-authority-<candidate_sha>",
+    "artifact_file": "acceptance-authority-evidence.json",
+    "required_authority": "pre_release_acceptance",
+    "final_production_authority": false,
+    "production_environment_authorized": false,
+    "vultr_api_access_performed": false,
+    "vm_mutation_performed": false,
+    "phone_mutation_performed": false
+  },
+  "execution": {
+    "workflow": ".github/workflows/vultr-readonly-preflight.yml",
+    "executor": "github-hosted",
+    "environment": "acceptance-vultr",
+    "required_secret_names": [
+      "VULTR_API_KEY",
+      "VULTR_SSH_PRIVATE_KEY"
+    ],
+    "final_production_authority": false,
+    "production_environment": "forbidden"
+  },
+  "provider_probe": {
+    "provider": "vultr",
+    "method": "GET",
+    "url": "https://api.vultr.com/v2/account",
+    "response_body": "discarded",
+    "response_metadata": "not_recorded",
+    "allowed_api_calls": 1,
+    "vm_lifecycle": "forbidden",
+    "provider_mutation": "forbidden"
+  },
+  "evidence": {
+    "format_version": 1,
+    "artifact_name_template": "vultr-readonly-preflight-<candidate_sha>",
+    "secret_values": "forbidden",
+    "secret_derived_identifiers": "forbidden",
+    "account_response_data": "forbidden",
+    "retention_days": 90
+  },
+  "authority_separation": {
+    "acceptance_environment_name": "acceptance-vultr",
+    "production_environment_name": "production-vultr",
+    "environments_must_differ": true,
+    "final_release_tag": "forbidden",
+    "final_production_authority": false
+  }
+}

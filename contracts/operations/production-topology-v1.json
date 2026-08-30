@@ -81,6 +81,7 @@
     "canonical_authority": "documented_and_contract_enforced",
     "phone_execution_satellite": "read_only_preflight_workflow_enabled_and_private_runner_online",
     "acceptance_authority": "implemented_candidate_quality_evidence_gate",
+    "vultr_readonly_preflight_workflow": "implemented_pending_live_proof",
     "vultr_adapter": "not_implemented",
     "vultr_live_preflight": "not_proven",
     "phone_workflows": "read_only_preflight_implemented",

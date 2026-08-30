@@ -3,6 +3,7 @@
   "status": "protected",
   "project_authority_contract": "contracts/operations/project-authority-v1.json",
   "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
+  "vultr_readonly_preflight_contract": "contracts/operations/vultr-readonly-preflight-v1.json",
   "source_repository": {
     "name": "iamaman11/mobile-proxy",
     "visibility": "public",
@@ -59,6 +60,22 @@
     "vultr_secret_access": "forbidden_in_item_16",
     "vm_mutation": "forbidden_in_item_16"
   },
+  "acceptance_vultr_environment": {
+    "name": "acceptance-vultr",
+    "authority": "pre_release_acceptance_read_only",
+    "entry_workflow": ".github/workflows/vultr-readonly-preflight.yml",
+    "required_precondition": "verified_vultr_acceptance_authority_artifact_for_exact_candidate_sha",
+    "required_secret_names": [
+      "VULTR_API_KEY",
+      "VULTR_SSH_PRIVATE_KEY"
+    ],
+    "allowed_provider_api": "GET /v2/account only",
+    "response_body_recording": "forbidden",
+    "vm_lifecycle": "forbidden",
+    "provider_mutation": "forbidden",
+    "final_production_authority": false,
+    "executor": "github-hosted"
+  },
   "phone_control_repository": {
     "name": "iamaman11/mobile-proxy-production",
     "visibility": "private",
@@ -101,12 +118,14 @@
   "forbidden": [
     "public_repository_self_hosted_runner",
     "phone_secret_in_public_source_or_public_workflow",
-    "vultr_secret_value_outside_production_vultr_environment_or_consuming_github_hosted_job",
+    "vultr_secret_value_outside_scoped_github_environment_or_consuming_github_hosted_job",
     "public_repository_phone_adb_workflow",
     "vultr_lifecycle_before_vm_ownership_contract_implementation",
     "manual_production_ssh_or_adb_as_standard_delivery_path",
     "satellite_repository_as_project_source_of_truth",
     "acceptance_authority_using_production_vultr_environment",
-    "acceptance_authority_using_final_release_tag"
+    "acceptance_authority_using_final_release_tag",
+    "acceptance_vultr_using_production_vultr_environment",
+    "acceptance_vultr_vm_lifecycle_before_item_18"
   ]
 }
