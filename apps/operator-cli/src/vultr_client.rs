@@ -3,14 +3,19 @@ use crate::vultr_lifecycle::{
     VultrVmSpec,
 };
 use proxy_core::{LifecycleScope, ObservedVm, PlannedCreate, VerifiedMutationTarget};
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::fmt;
+use std::io::Read;
 use std::time::Duration;
 
 const VULTR_API_BASE: &str = "https://api.vultr.com";
 const VULTR_API_VERSION: &str = "v2";
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const INSTANCE_PAGE_SIZE: u32 = 500;
+const MAX_INSTANCE_PAGES: usize = 20;
+const MAX_CURSOR_BYTES: usize = 1024;
 
 pub struct VultrAcceptanceClient {
     inner: AcceptanceClient<ReqwestVultrTransport>,
@@ -52,6 +57,8 @@ pub enum VultrClientError {
     HttpStatus(u16),
     ResponseTooLarge,
     InvalidResponse,
+    InvalidPagination,
+    PaginationLimitExceeded,
     Adapter(VultrAdapterError),
 }
 
@@ -65,6 +72,10 @@ impl fmt::Display for VultrClientError {
             Self::HttpStatus(status) => write!(formatter, "Vultr HTTP status {status}"),
             Self::ResponseTooLarge => formatter.write_str("Vultr response exceeded bounded size"),
             Self::InvalidResponse => formatter.write_str("Vultr response shape is invalid"),
+            Self::InvalidPagination => formatter.write_str("Vultr pagination metadata is invalid"),
+            Self::PaginationLimitExceeded => {
+                formatter.write_str("Vultr instance listing exceeded bounded page count")
+            }
             Self::Adapter(error) => error.fmt(formatter),
         }
     }
@@ -73,7 +84,15 @@ impl fmt::Display for VultrClientError {
 impl std::error::Error for VultrClientError {}
 
 trait VultrTransport {
-    fn execute(&self, request: VultrRequest) -> Result<Vec<u8>, VultrClientError>;
+    fn execute_with_query(
+        &self,
+        request: VultrRequest,
+        query: &[(String, String)],
+    ) -> Result<Vec<u8>, VultrClientError>;
+
+    fn execute(&self, request: VultrRequest) -> Result<Vec<u8>, VultrClientError> {
+        self.execute_with_query(request, &[])
+    }
 }
 
 struct AcceptanceClient<T> {
@@ -82,10 +101,49 @@ struct AcceptanceClient<T> {
 
 impl<T: VultrTransport> AcceptanceClient<T> {
     fn list_instances(&self) -> Result<Vec<ObservedVm>, VultrClientError> {
-        let body = self
-            .transport
-            .execute(VultrLifecycleAdapter::list_instances_request())?;
-        VultrLifecycleAdapter::decode_instances(&body).map_err(VultrClientError::Adapter)
+        let mut observed = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut seen_cursors = BTreeSet::new();
+
+        for _ in 0..MAX_INSTANCE_PAGES {
+            let mut query = vec![("per_page".to_owned(), INSTANCE_PAGE_SIZE.to_string())];
+            if let Some(value) = cursor.as_ref() {
+                query.push(("cursor".to_owned(), value.clone()));
+            }
+
+            let body = self.transport.execute_with_query(
+                VultrLifecycleAdapter::list_instances_request(),
+                &query,
+            )?;
+            let page: InstancesPage =
+                serde_json::from_slice(&body).map_err(|_| VultrClientError::InvalidResponse)?;
+            let count = page.instances.len();
+            observed.extend(
+                page.instances
+                    .into_iter()
+                    .map(VultrLifecycleAdapter::decode_instance)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(VultrClientError::Adapter)?,
+            );
+
+            let next = page
+                .meta
+                .and_then(|meta| meta.links)
+                .map(|links| links.next)
+                .unwrap_or_default();
+            if next.is_empty() {
+                if count >= INSTANCE_PAGE_SIZE as usize && page.meta_was_missing {
+                    return Err(VultrClientError::InvalidPagination);
+                }
+                return Ok(observed);
+            }
+            if next.len() > MAX_CURSOR_BYTES || !seen_cursors.insert(next.clone()) {
+                return Err(VultrClientError::InvalidPagination);
+            }
+            cursor = Some(next);
+        }
+
+        Err(VultrClientError::PaginationLimitExceeded)
     }
 
     fn create_instance(
@@ -125,6 +183,46 @@ struct CreatedInstanceEnvelope {
     instance: VultrInstanceDto,
 }
 
+#[derive(Deserialize)]
+struct InstancesPageWire {
+    instances: Vec<VultrInstanceDto>,
+    #[serde(default)]
+    meta: Option<PageMeta>,
+}
+
+struct InstancesPage {
+    instances: Vec<VultrInstanceDto>,
+    meta: Option<PageMeta>,
+    meta_was_missing: bool,
+}
+
+impl<'de> Deserialize<'de> for InstancesPage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = InstancesPageWire::deserialize(deserializer)?;
+        let meta_was_missing = wire.meta.is_none();
+        Ok(Self {
+            instances: wire.instances,
+            meta: wire.meta,
+            meta_was_missing,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct PageMeta {
+    #[serde(default)]
+    links: Option<PageLinks>,
+}
+
+#[derive(Deserialize)]
+struct PageLinks {
+    #[serde(default)]
+    next: String,
+}
+
 struct ReqwestVultrTransport {
     client: Client,
     api_token: String,
@@ -141,10 +239,32 @@ impl ReqwestVultrTransport {
             .map_err(|_| VultrClientError::Transport)?;
         Ok(Self { client, api_token })
     }
+
+    fn read_bounded(response: Response) -> Result<Vec<u8>, VultrClientError> {
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+        {
+            return Err(VultrClientError::ResponseTooLarge);
+        }
+        let mut reader = response.take((MAX_RESPONSE_BYTES + 1) as u64);
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|_| VultrClientError::Transport)?;
+        if bytes.len() > MAX_RESPONSE_BYTES {
+            return Err(VultrClientError::ResponseTooLarge);
+        }
+        Ok(bytes)
+    }
 }
 
 impl VultrTransport for ReqwestVultrTransport {
-    fn execute(&self, request: VultrRequest) -> Result<Vec<u8>, VultrClientError> {
+    fn execute_with_query(
+        &self,
+        request: VultrRequest,
+        query: &[(String, String)],
+    ) -> Result<Vec<u8>, VultrClientError> {
         if !request.path.starts_with(&format!("/{VULTR_API_VERSION}/"))
             || request.path.contains("..")
             || request.path.contains('?')
@@ -158,13 +278,26 @@ impl VultrTransport for ReqwestVultrTransport {
             VultrMethod::Patch => reqwest::Method::PATCH,
             VultrMethod::Delete => reqwest::Method::DELETE,
         };
+        if method != reqwest::Method::GET && !query.is_empty() {
+            return Err(VultrClientError::Transport);
+        }
+        if query.iter().any(|(key, value)| {
+            !matches!(key.as_str(), "per_page" | "cursor")
+                || key.is_empty()
+                || value.is_empty()
+                || value.len() > MAX_CURSOR_BYTES
+        }) {
+            return Err(VultrClientError::Transport);
+        }
+
         let url = format!("{VULTR_API_BASE}{}", request.path);
         let mut builder = self
             .client
             .request(method, url)
             .bearer_auth(&self.api_token)
             .header("Accept", "application/json")
-            .header("User-Agent", "mobile-proxy-operator-cli");
+            .header("User-Agent", "mobile-proxy-operator-cli")
+            .query(query);
         if let Some(body) = request.body {
             builder = builder.json(&body);
         }
@@ -172,11 +305,7 @@ impl VultrTransport for ReqwestVultrTransport {
         if !response.status().is_success() {
             return Err(VultrClientError::HttpStatus(response.status().as_u16()));
         }
-        let bytes = response.bytes().map_err(|_| VultrClientError::Transport)?;
-        if bytes.len() > MAX_RESPONSE_BYTES {
-            return Err(VultrClientError::ResponseTooLarge);
-        }
-        Ok(bytes.to_vec())
+        Self::read_bounded(response)
     }
 }
 
@@ -191,9 +320,16 @@ mod tests {
     use std::cell::RefCell;
 
     const ID1: &str = "11111111-1111-4111-8111-111111111111";
+    const ID2: &str = "22222222-2222-4222-8222-222222222222";
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct RecordedRequest {
+        request: VultrRequest,
+        query: Vec<(String, String)>,
+    }
 
     struct FakeTransport {
-        requests: RefCell<Vec<VultrRequest>>,
+        requests: RefCell<Vec<RecordedRequest>>,
         responses: RefCell<Vec<Vec<u8>>>,
     }
 
@@ -207,8 +343,15 @@ mod tests {
     }
 
     impl VultrTransport for FakeTransport {
-        fn execute(&self, request: VultrRequest) -> Result<Vec<u8>, VultrClientError> {
-            self.requests.borrow_mut().push(request);
+        fn execute_with_query(
+            &self,
+            request: VultrRequest,
+            query: &[(String, String)],
+        ) -> Result<Vec<u8>, VultrClientError> {
+            self.requests.borrow_mut().push(RecordedRequest {
+                request,
+                query: query.to_vec(),
+            });
             self.responses
                 .borrow_mut()
                 .pop()
@@ -252,34 +395,35 @@ mod tests {
         ))
     }
 
+    fn instance_json(id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "label": "mobile-proxy-acceptance",
+            "tags": exact_tags(),
+            "region": "waw",
+            "plan": "vc2-1c-2gb",
+            "os_id": 2284
+        })
+    }
+
     fn created_response() -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
-            "instance": {
-                "id": ID1,
-                "label": "mobile-proxy-acceptance",
-                "tags": exact_tags(),
-                "region": "waw",
-                "plan": "vc2-1c-2gb",
-                "os_id": 2284
-            }
+            "instance": instance_json(ID1)
+        }))
+        .unwrap()
+    }
+
+    fn list_page(instances: Vec<serde_json::Value>, next: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "instances": instances,
+            "meta": { "links": { "next": next } }
         }))
         .unwrap()
     }
 
     #[test]
     fn list_maps_vultr_dto_through_existing_typed_adapter() {
-        let response = serde_json::to_vec(&serde_json::json!({
-            "instances": [{
-                "id": ID1,
-                "label": "mobile-proxy-acceptance",
-                "tags": exact_tags(),
-                "region": "waw",
-                "plan": "vc2-1c-2gb",
-                "os_id": 2284
-            }]
-        }))
-        .unwrap();
-        let transport = FakeTransport::new(vec![response]);
+        let transport = FakeTransport::new(vec![list_page(vec![instance_json(ID1)], "")]);
         let client = AcceptanceClient { transport };
 
         let observed = client.list_instances().unwrap();
@@ -291,7 +435,43 @@ mod tests {
         ));
         let requests = client.transport.requests.borrow();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0], VultrLifecycleAdapter::list_instances_request());
+        assert_eq!(requests[0].request, VultrLifecycleAdapter::list_instances_request());
+        assert_eq!(
+            requests[0].query,
+            vec![("per_page".to_owned(), INSTANCE_PAGE_SIZE.to_string())]
+        );
+    }
+
+    #[test]
+    fn list_follows_every_cursor_before_returning_provider_state() {
+        let transport = FakeTransport::new(vec![
+            list_page(vec![instance_json(ID1)], "cursor-two"),
+            list_page(vec![instance_json(ID2)], ""),
+        ]);
+        let client = AcceptanceClient { transport };
+
+        let observed = client.list_instances().unwrap();
+        assert_eq!(observed.len(), 2);
+        let requests = client.transport.requests.borrow();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[1].query,
+            vec![
+                ("per_page".to_owned(), INSTANCE_PAGE_SIZE.to_string()),
+                ("cursor".to_owned(), "cursor-two".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn repeated_cursor_fails_closed() {
+        let transport = FakeTransport::new(vec![
+            list_page(vec![], "same-cursor"),
+            list_page(vec![], "same-cursor"),
+        ]);
+        let client = AcceptanceClient { transport };
+
+        assert_eq!(client.list_instances(), Err(VultrClientError::InvalidPagination));
     }
 
     #[test]
@@ -305,9 +485,10 @@ mod tests {
         let requests = client.transport.requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(
-            requests[0],
+            requests[0].request,
             VultrLifecycleAdapter::create_request(&plan, &spec())
         );
+        assert!(requests[0].query.is_empty());
     }
 
     #[test]
@@ -348,6 +529,7 @@ mod tests {
         client.delete_instance(&target).unwrap();
         let requests = client.transport.requests.borrow();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0], VultrLifecycleAdapter::delete_request(&target));
+        assert_eq!(requests[0].request, VultrLifecycleAdapter::delete_request(&target));
+        assert!(requests[0].query.is_empty());
     }
 }
