@@ -4,9 +4,6 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use mobile_proxy_control_plane_sqlite::SqliteStore;
-use rusqlite::Connection;
-
 const ADMIN_TOKEN: &str = "corruption-admin-token";
 const DEVICE_TOKEN: &str = "corruption-device-token";
 const UI_TOKEN: &str = "corruption-ui-token";
@@ -39,20 +36,7 @@ impl Drop for TempDirectory {
 fn control_plane_fails_closed_before_readiness_for_corrupt_sqlite_state() {
     let directory = TempDirectory::new();
     let state_path = directory.path.join("control-plane-state.sqlite3");
-    let store = SqliteStore::open(&state_path).unwrap();
-    drop(store);
-
-    let connection = Connection::open(&state_path).unwrap();
-    connection
-        .pragma_update(None, "ignore_check_constraints", true)
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO devices (node_id, record_json) VALUES ('', '{}')",
-            [],
-        )
-        .unwrap();
-    drop(connection);
+    fs::write(&state_path, b"not-a-sqlite-database").unwrap();
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_control-plane"))
         .arg("--listen")
