@@ -1,0 +1,486 @@
+name: Temporary Item 19 boundary reconciliation
+
+on:
+  push:
+    branches:
+      - item19-item20-boundary-reconciliation
+    paths:
+      - .github/workflows/_temp_item19_boundary_reconcile.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: item19-item20-boundary-reconciliation
+          fetch-depth: 2
+
+      - name: Assert bounded bootstrap commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "6764ca80a5d680683ddb45ec0804a1c1b673fc89"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/_temp_item19_boundary_reconcile.yml"
+
+      - name: Apply exact architecture reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one replacement target, found {count}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          workflow = ".github/workflows/item19-acceptance-lifecycle.yml"
+          replace_once(
+              workflow,
+              """      - name: Fetch current protected main and signing-continuity gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/branches/main\" \\
+            > current-main.json
+          gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/issues/115\" \\
+            > signing-gate.json
+""",
+              """      - name: Fetch current protected main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/branches/main\" \\
+            > current-main.json
+""",
+          )
+          replace_once(
+              workflow,
+              """            --preflight-evidence preflight-evidence/vultr-readonly-preflight-evidence.json \\
+            --signing-issue signing-gate.json \\
+            --output item19-admission-evidence.json
+""",
+              """            --preflight-evidence preflight-evidence/vultr-readonly-preflight-evidence.json \\
+            --output item19-admission-evidence.json
+""",
+          )
+          replace_once(
+              workflow,
+              """            echo '- Physical acceptance window: explicitly ready'
+            echo '- Signing continuity gate #115: closed'
+""",
+              """            echo '- Provider proof window: explicitly ready'
+            echo '- Phone signing-continuity gate #115: not consumed by Item 19; required before Item 20 phone mutation'
+""",
+          )
+          replace_once(
+              workflow,
+              """      - name: Revalidate exact-current gate and reconcile through typed acceptance lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_sha=$(gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/branches/main\" --jq '.commit.sha')
+          main_protected=$(gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/branches/main\" --jq '.protected')
+          signing_state=$(gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/issues/115\" --jq '.state')
+          [[ \"$main_sha\" == \"$CANDIDATE_SHA\" ]]
+          [[ \"$main_protected\" == \"true\" ]]
+          [[ \"$signing_state\" == \"closed\" ]]
+""",
+              """      - name: Revalidate exact-current protected main and reconcile through typed acceptance lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_sha=$(gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/branches/main\" --jq '.commit.sha')
+          main_protected=$(gh api \\
+            -H 'Accept: application/vnd.github+json' \\
+            -H 'X-GitHub-Api-Version: 2022-11-28' \\
+            \"repos/$GITHUB_REPOSITORY/branches/main\" --jq '.protected')
+          [[ \"$main_sha\" == \"$CANDIDATE_SHA\" ]]
+          [[ \"$main_protected\" == \"true\" ]]
+""",
+          )
+
+          verifier = "scripts/verify_item19_acceptance_lifecycle.py"
+          replace_once(verifier, '_SIGNING_GATE_ISSUE = 115\n', '_PHONE_SIGNING_GATE_ISSUE = 115\n')
+          replace_once(
+              verifier,
+              """def verify_signing_gate(issue: Mapping[str, object]) -> None:
+    if issue.get(\"number\") != _SIGNING_GATE_ISSUE or issue.get(\"state\") != \"closed\":
+        raise ValueError(\"signing continuity gate #115 is not closed\")
+
+
+""",
+              "",
+          )
+          replace_once(
+              verifier,
+              """        \"physical_acceptance_window_ready\": True,
+        \"signing_continuity_gate_issue\": _SIGNING_GATE_ISSUE,
+        \"signing_continuity_gate_closed\": True,
+""",
+              """        \"provider_proof_window_ready\": True,
+        \"provider_proof_ephemeral\": True,
+        \"phone_signing_gate_issue\": _PHONE_SIGNING_GATE_ISSUE,
+        \"phone_signing_gate_required_for_item20\": True,
+        \"phone_signing_gate_consumed_by_item19\": False,
+""",
+          )
+          replace_once(verifier, '    verify.add_argument("--signing-issue", type=Path, required=True)\n', '')
+          replace_once(verifier, '    signing_issue = _load_object(args.signing_issue)\n', '')
+          replace_once(verifier, '    verify_signing_gate(signing_issue)\n', '')
+
+          rust = "apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs"
+          replace_once(rust, 'const SIGNING_GATE_ISSUE: u64 = 115;\n', 'const PHONE_SIGNING_GATE_ISSUE: u64 = 115;\n')
+          replace_once(
+              rust,
+              """    physical_acceptance_window_ready: bool,
+    signing_continuity_gate_issue: u64,
+    signing_continuity_gate_closed: bool,
+""",
+              """    provider_proof_window_ready: bool,
+    provider_proof_ephemeral: bool,
+    phone_signing_gate_issue: u64,
+    phone_signing_gate_required_for_item20: bool,
+    phone_signing_gate_consumed_by_item19: bool,
+""",
+          )
+          replace_once(
+              rust,
+              """        || evidence.signing_continuity_gate_issue != SIGNING_GATE_ISSUE
+        || !evidence.physical_acceptance_window_ready
+        || !evidence.signing_continuity_gate_closed
+""",
+              """        || evidence.phone_signing_gate_issue != PHONE_SIGNING_GATE_ISSUE
+        || !evidence.provider_proof_window_ready
+        || !evidence.provider_proof_ephemeral
+        || !evidence.phone_signing_gate_required_for_item20
+        || evidence.phone_signing_gate_consumed_by_item19
+""",
+          )
+
+          tests = "scripts/tests/test_item19_acceptance_lifecycle.py"
+          replace_once(
+              tests,
+              """    def test_signing_gate_must_be_closed(self):
+        MODULE.verify_signing_gate({\"number\": 115, \"state\": \"closed\"})
+        for issue in (
+            {\"number\": 115, \"state\": \"open\"},
+            {\"number\": 114, \"state\": \"closed\"},
+        ):
+            with self.assertRaisesRegex(ValueError, \"#115\"):
+                MODULE.verify_signing_gate(issue)
+
+""",
+              """    def test_item19_provider_proof_does_not_consume_phone_signing_gate(self):
+        self.assertFalse(hasattr(MODULE, \"verify_signing_gate\"))
+        self.assertEqual(MODULE._PHONE_SIGNING_GATE_ISSUE, 115)
+
+""",
+          )
+          replace_once(
+              tests,
+              """        self.assertTrue(evidence[\"physical_acceptance_window_ready\"])
+        self.assertTrue(evidence[\"signing_continuity_gate_closed\"])
+""",
+              """        self.assertTrue(evidence[\"provider_proof_window_ready\"])
+        self.assertTrue(evidence[\"provider_proof_ephemeral\"])
+        self.assertEqual(evidence[\"phone_signing_gate_issue\"], 115)
+        self.assertTrue(evidence[\"phone_signing_gate_required_for_item20\"])
+        self.assertFalse(evidence[\"phone_signing_gate_consumed_by_item19\"])
+""",
+          )
+          replace_once(
+              tests,
+              '            "issues/115",\n            "runs-on: ubuntu-latest",\n            "Revalidate exact-current gate and reconcile through typed acceptance lifecycle",\n',
+              '            "runs-on: ubuntu-latest",\n            "Provider proof window: explicitly ready",\n            "Revalidate exact-current protected main and reconcile through typed acceptance lifecycle",\n',
+          )
+          replace_once(
+              tests,
+              """        self.assertGreaterEqual(workflow.count('\"repos/$GITHUB_REPOSITORY/issues/115\"'), 2)
+        revalidate = workflow.index(
+            \"Revalidate exact-current gate and reconcile through typed acceptance lifecycle\"
+        )
+""",
+              """        self.assertNotIn('\"repos/$GITHUB_REPOSITORY/issues/115\"', workflow)
+        revalidate = workflow.index(
+            \"Revalidate exact-current protected main and reconcile through typed acceptance lifecycle\"
+        )
+""",
+          )
+
+          contract = "contracts/operations/github-control-plane-v1.json"
+          replace_once(
+              contract,
+              '        "status": "implementation_active_live_invocation_forbidden_until_all_item_19_gates",',
+              '        "status": "protected_live_invocation_requires_exact_item_19_provider_gates",',
+          )
+          replace_once(
+              contract,
+              '          "physical_acceptance_window_ready"\n',
+              '          "provider_proof_window_ready"\n',
+          )
+          replace_once(
+              contract,
+              '        "mutation_revalidation": "exact_current_protected_main_and_signing_gate_rechecked_in_same_step_immediately_before_typed_lifecycle_entrypoint",',
+              '        "mutation_revalidation": "exact_current_protected_main_rechecked_in_same_step_immediately_before_typed_lifecycle_entrypoint",',
+          )
+          replace_once(
+              contract,
+              '        "cleanup": "verified_delete_then_physical_bound_uuid_absence_confirmation_then_durable_terminal_cas",\n        "provider_mutation": "bounded_item_19_only_after_exact_gates",',
+              '        "cleanup": "verified_delete_then_physical_bound_uuid_absence_confirmation_then_durable_terminal_cas",\n        "provider_proof_lifetime": "ephemeral_create_deploy_verify_cleanup_within_one_serialized_item_19_run",\n        "phone_signing_gate": "issue_115_applies_to_item_20_phone_mutation_not_item_19_provider_proof",\n        "item_20_server_session": "fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_never_reuse_terminal_item_19_intent",\n        "provider_mutation": "bounded_item_19_only_after_exact_provider_gates",',
+          )
+          replace_once(
+              contract,
+              '    "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates",',
+              '    "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_provider_gates",',
+          )
+
+          phone = "docs/operations/phone-gitops-runtime.md"
+          replace_once(
+              phone,
+              """**This is a workflow-level mutation gate, not only an APK-install gate.** Until the signing-continuity
+conditions below are satisfied, the private production boundary must not enable install/update,
+release activation, reboot/restart, network mutation, rollback or another mutable phone action merely
+because that individual step does not replace the Android APK. Narrowing this policy requires an
+explicit architecture/security decision; it must not be inferred from a runbook.
+""",
+              """**This is a workflow-level phone-mutation gate, not only an APK-install gate.** Until the signing-continuity
+conditions below are satisfied, the private production boundary must not enable install/update,
+release activation, reboot/restart, network mutation, rollback or another mutable phone action merely
+because that individual step does not replace the Android APK. This gate applies to the private phone
+execution boundary only; it does not gate the public canonical provider-only Item 19 proof, which has
+no phone credentials or phone mutation authority. Narrowing the phone gate still requires an explicit
+architecture/security decision; it must not be inferred from a runbook.
+""",
+          )
+          replace_once(
+              phone,
+              """Production Baseline item 19 may prepare and prove the JIT Vultr **acceptance** server only from the
+public canonical GitHub-hosted control plane. Item 19 performs no phone mutation.
+
+The physical item-20 window opens only after item 19 has handed off the exact accepted candidate and
+server deployment **and** this mutable-phone gate is satisfied. The fact that an item-20 stage may
+activate existing native files rather than install `apps/android-app` does not bypass the gate above.
+""",
+              """Production Baseline item 19 proves the JIT Vultr **acceptance** lifecycle only from the public
+canonical GitHub-hosted control plane. Its live proof is provider-only and ephemeral: create at most
+one controlled VM, deploy and verify the exact candidate, then deterministically delete it and commit
+the durable terminal state. Item 19 performs no phone mutation and does not consume #115.
+
+The physical item-20 window opens only after the Item 19 provider proof is complete **and** this
+mutable-phone gate is satisfied. Item 20 then opens a fresh one-at-a-time acceptance server session
+through the protected typed lifecycle under a distinct Item 20 ownership intent; the terminal Item 19
+proof intent is never reused. The fact that an item-20 stage may activate existing native files rather
+than install `apps/android-app` does not bypass the phone gate above.
+""",
+          )
+
+          plan = "docs/PRODUCTION_BASELINE_PLAN.md"
+          replace_once(
+              plan,
+              """9. Provision one controlled Vultr acceptance VM only when the physical-acceptance window is ready, through the typed adapter and immutable acceptance identity. Deploy the exact candidate server-side artifacts there. The retired Google/GCP server path must not be used as fallback, and this acceptance VM must not be represented as production.
+10. Run the physical sequence on the same immutable candidate SHA and acceptance VM:
+""",
+              """9. Provision one controlled Vultr acceptance VM only for an explicit **provider-proof window**, through the typed adapter and immutable acceptance identity. Deploy and verify the exact candidate server-side artifacts, then deterministically delete that proof VM before item 19 completes. The retired Google/GCP server path must not be used as fallback, and this acceptance VM must not be represented as production. The #115 signing-continuity gate applies to phone mutation, not to this provider-only proof.
+10. After item 19 completes, item 20 opens a fresh one-at-a-time Vultr acceptance session through the already-protected typed lifecycle under a distinct item-20 ownership intent for the same immutable candidate SHA; it must not reuse item 19's terminal intent. Run the physical sequence on that fresh item-20 acceptance VM:
+""",
+          )
+          replace_once(
+              plan,
+              """19. just-in-time controlled Vultr acceptance VM plus exact-candidate server deployment;
+20. immutable-SHA physical acceptance on the real phone against that acceptance VM;
+""",
+              """19. just-in-time controlled Vultr acceptance provider proof plus exact-candidate server deployment, verification and deterministic cleanup;
+20. immutable-SHA physical acceptance on the real phone against a fresh JIT acceptance session created through the protected typed lifecycle;
+""",
+          )
+          replace_once(
+              plan,
+              """Item 19 is intentionally just-in-time. Its non-mutating implementation work — durable crash-safe lifecycle state, typed acceptance-only Vultr execution, permanent rejection tests, workflow gates and documentation/contracts — may proceed before the physical window opens. The first live provider mutation remains forbidden until the then-current exact candidate has fresh acceptance authority and fresh read-only Vultr preflight evidence and the physical acceptance window is genuinely ready.
+
+The mutable phone lifecycle remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level mutation gate.
+""",
+              """Item 19 is intentionally just-in-time. Its non-mutating implementation work — durable crash-safe lifecycle state, typed acceptance-only Vultr execution, permanent rejection tests, workflow gates and documentation/contracts — may proceed before a provider proof window opens. The first live provider mutation remains forbidden until the then-current exact candidate has fresh acceptance authority, fresh read-only Vultr preflight evidence and an explicit provider-proof window. The Item 19 live proof is provider-only and ephemeral: it must deploy and verify the exact candidate, then deterministically clean up before Item 19 completes.
+
+The mutable phone lifecycle remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level phone-mutation gate. #115 is evaluated before Item 20 phone mutation and does not gate the provider-only Item 19 proof. Item 20 must use a fresh JIT acceptance session with a distinct ownership intent rather than reuse Item 19's terminal proof intent.
+""",
+          )
+
+          physical = "docs/physical-phone-acceptance-runbook.md"
+          replace_once(
+              physical,
+              """2. Item 19 is live-complete for the exact candidate used by this run:
+   - one or zero controlled acceptance-VM semantics proven;
+   - exact provider UUID/ownership/generation binding verified;
+   - exact-candidate server artifact deployed and verified;
+   - no production authority used.
+""",
+              """2. Item 19 is live-complete for the exact candidate used by this run:
+   - one or zero controlled acceptance-VM semantics proven;
+   - exact provider UUID/ownership/generation binding verified;
+   - exact-candidate server artifact deployed and verified;
+   - deterministic provider deletion and durable terminal state proven;
+   - no production authority used.
+""",
+          )
+          replace_once(
+              physical,
+              """## 4. Acceptance VM handoff from item 19
+
+Item 20 does not provision, select or adopt a VM itself.
+
+The server side is handed off from item 19 and is accepted only when the canonical item-19 lifecycle proves:
+""",
+              """## 4. Fresh Item 20 acceptance session from the protected Item 19 capability
+
+Item 20 does not select or adopt an arbitrary or pre-existing VM. The public canonical control plane
+opens exactly one fresh JIT acceptance VM through the protected typed lifecycle under a distinct
+Item 20 ownership intent. The terminal Item 19 proof intent is never reused.
+
+The lifecycle capability and proof are handed off from Item 19. The fresh Item 20 server session is
+accepted only when the canonical provider lifecycle proves:
+""",
+          )
+          replace_once(
+              physical,
+              """- deployed server bytes/manifest/SHA match the exact candidate;
+- public listeners and controlled probes required for the physical test are healthy;
+- the lifecycle remains under the single item-19 serialized writer.
+""",
+              """- deployed server bytes/manifest/SHA match the exact candidate;
+- public listeners and controlled probes required for the physical test are healthy;
+- the fresh session uses a distinct Item 20 ownership intent and does not reuse terminal Item 19 state;
+- the lifecycle remains under the single repository-wide serialized acceptance writer;
+- deterministic cleanup runs after the physical session and confirms provider absence before terminal CAS.
+""",
+          )
+          replace_once(
+              physical,
+              "The physical sequence is executed against the same item-19 acceptance VM and the same immutable candidate SHA throughout.\n",
+              "The physical sequence is executed against the same fresh Item 20 acceptance VM and the same immutable candidate SHA throughout.\n",
+          )
+
+          consistency = "scripts/check_item19_consistency.py"
+          replace_once(
+              consistency,
+              """        \"Item 20 becomes the next delivery item only after the live item-19 Definition of Done is complete\",
+""",
+              """        \"Item 20 becomes the next delivery item only after the live item-19 Definition of Done is complete\",
+        \"provider-only Item 19 proof\",
+        \"distinct ownership intent rather than reuse Item 19's terminal proof intent\",
+""",
+          )
+          replace_once(
+              consistency,
+              """        \"This is a workflow-level mutation gate, not only an APK-install gate.\",
+        \"Before enabling **any mutable phone workflow**\",
+""",
+              """        \"This is a workflow-level phone-mutation gate, not only an APK-install gate.\",
+        \"does not gate the public canonical provider-only Item 19 proof\",
+        \"Before enabling **any mutable phone workflow**\",
+""",
+          )
+          replace_once(
+              consistency,
+              """    for required in (
+        \"CreatePrepared\",
+""",
+              """    for required in (
+        \"distinct Item 20 ownership intent\",
+        \"terminal Item 19 proof intent is never reused\",
+    ):
+        if required not in physical:
+            errors.append(f\"physical acceptance runbook is missing non-cyclic JIT handoff token {required!r}\")
+
+    for required in (
+        \"CreatePrepared\",
+""",
+          )
+          replace_once(
+              consistency,
+              """            lifecycle = capabilities.get(\"item_19_acceptance_lifecycle\")
+            if not isinstance(lifecycle, dict) or lifecycle.get(\"production_scope\") != \"forbidden\":
+                errors.append(\"item-19 lifecycle must forbid production scope\")
+""",
+              """            lifecycle = capabilities.get(\"item_19_acceptance_lifecycle\")
+            if not isinstance(lifecycle, dict) or lifecycle.get(\"production_scope\") != \"forbidden\":
+                errors.append(\"item-19 lifecycle must forbid production scope\")
+            elif lifecycle.get(\"phone_signing_gate\") != \"issue_115_applies_to_item_20_phone_mutation_not_item_19_provider_proof\":
+                errors.append(\"item-19 provider proof must not consume the item-20 phone signing gate\")
+            elif lifecycle.get(\"item_20_server_session\") != \"fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_never_reuse_terminal_item_19_intent\":
+                errors.append(\"item-20 must open a fresh JIT server session without terminal intent reuse\")
+""",
+          )
+          PY
+          cargo fmt --all
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest scripts.tests.test_item19_acceptance_lifecycle scripts.tests.test_private_phone_preflight
+          git diff --check
+
+      - name: Commit bounded reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(git status --porcelain)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .github/workflows/item19-acceptance-lifecycle.yml \
+            apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs \
+            contracts/operations/github-control-plane-v1.json \
+            docs/PRODUCTION_BASELINE_PLAN.md \
+            docs/operations/phone-gitops-runtime.md \
+            docs/physical-phone-acceptance-runbook.md \
+            scripts/check_item19_consistency.py \
+            scripts/tests/test_item19_acceptance_lifecycle.py \
+            scripts/verify_item19_acceptance_lifecycle.py
+          git diff --cached --name-only | sort > changed.txt
+          cat > expected.txt <<'EOF'
+          .github/workflows/item19-acceptance-lifecycle.yml
+          apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs
+          contracts/operations/github-control-plane-v1.json
+          docs/PRODUCTION_BASELINE_PLAN.md
+          docs/operations/phone-gitops-runtime.md
+          docs/physical-phone-acceptance-runbook.md
+          scripts/check_item19_consistency.py
+          scripts/tests/test_item19_acceptance_lifecycle.py
+          scripts/verify_item19_acceptance_lifecycle.py
+          EOF
+          sort -o expected.txt expected.txt
+          diff -u expected.txt changed.txt
+          git commit -m "fix: reconcile item 19 provider proof and item 20 phone gate"
+          git push origin HEAD:item19-item20-boundary-reconciliation
