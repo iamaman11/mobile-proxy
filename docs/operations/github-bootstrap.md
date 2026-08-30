@@ -67,6 +67,13 @@ enabled, the canonical repository must implement and verify:
 - existing Android signing identity discovery before any signing-key replacement;
 - deterministic rollback and safe evidence correlation by immutable release tuple.
 
+The private read-only phone preflight itself is complete: the private caller ran on the exact
+`android-production` Linux runner, proved its required tools and the single registered ADB device,
+and produced bounded evidence without publishing the device identifier or mutating the phone.
+This is a runtime proof only; it does not make a mutable phone command available. The canonical
+record and remaining Android signing/lifecycle gate are in
+[phone GitOps runtime](phone-gitops-runtime.md).
+
 No bootstrap step authorizes creating a VM, installing an APK, changing phone networking, or
 running an arbitrary SSH/ADB/provider command. Those operations become available only through
 reviewed, tagged and verified workflows.

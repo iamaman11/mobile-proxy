@@ -214,7 +214,11 @@ The required order is:
 22. Vultr production promotion/deployment from the accepted final release tuple;
 23. final baseline closeout.
 
-The first unfinished item for the current continuation is item 15. PR #109 merged the canonical read-only phone-preflight logic, but it does not satisfy item 15 until the thin private caller exists and a real private Actions run proves the runner/tools/registered phone.
+Item 15 is complete: the thin private caller exists and a real private Actions run proved the Linux
+runner, required tools and exactly the registered phone without mutation or raw identifier
+publication. The first unfinished item for the current continuation is item 16. The phone's
+mutable lifecycle remains blocked until the signing-identity gate recorded in
+`docs/operations/phone-gitops-runtime.md` is satisfied.
 
 Items 15 through 18 should be completed without mutating the phone or creating a VM. Item 19 is intentionally just-in-time and should not create an idle acceptance VM merely to keep work moving if the real phone is not ready. Item 20 is the physical gate. Items 21 and 22 are forbidden until item 20 succeeds. No later item should be pulled forward merely to keep work moving.
 
