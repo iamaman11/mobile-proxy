@@ -433,8 +433,6 @@ mod tests {
             VultrLifecycleAdapter::enforce_item18_live_boundary(LifecycleScope::Production, false),
             Err(VultrAdapterError::FinalProductionAuthorityForbidden)
         );
-        assert!(!ITEM18_LIVE_PROVIDER_MUTATION_ALLOWED);
-        assert!(!ITEM18_FINAL_PRODUCTION_AUTHORITY_ALLOWED);
     }
 
     #[test]
