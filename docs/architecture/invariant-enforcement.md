@@ -2,7 +2,7 @@
 
 Status: normative governance companion  
 Audit revision: `2026-08-30`  
-Baseline `main`: `02067df89c5f7dc34198ef2d29d2405a21beb791`  
+Baseline `main`: `955d8dd67d212c1f0e89d29a8a90beebeb31b29d`  
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -29,8 +29,8 @@ The audit contains 67 invariant IDs:
 
 | Status | Count |
 | --- | ---: |
-| `enforced` | 31 |
-| `partially_enforced` | 20 |
+| `enforced` | 32 |
+| `partially_enforced` | 19 |
 | `planned` | 10 |
 | `not_applicable_yet` | 6 |
 | `review_only` | 0 |
@@ -63,7 +63,7 @@ The SQLite store permanently establishes WAL mode, foreign-key enforcement, a fi
 
 Backup/restore evidence is also permanent: `control-plane-state-backup` validates and materializes backups, verifies canonical parity, restores only into a new target and publishes atomically; `state_backup_cli.rs` exercises backup, verification, clean restore and successful startup of a control-plane process from the restored database.
 
-The remaining gap is narrower: there is no explicit complete SQLite integrity/corruption check such as `PRAGMA integrity_check` (or an equivalent demonstrated complete check) in startup/verification. `PERSIST-002` therefore remains `partially_enforced` under `sqlite-integrity-startup-acceptance`.
+PR #105 adds explicit complete startup/open integrity validation with `PRAGMA integrity_check` and `PRAGMA foreign_key_check`. Adapter regression evidence deliberately writes state that violates a schema CHECK constraint with enforcement temporarily disabled and requires `StoreError::IntegrityCheckFailed` on `open_existing`; process acceptance independently proves corrupt canonical SQLite cannot keep the control-plane daemon running toward readiness. `PERSIST-002` is therefore `enforced`.
 
 ### Atomic state mutation — `PERSIST-003`
 
@@ -94,7 +94,6 @@ The matrix, not this prose summary, is authoritative for exact ownership and fol
 - semantic discovery of newly invented authoritative state that bypasses the explicit registry (`ARCH-003` residual only);
 - review-backed SQL/business-transition isolation where generic AST tooling would not be justified (`ARCH-006`);
 - architecture change-scope and ADR supersession enforcement (`ARCH-007`, `ARCH-008`);
-- explicit SQLite startup/integrity-corruption checking (`PERSIST-002` residual only; clean backup/restore process recovery is already covered);
 - first real schema evolution proving expand-migrate-contract rollback (`UPGRADE-002`);
 - broader typed taxonomies and raw-string boundary enforcement;
 - repository-wide secret-log, metric-cardinality and bounded-concurrency controls;
