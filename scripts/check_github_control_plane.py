@@ -271,7 +271,7 @@ def check_repository(root: Path) -> list[str]:
 
         runtime = github.get("runtime_verification")
         if runtime != {
-            "vultr_secret_access": "pending_actions_preflight",
+            "vultr_secret_access": "passed_acceptance_vultr_read_only_preflight_on_exact_candidate",
             "android_runner_and_device": (
                 "passed_private_actions_read_only_preflight_on_registered_device; "
                 "mutable_phone_operations_remain_blocked"
@@ -324,6 +324,8 @@ def check_repository(root: Path) -> list[str]:
                     "passed_private_actions_read_only_preflight_on_registered_device"
                 ),
                 "acceptance_authority": "implemented_candidate_quality_evidence_gate",
+                "vultr_readonly_preflight_workflow": "implemented_live_proof_passed",
+                "vultr_live_preflight": "passed_read_only_account_and_key_preflight",
             }.items()
         ):
             errors.append("production topology GitOps checkpoint differs")
