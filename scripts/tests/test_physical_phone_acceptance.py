@@ -16,7 +16,7 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
         return {
             "format_version": 2,
             "repository": "iamaman11/mobile-proxy",
-            "workflow": "Software Release Candidate",
+            "workflow": "Quality",
             "candidate_sha": "a" * 40,
             "primary_runtime": "first_party_reverse_tunnel",
             "primary_runtime_requires_android_vpn": False,
@@ -35,6 +35,14 @@ class PhysicalPhoneAcceptanceTests(unittest.TestCase):
         git_output.side_effect = ["b" * 40]
         with self.assertRaisesRegex(MODULE.AcceptanceFailure, "differs"):
             MODULE.verify_candidate(self.evidence())
+
+    @mock.patch.object(MODULE, "git_output")
+    def test_retired_candidate_workflow_is_rejected(self, git_output):
+        evidence = self.evidence()
+        evidence["workflow"] = "Software Release Candidate"
+        with self.assertRaisesRegex(MODULE.AcceptanceFailure, "workflow differs"):
+            MODULE.verify_candidate(evidence)
+        git_output.assert_not_called()
 
     @mock.patch.object(MODULE, "curl_proxy")
     def test_proxy_sequence_covers_all_authenticated_protocols(self, curl_proxy):
