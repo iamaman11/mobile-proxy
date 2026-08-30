@@ -66,6 +66,8 @@ def check_repository(root: Path) -> list[str]:
         "items 15, 16, 17 and 18 are `COMPLETE`",
         "Item 19 is `ACTIVE`",
         "Item 20 becomes the next delivery item only after the live item-19 Definition of Done is complete",
+        "provider-only Item 19 proof",
+        "distinct ownership intent rather than reuse Item 19's terminal proof intent",
     ):
         if required not in plan:
             errors.append(f"canonical baseline plan is missing current item-19 status token {required!r}")
@@ -86,12 +88,20 @@ def check_repository(root: Path) -> list[str]:
         errors.append("legacy pre-device readiness audit must remain explicitly historical/non-normative")
 
     for required in (
-        "This is a workflow-level mutation gate, not only an APK-install gate.",
+        "This is a workflow-level phone-mutation gate, not only an APK-install gate.",
+        "does not gate the public canonical provider-only Item 19 proof",
         "Before enabling **any mutable phone workflow**",
         "private runner must never receive\n   Vultr credentials",
     ):
         if required not in phone:
             errors.append(f"phone GitOps runtime is missing fail-closed item-19/20 boundary {required!r}")
+
+    for required in (
+        "distinct Item 20 ownership intent",
+        "terminal Item 19 proof intent is never reused",
+    ):
+        if required not in physical:
+            errors.append(f"physical acceptance runbook is missing non-cyclic JIT handoff token {required!r}")
 
     for required in (
         "CreatePrepared",
@@ -143,6 +153,10 @@ def check_repository(root: Path) -> list[str]:
             lifecycle = capabilities.get("item_19_acceptance_lifecycle")
             if not isinstance(lifecycle, dict) or lifecycle.get("production_scope") != "forbidden":
                 errors.append("item-19 lifecycle must forbid production scope")
+            elif lifecycle.get("phone_signing_gate") != "issue_115_applies_to_item_20_phone_mutation_not_item_19_provider_proof":
+                errors.append("item-19 provider proof must not consume the item-20 phone signing gate")
+            elif lifecycle.get("item_20_server_session") != "fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_never_reuse_terminal_item_19_intent":
+                errors.append("item-20 must open a fresh JIT server session without terminal intent reuse")
 
     phone_contract = github.get("phone_control_repository") if github else None
     if not isinstance(phone_contract, dict):

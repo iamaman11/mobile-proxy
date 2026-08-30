@@ -82,7 +82,7 @@
         "provider_mutation": false
       },
       "item_19_acceptance_lifecycle": {
-        "status": "implementation_active_live_invocation_forbidden_until_all_item_19_gates",
+        "status": "protected_live_invocation_requires_exact_item_19_provider_gates",
         "workflow": ".github/workflows/item19-acceptance-lifecycle.yml",
         "command_issue": 124,
         "command": "/item19-acceptance-ready <full_sha>",
@@ -92,16 +92,19 @@
           "successful_quality_push_on_protected_main",
           "fresh_immutable_acceptance_authority",
           "fresh_vultr_readonly_preflight",
-          "physical_acceptance_window_ready"
+          "provider_proof_window_ready"
         ],
         "required_state": "durable_owner_controlled_acceptance_vm_lifecycle_state_outside_vcs",
         "required_concurrency": "single_repository_wide_acceptance_lifecycle_writer_cancel_in_progress_false",
         "provider_identity": "verified_provider_assigned_immutable_uuid_plus_exact_ownership_and_generation",
         "transport_endpoint": "ip_is_transport_only_after_verified_target_resolution_never_authority",
         "artifact_identity": "exact_candidate_sha_plus_bounded_manifest_verified_before_and_after_transport",
-        "mutation_revalidation": "exact_current_protected_main_and_signing_gate_rechecked_in_same_step_immediately_before_typed_lifecycle_entrypoint",
+        "mutation_revalidation": "exact_current_protected_main_rechecked_in_same_step_immediately_before_typed_lifecycle_entrypoint",
         "cleanup": "verified_delete_then_physical_bound_uuid_absence_confirmation_then_durable_terminal_cas",
-        "provider_mutation": "bounded_item_19_only_after_exact_gates",
+        "provider_proof_lifetime": "ephemeral_create_deploy_verify_cleanup_within_one_serialized_item_19_run",
+        "phone_signing_gate": "issue_115_applies_to_item_20_phone_mutation_not_item_19_provider_proof",
+        "item_20_server_session": "fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_never_reuse_terminal_item_19_intent",
+        "provider_mutation": "bounded_item_19_only_after_exact_provider_gates",
         "production_scope": "forbidden"
       }
     }

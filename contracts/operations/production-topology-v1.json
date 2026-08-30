@@ -88,7 +88,7 @@
     "vultr_durable_acceptance_state": "item_19_slice_a_active_crash_safe_dispatch_fencing_no_live_entrypoint",
     "vultr_typed_http_client": "item_19_slice_a_active_acceptance_only_bounded_full_instance_enumeration",
     "vultr_live_preflight": "passed_read_only_account_and_key_preflight_on_prior_candidate; fresh exact-current proof required before first item_19 mutation",
-    "vultr_live_lifecycle": "item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_physical_window_gates",
+    "vultr_live_lifecycle": "item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_provider_proof_window_gates",
     "phone_workflows": "read_only_preflight_implemented",
     "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
     "phone_mutation": "blocked_by_signing_continuity_gate_issue_115",

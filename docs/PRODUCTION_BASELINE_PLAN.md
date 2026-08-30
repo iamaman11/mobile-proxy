@@ -138,8 +138,8 @@ Required work:
    - prove Vultr account/key access through a GitHub-hosted read-only preflight without exposing secret-derived data;
    - establish an immutable acceptance execution identity that is distinct from the final release identity, so the final `vMAJOR.MINOR.PATCH` tag is not created before physical acceptance.
 8. Implement provider-neutral lifecycle interfaces and a typed Vultr adapter before creating any VM. Managed lifecycle must use provider UUID, exact ownership tags and generation/CAS semantics, and must reject ambiguous, neighbouring or unbound resources.
-9. Provision one controlled Vultr acceptance VM only when the physical-acceptance window is ready, through the typed adapter and immutable acceptance identity. Deploy the exact candidate server-side artifacts there. The retired Google/GCP server path must not be used as fallback, and this acceptance VM must not be represented as production.
-10. Run the physical sequence on the same immutable candidate SHA and acceptance VM:
+9. Provision one controlled Vultr acceptance VM only for an explicit **provider-proof window**, through the typed adapter and immutable acceptance identity. Deploy and verify the exact candidate server-side artifacts, then deterministically delete that proof VM before item 19 completes. The retired Google/GCP server path must not be used as fallback, and this acceptance VM must not be represented as production. The #115 signing-continuity gate applies to phone mutation, not to this provider-only proof.
+10. After item 19 completes, item 20 opens a fresh one-at-a-time Vultr acceptance session through the already-protected typed lifecycle under a distinct item-20 ownership intent for the same immutable candidate SHA; it must not reuse item 19's terminal intent. Run the physical sequence on that fresh item-20 acceptance VM:
    - verify exact deployed identity on both phone and server before traffic tests;
    - prove the primary first-party reverse tunnel over QUIC;
    - reboot the phone or service and prove state rehydration and reconnection;
@@ -208,17 +208,17 @@ The required order is:
 16. immutable Vultr acceptance execution gate that does not create the final release tag early and does not weaken the final production gate;
 17. GitHub-hosted Vultr read-only account/key preflight through that acceptance gate;
 18. provider-neutral lifecycle interfaces plus typed Vultr ownership adapter and rejection tests;
-19. just-in-time controlled Vultr acceptance VM plus exact-candidate server deployment;
-20. immutable-SHA physical acceptance on the real phone against that acceptance VM;
+19. just-in-time controlled Vultr acceptance provider proof plus exact-candidate server deployment, verification and deterministic cleanup;
+20. immutable-SHA physical acceptance on the real phone against a fresh JIT acceptance session created through the protected typed lifecycle;
 21. final immutable release evidence, protected annotated release tag and artifacts;
 22. Vultr production promotion/deployment from the accepted final release tuple;
 23. final baseline closeout.
 
 **Current canonical delivery status:** items 15, 16, 17 and 18 are `COMPLETE`. **Item 19 is `ACTIVE` and is the first unfinished item.** Its working tracker is #124.
 
-Item 19 is intentionally just-in-time. Its non-mutating implementation work — durable crash-safe lifecycle state, typed acceptance-only Vultr execution, permanent rejection tests, workflow gates and documentation/contracts — may proceed before the physical window opens. The first live provider mutation remains forbidden until the then-current exact candidate has fresh acceptance authority and fresh read-only Vultr preflight evidence and the physical acceptance window is genuinely ready.
+Item 19 is intentionally just-in-time. Its non-mutating implementation work — durable crash-safe lifecycle state, typed acceptance-only Vultr execution, permanent rejection tests, workflow gates and documentation/contracts — may proceed before a provider proof window opens. The first live provider mutation remains forbidden until the then-current exact candidate has fresh acceptance authority, fresh read-only Vultr preflight evidence and an explicit provider-proof window. The Item 19 live proof is provider-only and ephemeral: it must deploy and verify the exact candidate, then deterministically clean up before Item 19 completes.
 
-The mutable phone lifecycle remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level mutation gate.
+The mutable phone lifecycle remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level phone-mutation gate. #115 is evaluated before Item 20 phone mutation and does not gate the provider-only Item 19 proof. Item 20 must use a fresh JIT acceptance session with a distinct ownership intent rather than reuse Item 19's terminal proof intent.
 
 Item 20 becomes the next delivery item only after the live item-19 Definition of Done is complete. Items 21 and 22 remain forbidden until item 20 succeeds. No later item may be pulled forward merely to keep work moving.
 
