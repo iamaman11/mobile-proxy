@@ -135,12 +135,18 @@ class AcceptanceCandidateTests(unittest.TestCase):
         evidence = MODULE.build_acceptance_evidence(
             self.candidate_sha(),
             self.quality_run(),
-            "f" * 64,
             self.environment(),
         )
         self.assertEqual(evidence["authority"], "pre_release_acceptance")
         self.assertEqual(evidence["candidate_sha"], self.candidate_sha())
         self.assertEqual(evidence["executor"], "github-hosted")
+        self.assertEqual(
+            evidence["candidate_evidence_artifact"],
+            "software-release-candidate-" + self.candidate_sha(),
+        )
+        self.assertEqual(
+            evidence["candidate_evidence_file"], "release-candidate-evidence.json"
+        )
         self.assertFalse(evidence["final_production_authority"])
         self.assertFalse(evidence["production_environment_authorized"])
         self.assertFalse(evidence["final_release_tag_created"])
@@ -149,6 +155,7 @@ class AcceptanceCandidateTests(unittest.TestCase):
         self.assertFalse(evidence["phone_mutation_performed"])
         self.assertNotIn("VULTR_API_KEY", str(evidence))
         self.assertNotIn("VULTR_SSH_PRIVATE_KEY", str(evidence))
+        self.assertNotIn("sha256", str(evidence).lower())
 
 
 if __name__ == "__main__":
