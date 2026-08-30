@@ -16,8 +16,8 @@ const GITHUB_API_VERSION: &str = "2022-11-28";
 const DEPLOYMENT_TASK: &str = "mobile-proxy:acceptance-vm-binding";
 const DEPLOYMENT_ENVIRONMENT: &str = "acceptance-vm-binding-state";
 const LEDGER_FORMAT_VERSION: u64 = 1;
-const MAX_LEDGER_PAGES: u32 = 100;
 const PAGE_SIZE: u32 = 100;
+const MAX_LEDGER_PAGES: u32 = 100;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,14 +43,12 @@ impl BindingPayload {
 
     fn to_binding(&self, intent: &OwnershipIntent) -> Result<VmBinding, BindingStoreError> {
         validate_provider_uuid(&self.provider_id)?;
-        let provider_id = ProviderResourceId::new(self.provider_id.clone())
-            .map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
-        let generation = Generation::new(self.generation)
-            .map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
         Ok(VmBinding {
             intent: intent.clone(),
-            provider_id,
-            generation,
+            provider_id: ProviderResourceId::new(self.provider_id.clone())
+                .map_err(|_| BindingStoreError::InvalidLedgerRecord)?,
+            generation: Generation::new(self.generation)
+                .map_err(|_| BindingStoreError::InvalidLedgerRecord)?,
         })
     }
 }
@@ -100,10 +98,9 @@ pub struct DurableGitHubVmBindingStore {
 impl DurableGitHubVmBindingStore {
     pub fn new(github_token: String, candidate_sha: String) -> Result<Self, BindingStoreError> {
         validate_candidate_sha(&candidate_sha)?;
-        let backend = GitHubDeploymentApi::new(github_token)?;
         Ok(Self {
             inner: BindingStore {
-                backend,
+                backend: GitHubDeploymentApi::new(github_token)?,
                 candidate_sha,
             },
         })
@@ -164,7 +161,7 @@ impl fmt::Display for BindingStoreError {
             }
             Self::CompareAndSwapConflict => formatter.write_str("binding compare-and-swap conflict"),
             Self::TerminalIntentReuse => {
-                formatter.write_str("cleared ownership intent is terminal and cannot be rebound")
+                formatter.write_str("cleared ownership intent is terminal and cannot be reused")
             }
             Self::InvalidTransition => formatter.write_str("invalid binding state transition"),
             Self::HttpTransport => formatter.write_str("GitHub deployment-state transport failed"),
@@ -204,16 +201,17 @@ impl<B: DeploymentBackend> BindingStore<B> {
         Ok(())
     }
 
-    fn current_state(&self, intent: &OwnershipIntent) -> Result<LedgerState, BindingStoreError> {
-        self.validate_intent(intent)?;
-        let records = self.backend.list_records(&self.candidate_sha)?;
-        reconstruct_ledger(records, &self.candidate_sha)
-    }
-
     fn validate_binding(&self, binding: &VmBinding) -> Result<(), BindingStoreError> {
         self.validate_intent(&binding.intent)?;
-        validate_provider_uuid(binding.provider_id.as_str())?;
-        Ok(())
+        validate_provider_uuid(binding.provider_id.as_str())
+    }
+
+    fn current_state(&self, intent: &OwnershipIntent) -> Result<LedgerState, BindingStoreError> {
+        self.validate_intent(intent)?;
+        reconstruct_ledger(
+            self.backend.list_records(&self.candidate_sha)?,
+            &self.candidate_sha,
+        )
     }
 }
 
@@ -221,7 +219,11 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
     type Error = BindingStoreError;
 
     fn load(&self, intent: &OwnershipIntent) -> Result<Option<VmBinding>, Self::Error> {
-        Ok(self.current_state(intent)?.binding)
+        let state = self.current_state(intent)?;
+        if state.terminal {
+            return Err(BindingStoreError::TerminalIntentReuse);
+        }
+        Ok(state.binding)
     }
 
     fn compare_and_swap(
@@ -239,11 +241,11 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
         }
 
         let before = self.current_state(intent)?;
-        if before.binding.as_ref() != expected {
-            return Err(BindingStoreError::CompareAndSwapConflict);
-        }
         if before.terminal {
             return Err(BindingStoreError::TerminalIntentReuse);
+        }
+        if before.binding.as_ref() != expected {
+            return Err(BindingStoreError::CompareAndSwapConflict);
         }
 
         let transition = validate_transition(expected, replacement.as_ref())?;
@@ -265,10 +267,9 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
         })?;
 
         let after = self.current_state(intent)?;
-        let terminal_expected = replacement.is_none();
         if after.head_id != Some(created.id)
             || after.binding != replacement
-            || after.terminal != terminal_expected
+            || after.terminal != replacement.is_none()
         {
             return Err(BindingStoreError::WriteVerificationFailed);
         }
@@ -293,8 +294,8 @@ fn validate_transition(
                 .next()
                 .map_err(|_| BindingStoreError::InvalidTransition)?;
             if replacement.intent != expected.intent
-                || replacement.generation != next
                 || replacement.provider_id == expected.provider_id
+                || replacement.generation != next
             {
                 return Err(BindingStoreError::InvalidTransition);
             }
@@ -311,12 +312,13 @@ fn reconstruct_ledger(
 ) -> Result<LedgerState, BindingStoreError> {
     validate_candidate_sha(candidate_sha)?;
     records.sort_by_key(|record| record.id);
-    let mut ids = BTreeSet::new();
+
     let intent = OwnershipIntent::new(
         LifecycleScope::Acceptance,
         format!("candidate:{candidate_sha}"),
     )
     .map_err(|_| BindingStoreError::InvalidOwnershipIntent)?;
+    let mut seen_ids = BTreeSet::new();
     let mut state = LedgerState {
         head_id: None,
         binding: None,
@@ -324,19 +326,17 @@ fn reconstruct_ledger(
     };
 
     for record in records {
-        if !ids.insert(record.id) {
+        if !seen_ids.insert(record.id) {
             return Err(BindingStoreError::ForkedLedger);
         }
         validate_record(&record, candidate_sha, &intent)?;
-        if record.payload.predecessor_deployment_id != state.head_id {
-            return Err(BindingStoreError::ForkedLedger);
-        }
-        let current_payload = state.binding.as_ref().map(BindingPayload::from_binding);
-        if record.payload.expected != current_payload {
-            return Err(BindingStoreError::ForkedLedger);
-        }
         if state.terminal {
             return Err(BindingStoreError::TerminalIntentReuse);
+        }
+        if record.payload.predecessor_deployment_id != state.head_id
+            || record.payload.expected != state.binding.as_ref().map(BindingPayload::from_binding)
+        {
+            return Err(BindingStoreError::ForkedLedger);
         }
 
         match record.payload.transition {
@@ -382,6 +382,7 @@ fn reconstruct_ledger(
         }
         state.head_id = Some(record.id);
     }
+
     Ok(state)
 }
 
@@ -404,12 +405,11 @@ fn validate_record(
     {
         return Err(BindingStoreError::InvalidLedgerRecord);
     }
-    if let Some(binding) = payload.expected.as_ref() {
-        validate_provider_uuid(&binding.provider_id)?;
-        Generation::new(binding.generation)
-            .map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
-    }
-    if let Some(binding) = payload.replacement.as_ref() {
+
+    for binding in [payload.expected.as_ref(), payload.replacement.as_ref()]
+        .into_iter()
+        .flatten()
+    {
         validate_provider_uuid(&binding.provider_id)?;
         Generation::new(binding.generation)
             .map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
@@ -446,20 +446,22 @@ impl GitHubDeploymentApi {
         if token.is_empty() {
             return Err(BindingStoreError::HttpTransport);
         }
-        let client = Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| BindingStoreError::HttpTransport)?;
-        Ok(Self { client, token })
+        Ok(Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .map_err(|_| BindingStoreError::HttpTransport)?,
+            token,
+        })
     }
 
     fn deployments_url(&self) -> String {
         format!("{GITHUB_API_BASE}/repos/{CANONICAL_REPOSITORY}/deployments")
     }
 
-    fn request(&self, method: reqwest::Method, url: &str) -> reqwest::blocking::RequestBuilder {
+    fn request(&self, method: reqwest::Method) -> reqwest::blocking::RequestBuilder {
         self.client
-            .request(method, url)
+            .request(method, self.deployments_url())
             .bearer_auth(&self.token)
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
@@ -479,7 +481,7 @@ impl DeploymentBackend for GitHubDeploymentApi {
                 ("page", page.to_string()),
             ];
             let response = self
-                .request(reqwest::Method::GET, &self.deployments_url())
+                .request(reqwest::Method::GET)
                 .query(&query)
                 .send()
                 .map_err(|_| BindingStoreError::HttpTransport)?;
@@ -502,20 +504,19 @@ impl DeploymentBackend for GitHubDeploymentApi {
         &self,
         record: NewDeploymentRecord,
     ) -> Result<DeploymentRecord, BindingStoreError> {
-        let body = json!({
-            "ref": record.candidate_sha,
-            "task": DEPLOYMENT_TASK,
-            "auto_merge": false,
-            "required_contexts": [],
-            "payload": record.payload,
-            "environment": DEPLOYMENT_ENVIRONMENT,
-            "description": "mobile-proxy durable acceptance VM binding",
-            "transient_environment": true,
-            "production_environment": false
-        });
         let response = self
-            .request(reqwest::Method::POST, &self.deployments_url())
-            .json(&body)
+            .request(reqwest::Method::POST)
+            .json(&json!({
+                "ref": record.candidate_sha,
+                "task": DEPLOYMENT_TASK,
+                "auto_merge": false,
+                "required_contexts": [],
+                "payload": record.payload,
+                "environment": DEPLOYMENT_ENVIRONMENT,
+                "description": "mobile-proxy durable acceptance VM binding",
+                "transient_environment": true,
+                "production_environment": false
+            }))
             .send()
             .map_err(|_| BindingStoreError::HttpTransport)?;
         if response.status() != reqwest::StatusCode::CREATED {
@@ -598,8 +599,7 @@ mod tests {
             .unwrap();
         drop(writer);
 
-        let reader = store(backend);
-        assert_eq!(reader.load(&intent()).unwrap(), Some(first));
+        assert_eq!(store(backend).load(&intent()).unwrap(), Some(first));
     }
 
     #[test]
@@ -611,9 +611,8 @@ mod tests {
             .compare_and_swap(&intent(), None, Some(first.clone()))
             .unwrap();
 
-        let stale = binding(ID2, 1);
         assert_eq!(
-            writer.compare_and_swap(&intent(), Some(&stale), Some(binding(ID3, 2))),
+            writer.compare_and_swap(&intent(), Some(&binding(ID2, 1)), Some(binding(ID3, 2))),
             Err(BindingStoreError::CompareAndSwapConflict)
         );
         assert_eq!(backend.records.borrow().len(), 1);
@@ -623,7 +622,7 @@ mod tests {
     fn replacement_requires_exact_next_generation_and_new_provider_id() {
         let backend = MemoryBackend::default();
         let first = binding(ID1, 1);
-        let mut writer = store(backend.clone());
+        let mut writer = store(backend);
         writer
             .compare_and_swap(&intent(), None, Some(first.clone()))
             .unwrap();
@@ -645,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_is_terminal_and_cannot_restart_generation_one() {
+    fn clear_is_terminal_and_load_fails_closed_after_restart() {
         let backend = MemoryBackend::default();
         let first = binding(ID1, 1);
         let mut writer = store(backend.clone());
@@ -655,10 +654,13 @@ mod tests {
         writer
             .compare_and_swap(&intent(), Some(&first), None)
             .unwrap();
-        assert_eq!(writer.load(&intent()).unwrap(), None);
         drop(writer);
 
         let mut restarted = store(backend);
+        assert_eq!(
+            restarted.load(&intent()),
+            Err(BindingStoreError::TerminalIntentReuse)
+        );
         assert_eq!(
             restarted.compare_and_swap(&intent(), None, Some(binding(ID2, 1))),
             Err(BindingStoreError::TerminalIntentReuse)
@@ -674,7 +676,7 @@ mod tests {
             .compare_and_swap(&intent(), None, Some(first.clone()))
             .unwrap();
 
-        let base = backend.records.borrow()[0].clone();
+        let predecessor = backend.records.borrow()[0].id;
         for (id, provider_id) in [(2, ID2), (3, ID3)] {
             backend.records.borrow_mut().push(DeploymentRecord {
                 id,
@@ -689,7 +691,7 @@ mod tests {
                     candidate_sha: SHA.to_owned(),
                     scope: LifecycleScope::Acceptance,
                     intent_id: intent().id().to_owned(),
-                    predecessor_deployment_id: Some(base.id),
+                    predecessor_deployment_id: Some(predecessor),
                     transition: LedgerTransition::Replace,
                     expected: Some(BindingPayload::from_binding(&first)),
                     replacement: Some(BindingPayload::from_binding(&binding(provider_id, 2))),
@@ -705,14 +707,14 @@ mod tests {
 
     #[test]
     fn production_or_wrong_candidate_intent_is_rejected() {
-        let backend = MemoryBackend::default();
-        let store = store(backend);
+        let store = store(MemoryBackend::default());
         let production =
             OwnershipIntent::new(LifecycleScope::Production, format!("candidate:{SHA}")).unwrap();
         assert_eq!(
             store.load(&production),
             Err(BindingStoreError::InvalidOwnershipIntent)
         );
+
         let wrong = OwnershipIntent::new(
             LifecycleScope::Acceptance,
             "candidate:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
