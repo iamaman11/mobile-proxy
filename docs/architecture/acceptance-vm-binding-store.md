@@ -1,80 +1,114 @@
-# Acceptance VM durable binding store
+# Acceptance VM durable lifecycle state
 
 Status: Production Baseline item 19 Slice A; implementation only, **no live provider mutation is exposed by this slice**.
 
-Canonical lifecycle contract: `contracts/governance/vm-ownership-v1.json`.
-Provider-neutral policy: `crates/proxy-core/src/provider_lifecycle.rs`.
-Concrete store: `apps/operator-cli/src/github_vm_binding_store.rs`.
+Canonical lifecycle contract: `contracts/governance/vm-ownership-v1.json`.  
+Provider-neutral policy: `crates/proxy-core/src/provider_lifecycle.rs`.  
+Concrete durable state: `apps/operator-cli/src/github_vm_binding_store.rs`.  
 Typed Vultr transport: `apps/operator-cli/src/vultr_client.rs` over `apps/operator-cli/src/vultr_lifecycle.rs`.
 
 ## Purpose
 
-Item 18 deliberately stopped at the `VmBindingStore` port. A GitHub-hosted runner is ephemeral, so process memory or a runner-local file cannot safely bind a Vultr instance across retry or restart. Item 19 uses a minimal append-only GitHub Deployment ledger as owner-controlled state outside Git version control.
+Item 18 deliberately stopped at provider-neutral lifecycle policy and the typed Vultr adapter. A GitHub-hosted runner is ephemeral, so process memory or a runner-local file cannot safely bind a provider resource across retry or restart.
 
-The ledger is intentionally specific to the JIT acceptance VM lifecycle. It is not a generic infrastructure-state platform.
+Item 19 uses a small append-only GitHub Deployment ledger as owner-controlled runtime state outside Git version control. It is specific to the single JIT acceptance VM lifecycle and is not a generic infrastructure-state platform.
 
-## Exact ledger identity
+## Exact lifecycle identity
 
-Each candidate has one immutable ownership intent:
+Each software candidate has one immutable acceptance ownership intent:
 
 ```text
 scope=acceptance
 intent=candidate:<exact full lowercase 40-character SHA>
 ```
 
-Deployment records use a fixed task and non-production environment identity. Every payload contains:
+Every durable deployment record contains the exact candidate SHA, static `project=mobile-proxy` / `managed-by=mobile-proxy` identity, acceptance scope, exact intent, predecessor deployment ID, generation and transition payload.
 
-- format version;
-- exact `project=mobile-proxy` and `managed-by=mobile-proxy` identity;
-- exact candidate SHA;
-- exact acceptance scope and intent ID;
-- predecessor deployment ID;
-- transition (`bind`, `replace`, or `clear`);
-- exact expected binding, when present;
-- exact replacement binding, when present.
+A bound resource contains only the provider-assigned canonical Vultr UUID and positive generation. VM name, label, IP address, provider list order and arbitrary caller-provided identifiers are never mutation authority.
 
-A binding contains only the provider-assigned canonical Vultr UUID and positive generation. Names, labels, IPs, provider list order and arbitrary caller-provided IDs are not reconstructed as authority.
+## Durable lifecycle state machine
 
-## Recovery and compare-and-swap
+The ledger reconstructs exactly one of these states:
 
-A runner restart reconstructs state by reading the complete bounded deployment ledger for the exact candidate and validating every record. The implementation rejects:
+1. `Empty` — this immutable intent has never begun a provider create attempt.
+2. `CreatePrepared { generation }` — create has been reserved durably but no provider POST is authorized yet.
+3. `CreateDispatched { generation }` — the one create dispatch has been durably fenced before the provider call.
+4. `Bound(binding)` — an exact provider UUID and generation have been verified and committed.
+5. `DeletePrepared(binding)` — exact deletion has been reserved after target verification.
+6. `DeleteDispatched(binding)` — delete dispatch has been durably fenced before the provider call.
+7. `Terminal { last_generation }` — provider deletion has been confirmed and the immutable intent is permanently closed.
 
-- a record whose GitHub `ref`/resolved SHA is not the exact candidate;
-- wrong task/environment/project/manager/scope/intent;
-- malformed or non-canonical provider UUIDs;
-- duplicate or non-linear predecessor chains;
-- a record whose `expected` value is not the reconstructed prior binding;
-- replacement that is not exactly generation `current + 1` with a new provider UUID;
-- a stale compare-and-swap expected value;
-- any record after terminal clear.
+The same `candidate:<sha>` intent cannot return from `Terminal` to generation 1.
 
-`clear` is terminal for an immutable candidate intent. The same `candidate:<sha>` intent cannot silently restart at generation 1 after cleanup. A later lifecycle therefore needs a distinct immutable ownership intent rather than erasing monotonic history.
+### Why create dispatch is fenced before HTTP
 
-The GitHub Deployment API is durable storage, not a standalone locking primitive. The live item-19 workflow must compose this store with one repository-wide acceptance-lifecycle `concurrency` group and `cancel-in-progress: false`. Within that serialized writer boundary, each transition performs exact read/compare/append/re-read verification. If an unexpected competing writer nevertheless creates a fork, reconstruction fails closed and no subsequent provider mutation is authorized.
+There is no documented Vultr create-instance idempotency contract that this project can rely on. Therefore an ambiguous `POST /v2/instances` transport outcome must never be followed by a blind second POST.
 
-This serialized-writer requirement is part of the concrete CAS design and must be present before the first live VM mutation.
+The coordinator must persist `CreateDispatched` **before** sending the create request. If the process or runner then disappears:
+
+- retry reconstructs `CreateDispatched` rather than seeing an apparently clean `None` binding;
+- the generic `VmBindingStore::load()` projection returns an in-progress error, so `plan_present(None, ...)` cannot silently authorize another create;
+- a second `mark_create_dispatched` call fails closed;
+- recovery re-enumerates provider state and may commit the provider-assigned UUID only when exactly one resource has the expected ownership intent/generation and exact desired specification;
+- zero resources after an ambiguous dispatched state is not permission to send another create automatically.
+
+This deliberately prefers a safe stuck state over duplicate paid infrastructure.
+
+### Delete recovery
+
+Delete is also fenced before HTTP. A retry reconstructs the exact binding and generation. It must re-list the provider, re-authorize the exact UUID/ownership/generation, and then either:
+
+- reissue delete only for that same verified UUID when it still exists; or
+- when provider absence is confirmed, CAS-clear to `Terminal`.
+
+Binding clear before provider-confirmed deletion is forbidden.
+
+## Compare-and-swap and fork handling
+
+GitHub Deployments provide durable append-only records; they are not themselves a lock primitive. Item 19 composes the ledger with one repository-wide acceptance-lifecycle GitHub Actions `concurrency` group using `cancel-in-progress: false`.
+
+Inside that serialized writer boundary, every transition performs:
+
+1. read and reconstruct the complete bounded ledger;
+2. compare exact predecessor state/generation/binding;
+3. append one transition record;
+4. re-read and verify that the new record is the unique head and produces the expected state.
+
+If an unexpected competing writer creates a non-linear predecessor chain, reconstruction fails closed as a fork before any subsequent provider mutation is authorized.
+
+The durable state therefore distinguishes never-created, in-progress, bound, deleting and terminal states instead of projecting all non-bound states to `None`.
+
+## Complete provider enumeration
+
+Mutation safety depends on seeing every relevant Vultr instance, not merely the first API page. The typed acceptance client requests the maximum supported page size (`per_page=500`), follows cursor pagination with a fixed page bound, rejects repeated/oversized cursors, and fails closed when pagination cannot prove a complete listing.
+
+Provider response bodies are read through a hard byte bound instead of being fully buffered before the size check.
+
+Every returned instance still passes through `VultrLifecycleAdapter` for canonical UUID parsing, exact ownership-tag decoding and specification fingerprinting.
 
 ## Typed Vultr execution boundary
 
-`VultrAcceptanceClient` is an HTTP executor for the existing typed `VultrLifecycleAdapter`; it does not reimplement ownership selection in workflow or shell. It:
+`VultrAcceptanceClient` is the concrete HTTP transport for item 19. It:
 
-- uses the adapter's typed list/create/delete request descriptors;
+- uses typed request descriptors from `VultrLifecycleAdapter`;
 - accepts `PlannedCreate` for create and `VerifiedMutationTarget` for destructive delete;
-- rejects production scope before HTTP mutation;
-- treats provider response bodies as bounded transport data and never includes them in error messages.
+- rejects production scope before mutation transport;
+- has no arbitrary endpoint passthrough;
+- performs bounded full instance enumeration;
+- emits bounded typed errors and never includes provider response bodies, tokens or credential-derived identifiers in errors.
 
-Slice A deliberately exposes no CLI command and no GitHub workflow invoking the client. Before a live create, the item-19 coordinator must still re-list provider state, use `plan_present`, verify the returned/re-listed exact ownership and specification, and CAS-persist the provider-assigned UUID before declaring success. Before delete, it must re-list and re-authorize the exact bound target, delete only that UUID, confirm provider absence, then CAS-clear the binding.
+Slice A exposes no CLI command and no GitHub workflow that invokes live mutation. The item-19 coordinator/workflow remains a later slice and must consume the durable state machine before a create/delete call is reachable.
 
 ## JIT readiness gate
 
-No acceptance VM is created merely because this store/client exists. The first live mutation additionally requires all of the following on the then-current protected `main` SHA:
+No acceptance VM is created merely because Slice A exists. Before the first live mutation on the then-current protected `main` SHA, all of the following are required:
 
-1. successful canonical Quality `push` and exact immutable release-candidate evidence;
-2. fresh immutable acceptance-authority evidence for that exact SHA;
-3. fresh Vultr read-only preflight for that exact SHA;
-4. a ready physical-phone acceptance window;
-5. the bounded item-19 workflow with serialized concurrency and exact lifecycle verification.
+1. successful canonical `Quality` push and exact immutable release-candidate evidence;
+2. fresh immutable `/accept-candidate <sha>` authority for that exact SHA;
+3. fresh `/vultr-readonly-preflight <sha>` evidence for that exact SHA;
+4. a ready physical-phone acceptance window under the canonical phone GitOps policy;
+5. the bounded item-19 workflow with serialized concurrency, durable dispatch fencing and exact lifecycle verification.
 
-Issue #115 currently blocks the physical window because Android signing continuity has not been recovered into the private GitHub execution boundary. No phone mutation, signing-key replacement shortcut or idle paid acceptance VM is permitted while that blocker remains.
+Issue #115 currently blocks the mutable physical-phone window because Android signing continuity has not been recovered into the private GitHub execution boundary. The fact that a particular physical test step may not install `apps/android-app` is not authority to bypass that fail-closed gate.
 
-`production-vultr`, final `v*` release creation, production promotion, GCP and manual provider/SSH control are outside this boundary.
+`production-vultr`, final `v*` release creation, production promotion, GCP and manual provider/SSH control are outside item 19 Slice A.
