@@ -2,6 +2,7 @@
   "contract_version": 1,
   "status": "protected",
   "project_authority_contract": "contracts/operations/project-authority-v1.json",
+  "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
   "source_repository": {
     "name": "iamaman11/mobile-proxy",
     "visibility": "public",
@@ -44,6 +45,19 @@
       "VULTR_SSH_PRIVATE_KEY"
     ],
     "executor": "github-hosted"
+  },
+  "acceptance_authority": {
+    "name": "vultr-pre-release-acceptance",
+    "workflow": ".github/workflows/acceptance-authority.yml",
+    "command_issue": 90,
+    "command": "/accept-candidate <full_sha>",
+    "allowed_identity": "full_40_char_git_sha",
+    "candidate_evidence": "successful_quality_push_on_main_plus_matching_release_candidate_artifact",
+    "executor": "github-hosted",
+    "environment": "none_in_item_16",
+    "final_production_authority": false,
+    "vultr_secret_access": "forbidden_in_item_16",
+    "vm_mutation": "forbidden_in_item_16"
   },
   "phone_control_repository": {
     "name": "iamaman11/mobile-proxy-production",
@@ -91,6 +105,8 @@
     "public_repository_phone_adb_workflow",
     "vultr_lifecycle_before_vm_ownership_contract_implementation",
     "manual_production_ssh_or_adb_as_standard_delivery_path",
-    "satellite_repository_as_project_source_of_truth"
+    "satellite_repository_as_project_source_of_truth",
+    "acceptance_authority_using_production_vultr_environment",
+    "acceptance_authority_using_final_release_tag"
   ]
 }
