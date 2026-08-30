@@ -106,14 +106,23 @@ class VmOwnershipContractTests(unittest.TestCase):
         )
         self.assertTrue(any("keep item 18 typed Vultr adapter" in error for error in errors))
 
-    def test_topology_cannot_enable_live_lifecycle_before_all_item19_gates(self):
+    def test_topology_cannot_forge_item19_terminal_live_proof(self):
         errors = self.validate_json_changed(
             "contracts/operations/production-topology-v1.json",
             lambda topology: topology["migration_status"].update(
                 {"vultr_live_lifecycle": "enabled"}
             ),
         )
-        self.assertTrue(any("live lifecycle must remain forbidden" in error for error in errors))
+        self.assertTrue(any("terminal item-19 live proof" in error for error in errors))
+
+    def test_topology_cannot_reuse_terminal_item19_intent_for_item20(self):
+        errors = self.validate_json_changed(
+            "contracts/operations/production-topology-v1.json",
+            lambda topology: topology["migration_status"].update(
+                {"next_acceptance_lifecycle": "reuse_item_19_intent"}
+            ),
+        )
+        self.assertTrue(any("fresh item-20 lifecycle intent" in error for error in errors))
 
     def test_control_plane_cannot_enable_item19_live_execution_early(self):
         errors = self.validate_json_changed(
