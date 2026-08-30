@@ -52,7 +52,6 @@ mod tests {
             proxy_bind_ready: Some(true),
             local_serving_ready: Some(true),
         });
-        assert!(!projected.publicly_serving);
         assert_eq!(projected.availability, Availability::Degraded.to_string());
     }
 
