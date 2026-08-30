@@ -21,9 +21,9 @@ pub use fingerprints::{
 };
 pub use provider_lifecycle::{
     DesiredVm, Generation, LifecycleError, LifecycleScope, LifecycleValueError, MutationKind,
-    ObservedVm, OwnershipIntent, OwnershipMetadata, OwnershipObservation, PlannedCreate,
-    ProviderResourceId, ReconcilePlan, VerifiedMutationTarget, VmBinding, VmBindingStore,
-    OWNERSHIP_MANAGER, OWNERSHIP_PROJECT, authorize_mutation, plan_present,
+    OWNERSHIP_MANAGER, OWNERSHIP_PROJECT, ObservedVm, OwnershipIntent, OwnershipMetadata,
+    OwnershipObservation, PlannedCreate, ProviderResourceId, ReconcilePlan, VerifiedMutationTarget,
+    VmBinding, VmBindingStore, authorize_mutation, plan_present,
 };
 pub use records::{
     DeviceList, DeviceRecord, HealthRecord, HeartbeatRequest, JobRecord, ProxyRuntimeRecord,
