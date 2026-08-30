@@ -686,12 +686,7 @@ mod tests {
     fn truly_absent_bound_uuid_is_reported_not_found() {
         let binding = binding();
         assert_eq!(
-            authorize_mutation(
-                &binding,
-                &[],
-                binding.generation,
-                MutationKind::Delete,
-            ),
+            authorize_mutation(&binding, &[], binding.generation, MutationKind::Delete,),
             Err(LifecycleError::ProviderResourceNotFound)
         );
     }
