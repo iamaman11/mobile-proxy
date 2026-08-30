@@ -16,7 +16,7 @@ from typing import Any
 
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _EXPECTED_REPOSITORY = "iamaman11/mobile-proxy"
-_EXPECTED_WORKFLOW = "Software Release Candidate"
+_EXPECTED_WORKFLOW = "Quality"
 _REQUIRED_SOFTWARE_CHECKS = {
     "architecture_boundaries",
     "native_reverse_tunnel_default",
