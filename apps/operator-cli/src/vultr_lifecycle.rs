@@ -80,9 +80,7 @@ impl fmt::Display for VultrAdapterError {
             Self::InvalidOwnershipMetadata => "Vultr ownership tags are invalid",
             Self::InvalidResponse => "Vultr response does not match the typed adapter contract",
             Self::Item18LiveMutationForbidden => "item 18 forbids live Vultr lifecycle execution",
-            Self::FinalProductionAuthorityForbidden => {
-                "item 18 forbids final production authority"
-            }
+            Self::FinalProductionAuthorityForbidden => "item 18 forbids final production authority",
         })
     }
 }
@@ -156,10 +154,7 @@ impl VultrLifecycleAdapter {
         }
     }
 
-    pub fn reconfigure_request(
-        target: &VerifiedMutationTarget,
-        label: &str,
-    ) -> VultrRequest {
+    pub fn reconfigure_request(target: &VerifiedMutationTarget, label: &str) -> VultrRequest {
         VultrRequest {
             method: VultrMethod::Patch,
             path: format!("/v2/instances/{}", target.provider_id().as_str()),
@@ -287,9 +282,7 @@ fn exact_tag_value<'a>(
     tags: &'a [String],
     prefix: &str,
 ) -> Result<Option<&'a str>, VultrAdapterError> {
-    let mut matches = tags
-        .iter()
-        .filter_map(|tag| tag.strip_prefix(prefix));
+    let mut matches = tags.iter().filter_map(|tag| tag.strip_prefix(prefix));
     let first = matches.next();
     if matches.next().is_some() {
         return Err(VultrAdapterError::InvalidOwnershipMetadata);
@@ -433,17 +426,11 @@ mod tests {
     #[test]
     fn item18_rejects_live_mutation_and_final_production_authority() {
         assert_eq!(
-            VultrLifecycleAdapter::enforce_item18_live_boundary(
-                LifecycleScope::Acceptance,
-                true
-            ),
+            VultrLifecycleAdapter::enforce_item18_live_boundary(LifecycleScope::Acceptance, true),
             Err(VultrAdapterError::Item18LiveMutationForbidden)
         );
         assert_eq!(
-            VultrLifecycleAdapter::enforce_item18_live_boundary(
-                LifecycleScope::Production,
-                false
-            ),
+            VultrLifecycleAdapter::enforce_item18_live_boundary(LifecycleScope::Production, false),
             Err(VultrAdapterError::FinalProductionAuthorityForbidden)
         );
         assert!(!ITEM18_LIVE_PROVIDER_MUTATION_ALLOWED);
@@ -461,10 +448,7 @@ mod tests {
         .unwrap();
         let binding = VmBinding {
             intent: intent(),
-            provider_id: ProviderResourceId::new(
-                "11111111-1111-4111-8111-111111111111",
-            )
-            .unwrap(),
+            provider_id: ProviderResourceId::new("11111111-1111-4111-8111-111111111111").unwrap(),
             generation,
         };
         assert_eq!(
