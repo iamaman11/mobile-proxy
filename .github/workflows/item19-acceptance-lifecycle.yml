@@ -1,0 +1,420 @@
+name: Item 19 acceptance lifecycle
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: item19-acceptance-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  admission:
+    name: Validate exact acceptance lifecycle authority
+    if: >-
+      github.event.issue.number == 124 &&
+      github.event.issue.pull_request == null &&
+      github.event.comment.user.login == github.repository_owner &&
+      startsWith(github.event.comment.body, '/item19-acceptance-ready ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
+      quality_run_id: ${{ steps.quality.outputs.run_id }}
+      acceptance_run_id: ${{ steps.acceptance.outputs.run_id }}
+      preflight_run_id: ${{ steps.preflight.outputs.run_id }}
+    steps:
+      - name: Validate trusted canonical control-plane ref
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "iamaman11/mobile-proxy" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$REF_PROTECTED" == "true" ]]
+
+      - name: Check out immutable control-plane logic
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Parse exact readiness candidate
+        id: candidate
+        shell: bash
+        env:
+          COMMAND_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          candidate_sha=$(python3 scripts/verify_item19_acceptance_lifecycle.py parse-command \
+            --body-env COMMAND_BODY)
+          printf 'sha=%s\n' "$candidate_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Select exact successful Quality push
+        id: quality
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?branch=main&event=push&status=success&head_sha=$CANDIDATE_SHA&per_page=100" \
+            > quality-runs.json
+          run_id=$(python3 scripts/verify_item19_acceptance_lifecycle.py select-quality-run \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --runs quality-runs.json \
+            --output selected-quality-run.json)
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact immutable release-candidate evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          QUALITY_RUN_ID: ${{ steps.quality.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir release-candidate-evidence
+          gh run download "$QUALITY_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "software-release-candidate-$CANDIDATE_SHA" \
+            --dir release-candidate-evidence
+          test -f release-candidate-evidence/release-candidate-evidence.json
+          test "$(find release-candidate-evidence -maxdepth 2 -type f | wc -l)" -eq 1
+
+      - name: Select fresh immutable acceptance authority
+        id: acceptance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/acceptance-authority.yml/runs?branch=main&event=issue_comment&status=success&head_sha=$CANDIDATE_SHA&per_page=100" \
+            > acceptance-runs.json
+          run_id=$(python3 scripts/verify_item19_acceptance_lifecycle.py select-acceptance-run \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --runs acceptance-runs.json \
+            --output selected-acceptance-run.json)
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact acceptance-authority evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          ACCEPTANCE_RUN_ID: ${{ steps.acceptance.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir acceptance-evidence
+          gh run download "$ACCEPTANCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "vultr-acceptance-authority-$CANDIDATE_SHA" \
+            --dir acceptance-evidence
+          test -f acceptance-evidence/acceptance-authority-evidence.json
+          test "$(find acceptance-evidence -maxdepth 2 -type f | wc -l)" -eq 1
+
+      - name: Select fresh immutable Vultr read-only preflight
+        id: preflight
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/vultr-readonly-preflight.yml/runs?branch=main&event=issue_comment&status=success&head_sha=$CANDIDATE_SHA&per_page=100" \
+            > preflight-runs.json
+          run_id=$(python3 scripts/verify_item19_acceptance_lifecycle.py select-preflight-run \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --runs preflight-runs.json \
+            --output selected-preflight-run.json)
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact read-only preflight evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          PREFLIGHT_RUN_ID: ${{ steps.preflight.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir preflight-evidence
+          gh run download "$PREFLIGHT_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "vultr-readonly-preflight-$CANDIDATE_SHA" \
+            --dir preflight-evidence
+          test -f preflight-evidence/vultr-readonly-preflight-evidence.json
+          test "$(find preflight-evidence -maxdepth 2 -type f | wc -l)" -eq 1
+
+      - name: Fetch current protected main and signing-continuity gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/branches/main" \
+            > current-main.json
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/issues/115" \
+            > signing-gate.json
+
+      - name: Verify ordered exact-current gate chain
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          COMMAND_COMMENT_ID: ${{ github.event.comment.id }}
+          COMMAND_CREATED_AT: ${{ github.event.comment.created_at }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_item19_acceptance_lifecycle.py verify-gates \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --main-branch current-main.json \
+            --quality-run selected-quality-run.json \
+            --candidate-evidence release-candidate-evidence/release-candidate-evidence.json \
+            --acceptance-run selected-acceptance-run.json \
+            --acceptance-evidence acceptance-evidence/acceptance-authority-evidence.json \
+            --preflight-run selected-preflight-run.json \
+            --preflight-evidence preflight-evidence/vultr-readonly-preflight-evidence.json \
+            --signing-issue signing-gate.json \
+            --output item19-admission-evidence.json
+          python3 -m json.tool item19-admission-evidence.json >/dev/null
+
+      - name: Upload bounded admission evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: item19-admission-${{ steps.candidate.outputs.sha }}
+          path: item19-admission-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record bounded admission result
+        shell: bash
+        run: |
+          {
+            echo '## Item 19 acceptance lifecycle admission'
+            echo "- Candidate SHA: ${{ steps.candidate.outputs.sha }}"
+            echo "- Quality run: ${{ steps.quality.outputs.run_id }}"
+            echo "- Acceptance authority run: ${{ steps.acceptance.outputs.run_id }}"
+            echo "- Read-only preflight run: ${{ steps.preflight.outputs.run_id }}"
+            echo '- Physical acceptance window: explicitly ready'
+            echo '- Signing continuity gate #115: closed'
+            echo '- Lifecycle scope: acceptance only'
+            echo '- Final production authority: false'
+            echo '- Phone mutation authorized: false'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-artifact:
+    name: Build exact candidate server artifact
+    needs: admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CANDIDATE_SHA: ${{ needs.admission.outputs.candidate_sha }}
+    steps:
+      - name: Check out exact accepted candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Assert immutable source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Build exact server and lifecycle binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked \
+            -p control-plane \
+            -p relay-gate \
+            -p reverse-tunnel-server \
+            -p operator-cli --bin item19-acceptance-lifecycle
+
+      - name: Assemble and seal bounded server artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p item19-server-artifact/bin
+          install -m 0755 target/release/control-plane item19-server-artifact/bin/control-plane
+          install -m 0755 target/release/relay-gate item19-server-artifact/bin/relay-gate
+          install -m 0755 target/release/reverse-tunnel-server item19-server-artifact/bin/reverse-tunnel-server
+          install -m 0755 target/release/item19-acceptance-lifecycle item19-server-artifact/bin/item19-acceptance-lifecycle
+          item19-server-artifact/bin/item19-acceptance-lifecycle prepare-artifact \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --root item19-server-artifact \
+            --manifest item19-server-artifact/manifest.json
+          item19-server-artifact/bin/item19-acceptance-lifecycle verify-artifact \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --root item19-server-artifact \
+            --manifest item19-server-artifact/manifest.json
+
+      - name: Upload exact candidate server artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: item19-server-${{ env.CANDIDATE_SHA }}
+          path: item19-server-artifact/
+          if-no-files-found: error
+          retention-days: 7
+
+  lifecycle-deploy:
+    name: Reconcile one acceptance VM and deploy exact candidate
+    needs:
+      - admission
+      - build-artifact
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: acceptance-vultr
+    env:
+      CANDIDATE_SHA: ${{ needs.admission.outputs.candidate_sha }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      VULTR_SSH_PRIVATE_KEY: ${{ secrets.VULTR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Download exact candidate server artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir item19-server-artifact
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "item19-server-$CANDIDATE_SHA" \
+            --dir item19-server-artifact
+          test -x item19-server-artifact/bin/item19-acceptance-lifecycle
+          test -f item19-server-artifact/manifest.json
+
+      - name: Download exact admission evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir admission-evidence
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "item19-admission-$CANDIDATE_SHA" \
+            --dir admission-evidence
+          test -f admission-evidence/item19-admission-evidence.json
+
+      - name: Materialize bounded acceptance SSH identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$VULTR_SSH_PRIVATE_KEY"
+          printf '%s\n' "$VULTR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/item19-vultr-ssh"
+          ssh-keygen -y -f "$RUNNER_TEMP/item19-vultr-ssh" >/dev/null
+
+      - name: Reconcile and deploy through typed acceptance lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          item19-server-artifact/bin/item19-acceptance-lifecycle reconcile-deploy \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --admission-evidence admission-evidence/item19-admission-evidence.json \
+            --artifact-root item19-server-artifact \
+            --manifest item19-server-artifact/manifest.json \
+            --ssh-private-key "$RUNNER_TEMP/item19-vultr-ssh" \
+            --evidence-output item19-deploy-evidence.json
+          python3 -m json.tool item19-deploy-evidence.json >/dev/null
+
+      - name: Upload bounded deployment evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: item19-deploy-${{ env.CANDIDATE_SHA }}
+          path: item19-deploy-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+  cleanup:
+    name: Deterministic exact-target acceptance cleanup
+    if: >-
+      always() &&
+      needs.admission.result == 'success' &&
+      needs.build-artifact.result == 'success'
+    needs:
+      - admission
+      - build-artifact
+      - lifecycle-deploy
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: acceptance-vultr
+    env:
+      CANDIDATE_SHA: ${{ needs.admission.outputs.candidate_sha }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+    steps:
+      - name: Download exact lifecycle binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir item19-server-artifact
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "item19-server-$CANDIDATE_SHA" \
+            --dir item19-server-artifact
+          test -x item19-server-artifact/bin/item19-acceptance-lifecycle
+
+      - name: Confirm deletion before terminal CAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          item19-server-artifact/bin/item19-acceptance-lifecycle cleanup \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --evidence-output item19-cleanup-evidence.json
+          python3 -m json.tool item19-cleanup-evidence.json >/dev/null
+
+      - name: Upload bounded cleanup evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: item19-cleanup-${{ env.CANDIDATE_SHA }}
+          path: item19-cleanup-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record bounded cleanup result
+        shell: bash
+        run: |
+          {
+            echo '## Item 19 deterministic cleanup'
+            echo "- Candidate SHA: $CANDIDATE_SHA"
+            echo '- Provider target: verified immutable UUID only'
+            echo '- Provider deletion confirmation required before terminal CAS'
+            echo '- Lifecycle scope: acceptance only'
+            echo '- Neighboring resources: not mutation targets'
+            echo '- production-vultr: not authorized'
+            echo '- Phone mutation: not performed'
+          } >> "$GITHUB_STEP_SUMMARY"
