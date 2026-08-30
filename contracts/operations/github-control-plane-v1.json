@@ -51,7 +51,8 @@
     "authority": "execution_only",
     "canonical_source": "iamaman11/mobile-proxy",
     "control_issue": 1,
-    "preferred_logic_source": "canonical_reusable_workflow_or_verified_release_artifact",
+    "preferred_logic_source": "canonical_public_logic_pinned_to_immutable_sha_or_verified_release_artifact",
+    "required_device_binding_secret": "ANDROID_PRODUCTION_SERIAL",
     "required_runner_labels": [
       "self-hosted",
       "Linux",
@@ -75,7 +76,7 @@
   "release_immutability": "not_enabled_until_draft_asset_checksum_sbom_attestation_publish_order_is_implemented",
   "runtime_verification": {
     "vultr_secret_access": "pending_actions_preflight",
-    "android_runner_and_device": "pending_private_actions_preflight"
+    "android_runner_and_device": "private_runner_reachable_registered_device_binding_missing"
   },
   "forbidden": [
     "public_repository_self_hosted_runner",
