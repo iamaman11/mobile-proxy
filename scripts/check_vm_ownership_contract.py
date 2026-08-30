@@ -9,23 +9,43 @@ from pathlib import Path
 
 CONTRACT_PATH = Path("contracts/governance/vm-ownership-v1.json")
 DOCUMENT_PATH = Path("docs/architecture/vm-ownership-boundary.md")
-REQUIRED_TAGS = {"project": "mobile-proxy", "managed-by": "mobile-proxy"}
-REQUIRED_OPERATIONS = {"create", "manage", "snapshot", "delete", "recreate"}
+PROVIDER_POLICY_PATH = Path("crates/proxy-core/src/provider_lifecycle.rs")
+VULTR_ADAPTER_PATH = Path("apps/operator-cli/src/vultr_lifecycle.rs")
+REQUIRED_STATIC_METADATA = {"project": "mobile-proxy", "managed-by": "mobile-proxy"}
+REQUIRED_BINDING_FIELDS = ["scope", "intent", "generation"]
+REQUIRED_OPERATIONS = {
+    "create",
+    "manage",
+    "stop",
+    "reconfigure",
+    "snapshot",
+    "delete",
+    "replace",
+}
 REQUIRED_FAILURES = {
     "missing_binding",
     "invalid_binding",
     "provider_instance_not_found",
-    "uuid_mismatch",
-    "required_tag_missing",
-    "required_tag_mismatch",
+    "provider_identity_mismatch",
+    "missing_ownership_metadata",
+    "ownership_metadata_mismatch",
+    "conflicting_ownership_metadata",
+    "ambiguous_resource_set",
+    "duplicate_ownership_claim",
+    "neighbouring_or_unbound_resource",
+    "stale_generation",
     "binding_compare_and_swap_conflict",
 }
 FORBIDDEN_BEHAVIOURS = {
     "arbitrary_instance_uuid_from_operator_input",
     "first_matching_instance_selection",
-    "label_or_name_as_authority",
-    "operation_after_identity_or_tag_verification_failure",
+    "label_name_or_ip_as_authority",
+    "fuzzy_or_prefix_ownership_matching",
+    "mutation_without_expected_generation",
+    "operation_after_identity_ownership_or_generation_verification_failure",
     "unverified_binding_replacement",
+    "item_18_live_provider_mutation",
+    "item_18_final_production_authority",
 }
 
 
@@ -33,10 +53,16 @@ def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     contract_path = root / CONTRACT_PATH
     document_path = root / DOCUMENT_PATH
+    provider_policy_path = root / PROVIDER_POLICY_PATH
+    vultr_adapter_path = root / VULTR_ADAPTER_PATH
     if not contract_path.is_file():
         return [f"missing VM ownership contract: {CONTRACT_PATH}"]
     if not document_path.is_file():
         return [f"missing VM ownership architecture document: {DOCUMENT_PATH}"]
+    if not provider_policy_path.is_file():
+        errors.append(f"missing provider-neutral lifecycle policy: {PROVIDER_POLICY_PATH}")
+    if not vultr_adapter_path.is_file():
+        errors.append(f"missing typed Vultr adapter: {VULTR_ADAPTER_PATH}")
     try:
         contract = json.loads(contract_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
@@ -49,66 +75,162 @@ def check_repository(root: Path) -> list[str]:
         errors.append("VM ownership contract status must be protected")
     if contract.get("owner") != "operator-cli":
         errors.append("VM ownership contract owner must be operator-cli")
-    if contract.get("required_tags") != REQUIRED_TAGS:
-        errors.append("VM ownership required_tags must be the exact mobile-proxy ownership tags")
+
+    implementation = contract.get("implementation")
+    expected_implementation = {
+        "provider_neutral_policy": str(PROVIDER_POLICY_PATH),
+        "vultr_adapter": str(VULTR_ADAPTER_PATH),
+        "live_execution": "forbidden_in_item_18",
+        "first_live_vm_creation_item": 19,
+    }
+    if implementation != expected_implementation:
+        errors.append("VM ownership implementation boundary differs from item-18 policy")
+
     binding = contract.get("binding")
     if not isinstance(binding, dict):
         errors.append("VM ownership binding must be an object")
-    elif binding.get("identity") != "provider-assigned immutable instance UUID":
-        errors.append("VM ownership binding must use a provider-assigned immutable instance UUID")
+    else:
+        if binding.get("identity") != "provider-assigned immutable instance UUID/ID":
+            errors.append("VM ownership binding must use provider-assigned immutable identity")
+        if binding.get("ownership_intent") != "exact immutable lifecycle scope plus exact intent ID":
+            errors.append("VM ownership binding must include exact immutable ownership intent")
+        if "generation" not in binding or "compare_and_swap" not in binding:
+            errors.append("VM ownership binding must define generation and compare-and-swap fencing")
+
+    ownership = contract.get("required_ownership_metadata")
+    if not isinstance(ownership, dict):
+        errors.append("VM ownership metadata contract must be an object")
+    else:
+        if ownership.get("static") != REQUIRED_STATIC_METADATA:
+            errors.append("VM ownership static metadata differs from exact mobile-proxy identity")
+        if ownership.get("binding_fields") != REQUIRED_BINDING_FIELDS:
+            errors.append("VM ownership binding metadata must be exact scope, intent and generation")
+        if ownership.get("matching") != "exact_only":
+            errors.append("VM ownership metadata matching must be exact-only")
 
     operations = contract.get("operations")
     if not isinstance(operations, dict) or set(operations) != REQUIRED_OPERATIONS:
-        errors.append("VM ownership operations must contain exactly create, manage, snapshot, delete and recreate")
+        errors.append("VM ownership operations must contain the exact typed lifecycle operation set")
         operations = {}
-    for operation in ("manage", "snapshot", "delete"):
-        rule = operations.get(operation)
-        if not isinstance(rule, dict) or not all(
-            rule.get(field) is True
-            for field in ("requires_persisted_binding", "requires_exact_uuid", "requires_exact_required_tags")
-        ):
-            errors.append(f"VM ownership {operation} must require binding, exact UUID and exact tags")
+
     create = operations.get("create")
     if not isinstance(create, dict) or not all(
         create.get(field) is True
         for field in (
-            "provider_request_must_set_required_tags",
-            "provider_response_must_match_required_tags",
-            "persist_binding_before_success",
+            "requires_no_existing_binding",
+            "requires_zero_ownership_compatible_resources",
+            "provider_request_must_set_exact_ownership_metadata",
+            "provider_response_must_match_exact_ownership_metadata",
+            "persist_binding_with_compare_and_swap_before_success",
         )
     ):
-        errors.append("VM ownership create must tag, verify and persist before success")
+        errors.append("VM ownership create must be unbound, unique, exactly owned and CAS-persisted")
+
+    for operation in ("manage", "stop", "reconfigure", "snapshot", "delete", "replace"):
+        rule = operations.get(operation)
+        if not isinstance(rule, dict) or not all(
+            rule.get(field) is True
+            for field in (
+                "requires_persisted_binding",
+                "requires_exact_provider_identity",
+                "requires_exact_ownership_metadata",
+                "requires_expected_generation",
+            )
+        ):
+            errors.append(
+                f"VM ownership {operation} must require binding, exact provider identity, exact ownership and generation"
+            )
+
     delete = operations.get("delete")
-    if not isinstance(delete, dict) or delete.get("clear_binding_only_after_provider_confirms_delete") is not True:
-        errors.append("VM ownership delete must retain binding until provider deletion succeeds")
-    recreate = operations.get("recreate")
-    if not isinstance(recreate, dict) or not all(
-        recreate.get(field) is True
+    if not isinstance(delete, dict) or not all(
+        delete.get(field) is True
         for field in (
-            "provider_request_must_set_required_tags",
-            "provider_response_must_match_required_tags",
-            "atomically_replace_uuid_and_generation_after_verification",
+            "clear_binding_only_after_provider_confirms_delete",
+            "clear_binding_requires_compare_and_swap",
         )
     ):
-        errors.append("VM ownership recreate must verify tags and atomically replace the binding")
+        errors.append("VM ownership delete must retain and CAS-clear the binding after provider confirmation")
+
+    replace = operations.get("replace")
+    if not isinstance(replace, dict) or not all(
+        replace.get(field) is True
+        for field in (
+            "replacement_generation_must_be_exactly_current_plus_one",
+            "replacement_must_be_verified_before_binding_swap",
+            "atomically_replace_provider_identity_and_generation_with_compare_and_swap",
+        )
+    ):
+        errors.append("VM ownership replace must advance exactly one generation and CAS the verified identity")
 
     failures = contract.get("fail_closed")
     if not isinstance(failures, list) or set(failures) != REQUIRED_FAILURES:
-        errors.append("VM ownership fail_closed set differs from the required fail-closed failures")
+        errors.append("VM ownership fail_closed set differs from the required item-18 failures")
     forbidden = contract.get("forbidden")
     if not isinstance(forbidden, list) or set(forbidden) != FORBIDDEN_BEHAVIOURS:
-        errors.append("VM ownership forbidden set differs from the required forbidden behaviours")
+        errors.append("VM ownership forbidden set differs from the required item-18 behaviours")
+
+    item_18 = contract.get("item_18_execution")
+    if item_18 != {
+        "allowed": "contract_policy_adapter_and_non_mutating_tests_only",
+        "live_provider_mutation": False,
+        "real_vm_creation": False,
+        "production_vultr_authority": False,
+        "phone_mutation": False,
+    }:
+        errors.append("item 18 execution boundary must remain non-mutating and non-production")
+
     if not isinstance(contract.get("activation_condition"), str) or not contract["activation_condition"]:
         errors.append("VM ownership contract requires a non-empty activation_condition")
 
     document = document_path.read_text(encoding="utf-8")
     for required in (
-        "provider-assigned immutable VM UUID",
-        "project=mobile-proxy",
-        "managed-by=mobile-proxy",
+        "provider-assigned immutable VM UUID/ID",
+        "scope",
+        "intent",
+        "generation",
+        "compare-and-swap",
         "fail closed",
-        "atomically replace UUID and generation",
+        "item 19",
     ):
         if required not in document:
             errors.append(f"VM ownership architecture document is missing {required!r}")
+
+    if provider_policy_path.is_file():
+        policy = provider_policy_path.read_text(encoding="utf-8")
+        for required in (
+            "ProviderResourceId",
+            "OwnershipIntent",
+            "Generation",
+            "VmBindingStore",
+            "compare_and_swap",
+            "VerifiedMutationTarget",
+            "DuplicateOwnershipClaim",
+            "NeighboringOrUnboundResource",
+            "StaleGeneration",
+        ):
+            if required not in policy:
+                errors.append(f"provider-neutral lifecycle policy is missing {required!r}")
+
+    if vultr_adapter_path.is_file():
+        adapter = vultr_adapter_path.read_text(encoding="utf-8")
+        for required in (
+            "Uuid::parse_str",
+            "mobile-proxy:scope=",
+            "mobile-proxy:intent=",
+            "mobile-proxy:generation=",
+            "VerifiedMutationTarget",
+            "PlannedCreate",
+            "ITEM18_LIVE_PROVIDER_MUTATION_ALLOWED: bool = false",
+            "ITEM18_FINAL_PRODUCTION_AUTHORITY_ALLOWED: bool = false",
+        ):
+            if required not in adapter:
+                errors.append(f"typed Vultr adapter is missing {required!r}")
+        forbidden_adapter_tokens = (
+            "std::env::var(\"VULTR_API_KEY\")",
+            "environment: production-vultr",
+            "Command::Vultr",
+        )
+        for token in forbidden_adapter_tokens:
+            if token in adapter:
+                errors.append(f"item-18 Vultr adapter exposes forbidden live authority token {token!r}")
     return errors
