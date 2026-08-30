@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-08-30",
-  "baseline_main_sha": "213b25a5b8bc82752e32e28ae48ee85ff808613a",
+  "baseline_main_sha": "08bd5faa04a9f59cd248651e52570b2301f37c61",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -46,6 +46,11 @@
       "path": ".github/workflows/quality.yml",
       "job": "rust",
       "step": "Run complete workspace tests"
+    },
+    "RQ-RC": {
+      "path": ".github/workflows/quality.yml",
+      "job": "release-candidate-evidence",
+      "step": "Write immutable candidate evidence"
     }
   },
   "columns": [
@@ -547,7 +552,7 @@
       ],
       "",
       "",
-      "Import validates legacy state before write, rehydrates canonical SQLite for parity/diagnostic output, the production daemon is SQLite-only, and rollback-export round-trips latest state through the previous-release JSON contract in process acceptance.",
+      "Import validates legacy JSON before write, rehydrates canonical SQLite for parity/diagnostic output, the production daemon is SQLite-only, and rollback-export round-trips latest state through the previous-release JSON contract in process acceptance.",
       ""
     ],
     [
@@ -1314,13 +1319,21 @@
       "P",
       "§10",
       "Acceptance and release evidence identifies one immutable Git SHA and required compatibility state",
-      "planned",
+      "enforced",
       "operations",
-      [],
-      [],
-      "immutable-sha-acceptance-metadata",
+      [
+        ".github/workflows/quality.yml",
+        "scripts/write_release_candidate_evidence.py",
+        "scripts/tests/test_release_candidate_evidence.py",
+        "scripts/tests/test_git_delivery_workflows.py",
+        "docs/phase-d-software-release-candidate-closeout.md"
+      ],
+      [
+        "RQ-RC"
+      ],
       "",
       "",
+      "The aggregate Quality workflow binds every full code-gated candidate to exact CANDIDATE_SHA and emits software-release-candidate-<sha> only after policy, Rust, supply-chain and Android acceptance succeeds. The evidence writer rejects mismatched or dirty checkouts and records bounded runtime/rollback compatibility state with physical_phone_acceptance_required=true and baseline_complete=false; merge-group and documentation-only paths cannot mint a retained software candidate.",
       ""
     ],
     [
