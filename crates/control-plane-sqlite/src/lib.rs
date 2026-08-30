@@ -1,3 +1,4 @@
+mod integrity;
 mod legacy_json_import;
 mod snapshot_compare_and_swap;
 mod snapshot_error;
@@ -88,6 +89,7 @@ pub enum StoreError {
     UnexpectedJournalMode,
     UnexpectedForeignKeyState,
     UnexpectedSchema,
+    IntegrityCheckFailed,
 }
 
 impl Display for StoreError {
@@ -109,6 +111,7 @@ impl Display for StoreError {
             Self::UnexpectedSchema => {
                 formatter.write_str("SQLite schema does not match the supported baseline inventory")
             }
+            Self::IntegrityCheckFailed => formatter.write_str("SQLite integrity check failed"),
         }
     }
 }
@@ -122,7 +125,8 @@ impl Error for StoreError {
             | Self::UnsupportedSchemaVersion { .. }
             | Self::UnexpectedJournalMode
             | Self::UnexpectedForeignKeyState
-            | Self::UnexpectedSchema => None,
+            | Self::UnexpectedSchema
+            | Self::IntegrityCheckFailed => None,
         }
     }
 }
@@ -176,6 +180,7 @@ impl SqliteStore {
         configure_connection(&connection, require_wal)?;
         apply_migrations(&mut connection)?;
         validate_schema(&connection)?;
+        integrity::validate_integrity(&connection)?;
         Ok(Self { connection })
     }
 
@@ -188,6 +193,7 @@ impl SqliteStore {
             });
         }
         validate_schema(&connection)?;
+        integrity::validate_integrity(&connection)?;
         configure_connection(&connection, require_wal)?;
         Ok(Self { connection })
     }

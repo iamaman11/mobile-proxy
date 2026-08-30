@@ -22,4 +22,5 @@ subtle.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
+rusqlite.workspace = true
 tower = { version = "0.5", features = ["util"] }
