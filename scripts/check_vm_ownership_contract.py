@@ -11,6 +11,8 @@ CONTRACT_PATH = Path("contracts/governance/vm-ownership-v1.json")
 DOCUMENT_PATH = Path("docs/architecture/vm-ownership-boundary.md")
 PROVIDER_POLICY_PATH = Path("crates/proxy-core/src/provider_lifecycle.rs")
 VULTR_ADAPTER_PATH = Path("apps/operator-cli/src/vultr_lifecycle.rs")
+TOPOLOGY_PATH = Path("contracts/operations/production-topology-v1.json")
+GITHUB_CONTROL_PLANE_PATH = Path("contracts/operations/github-control-plane-v1.json")
 REQUIRED_STATIC_METADATA = {"project": "mobile-proxy", "managed-by": "mobile-proxy"}
 REQUIRED_BINDING_FIELDS = ["scope", "intent", "generation"]
 REQUIRED_OPERATIONS = {
@@ -47,6 +49,29 @@ FORBIDDEN_BEHAVIOURS = {
     "item_18_live_provider_mutation",
     "item_18_final_production_authority",
 }
+EXPECTED_ADAPTER_STATUS = {
+    "status": "implemented_non_mutating_item_18",
+    "provider_neutral_policy": str(PROVIDER_POLICY_PATH),
+    "provider_adapter": str(VULTR_ADAPTER_PATH),
+    "ownership_contract": str(CONTRACT_PATH),
+    "provider_identity": "typed_provider_assigned_immutable_uuid_id",
+    "ownership_matching": "exact_project_manager_scope_intent_generation",
+    "generation_cas": "required",
+    "idempotent_reconcile": "required",
+    "live_execution": "forbidden_until_item_19",
+    "first_live_vm_creation_item": 19,
+    "production_vultr_authority": False,
+}
+
+
+def _load_json(root: Path, path: Path, label: str) -> tuple[dict | None, str | None]:
+    try:
+        value = json.loads((root / path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return None, f"cannot load {label}: {error}"
+    if not isinstance(value, dict):
+        return None, f"{label} root must be an object"
+    return value, None
 
 
 def check_repository(root: Path) -> list[str]:
@@ -63,12 +88,19 @@ def check_repository(root: Path) -> list[str]:
         errors.append(f"missing provider-neutral lifecycle policy: {PROVIDER_POLICY_PATH}")
     if not vultr_adapter_path.is_file():
         errors.append(f"missing typed Vultr adapter: {VULTR_ADAPTER_PATH}")
-    try:
-        contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        return [f"cannot parse VM ownership contract: {error}"]
-    if not isinstance(contract, dict):
-        return ["VM ownership contract root must be an object"]
+
+    contract, load_error = _load_json(root, CONTRACT_PATH, "VM ownership contract")
+    if load_error:
+        return [load_error]
+    assert contract is not None
+
+    topology, topology_error = _load_json(root, TOPOLOGY_PATH, "production topology contract")
+    if topology_error:
+        errors.append(topology_error)
+    github, github_error = _load_json(root, GITHUB_CONTROL_PLANE_PATH, "GitHub control-plane contract")
+    if github_error:
+        errors.append(github_error)
+
     if contract.get("contract_version") != 1:
         errors.append("VM ownership contract_version must be 1")
     if contract.get("status") != "protected":
@@ -182,6 +214,38 @@ def check_repository(root: Path) -> list[str]:
     if not isinstance(contract.get("activation_condition"), str) or not contract["activation_condition"]:
         errors.append("VM ownership contract requires a non-empty activation_condition")
 
+    if topology is not None:
+        migration = topology.get("migration_status")
+        if not isinstance(migration, dict):
+            errors.append("production topology migration_status must be an object")
+        else:
+            if migration.get("vultr_adapter") != (
+                "implemented_typed_provider_neutral_ownership_and_generation_cas_non_mutating_item18"
+            ):
+                errors.append("production topology must keep item 18 Vultr adapter in implemented state")
+            if migration.get("vultr_live_lifecycle") != "forbidden_until_item_19":
+                errors.append("production topology must keep live Vultr lifecycle forbidden until item 19")
+
+    if github is not None:
+        if github.get("vm_ownership_contract") != str(CONTRACT_PATH):
+            errors.append("GitHub control plane must bind the VM ownership contract")
+        if github.get("vultr_lifecycle_adapter") != EXPECTED_ADAPTER_STATUS:
+            errors.append("GitHub control plane item-18 Vultr lifecycle adapter status differs from protected state")
+        acceptance = github.get("acceptance_vultr_environment")
+        if not isinstance(acceptance, dict) or any(
+            acceptance.get(key) != value
+            for key, value in {
+                "name": "acceptance-vultr",
+                "authority": "pre_release_acceptance_read_only",
+                "allowed_provider_api": "GET /v2/account only",
+                "vm_lifecycle": "forbidden",
+                "provider_mutation": "forbidden",
+                "final_production_authority": False,
+                "executor": "github-hosted",
+            }.items()
+        ):
+            errors.append("item 18 must preserve the item-17 acceptance-vultr read-only boundary")
+
     document = document_path.read_text(encoding="utf-8")
     for required in (
         "provider-assigned immutable VM UUID/ID",
@@ -234,3 +298,14 @@ def check_repository(root: Path) -> list[str]:
             if token in adapter:
                 errors.append(f"item-18 Vultr adapter exposes forbidden live authority token {token!r}")
     return errors
+
+
+def main() -> int:
+    errors = check_repository(Path(__file__).resolve().parents[1])
+    for error in errors:
+        print(error)
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
