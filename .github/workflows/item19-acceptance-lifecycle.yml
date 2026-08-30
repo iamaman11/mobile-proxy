@@ -247,7 +247,8 @@ jobs:
           cargo build --release --locked \
             -p control-plane \
             -p relay-gate \
-            -p reverse-tunnel-server \
+            -p reverse-tunnel-server
+          cargo build --release --locked \
             -p operator-cli --bin item19-acceptance-lifecycle
 
       - name: Assemble and seal bounded server artifact
