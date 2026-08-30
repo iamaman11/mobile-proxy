@@ -1,0 +1,32 @@
+name: Item19 mark PR ready workaround
+
+on:
+  push:
+    branches:
+      - item19-binding-store-vultr-executor
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  mark-ready:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Mark exact PR ready for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          current="$(gh api repos/${GITHUB_REPOSITORY}/pulls/125 --jq .head.sha)"
+          draft="$(gh api repos/${GITHUB_REPOSITORY}/pulls/125 --jq .draft)"
+          test "$current" = "$EXPECTED_HEAD"
+          test "$draft" = "true"
+          pr_id="$(gh api repos/${GITHUB_REPOSITORY}/pulls/125 --jq .node_id)"
+          result="$(gh api graphql \
+            -f query='mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft headRefOid number}}}' \
+            -F id="$pr_id")"
+          test "$(jq -r '.data.markPullRequestReadyForReview.pullRequest.isDraft' <<<"$result")" = "false"
+          test "$(jq -r '.data.markPullRequestReadyForReview.pullRequest.headRefOid' <<<"$result")" = "$EXPECTED_HEAD"
+          test "$(jq -r '.data.markPullRequestReadyForReview.pullRequest.number' <<<"$result")" = "125"
