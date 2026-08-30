@@ -293,7 +293,8 @@ fn collect_artifact_files(root: &Path, directory: &Path, files: &mut Vec<String>
     for entry in fs::read_dir(directory).context("cannot enumerate item 19 artifact")? {
         let entry = entry.context("cannot enumerate item 19 artifact entry")?;
         let path = entry.path();
-        let metadata = fs::symlink_metadata(&path).context("cannot inspect item 19 artifact entry")?;
+        let metadata =
+            fs::symlink_metadata(&path).context("cannot inspect item 19 artifact entry")?;
         if metadata.file_type().is_symlink() {
             bail!("item 19 artifact must not contain symlinks");
         }
@@ -336,15 +337,16 @@ fn prepare_artifact(candidate_sha: &str, root: &Path, manifest: &Path) -> Result
 fn verify_artifact(candidate_sha: &str, root: &Path, manifest: &Path) -> Result<()> {
     validate_candidate_sha(candidate_sha)?;
     validate_manifest_location(root, manifest)?;
-    let metadata = fs::symlink_metadata(manifest).context("item 19 artifact manifest is missing")?;
+    let metadata =
+        fs::symlink_metadata(manifest).context("item 19 artifact manifest is missing")?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         bail!("item 19 artifact manifest must be a regular file");
     }
     if metadata.len() == 0 || metadata.len() > MAX_JSON_BYTES {
         bail!("item 19 artifact manifest size is invalid");
     }
-    let artifact: ArtifactManifest =
-        serde_json::from_slice(&fs::read(manifest)?).context("invalid item 19 artifact manifest")?;
+    let artifact: ArtifactManifest = serde_json::from_slice(&fs::read(manifest)?)
+        .context("invalid item 19 artifact manifest")?;
     if artifact.format_version != MANIFEST_FORMAT_VERSION
         || artifact.candidate_sha != candidate_sha
         || artifact.digest_domain != ARTIFACT_DIGEST_DOMAIN.as_str()
@@ -551,12 +553,7 @@ fn ensure_bound(
         )),
         AcceptanceVmLifecycleState::Bound(binding) => {
             let observed = client.list_instances()?;
-            match plan_present(
-                Some(&binding),
-                &observed,
-                desired,
-                Some(binding.generation),
-            )? {
+            match plan_present(Some(&binding), &observed, desired, Some(binding.generation))? {
                 ReconcilePlan::Noop(_) => Ok((binding, BindOrigin::Existing)),
                 ReconcilePlan::Reconfigure(_) => {
                     bail!(
@@ -584,12 +581,7 @@ fn verified_bound_target(
     binding: &VmBinding,
 ) -> Result<VerifiedMutationTarget> {
     let observed = client.list_instances()?;
-    match plan_present(
-        Some(binding),
-        &observed,
-        desired,
-        Some(binding.generation),
-    )? {
+    match plan_present(Some(binding), &observed, desired, Some(binding.generation))? {
         ReconcilePlan::Noop(target) => Ok(target),
         ReconcilePlan::Reconfigure(_) => {
             bail!("acceptance VM specification drifted before transport resolution")
@@ -741,10 +733,8 @@ fn reconcile_deploy(
     let cloud_init = build_cloud_init(&public_key);
     let user_data_b64 = STANDARD.encode(cloud_init.as_bytes());
     let desired = acceptance_desired(candidate_sha)?;
-    let mut store = DurableGitHubVmBindingStore::new(
-        required_env("GITHUB_TOKEN")?,
-        candidate_sha.to_owned(),
-    )?;
+    let mut store =
+        DurableGitHubVmBindingStore::new(required_env("GITHUB_TOKEN")?, candidate_sha.to_owned())?;
     let client = VultrAcceptanceClient::new(required_env("VULTR_API_KEY")?)?;
     let (binding, origin) = ensure_bound(&mut store, &client, &desired, &user_data_b64)?;
     let target = verified_bound_target(&client, &desired, &binding)?;
@@ -785,24 +775,14 @@ fn resolve_delete_target(
     binding: &VmBinding,
 ) -> Result<VerifiedMutationTarget> {
     let observed = client.list_instances()?;
-    authorize_mutation(
-        binding,
-        &observed,
-        binding.generation,
-        MutationKind::Delete,
-    )
-    .map_err(Into::into)
+    authorize_mutation(binding, &observed, binding.generation, MutationKind::Delete)
+        .map_err(Into::into)
 }
 
 fn confirm_provider_deleted(client: &VultrAcceptanceClient, binding: &VmBinding) -> Result<()> {
     for _ in 0..DELETE_CONFIRM_ATTEMPTS {
         let observed = client.list_instances()?;
-        match authorize_mutation(
-            binding,
-            &observed,
-            binding.generation,
-            MutationKind::Delete,
-        ) {
+        match authorize_mutation(binding, &observed, binding.generation, MutationKind::Delete) {
             Err(LifecycleError::ProviderResourceNotFound) => return Ok(()),
             Ok(_) => thread::sleep(DELETE_CONFIRM_DELAY),
             Err(error) => return Err(error.into()),
@@ -811,10 +791,7 @@ fn confirm_provider_deleted(client: &VultrAcceptanceClient, binding: &VmBinding)
     bail!("exact acceptance VM deletion was not confirmed within bounded window")
 }
 
-fn terminal_matches(
-    store: &DurableGitHubVmBindingStore,
-    binding: &VmBinding,
-) -> Result<bool> {
+fn terminal_matches(store: &DurableGitHubVmBindingStore, binding: &VmBinding) -> Result<bool> {
     Ok(matches!(
         store.lifecycle_state(&binding.intent)?,
         AcceptanceVmLifecycleState::Terminal { last_generation }
@@ -851,12 +828,7 @@ fn recover_dispatched_delete(
     binding: &VmBinding,
 ) -> Result<()> {
     let observed = client.list_instances()?;
-    match authorize_mutation(
-        binding,
-        &observed,
-        binding.generation,
-        MutationKind::Delete,
-    ) {
+    match authorize_mutation(binding, &observed, binding.generation, MutationKind::Delete) {
         Err(LifecycleError::ProviderResourceNotFound) => {
             store.compare_and_swap(&binding.intent, Some(binding), None)?;
         }
@@ -876,10 +848,8 @@ fn recover_dispatched_delete(
 fn cleanup(candidate_sha: &str, evidence_output: &Path) -> Result<()> {
     validate_candidate_sha(candidate_sha)?;
     let desired = acceptance_desired(candidate_sha)?;
-    let mut store = DurableGitHubVmBindingStore::new(
-        required_env("GITHUB_TOKEN")?,
-        candidate_sha.to_owned(),
-    )?;
+    let mut store =
+        DurableGitHubVmBindingStore::new(required_env("GITHUB_TOKEN")?, candidate_sha.to_owned())?;
     let client = VultrAcceptanceClient::new(required_env("VULTR_API_KEY")?)?;
     let mut delete_dispatched = false;
     let mut deletion_confirmed = false;
