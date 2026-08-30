@@ -145,6 +145,13 @@ def check_repository(root: Path) -> list[str]:
             "android-production",
         ]:
             errors.append("phone runner labels differ from the contract")
+        if isinstance(phone, dict):
+            if phone.get("preferred_logic_source") != (
+                "canonical_public_logic_pinned_to_immutable_sha_or_verified_release_artifact"
+            ):
+                errors.append("phone execution logic source is not immutable and canonical")
+            if phone.get("required_device_binding_secret") != "ANDROID_PRODUCTION_SERIAL":
+                errors.append("phone registered-device binding differs from the contract")
 
     if topology:
         project_authority = topology.get("project_authority")
@@ -163,6 +170,9 @@ def check_repository(root: Path) -> list[str]:
                 "vultr": "GitHub-hosted runner in production-vultr",
                 "phone": (
                     "private-repository caller context with android-production self-hosted runner"
+                ),
+                "phone_logic": (
+                    "canonical public logic pinned to immutable SHA or verified canonical release artifact"
                 ),
             }.items()
         ):
