@@ -21,6 +21,20 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn("Production deployment is blocked", deployment)
         self.assertNotIn("self-hosted", deployment)
 
+    def test_quality_gate_owns_immutable_release_candidate_evidence(self) -> None:
+        quality = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
+
+        self.assertFalse(
+            (ROOT / ".github/workflows/software-release-candidate.yml").exists()
+        )
+        self.assertIn("release-candidate-evidence:", quality)
+        self.assertIn("Immutable release-candidate evidence", quality)
+        self.assertIn("github.event_name != 'merge_group'", quality)
+        self.assertIn("scripts/write_release_candidate_evidence.py", quality)
+        self.assertIn("software-release-candidate-${{ env.CANDIDATE_SHA }}", quality)
+        self.assertIn("release_candidate=$RELEASE_CANDIDATE_RESULT", quality)
+        self.assertIn("test \"$RELEASE_CANDIDATE_RESULT\" = success", quality)
+
 
 if __name__ == "__main__":
     unittest.main()

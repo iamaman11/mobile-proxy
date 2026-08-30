@@ -134,6 +134,42 @@ jobs:
           cd apps/android-app
           bash ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
+  release-candidate-evidence:
+    name: Immutable release-candidate evidence
+    needs:
+      - classify
+      - policy
+      - rust
+      - supply-chain
+      - android
+    if: >-
+      always() &&
+      needs.classify.outputs.code == 'true' &&
+      github.event_name != 'merge_group' &&
+      needs.policy.result == 'success' &&
+      needs.rust.result == 'success' &&
+      needs.supply-chain.result == 'success' &&
+      needs.android.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out immutable candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - name: Write immutable candidate evidence
+        run: |
+          python3 scripts/write_release_candidate_evidence.py \
+            --output release-candidate-evidence.json
+          python3 -m json.tool release-candidate-evidence.json >/dev/null
+      - name: Upload immutable candidate evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: software-release-candidate-${{ env.CANDIDATE_SHA }}
+          path: release-candidate-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
   quality-gate:
     name: Quality Gate
     if: always()
@@ -143,6 +179,7 @@ jobs:
       - rust
       - supply-chain
       - android
+      - release-candidate-evidence
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -156,9 +193,19 @@ jobs:
           RUST_RESULT: ${{ needs.rust.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           ANDROID_RESULT: ${{ needs.android.result }}
+          RELEASE_CANDIDATE_RESULT: ${{ needs.release-candidate-evidence.result }}
           CODE_CHANGE: ${{ needs.classify.outputs.code }}
         run: |
-          if [[ "$CODE_CHANGE" == true ]]; then
+          if [[ "$CODE_CHANGE" == true && "$GITHUB_EVENT_NAME" != merge_group ]]; then
+            python3 scripts/write_ci_summary.py \
+              --output quality-summary.json \
+              --sha "$CANDIDATE_SHA" \
+              --check "policy=$POLICY_RESULT" \
+              --check "rust=$RUST_RESULT" \
+              --check "supply_chain=$SUPPLY_CHAIN_RESULT" \
+              --check "android=$ANDROID_RESULT" \
+              --check "release_candidate=$RELEASE_CANDIDATE_RESULT"
+          elif [[ "$CODE_CHANGE" == true ]]; then
             python3 scripts/write_ci_summary.py \
               --output quality-summary.json \
               --sha "$CANDIDATE_SHA" \
@@ -187,6 +234,7 @@ jobs:
           RUST_RESULT: ${{ needs.rust.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           ANDROID_RESULT: ${{ needs.android.result }}
+          RELEASE_CANDIDATE_RESULT: ${{ needs.release-candidate-evidence.result }}
           CODE_CHANGE: ${{ needs.classify.outputs.code }}
         run: |
           test "$POLICY_RESULT" = success
@@ -194,8 +242,14 @@ jobs:
             test "$RUST_RESULT" = success
             test "$SUPPLY_CHAIN_RESULT" = success
             test "$ANDROID_RESULT" = success
+            if [[ "$GITHUB_EVENT_NAME" == merge_group ]]; then
+              test "$RELEASE_CANDIDATE_RESULT" = skipped
+            else
+              test "$RELEASE_CANDIDATE_RESULT" = success
+            fi
           else
             test "$RUST_RESULT" = skipped
             test "$SUPPLY_CHAIN_RESULT" = skipped
             test "$ANDROID_RESULT" = skipped
+            test "$RELEASE_CANDIDATE_RESULT" = skipped
           fi
