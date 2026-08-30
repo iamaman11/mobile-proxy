@@ -84,6 +84,18 @@ def check_repository(root: Path) -> list[str]:
             }
             if not isinstance(forbidden, list) or not required_forbidden.issubset(forbidden):
                 errors.append("execution satellite can become an independent project/provider source")
+        release_identity = authority.get("release_identity")
+        if not isinstance(release_identity, dict) or any(
+            release_identity.get(key) != value
+            for key, value in {
+                "repository": "iamaman11/mobile-proxy",
+                "tag": "vMAJOR.MINOR.PATCH",
+                "tag_kind": "annotated",
+                "deployment_id_rule": "mobile-proxy-<tag>-<first12sha>",
+                "mutable_branch_authority": "forbidden",
+            }.items()
+        ):
+            errors.append("cross-repository release identity is not immutable")
 
     if acceptance:
         if any(
@@ -96,29 +108,79 @@ def check_repository(root: Path) -> list[str]:
             }.items()
         ):
             errors.append("acceptance authority identity is not canonical and pre-release only")
-        command = acceptance.get("command")
-        if command != {
+        if acceptance.get("command") != {
             "issue": 90,
             "syntax": "/accept-candidate <full_sha>",
             "authorized_actor": "repository_owner",
         }:
             errors.append("acceptance command authority differs from the contract")
         identity = acceptance.get("candidate_identity")
-        if not isinstance(identity, dict) or identity.get("kind") != "full_git_sha" or identity.get("pattern") != "^[0-9a-f]{40}$":
-            errors.append("acceptance candidate identity is not exact full-SHA only")
-        separation = acceptance.get("authority_separation")
-        if not isinstance(separation, dict) or any(
-            separation.get(key) != value
+        if not isinstance(identity, dict) or any(
+            identity.get(key) != value
             for key, value in {
-                "final_production_authority": False,
-                "production_environment": "forbidden",
-                "final_release_tag": "forbidden",
-                "production_environment_name": "production-vultr",
-                "production_ref_type": "tag",
-                "production_ref_pattern": "v*",
+                "kind": "full_git_sha",
+                "pattern": "^[0-9a-f]{40}$",
             }.items()
         ):
+            errors.append("acceptance candidate identity is not exact full-SHA only")
+        elif identity.get("mutable_or_approximate_refs_forbidden") != [
+            "main",
+            "latest",
+            "branch_name",
+            "short_sha",
+        ]:
+            errors.append("acceptance candidate mutable-ref rejection differs from the contract")
+        candidate_evidence = acceptance.get("candidate_evidence")
+        if not isinstance(candidate_evidence, dict) or any(
+            candidate_evidence.get(key) != value
+            for key, value in {
+                "quality_workflow": "Quality",
+                "quality_workflow_path": ".github/workflows/quality.yml",
+                "required_event": "push",
+                "required_branch": "main",
+                "required_status": "completed",
+                "required_conclusion": "success",
+                "artifact_name_template": "software-release-candidate-<candidate_sha>",
+                "artifact_file": "release-candidate-evidence.json",
+                "required_format_version": 2,
+                "required_repository": "iamaman11/mobile-proxy",
+            }.items()
+        ):
+            errors.append("acceptance candidate evidence source is not exact")
+        elif candidate_evidence.get("required_flags") != {
+            "software_10_of_10_ready": True,
+            "physical_phone_acceptance_required": True,
+            "baseline_complete": False,
+        }:
+            errors.append("acceptance candidate evidence flags differ from the contract")
+        if acceptance.get("execution") != {
+            "workflow": ".github/workflows/acceptance-authority.yml",
+            "executor": "github-hosted",
+            "environment": "none_in_item_16",
+            "vultr_api_access": "forbidden_in_item_16",
+            "vultr_secret_access": "forbidden_in_item_16",
+            "vm_mutation": "forbidden_in_item_16",
+            "phone_mutation": "forbidden_in_item_16",
+        }:
+            errors.append("acceptance execution boundary is not item-16 authority-only")
+        separation = acceptance.get("authority_separation")
+        if not isinstance(separation, dict) or separation != {
+            "final_production_authority": False,
+            "production_environment": "forbidden",
+            "final_release_tag": "forbidden",
+            "production_workflow": ".github/workflows/production-preflight.yml",
+            "production_environment_name": "production-vultr",
+            "production_ref_type": "tag",
+            "production_ref_pattern": "v*",
+        }:
             errors.append("acceptance authority must remain distinct from final production authority")
+        if acceptance.get("evidence") != {
+            "format_version": 1,
+            "artifact_name_template": "vultr-acceptance-authority-<candidate_sha>",
+            "secret_derived_data": "forbidden",
+            "retention_days": 90,
+        }:
+            errors.append("acceptance evidence contract is not bounded")
 
     if github:
         source = github.get("source_repository")
@@ -148,6 +210,27 @@ def check_repository(root: Path) -> list[str]:
             }.items()
         ):
             errors.append("production-vultr boundary is not protected tag-only")
+        if not isinstance(production, dict) or production.get("required_secret_names") != [
+            "VULTR_API_KEY",
+            "VULTR_SSH_PRIVATE_KEY",
+        ]:
+            errors.append("production-vultr secret names differ from the contract")
+
+        acceptance_authority = github.get("acceptance_authority")
+        if not isinstance(acceptance_authority, dict) or acceptance_authority != {
+            "name": "vultr-pre-release-acceptance",
+            "workflow": ".github/workflows/acceptance-authority.yml",
+            "command_issue": 90,
+            "command": "/accept-candidate <full_sha>",
+            "allowed_identity": "full_40_char_git_sha",
+            "candidate_evidence": "successful_quality_push_on_main_plus_matching_release_candidate_artifact",
+            "executor": "github-hosted",
+            "environment": "none_in_item_16",
+            "final_production_authority": False,
+            "vultr_secret_access": "forbidden_in_item_16",
+            "vm_mutation": "forbidden_in_item_16",
+        }:
+            errors.append("GitHub acceptance authority differs from the protected contract")
 
         acceptance_env = github.get("acceptance_vultr_environment")
         if not isinstance(acceptance_env, dict):
@@ -156,12 +239,18 @@ def check_repository(root: Path) -> list[str]:
             required = {
                 "name": "acceptance-vultr",
                 "authority": "pre_release_acceptance_credential_boundary_not_final_production_authority",
+                "required_precondition": "verified_vultr_acceptance_authority_artifact_for_exact_candidate_sha",
                 "executor": "github-hosted",
                 "final_production_authority": False,
             }
             for key, value in required.items():
                 if acceptance_env.get(key) != value:
                     errors.append(f"acceptance-vultr {key!r} differs from protected value")
+            if acceptance_env.get("required_secret_names") != [
+                "VULTR_API_KEY",
+                "VULTR_SSH_PRIVATE_KEY",
+            ]:
+                errors.append("acceptance-vultr secret names differ from the contract")
             capabilities = acceptance_env.get("workflow_capabilities")
             if not isinstance(capabilities, dict):
                 errors.append("acceptance-vultr must separate workflow capabilities")
@@ -174,7 +263,7 @@ def check_repository(root: Path) -> list[str]:
                     "vm_lifecycle": False,
                     "provider_mutation": False,
                 }:
-                    errors.append("read-only Vultr preflight capability must remain GET /v2/account only")
+                    errors.append("read-only acceptance capability must remain GET /v2/account only")
                 lifecycle = capabilities.get("item_19_acceptance_lifecycle")
                 if not isinstance(lifecycle, dict) or any(
                     lifecycle.get(key) != value
@@ -183,6 +272,7 @@ def check_repository(root: Path) -> list[str]:
                         "scope": "acceptance_only",
                         "required_state": "durable_owner_controlled_acceptance_vm_lifecycle_state_outside_vcs",
                         "required_concurrency": "single_repository_wide_acceptance_lifecycle_writer_cancel_in_progress_false",
+                        "provider_mutation": "bounded_item_19_only_after_exact_gates",
                         "production_scope": "forbidden",
                     }.items()
                 ):
@@ -208,12 +298,30 @@ def check_repository(root: Path) -> list[str]:
         ):
             errors.append("phone control repository must remain execution-only")
         else:
+            if phone.get("preferred_logic_source") != "canonical_public_logic_pinned_to_immutable_sha_or_verified_release_artifact":
+                errors.append("phone execution logic source is not immutable and canonical")
+            if phone.get("required_device_binding_secret") != "ANDROID_PRODUCTION_SERIAL":
+                errors.append("phone registered-device binding differs from the contract")
+            if phone.get("reserved_android_signing_secret_names") != [
+                "ANDROID_RELEASE_KEYSTORE_B64",
+                "ANDROID_RELEASE_KEYSTORE_PASSWORD",
+                "ANDROID_RELEASE_KEY_ALIAS",
+                "ANDROID_RELEASE_KEY_PASSWORD",
+            ]:
+                errors.append("phone Android signing-secret contract differs")
             if phone.get("required_runner_labels") != ["self-hosted", "Linux", "X64", "android-production"]:
                 errors.append("phone runner labels differ from protected contract")
             runner_forbidden = phone.get("runner_must_not_receive")
             required_runner_forbidden = {"VULTR_API_KEY", "VULTR_SSH_PRIVATE_KEY", "unrelated_github_pat"}
             if not isinstance(runner_forbidden, list) or not required_runner_forbidden.issubset(runner_forbidden):
                 errors.append("private phone runner is not explicitly denied Vultr credentials")
+
+        runtime = github.get("runtime_verification")
+        if runtime != {
+            "vultr_secret_access": "passed_acceptance_vultr_read_only_preflight_on_exact_candidate",
+            "android_runner_and_device": "passed_private_actions_read_only_preflight_on_registered_device; mutable_phone_operations_remain_blocked",
+        }:
+            errors.append("GitHub runtime-verification checkpoint differs from the contract")
 
         forbidden = github.get("forbidden")
         required_forbidden = {
@@ -240,12 +348,29 @@ def check_repository(root: Path) -> list[str]:
         if not isinstance(execution, dict):
             errors.append("production topology execution boundary is missing")
         else:
-            if "GitHub-hosted runner" not in str(execution.get("vultr_acceptance", "")) or "production-vultr" not in str(execution.get("vultr_acceptance", "")):
+            vultr_acceptance = str(execution.get("vultr_acceptance", ""))
+            if "GitHub-hosted runner" not in vultr_acceptance or "production-vultr" not in vultr_acceptance:
                 errors.append("Vultr acceptance execution boundary is not GitHub-hosted and production-separated")
+            if execution.get("vultr_production") != "GitHub-hosted runner in production-vultr from protected final v* release only":
+                errors.append("Vultr production execution boundary differs from protected topology")
             if execution.get("phone") != "private-repository caller context with android-production self-hosted runner":
                 errors.append("phone execution boundary differs from protected topology")
+            if execution.get("phone_logic") != "canonical public logic pinned to immutable SHA or verified canonical release artifact":
+                errors.append("phone execution logic differs from protected topology")
             if execution.get("cross_boundary_secret_rule") != "private phone runner never receives Vultr credentials and public Vultr jobs never receive raw phone identifiers or phone-control secrets":
                 errors.append("cross-control-plane secret separation is not explicit")
+        migration = topology.get("migration_status")
+        if not isinstance(migration, dict) or any(
+            migration.get(key) != value
+            for key, value in {
+                "phone_execution_satellite": "read_only_preflight_workflow_enabled_and_private_runner_online",
+                "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
+                "acceptance_authority": "implemented_candidate_quality_evidence_gate",
+                "vultr_readonly_preflight_workflow": "implemented_live_proof_passed_and_remains_read_only",
+                "phone_mutation": "blocked_by_signing_continuity_gate_issue_115",
+            }.items()
+        ):
+            errors.append("production topology GitOps checkpoint differs")
 
     for relative in REQUIRED_DOCS:
         if not (root / relative).is_file():
@@ -264,17 +389,30 @@ def check_repository(root: Path) -> list[str]:
     else:
         content = acceptance_workflow.read_text(encoding="utf-8")
         for required in (
+            "issue_comment:",
             "github.event.issue.number == 90",
+            "github.event.comment.user.login == github.repository_owner",
             "startsWith(github.event.comment.body, '/accept-candidate ')",
             "runs-on: ubuntu-latest",
+            "actions: read",
+            "contents: read",
+            "verify_acceptance_candidate.py",
             "software-release-candidate-",
             "vultr-acceptance-authority-",
         ):
             if required not in content:
-                errors.append(f"acceptance authority workflow is missing {required!r}")
-        for forbidden in ("environment: production-vultr", "VULTR_API_KEY", "VULTR_SSH_PRIVATE_KEY", "refs/tags/", "secrets."):
+                errors.append("acceptance workflow does not enforce the exact hosted candidate gate")
+                break
+        for forbidden in (
+            "environment: production-vultr",
+            "VULTR_API_KEY",
+            "VULTR_SSH_PRIVATE_KEY",
+            "refs/tags/",
+            "secrets.",
+        ):
             if forbidden in content:
-                errors.append(f"acceptance authority workflow contains forbidden production/provider token {forbidden!r}")
+                errors.append("acceptance workflow attempts to use final production authority or secrets")
+                break
 
     readonly_workflow = root / READONLY_WORKFLOW
     if not readonly_workflow.is_file():
@@ -294,8 +432,15 @@ def check_repository(root: Path) -> list[str]:
         errors.append("production preflight workflow is missing")
     else:
         content = production_preflight.read_text(encoding="utf-8")
-        if "environment: production-vultr" not in content or "refs/tags/" not in content:
-            errors.append("production preflight must remain production-vultr/tag bound")
+        required_tag_gate = (
+            "environment: production-vultr",
+            '[[ "$GITHUB_REF_TYPE" == "tag" ]]',
+            '[[ "$GITHUB_REF_NAME" == v* ]]',
+            '[[ "$GITHUB_REF" == refs/tags/v* ]]',
+            '[[ "$REF_PROTECTED" == "true" ]]',
+        )
+        if any(token not in content for token in required_tag_gate):
+            errors.append("production preflight is no longer protected v*-tag only")
 
     return errors
 
