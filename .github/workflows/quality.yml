@@ -196,7 +196,7 @@ jobs:
           RELEASE_CANDIDATE_RESULT: ${{ needs.release-candidate-evidence.result }}
           CODE_CHANGE: ${{ needs.classify.outputs.code }}
         run: |
-          if [[ "$CODE_CHANGE" == true ]]; then
+          if [[ "$CODE_CHANGE" == true && "$GITHUB_EVENT_NAME" != merge_group ]]; then
             python3 scripts/write_ci_summary.py \
               --output quality-summary.json \
               --sha "$CANDIDATE_SHA" \
@@ -205,6 +205,14 @@ jobs:
               --check "supply_chain=$SUPPLY_CHAIN_RESULT" \
               --check "android=$ANDROID_RESULT" \
               --check "release_candidate=$RELEASE_CANDIDATE_RESULT"
+          elif [[ "$CODE_CHANGE" == true ]]; then
+            python3 scripts/write_ci_summary.py \
+              --output quality-summary.json \
+              --sha "$CANDIDATE_SHA" \
+              --check "policy=$POLICY_RESULT" \
+              --check "rust=$RUST_RESULT" \
+              --check "supply_chain=$SUPPLY_CHAIN_RESULT" \
+              --check "android=$ANDROID_RESULT"
           else
             python3 scripts/write_ci_summary.py \
               --output quality-summary.json \
