@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -122,12 +121,9 @@ def _required(env: Mapping[str, str], name: str, maximum: int = 256) -> str:
 def build_acceptance_evidence(
     candidate_sha: str,
     quality_run: Mapping[str, object],
-    candidate_evidence_sha256: str,
     env: Mapping[str, str],
 ) -> dict[str, object]:
     validate_candidate_sha(candidate_sha)
-    if not re.fullmatch(r"[0-9a-f]{64}", candidate_evidence_sha256):
-        raise ValueError("candidate evidence digest must be lowercase SHA-256")
 
     repository = _required(env, "GITHUB_REPOSITORY")
     if repository != _CANONICAL_REPOSITORY:
@@ -157,7 +153,8 @@ def build_acceptance_evidence(
         "command_comment_id": comment_id,
         "candidate_quality_run_id": str(quality_run_id),
         "candidate_quality_run_attempt": str(quality_run_attempt),
-        "candidate_evidence_sha256": candidate_evidence_sha256,
+        "candidate_evidence_artifact": f"software-release-candidate-{candidate_sha}",
+        "candidate_evidence_file": "release-candidate-evidence.json",
         "final_production_authority": False,
         "production_environment_authorized": False,
         "final_release_tag_created": False,
@@ -179,14 +176,6 @@ def _load_object(path: Path) -> dict[str, object]:
 
 def _write_object(path: Path, value: Mapping[str, object]) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def main() -> int:
@@ -224,7 +213,6 @@ def main() -> int:
     acceptance = build_acceptance_evidence(
         args.candidate_sha,
         quality_run,
-        _sha256(args.candidate_evidence),
         os.environ,
     )
     _write_object(args.output, acceptance)
