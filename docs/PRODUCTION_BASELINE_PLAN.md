@@ -214,13 +214,13 @@ The required order is:
 22. Vultr production promotion/deployment from the accepted final release tuple;
 23. final baseline closeout.
 
-Item 15 is complete: the thin private caller exists and a real private Actions run proved the Linux
-runner, required tools and exactly the registered phone without mutation or raw identifier
-publication. The first unfinished item for the current continuation is item 16. The phone's
-mutable lifecycle remains blocked until the signing-identity gate recorded in
-`docs/operations/phone-gitops-runtime.md` is satisfied.
+**Current canonical delivery status:** items 15, 16, 17 and 18 are `COMPLETE`. **Item 19 is `ACTIVE` and is the first unfinished item.** Its working tracker is #124.
 
-Items 15 through 18 should be completed without mutating the phone or creating a VM. Item 19 is intentionally just-in-time and should not create an idle acceptance VM merely to keep work moving if the real phone is not ready. Item 20 is the physical gate. Items 21 and 22 are forbidden until item 20 succeeds. No later item should be pulled forward merely to keep work moving.
+Item 19 is intentionally just-in-time. Its non-mutating implementation work — durable crash-safe lifecycle state, typed acceptance-only Vultr execution, permanent rejection tests, workflow gates and documentation/contracts — may proceed before the physical window opens. The first live provider mutation remains forbidden until the then-current exact candidate has fresh acceptance authority and fresh read-only Vultr preflight evidence and the physical acceptance window is genuinely ready.
+
+The mutable phone lifecycle remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level mutation gate.
+
+Item 20 becomes the next delivery item only after the live item-19 Definition of Done is complete. Items 21 and 22 remain forbidden until item 20 succeeds. No later item may be pulled forward merely to keep work moving.
 
 ## 7. System invariants
 
@@ -281,6 +281,9 @@ These invariants apply to every baseline slice. They are stronger than implement
 9. The final release tag and production promotion are forbidden before the required physical acceptance succeeds.
 10. Phone-side and server-side physical evidence must refer to the same immutable candidate SHA and exact deployed artifact identities.
 11. Physical proof of QUIC fallback must force failure at the server/network boundary while TLS/TCP reserve remains available; a client-only mock or declared transport state is not sufficient evidence.
+12. Provider lifecycle authority is the durable exact provider binding plus exact ownership intent/generation; IP, name, label and provider result ordering are transport/discovery data only and never mutation authority.
+13. A dispatched provider create must not be blindly retried after an ambiguous outcome; durable lifecycle state must distinguish an in-progress create from a never-created intent.
+14. A terminal-cleared immutable acceptance intent must never silently reset to generation 1.
 
 ## 8. Module responsibility map
 
@@ -294,6 +297,7 @@ The following responsibility map prevents behavior from drifting between layers.
 | request authentication and wire decoding | transport adapter | domain or persistence crates |
 | idempotency classification and replay decision | application behavior with durable evidence | HTTP response mapping |
 | tunnel connection lifecycle and exact session authority | reverse-tunnel runtime | metrics renderer or health projection |
+| provider lifecycle policy and exact mutation authority | provider-neutral lifecycle plus typed provider adapter/state implementation | workflow YAML, shell, IP/name selection |
 | compatibility projection for legacy surfaces | explicit compatibility adapter | canonical domain vocabulary |
 | health and metrics rendering | observability adapters reading authoritative state | independent mutable counters unless the event source is authoritative |
 
@@ -388,11 +392,13 @@ This plan may be changed only through a dedicated documentation decision that:
 
 Activating any item from `docs/future/` requires a separate decision and must not occur as an incidental follow-up inside a baseline PR.
 
+The item-19 reconciliation that changes only stale delivery status and makes already-accepted provider/phone boundaries explicit is a documentation consistency correction, not activation of new roadmap scope.
+
 ## 13. Stop conditions
 
 Development must stop for reassessment when any of the following is true:
 
-- source-controlled and control-plane work through delivery item 18 is complete but the real phone is not ready for the physical window; do not provision an idle acceptance VM solely to keep work moving;
+- item-19 implementation work that is independently testable is complete but the real phone window is not ready; do not provision an idle acceptance VM solely to keep work moving;
 - the physical sequence in item 20 fails or shows source/artifact identity drift, in which case the failed candidate must not be released or promoted;
 - all current delivery items through final production promotion and baseline closeout are complete;
 - a proposed change belongs only to the future roadmap;
