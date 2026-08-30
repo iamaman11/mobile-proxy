@@ -1,6 +1,6 @@
 use crate::provider_lifecycle::{
-    DesiredVm, Generation, LifecycleScope, ObservedVm, OwnershipIntent, OwnershipMetadata,
-    OwnershipObservation, PlannedCreate, ProviderResourceId, VmBinding,
+    DesiredVm, Generation, ObservedVm, OwnershipIntent, OwnershipMetadata, OwnershipObservation,
+    PlannedCreate, ProviderResourceId, VmBinding,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -108,15 +108,23 @@ pub fn create_dispatch_fence(
     plan: &PlannedCreate,
     desired: &DesiredVm,
 ) -> Result<CreateDispatchFence, CreateDispatchError> {
-    if plan.intent() != &desired.intent {
+    create_dispatch_fence_for_recovery(plan.intent(), plan.generation(), desired)
+}
+
+pub fn create_dispatch_fence_for_recovery(
+    intent: &OwnershipIntent,
+    generation: Generation,
+    desired: &DesiredVm,
+) -> Result<CreateDispatchFence, CreateDispatchError> {
+    if intent != &desired.intent {
         return Err(CreateDispatchError::OwnershipIntentMismatch);
     }
-    if plan.generation() != Generation::INITIAL {
+    if generation != Generation::INITIAL {
         return Err(CreateDispatchError::UnexpectedGeneration);
     }
     Ok(CreateDispatchFence {
         intent: desired.intent.clone(),
-        generation: plan.generation(),
+        generation,
         display_name: desired.display_name.clone(),
         spec_fingerprint: desired.spec_fingerprint.clone(),
     })
@@ -143,12 +151,10 @@ pub fn recover_dispatched_create(
         .iter()
         .filter(|resource| resource.display_name == fence.display_name)
         .collect();
-    if same_name.iter().any(|resource| {
-        matches!(
-            &resource.ownership,
-            OwnershipObservation::Conflicting
-        )
-    }) {
+    if same_name
+        .iter()
+        .any(|resource| matches!(&resource.ownership, OwnershipObservation::Conflicting))
+    {
         return Err(CreateDispatchError::ConflictingOwnershipMetadata);
     }
     if same_name.len() > 1 {
@@ -227,6 +233,26 @@ mod tests {
             ownership,
             spec_fingerprint: spec_fingerprint.to_owned(),
         }
+    }
+
+    #[test]
+    fn durable_recovery_constructor_matches_initial_dispatch_fence() {
+        let desired = desired();
+        let ReconcilePlan::Create(plan) = plan_present(None, &[], &desired, None).unwrap() else {
+            panic!("expected create plan");
+        };
+        assert_eq!(
+            create_dispatch_fence(&plan, &desired).unwrap(),
+            create_dispatch_fence_for_recovery(plan.intent(), plan.generation(), &desired).unwrap()
+        );
+    }
+
+    #[test]
+    fn durable_recovery_constructor_rejects_stale_generation() {
+        assert_eq!(
+            create_dispatch_fence_for_recovery(&intent(), Generation::new(2).unwrap(), &desired(),),
+            Err(CreateDispatchError::UnexpectedGeneration)
+        );
     }
 
     #[test]

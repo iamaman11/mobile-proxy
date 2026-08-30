@@ -2,6 +2,7 @@ pub mod commands;
 pub mod constants;
 pub mod endpoints;
 pub mod fingerprints;
+pub mod provider_create_dispatch;
 pub mod provider_lifecycle;
 pub mod records;
 pub mod runtime;

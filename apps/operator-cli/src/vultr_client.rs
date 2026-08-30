@@ -2,12 +2,17 @@ use crate::vultr_lifecycle::{
     VultrAdapterError, VultrInstanceDto, VultrLifecycleAdapter, VultrMethod, VultrRequest,
     VultrVmSpec,
 };
-use proxy_core::{LifecycleScope, ObservedVm, PlannedCreate, VerifiedMutationTarget};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use proxy_core::{
+    LifecycleScope, MutationKind, ObservedVm, PlannedCreate, VerifiedMutationTarget, VmBinding,
+    authorize_mutation,
+};
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Read;
+use std::net::Ipv4Addr;
 use std::time::Duration;
 
 const VULTR_API_BASE: &str = "https://api.vultr.com";
@@ -16,6 +21,7 @@ const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const INSTANCE_PAGE_SIZE: u32 = 500;
 const MAX_INSTANCE_PAGES: usize = 20;
 const MAX_CURSOR_BYTES: usize = 1024;
+const MAX_USER_DATA_BYTES: usize = 32 * 1024;
 
 pub struct VultrAcceptanceClient {
     inner: AcceptanceClient<ReqwestVultrTransport>,
@@ -42,6 +48,23 @@ impl VultrAcceptanceClient {
         self.inner.create_instance(plan, spec)
     }
 
+    pub fn create_instance_with_user_data(
+        &self,
+        plan: &PlannedCreate,
+        spec: &VultrVmSpec,
+        user_data_b64: &str,
+    ) -> Result<ObservedVm, VultrClientError> {
+        self.inner
+            .create_instance_with_user_data(plan, spec, user_data_b64)
+    }
+
+    pub fn instance_ipv4(
+        &self,
+        target: &VerifiedMutationTarget,
+    ) -> Result<Ipv4Addr, VultrClientError> {
+        self.inner.instance_ipv4(target)
+    }
+
     pub fn delete_instance(&self, target: &VerifiedMutationTarget) -> Result<(), VultrClientError> {
         self.inner.delete_instance(target)
     }
@@ -50,6 +73,9 @@ impl VultrAcceptanceClient {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VultrClientError {
     AcceptanceScopeRequired,
+    InvalidUserData,
+    TargetVerificationFailed,
+    InvalidTransportEndpoint,
     Transport,
     HttpStatus(u16),
     ResponseTooLarge,
@@ -64,6 +90,15 @@ impl fmt::Display for VultrClientError {
         match self {
             Self::AcceptanceScopeRequired => {
                 formatter.write_str("live Vultr client is restricted to acceptance scope")
+            }
+            Self::InvalidUserData => {
+                formatter.write_str("Vultr acceptance create user-data is invalid or unbounded")
+            }
+            Self::TargetVerificationFailed => formatter.write_str(
+                "Vultr transport endpoint could not be tied to the exact verified provider target",
+            ),
+            Self::InvalidTransportEndpoint => {
+                formatter.write_str("verified Vultr target has no acceptable public IPv4 endpoint")
             }
             Self::Transport => formatter.write_str("Vultr HTTP transport failed"),
             Self::HttpStatus(status) => write!(formatter, "Vultr HTTP status {status}"),
@@ -151,9 +186,56 @@ impl<T: VultrTransport> AcceptanceClient<T> {
         let body = self
             .transport
             .execute(VultrLifecycleAdapter::create_request(plan, spec))?;
+        decode_created_instance(&body)
+    }
+
+    fn create_instance_with_user_data(
+        &self,
+        plan: &PlannedCreate,
+        spec: &VultrVmSpec,
+        user_data_b64: &str,
+    ) -> Result<ObservedVm, VultrClientError> {
+        require_acceptance(plan.intent().scope())?;
+        validate_user_data(user_data_b64)?;
+        let body = self
+            .transport
+            .execute(VultrLifecycleAdapter::create_request_with_user_data(
+                plan,
+                spec,
+                user_data_b64,
+            ))?;
+        decode_created_instance(&body)
+    }
+
+    fn instance_ipv4(&self, target: &VerifiedMutationTarget) -> Result<Ipv4Addr, VultrClientError> {
+        require_acceptance(target.intent().scope())?;
+        let body = self
+            .transport
+            .execute(VultrLifecycleAdapter::get_instance_request(target))?;
         let envelope: CreatedInstanceEnvelope =
             serde_json::from_slice(&body).map_err(|_| VultrClientError::InvalidResponse)?;
-        VultrLifecycleAdapter::decode_instance(envelope.instance).map_err(VultrClientError::Adapter)
+        let endpoint = envelope.instance.main_ip.clone();
+        let observed = VultrLifecycleAdapter::decode_instance(envelope.instance)
+            .map_err(VultrClientError::Adapter)?;
+        let binding = VmBinding {
+            intent: target.intent().clone(),
+            provider_id: target.provider_id().clone(),
+            generation: target.generation(),
+        };
+        authorize_mutation(
+            &binding,
+            &[observed],
+            target.generation(),
+            MutationKind::Reconfigure,
+        )
+        .map_err(|_| VultrClientError::TargetVerificationFailed)?;
+        let endpoint = endpoint
+            .parse::<Ipv4Addr>()
+            .map_err(|_| VultrClientError::InvalidTransportEndpoint)?;
+        if !is_acceptable_public_ipv4(endpoint) {
+            return Err(VultrClientError::InvalidTransportEndpoint);
+        }
+        Ok(endpoint)
     }
 
     fn delete_instance(&self, target: &VerifiedMutationTarget) -> Result<(), VultrClientError> {
@@ -164,11 +246,50 @@ impl<T: VultrTransport> AcceptanceClient<T> {
     }
 }
 
+fn decode_created_instance(body: &[u8]) -> Result<ObservedVm, VultrClientError> {
+    let envelope: CreatedInstanceEnvelope =
+        serde_json::from_slice(body).map_err(|_| VultrClientError::InvalidResponse)?;
+    VultrLifecycleAdapter::decode_instance(envelope.instance).map_err(VultrClientError::Adapter)
+}
+
+fn validate_user_data(user_data_b64: &str) -> Result<(), VultrClientError> {
+    if user_data_b64.is_empty() || user_data_b64.len() > MAX_USER_DATA_BYTES.saturating_mul(2) {
+        return Err(VultrClientError::InvalidUserData);
+    }
+    let decoded = STANDARD
+        .decode(user_data_b64)
+        .map_err(|_| VultrClientError::InvalidUserData)?;
+    if decoded.is_empty() || decoded.len() > MAX_USER_DATA_BYTES {
+        return Err(VultrClientError::InvalidUserData);
+    }
+    let text = std::str::from_utf8(&decoded).map_err(|_| VultrClientError::InvalidUserData)?;
+    if !text.starts_with("#cloud-config\n") {
+        return Err(VultrClientError::InvalidUserData);
+    }
+    Ok(())
+}
+
 fn require_acceptance(scope: LifecycleScope) -> Result<(), VultrClientError> {
     if scope != LifecycleScope::Acceptance {
         return Err(VultrClientError::AcceptanceScopeRequired);
     }
     Ok(())
+}
+
+fn is_acceptable_public_ipv4(address: Ipv4Addr) -> bool {
+    let octets = address.octets();
+    let shared = octets[0] == 100 && (64..=127).contains(&octets[1]);
+    let benchmarking = octets[0] == 198 && (18..=19).contains(&octets[1]);
+    !address.is_unspecified()
+        && !address.is_loopback()
+        && !address.is_private()
+        && !address.is_link_local()
+        && !address.is_multicast()
+        && !address.is_broadcast()
+        && !address.is_documentation()
+        && !shared
+        && !benchmarking
+        && octets[0] < 240
 }
 
 #[derive(Deserialize)]
@@ -306,9 +427,8 @@ impl VultrTransport for ReqwestVultrTransport {
 mod tests {
     use super::*;
     use proxy_core::{
-        DesiredVm, Generation, MutationKind, OwnershipIntent, OwnershipMetadata,
-        OwnershipObservation, ProviderResourceId, ReconcilePlan, VmBinding, authorize_mutation,
-        plan_present,
+        DesiredVm, Generation, OwnershipIntent, OwnershipMetadata, OwnershipObservation,
+        ProviderResourceId, ReconcilePlan, VmBinding, plan_present,
     };
     use std::cell::RefCell;
 
@@ -377,27 +497,45 @@ mod tests {
         plan
     }
 
-    fn exact_tags() -> Vec<String> {
+    fn ownership_tags(scope: LifecycleScope, generation: Generation) -> Vec<String> {
         crate::vultr_lifecycle::encode_ownership(&OwnershipMetadata::exact(
-            &intent(LifecycleScope::Acceptance),
-            Generation::INITIAL,
+            &intent(scope),
+            generation,
         ))
     }
 
-    fn instance_json(id: &str) -> serde_json::Value {
+    fn instance_json(
+        id: &str,
+        scope: LifecycleScope,
+        generation: Generation,
+        main_ip: &str,
+    ) -> serde_json::Value {
         serde_json::json!({
             "id": id,
             "label": "mobile-proxy-acceptance",
-            "tags": exact_tags(),
+            "tags": ownership_tags(scope, generation),
             "region": "waw",
             "plan": "vc2-1c-2gb",
-            "os_id": 2284
+            "os_id": 2284,
+            "main_ip": main_ip
         })
     }
 
     fn created_response() -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
-            "instance": instance_json(ID1)
+            "instance": instance_json(
+                ID1,
+                LifecycleScope::Acceptance,
+                Generation::INITIAL,
+                "8.8.8.8",
+            )
+        }))
+        .unwrap()
+    }
+
+    fn exact_instance_response(generation: Generation, main_ip: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "instance": instance_json(ID1, LifecycleScope::Acceptance, generation, main_ip)
         }))
         .unwrap()
     }
@@ -410,9 +548,36 @@ mod tests {
         .unwrap()
     }
 
+    fn verified_target() -> VerifiedMutationTarget {
+        let generation = Generation::new(4).unwrap();
+        let binding = VmBinding {
+            intent: intent(LifecycleScope::Acceptance),
+            provider_id: ProviderResourceId::new(ID1).unwrap(),
+            generation,
+        };
+        let observed = ObservedVm {
+            provider_id: ProviderResourceId::new(ID1).unwrap(),
+            display_name: "mobile-proxy-acceptance".to_owned(),
+            ownership: OwnershipObservation::Exact(OwnershipMetadata::exact(
+                &binding.intent,
+                generation,
+            )),
+            spec_fingerprint: spec().fingerprint(),
+        };
+        authorize_mutation(&binding, &[observed], generation, MutationKind::Delete).unwrap()
+    }
+
     #[test]
     fn list_maps_vultr_dto_through_existing_typed_adapter() {
-        let transport = FakeTransport::new(vec![list_page(vec![instance_json(ID1)], "")]);
+        let transport = FakeTransport::new(vec![list_page(
+            vec![instance_json(
+                ID1,
+                LifecycleScope::Acceptance,
+                Generation::INITIAL,
+                "8.8.8.8",
+            )],
+            "",
+        )]);
         let client = AcceptanceClient { transport };
 
         let observed = client.list_instances().unwrap();
@@ -437,8 +602,24 @@ mod tests {
     #[test]
     fn list_follows_every_cursor_before_returning_provider_state() {
         let transport = FakeTransport::new(vec![
-            list_page(vec![instance_json(ID1)], "cursor-two"),
-            list_page(vec![instance_json(ID2)], ""),
+            list_page(
+                vec![instance_json(
+                    ID1,
+                    LifecycleScope::Acceptance,
+                    Generation::INITIAL,
+                    "8.8.8.8",
+                )],
+                "cursor-two",
+            ),
+            list_page(
+                vec![instance_json(
+                    ID2,
+                    LifecycleScope::Acceptance,
+                    Generation::INITIAL,
+                    "1.1.1.1",
+                )],
+                "",
+            ),
         ]);
         let client = AcceptanceClient { transport };
 
@@ -487,6 +668,50 @@ mod tests {
     }
 
     #[test]
+    fn cloud_init_create_is_bounded_and_typed() {
+        let transport = FakeTransport::new(vec![created_response()]);
+        let client = AcceptanceClient { transport };
+        let plan = planned_create(LifecycleScope::Acceptance);
+        let user_data = STANDARD.encode("#cloud-config\nssh_pwauth: false\n");
+
+        client
+            .create_instance_with_user_data(&plan, &spec(), &user_data)
+            .unwrap();
+        let requests = client.transport.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].request,
+            VultrLifecycleAdapter::create_request_with_user_data(&plan, &spec(), &user_data)
+        );
+    }
+
+    #[test]
+    fn invalid_or_production_user_data_never_reaches_http_transport() {
+        let valid = STANDARD.encode("#cloud-config\nssh_pwauth: false\n");
+        let production_transport = FakeTransport::new(vec![]);
+        let production_client = AcceptanceClient {
+            transport: production_transport,
+        };
+        let production_plan = planned_create(LifecycleScope::Production);
+        assert_eq!(
+            production_client.create_instance_with_user_data(&production_plan, &spec(), &valid,),
+            Err(VultrClientError::AcceptanceScopeRequired)
+        );
+        assert!(production_client.transport.requests.borrow().is_empty());
+
+        let invalid_transport = FakeTransport::new(vec![]);
+        let invalid_client = AcceptanceClient {
+            transport: invalid_transport,
+        };
+        let acceptance_plan = planned_create(LifecycleScope::Acceptance);
+        assert_eq!(
+            invalid_client.create_instance_with_user_data(&acceptance_plan, &spec(), "not-base64"),
+            Err(VultrClientError::InvalidUserData)
+        );
+        assert!(invalid_client.transport.requests.borrow().is_empty());
+    }
+
+    #[test]
     fn production_create_is_rejected_before_http_transport() {
         let transport = FakeTransport::new(vec![]);
         let client = AcceptanceClient { transport };
@@ -500,24 +725,65 @@ mod tests {
     }
 
     #[test]
+    fn transport_ip_comes_only_from_exact_verified_uuid_response() {
+        let target = verified_target();
+        let transport = FakeTransport::new(vec![exact_instance_response(
+            target.generation(),
+            "8.8.8.8",
+        )]);
+        let client = AcceptanceClient { transport };
+
+        assert_eq!(
+            client.instance_ipv4(&target).unwrap(),
+            "8.8.8.8".parse::<Ipv4Addr>().unwrap()
+        );
+        let requests = client.transport.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].request,
+            VultrLifecycleAdapter::get_instance_request(&target)
+        );
+        assert!(requests[0].query.is_empty());
+    }
+
+    #[test]
+    fn transport_ip_is_not_authority_for_wrong_owner() {
+        let target = verified_target();
+        let body = serde_json::to_vec(&serde_json::json!({
+            "instance": instance_json(
+                ID1,
+                LifecycleScope::Acceptance,
+                Generation::new(5).unwrap(),
+                "8.8.8.8",
+            )
+        }))
+        .unwrap();
+        let transport = FakeTransport::new(vec![body]);
+        let client = AcceptanceClient { transport };
+
+        assert_eq!(
+            client.instance_ipv4(&target),
+            Err(VultrClientError::TargetVerificationFailed)
+        );
+    }
+
+    #[test]
+    fn non_public_transport_endpoint_is_rejected_after_target_verification() {
+        let target = verified_target();
+        let transport = FakeTransport::new(vec![exact_instance_response(
+            target.generation(),
+            "10.0.0.1",
+        )]);
+        let client = AcceptanceClient { transport };
+        assert_eq!(
+            client.instance_ipv4(&target),
+            Err(VultrClientError::InvalidTransportEndpoint)
+        );
+    }
+
+    #[test]
     fn delete_accepts_only_provider_neutral_verified_target() {
-        let generation = Generation::new(4).unwrap();
-        let binding = VmBinding {
-            intent: intent(LifecycleScope::Acceptance),
-            provider_id: ProviderResourceId::new(ID1).unwrap(),
-            generation,
-        };
-        let observed = ObservedVm {
-            provider_id: ProviderResourceId::new(ID1).unwrap(),
-            display_name: "mobile-proxy-acceptance".to_owned(),
-            ownership: OwnershipObservation::Exact(OwnershipMetadata::exact(
-                &binding.intent,
-                generation,
-            )),
-            spec_fingerprint: spec().fingerprint(),
-        };
-        let target =
-            authorize_mutation(&binding, &[observed], generation, MutationKind::Delete).unwrap();
+        let target = verified_target();
         let transport = FakeTransport::new(vec![vec![]]);
         let client = AcceptanceClient { transport };
 

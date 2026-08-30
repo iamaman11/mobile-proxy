@@ -57,6 +57,8 @@ pub struct VultrInstanceDto {
     pub region: String,
     pub plan: String,
     pub os_id: u64,
+    #[serde(default)]
+    pub main_ip: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -94,6 +96,14 @@ impl VultrLifecycleAdapter {
         VultrRequest {
             method: VultrMethod::Get,
             path: "/v2/instances".to_owned(),
+            body: None,
+        }
+    }
+
+    pub fn get_instance_request(target: &VerifiedMutationTarget) -> VultrRequest {
+        VultrRequest {
+            method: VultrMethod::Get,
+            path: format!("/v2/instances/{}", target.provider_id().as_str()),
             body: None,
         }
     }
@@ -142,6 +152,19 @@ impl VultrLifecycleAdapter {
                 "tags": encode_ownership(&plan.ownership()),
             })),
         }
+    }
+
+    pub fn create_request_with_user_data(
+        plan: &PlannedCreate,
+        spec: &VultrVmSpec,
+        user_data_b64: &str,
+    ) -> VultrRequest {
+        let mut request = Self::create_request(plan, spec);
+        request
+            .body
+            .as_mut()
+            .expect("create request always has a JSON body")["user_data"] = json!(user_data_b64);
+        request
     }
 
     pub fn stop_request(target: &VerifiedMutationTarget) -> VultrRequest {
@@ -320,6 +343,7 @@ mod tests {
             region: spec.region,
             plan: spec.plan,
             os_id: spec.os_id,
+            main_ip: String::new(),
         }
     }
 
@@ -399,6 +423,34 @@ mod tests {
             request.body.unwrap()["tags"],
             json!(encode_ownership(&create.ownership()))
         );
+    }
+
+    #[test]
+    fn create_with_user_data_preserves_exact_ownership() {
+        let desired = DesiredVm {
+            intent: intent(),
+            display_name: spec().label.clone(),
+            spec_fingerprint: spec().fingerprint(),
+        };
+        let ReconcilePlan::Create(create) = plan_present(None, &[], &desired, None).unwrap() else {
+            panic!("expected create plan");
+        };
+        let request =
+            VultrLifecycleAdapter::create_request_with_user_data(&create, &spec(), "IyEvYmluL3No");
+        let body = request.body.unwrap();
+        assert_eq!(body["user_data"], json!("IyEvYmluL3No"));
+        assert_eq!(body["tags"], json!(encode_ownership(&create.ownership())));
+    }
+
+    #[test]
+    fn exact_instance_request_uses_verified_provider_uuid() {
+        let request = VultrLifecycleAdapter::get_instance_request(&verified_target());
+        assert_eq!(request.method, VultrMethod::Get);
+        assert_eq!(
+            request.path,
+            "/v2/instances/11111111-1111-4111-8111-111111111111"
+        );
+        assert!(request.body.is_none());
     }
 
     #[test]

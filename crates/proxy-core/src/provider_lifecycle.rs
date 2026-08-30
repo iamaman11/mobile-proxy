@@ -416,6 +416,7 @@ fn resolve_bound_resource(
         return Err(LifecycleError::StaleGeneration);
     }
 
+    let expected_metadata = OwnershipMetadata::exact(&binding.intent, binding.generation);
     if let Some(bound_observation) = observed
         .iter()
         .find(|resource| resource.provider_id == binding.provider_id)
@@ -424,6 +425,12 @@ fn resolve_bound_resource(
             OwnershipObservation::Missing => return Err(LifecycleError::MissingOwnership),
             OwnershipObservation::Conflicting => {
                 return Err(LifecycleError::ConflictingOwnershipMetadata);
+            }
+            OwnershipObservation::Exact(metadata) if metadata != &expected_metadata => {
+                if metadata.matches_except_generation(&expected_metadata) {
+                    return Err(LifecycleError::StaleGeneration);
+                }
+                return Err(LifecycleError::OwnershipMetadataMismatch);
             }
             OwnershipObservation::Exact(_) => {}
         }
@@ -445,7 +452,6 @@ fn resolve_bound_resource(
     let OwnershipObservation::Exact(metadata) = &resource.ownership else {
         return Err(LifecycleError::MissingOwnership);
     };
-    let expected_metadata = OwnershipMetadata::exact(&binding.intent, binding.generation);
     if metadata != &expected_metadata {
         if metadata.matches_except_generation(&expected_metadata) {
             return Err(LifecycleError::StaleGeneration);
@@ -648,6 +654,40 @@ mod tests {
                 MutationKind::Reconfigure,
             ),
             Err(LifecycleError::StaleGeneration)
+        );
+    }
+
+    #[test]
+    fn bound_uuid_with_wrong_exact_owner_is_not_treated_as_deleted() {
+        let binding = binding();
+        let wrong_intent =
+            OwnershipIntent::new(LifecycleScope::Acceptance, "candidate:different").unwrap();
+        let observed = vec![ObservedVm {
+            provider_id: binding.provider_id.clone(),
+            display_name: desired().display_name,
+            ownership: OwnershipObservation::Exact(OwnershipMetadata::exact(
+                &wrong_intent,
+                binding.generation,
+            )),
+            spec_fingerprint: "spec:v1".to_owned(),
+        }];
+        assert_eq!(
+            authorize_mutation(
+                &binding,
+                &observed,
+                binding.generation,
+                MutationKind::Delete,
+            ),
+            Err(LifecycleError::OwnershipMetadataMismatch)
+        );
+    }
+
+    #[test]
+    fn truly_absent_bound_uuid_is_reported_not_found() {
+        let binding = binding();
+        assert_eq!(
+            authorize_mutation(&binding, &[], binding.generation, MutationKind::Delete,),
+            Err(LifecycleError::ProviderResourceNotFound)
         );
     }
 
