@@ -105,8 +105,8 @@ def check_repository(root: Path) -> list[str]:
     ):
         if required not in state:
             errors.append(f"durable item-19 lifecycle state is missing {required!r}")
-    if "Ok(None)" not in state:
-        errors.append("binding projection no longer exposes an explicit never-started None state")
+    if "AcceptanceVmLifecycleState::Empty => Ok(None)" not in state:
+        errors.append("only never-started Empty state may project as an unbound None binding")
     if "AcceptanceVmLifecycleState::CreateDispatched" not in state or "Err(BindingStoreError::OperationInProgress)" not in state:
         errors.append("in-progress create must not project as an unbound/never-created intent")
 
