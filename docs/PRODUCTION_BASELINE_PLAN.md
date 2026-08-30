@@ -12,7 +12,7 @@ The former long-horizon platform roadmap has been moved to [`future/ULTIMATE_IMP
 
 This document is the sole canonical implementation roadmap for current development. Architecture ADRs and compatibility contracts remain normative for their bounded subjects, but they do not authorize work outside this baseline.
 
-Execution is split into a software-complete release candidate and final physical-device acceptance. Lack of an attached phone does not authorize deferring source-controlled migration, runtime cutover, recovery, backup/restore, process-level tunnel acceptance or operational work that can be proved without the device.
+Execution is staged as a software-complete immutable candidate, GitHub-only control-plane preflights, a controlled provider-backed acceptance environment, physical-device acceptance, immutable final release publication, and only then production promotion. The retired Google/GCP server path is not an acceptance or production fallback. Physical acceptance that requires a public server peer must use a bounded acceptance VM on the target provider, but that VM is not itself production promotion.
 
 ## 2. Protected compatibility surface
 
@@ -121,7 +121,7 @@ Completion criteria:
 
 ### Phase D — minimum operations and staged acceptance
 
-Goal: prove the resulting system can be operated and restored without device access, produce one immutable software-complete release candidate, and then confirm that candidate on a real device.
+Goal: prove the resulting system can be operated and restored without device access, produce one immutable software-complete candidate, establish GitHub-only execution and a controlled Vultr acceptance environment, confirm that exact candidate on a real phone, publish the final immutable release only after that physical proof, and then promote the accepted state to Vultr production.
 
 Required work:
 
@@ -131,25 +131,42 @@ Required work:
 4. Run a restore drill into a clean environment and verify the restored state.
 5. Complete all process-level proxy and tunnel acceptance, rollback and recovery evidence on one immutable Git SHA.
 6. Record a software-complete release-candidate closeout and provide an executable physical-phone acceptance runbook for that SHA.
-7. When a phone is available, run the physical sequence on the immutable candidate SHA:
-   - clean startup;
-   - all three proxy surfaces plus HTTP CONNECT;
-   - phone or service reboot;
-   - state rehydration;
-   - QUIC operation;
-   - forced TLS/TCP fallback;
-   - return to QUIC;
-   - WireGuard rollback availability.
-8. Record any unresolved P0/P1 defect and do not declare the baseline complete while one remains.
+7. Complete the GitHub-only execution prerequisites before phone mutation:
+   - keep the public repository free of self-hosted runners and public ADB workflows;
+   - add only the minimum private caller/shim in `iamaman11/mobile-proxy-production`;
+   - prove the `android-production` runner, required tools and exactly the registered phone through read-only private Actions preflight;
+   - prove Vultr account/key access through a GitHub-hosted read-only preflight without exposing secret-derived data;
+   - establish an immutable acceptance execution identity that is distinct from the final release identity, so the final `vMAJOR.MINOR.PATCH` tag is not created before physical acceptance.
+8. Implement provider-neutral lifecycle interfaces and a typed Vultr adapter before creating any VM. Managed lifecycle must use provider UUID, exact ownership tags and generation/CAS semantics, and must reject ambiguous, neighbouring or unbound resources.
+9. Provision one controlled Vultr acceptance VM only when the physical-acceptance window is ready, through the typed adapter and immutable acceptance identity. Deploy the exact candidate server-side artifacts there. The retired Google/GCP server path must not be used as fallback, and this acceptance VM must not be represented as production.
+10. Run the physical sequence on the same immutable candidate SHA and acceptance VM:
+   - verify exact deployed identity on both phone and server before traffic tests;
+   - prove the primary first-party reverse tunnel over QUIC;
+   - reboot the phone or service and prove state rehydration and reconnection;
+   - force QUIC failure at the server/network boundary while keeping certificate-pinned TLS/TCP available;
+   - prove automatic operation over TLS/TCP reserve;
+   - restore QUIC and prove new connections return to the primary transport;
+   - prove mixed proxy, SOCKS5, HTTP and HTTP CONNECT through the real phone path;
+   - prove stock WireGuard rollback;
+   - return from WireGuard to the primary first-party runtime;
+   - verify exact deployed identity again after all reboot, fallback, rollback and recovery transitions.
+11. Record any unresolved P0/P1 defect and do not advance while one remains.
+12. Only after successful physical acceptance, create the final immutable release evidence and protected annotated `vMAJOR.MINOR.PATCH` tag, attach the required artifacts/digests and provenance/attestation evidence, and publish the release using the approved immutable ordering.
+13. Only after that final release exists, perform Vultr production promotion/deployment through the typed adapter. The promotion may adopt the already-accepted managed VM only if its provider binding, ownership tags, generation and artifact digests exactly match the final release; otherwise it must provision or recreate the production state through the same typed ownership path. Manual SSH/provider CLI is not an acceptable normal promotion path.
 
 Completion criteria:
 
 - backup and restore are repeatable and documented;
 - liveness remains healthy when the process is healthy even if no phone is available;
 - readiness accurately reflects critical storage and worker dependencies;
-- all source-controlled and process-testable acceptance passes on one unchanged commit, producing a software-complete release candidate;
-- the only permitted remaining gate after software closeout is the documented physical-phone sequence;
-- physical acceptance passes on the immutable candidate commit, or all software evidence is rerun on a later immutable commit before the physical run;
+- all source-controlled and process-testable acceptance passes on one unchanged commit, producing a software-complete candidate;
+- the private phone preflight proves the expected runner/tools/device without mutating the phone or publishing its raw identifier;
+- no Vultr VM is created before the typed ownership adapter and its rejection tests pass;
+- the acceptance VM is explicitly bounded evidence infrastructure and is not confused with final production promotion;
+- physical acceptance proves the same immutable candidate on phone and server across primary QUIC, reboot, forced TLS/TCP reserve, QUIC recovery, all protected proxy surfaces, WireGuard rollback and return to primary;
+- the final release tag/evidence is created only after physical acceptance succeeds;
+- Vultr production promotion occurs only from that final immutable release tuple;
+- Google/GCP is not required anywhere in the acceptance or production path;
 - the resulting release is suitable for continued real use without requiring the future platform roadmap.
 
 ## 5. Explicit non-goals
@@ -187,10 +204,19 @@ The required order is:
 12. health semantics;
 13. backup/restore drill;
 14. controlled immutable-SHA software acceptance and release-candidate closeout;
-15. immutable-SHA physical acceptance when a device is available;
-16. final baseline closeout.
+15. private GitHub-only phone caller/shim plus live read-only `android-production` runner/tool/registered-device preflight;
+16. immutable Vultr acceptance execution gate that does not create the final release tag early and does not weaken the final production gate;
+17. GitHub-hosted Vultr read-only account/key preflight through that acceptance gate;
+18. provider-neutral lifecycle interfaces plus typed Vultr ownership adapter and rejection tests;
+19. just-in-time controlled Vultr acceptance VM plus exact-candidate server deployment;
+20. immutable-SHA physical acceptance on the real phone against that acceptance VM;
+21. final immutable release evidence, protected annotated release tag and artifacts;
+22. Vultr production promotion/deployment from the accepted final release tuple;
+23. final baseline closeout.
 
-Items 1 through 14 must be completed without waiting for a physical device. Device unavailability may pause only item 15 and the dependent final closeout in item 16. No later item should otherwise be pulled forward merely to keep work moving.
+The first unfinished item for the current continuation is item 15. PR #109 merged the canonical read-only phone-preflight logic, but it does not satisfy item 15 until the thin private caller exists and a real private Actions run proves the runner/tools/registered phone.
+
+Items 15 through 18 should be completed without mutating the phone or creating a VM. Item 19 is intentionally just-in-time and should not create an idle acceptance VM merely to keep work moving if the real phone is not ready. Item 20 is the physical gate. Items 21 and 22 are forbidden until item 20 succeeds. No later item should be pulled forward merely to keep work moving.
 
 ## 7. System invariants
 
@@ -246,6 +272,11 @@ These invariants apply to every baseline slice. They are stronger than implement
 4. Physical acceptance evidence must use that immutable candidate SHA; if source changes, the relevant software evidence must be rerun before physical acceptance.
 5. Software-complete status is not baseline-complete status and must state that the physical gate remains.
 6. No release is declared baseline-complete with an unresolved P0 or P1 defect.
+7. The retired Google/GCP server path must not be used to satisfy physical acceptance, rollback proof or production deployment.
+8. A provider-backed acceptance VM may exist before the final release only under a distinct immutable acceptance identity, typed ownership and bounded acceptance purpose; it must not be represented as production.
+9. The final release tag and production promotion are forbidden before the required physical acceptance succeeds.
+10. Phone-side and server-side physical evidence must refer to the same immutable candidate SHA and exact deployed artifact identities.
+11. Physical proof of QUIC fallback must force failure at the server/network boundary while TLS/TCP reserve remains available; a client-only mock or declared transport state is not sufficient evidence.
 
 ## 8. Module responsibility map
 
@@ -320,7 +351,8 @@ Before changing code, the developer or agent must:
    - explicit non-goals;
    - compatibility surface;
    - required acceptance evidence.
-8. Stop and request or record a product decision if the proposed work belongs to Section 5 or the future roadmap.
+8. For items 15 through 22, also verify the current public/private GitOps boundary, whether a live private-phone preflight has actually passed, whether any acceptance VM exists, and whether the final release tag is still correctly absent before physical acceptance.
+9. Stop and request or record a product decision if the proposed work belongs to Section 5 or the future roadmap.
 
 No external checkpoint may authorize skipping these steps.
 
@@ -356,8 +388,9 @@ Activating any item from `docs/future/` requires a separate decision and must no
 
 Development must stop for reassessment when any of the following is true:
 
-- all software-completable work through delivery item 14 is complete and only physical-device acceptance remains, in which case implementation pauses with an explicit software-complete release candidate rather than claiming baseline completion;
-- all four baseline phases, including physical acceptance, are complete;
+- source-controlled and control-plane work through delivery item 18 is complete but the real phone is not ready for the physical window; do not provision an idle acceptance VM solely to keep work moving;
+- the physical sequence in item 20 fails or shows source/artifact identity drift, in which case the failed candidate must not be released or promoted;
+- all current delivery items through final production promotion and baseline closeout are complete;
 - a proposed change belongs only to the future roadmap;
 - implementation cost is no longer proportional to a demonstrated operational risk;
 - compatibility can no longer be preserved without a product decision;
