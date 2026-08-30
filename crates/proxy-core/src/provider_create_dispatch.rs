@@ -143,12 +143,10 @@ pub fn recover_dispatched_create(
         .iter()
         .filter(|resource| resource.display_name == fence.display_name)
         .collect();
-    if same_name.iter().any(|resource| {
-        matches!(
-            &resource.ownership,
-            OwnershipObservation::Conflicting
-        )
-    }) {
+    if same_name
+        .iter()
+        .any(|resource| matches!(&resource.ownership, OwnershipObservation::Conflicting))
+    {
         return Err(CreateDispatchError::ConflictingOwnershipMetadata);
     }
     if same_name.len() > 1 {
