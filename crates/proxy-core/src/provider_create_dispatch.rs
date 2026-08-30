@@ -250,11 +250,7 @@ mod tests {
     #[test]
     fn durable_recovery_constructor_rejects_stale_generation() {
         assert_eq!(
-            create_dispatch_fence_for_recovery(
-                &intent(),
-                Generation::new(2).unwrap(),
-                &desired(),
-            ),
+            create_dispatch_fence_for_recovery(&intent(), Generation::new(2).unwrap(), &desired(),),
             Err(CreateDispatchError::UnexpectedGeneration)
         );
     }
