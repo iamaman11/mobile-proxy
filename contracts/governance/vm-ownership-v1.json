@@ -6,7 +6,9 @@
   "implementation": {
     "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
     "vultr_adapter": "apps/operator-cli/src/vultr_lifecycle.rs",
-    "live_execution": "forbidden_in_item_18",
+    "vultr_http_client": "apps/operator-cli/src/vultr_client.rs",
+    "durable_acceptance_state": "apps/operator-cli/src/github_vm_binding_store.rs",
+    "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates",
     "first_live_vm_creation_item": 19
   },
   "binding": {
@@ -14,8 +16,20 @@
     "identity": "provider-assigned immutable instance UUID/ID",
     "ownership_intent": "exact immutable lifecycle scope plus exact intent ID",
     "generation": "positive monotonically increasing generation bound into provider ownership metadata",
-    "compare_and_swap": "every binding create, replace or clear requires the exact expected prior binding/generation"
+    "compare_and_swap": "every binding create, replace or clear requires the exact expected prior lifecycle state, binding and generation",
+    "serialized_writer": "one repository-wide acceptance lifecycle workflow concurrency group with cancel-in-progress false",
+    "fork_policy": "non-linear durable history fails closed",
+    "terminal_reuse": "forbidden"
   },
+  "lifecycle_states": [
+    "empty",
+    "create_prepared",
+    "create_dispatched",
+    "bound",
+    "delete_prepared",
+    "delete_dispatched",
+    "terminal"
+  ],
   "required_ownership_metadata": {
     "static": {
       "project": "mobile-proxy",
@@ -28,12 +42,22 @@
     ],
     "matching": "exact_only"
   },
+  "provider_enumeration": {
+    "complete_listing_required_before_lifecycle_decision": true,
+    "pagination": "bounded_cursor_pagination_until_no_next_cursor",
+    "first_page_only": "forbidden",
+    "duplicate_or_ambiguous_claims": "fail_closed"
+  },
   "operations": {
     "create": {
-      "requires_no_existing_binding": true,
+      "requires_never_started_empty_state": true,
       "requires_zero_ownership_compatible_resources": true,
+      "requires_durable_prepare_before_dispatch": true,
+      "requires_durable_dispatch_fence_before_provider_post": true,
+      "blind_redispatch_after_dispatched_state": "forbidden",
+      "ambiguous_provider_post_outcome": "relist_and_recover_or_fail_closed_never_blindly_post_again",
       "provider_request_must_set_exact_ownership_metadata": true,
-      "provider_response_must_match_exact_ownership_metadata": true,
+      "provider_response_or_relisted_resource_must_match_exact_ownership_metadata": true,
       "persist_binding_with_compare_and_swap_before_success": true
     },
     "manage": {
@@ -65,8 +89,11 @@
       "requires_exact_provider_identity": true,
       "requires_exact_ownership_metadata": true,
       "requires_expected_generation": true,
+      "requires_durable_prepare_before_dispatch": true,
+      "requires_durable_dispatch_fence_before_provider_delete": true,
       "clear_binding_only_after_provider_confirms_delete": true,
-      "clear_binding_requires_compare_and_swap": true
+      "clear_binding_requires_compare_and_swap": true,
+      "clear_transitions_intent_to_terminal": true
     },
     "replace": {
       "requires_persisted_binding": true,
@@ -75,12 +102,16 @@
       "requires_expected_generation": true,
       "replacement_generation_must_be_exactly_current_plus_one": true,
       "replacement_must_be_verified_before_binding_swap": true,
-      "atomically_replace_provider_identity_and_generation_with_compare_and_swap": true
+      "atomically_replace_provider_identity_and_generation_with_compare_and_swap": true,
+      "live_item_19_replacement": "not_required_for_the_single_jit_acceptance_proof_and_must_not_bypass_create_dispatch_fencing"
     }
   },
   "fail_closed": [
     "missing_binding",
     "invalid_binding",
+    "lifecycle_operation_in_progress_presented_as_empty",
+    "create_already_dispatched",
+    "terminal_intent_reuse",
     "provider_instance_not_found",
     "provider_identity_mismatch",
     "missing_ownership_metadata",
@@ -90,7 +121,9 @@
     "duplicate_ownership_claim",
     "neighbouring_or_unbound_resource",
     "stale_generation",
-    "binding_compare_and_swap_conflict"
+    "binding_compare_and_swap_conflict",
+    "forked_durable_lifecycle_history",
+    "incomplete_provider_pagination"
   ],
   "forbidden": [
     "arbitrary_instance_uuid_from_operator_input",
@@ -100,12 +133,23 @@
     "mutation_without_expected_generation",
     "operation_after_identity_ownership_or_generation_verification_failure",
     "unverified_binding_replacement",
+    "blind_create_retry_after_dispatch_fence",
+    "binding_clear_before_provider_confirmed_delete",
+    "terminal_intent_reset_to_generation_one",
     "item_18_live_provider_mutation",
-    "item_18_final_production_authority"
+    "item_18_final_production_authority",
+    "item_19_production_authority"
   ],
-  "activation_condition": "A shared-account provider adapter, including Vultr, must satisfy this contract and permanent rejection tests before any live lifecycle command is exposed.",
+  "activation_condition": "A shared-account provider adapter, including Vultr, must satisfy this contract, durable crash-safe lifecycle state, complete provider enumeration and permanent rejection tests before any live lifecycle workflow is enabled.",
   "item_18_execution": {
     "allowed": "contract_policy_adapter_and_non_mutating_tests_only",
+    "live_provider_mutation": false,
+    "real_vm_creation": false,
+    "production_vultr_authority": false,
+    "phone_mutation": false
+  },
+  "item_19_slice_a": {
+    "allowed": "durable_state_typed_http_client_contracts_docs_and_non_mutating_tests",
     "live_provider_mutation": false,
     "real_vm_creation": false,
     "production_vultr_authority": false,
