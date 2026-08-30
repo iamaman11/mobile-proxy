@@ -214,13 +214,13 @@ The required order is:
 22. Vultr production promotion/deployment from the accepted final release tuple;
 23. final baseline closeout.
 
-**Current canonical delivery status:** items 15, 16, 17 and 18 are `COMPLETE`. **Item 19 is `ACTIVE` and is the first unfinished item.** Its working tracker is #124.
+**Current canonical delivery status:** items 15, 16, 17, 18 and 19 are `COMPLETE`. **Item 20 is the first unfinished delivery item.** The completed Item 19 working tracker is #124; its bounded live proof is recorded in `docs/operations/item19-provider-proof-closeout.md`.
 
-Item 19 is intentionally just-in-time. Its non-mutating implementation work — durable crash-safe lifecycle state, typed acceptance-only Vultr execution, permanent rejection tests, workflow gates and documentation/contracts — may proceed before a provider proof window opens. The first live provider mutation remains forbidden until the then-current exact candidate has fresh acceptance authority, fresh read-only Vultr preflight evidence and an explicit provider-proof window. The Item 19 live proof is provider-only and ephemeral: it must deploy and verify the exact candidate, then deterministically clean up before Item 19 completes.
+The provider-only Item 19 proof completed on immutable candidate `d151dbdd156279e32a5361d304c90f996bd2d565`. Exact-current Quality, immutable acceptance authority and read-only Vultr preflight gates were consumed by lifecycle run `33342000338`; the exact candidate server artifact was deployed and verified on one controlled acceptance VM, and exact-target provider deletion was confirmed before durable terminal state. The proof VM is gone, and the terminal Item 19 ownership intent is not reusable.
 
-The mutable phone lifecycle remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level phone-mutation gate. #115 is evaluated before Item 20 phone mutation and does not gate the provider-only Item 19 proof. Item 20 must use a fresh JIT acceptance session with a distinct ownership intent rather than reuse Item 19's terminal proof intent.
+Item 20 remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level phone-mutation gate. When #115 is resolved and the mutable physical window opens, Item 20 must use a fresh JIT acceptance session with a distinct ownership intent rather than reuse Item 19's terminal proof intent.
 
-Item 20 becomes the next delivery item only after the live item-19 Definition of Done is complete. Items 21 and 22 remain forbidden until item 20 succeeds. No later item may be pulled forward merely to keep work moving.
+Items 21 and 22 remain forbidden until item 20 succeeds. No final protected `v*` release/tag or production promotion is authorized by Item 19 completion, and no later item may be pulled forward merely to keep work moving.
 
 ## 7. System invariants
 
@@ -398,7 +398,7 @@ The item-19 reconciliation that changes only stale delivery status and makes alr
 
 Development must stop for reassessment when any of the following is true:
 
-- item-19 implementation work that is independently testable is complete but the real phone window is not ready; do not provision an idle acceptance VM solely to keep work moving;
+- Item 20 remains blocked by #115 or the real phone window is not ready; do not provision an idle acceptance VM merely to keep work moving;
 - the physical sequence in item 20 fails or shows source/artifact identity drift, in which case the failed candidate must not be released or promoted;
 - all current delivery items through final production promotion and baseline closeout are complete;
 - a proposed change belongs only to the future roadmap;

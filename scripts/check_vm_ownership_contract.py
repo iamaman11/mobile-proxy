@@ -243,12 +243,14 @@ def check_repository(root: Path) -> list[str]:
         else:
             if migration.get("vultr_adapter") != "implemented_typed_provider_neutral_ownership_and_generation_policy":
                 errors.append("production topology must keep item 18 typed Vultr adapter protected")
-            if migration.get("vultr_durable_acceptance_state") != "item_19_slice_a_active_crash_safe_dispatch_fencing_no_live_entrypoint":
-                errors.append("production topology must bind the item-19 durable state boundary")
-            if migration.get("vultr_typed_http_client") != "item_19_slice_a_active_acceptance_only_bounded_full_instance_enumeration":
-                errors.append("production topology must bind the item-19 typed client boundary")
-            if migration.get("vultr_live_lifecycle") != "item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_provider_proof_window_gates":
-                errors.append("production topology live lifecycle must remain forbidden until all item-19 live gates")
+            if migration.get("vultr_durable_acceptance_state") != "item_19_complete_crash_safe_dispatch_fencing_and_terminal_cleanup_proven_live":
+                errors.append("production topology must bind the completed item-19 durable state boundary")
+            if migration.get("vultr_typed_http_client") != "item_19_complete_acceptance_only_bounded_full_instance_enumeration_and_live_execution_proven":
+                errors.append("production topology must bind the completed item-19 typed client boundary")
+            if migration.get("vultr_live_lifecycle") != "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed":
+                errors.append("production topology must bind the terminal item-19 live proof")
+            if migration.get("next_acceptance_lifecycle") != "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent":
+                errors.append("production topology must require a fresh item-20 lifecycle intent")
 
     if github:
         adapter = github.get("vultr_lifecycle_adapter")

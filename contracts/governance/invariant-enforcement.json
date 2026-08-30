@@ -13,7 +13,7 @@
   "sources": {
     "P": {
       "path": "docs/PRODUCTION_BASELINE_PLAN.md",
-      "blob_sha": "9e00f47d5f1e37bf8e4461bc11ececa188c94b8c"
+      "blob_sha": "65a88761e6bf840638d828f218db4b2ffeccccd4"
     },
     "A1": {
       "path": "docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md",
@@ -387,7 +387,7 @@
       ],
       "",
       "",
-      "All current control-plane mutations\u2014command issuance and acknowledgement, device registration, heartbeat and public probe\u2014enter through typed application ports; query handlers remain read-only.",
+      "All current control-plane mutations—command issuance and acknowledgement, device registration, heartbeat and public probe—enter through typed application ports; query handlers remain read-only.",
       ""
     ],
     [
