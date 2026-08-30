@@ -5,11 +5,8 @@ use proxy_core::{
 
 #[test]
 fn same_name_with_complete_wrong_owner_metadata_is_rejected() {
-    let intent = OwnershipIntent::new(
-        LifecycleScope::Acceptance,
-        "candidate:0123456789abcdef",
-    )
-    .unwrap();
+    let intent =
+        OwnershipIntent::new(LifecycleScope::Acceptance, "candidate:0123456789abcdef").unwrap();
     let desired = DesiredVm {
         intent: intent.clone(),
         display_name: "mobile-proxy-acceptance".to_owned(),
