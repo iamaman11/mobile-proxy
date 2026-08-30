@@ -2,7 +2,7 @@
   "schema_version": 1,
   "status": "normative",
   "audit_revision": "2026-08-30",
-  "baseline_main_sha": "02067df89c5f7dc34198ef2d29d2405a21beb791",
+  "baseline_main_sha": "955d8dd67d212c1f0e89d29a8a90beebeb31b29d",
   "allowed_statuses": [
     "enforced",
     "partially_enforced",
@@ -487,21 +487,24 @@
       "P",
       "§4 Phase B, §7.2, §7.6",
       "SQLite uses WAL, foreign keys, busy timeout, single-writer discipline, short transactions, backup and integrity checks",
-      "partially_enforced",
+      "enforced",
       "persistence",
       [
         "crates/control-plane-sqlite/src/lib.rs",
+        "crates/control-plane-sqlite/src/integrity.rs",
         "crates/control-plane-sqlite/src/snapshot_compare_and_swap.rs",
         "crates/control-plane-sqlite/src/snapshot_store_tests.rs",
+        "crates/control-plane-sqlite/tests/integrity.rs",
         "services/control-plane/src/bin/control-plane-state-backup.rs",
-        "services/control-plane/tests/state_backup_cli.rs"
+        "services/control-plane/tests/state_backup_cli.rs",
+        "services/control-plane/tests/sqlite_corruption_startup.rs"
       ],
       [
         "RQ-T"
       ],
-      "sqlite-integrity-startup-acceptance",
       "",
-      "WAL, foreign keys, a five-second busy timeout, synchronous FULL and immediate bounded write transactions are permanent behavior. Backup, verification, clean restore and process startup from restored state are permanently exercised. The remaining gap is an explicit complete SQLite integrity/corruption check during startup or verification.",
+      "",
+      "WAL, foreign keys, a five-second busy timeout, synchronous FULL and immediate bounded write transactions are permanent behavior. Startup/open performs PRAGMA integrity_check plus PRAGMA foreign_key_check; adapter and process regression evidence fails closed for corrupt SQLite state before readiness. Backup, verification, clean restore and process startup from restored state are permanently exercised.",
       ""
     ],
     [
