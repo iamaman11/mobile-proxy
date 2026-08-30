@@ -1,7 +1,7 @@
 # Immutable-SHA Physical Phone Acceptance Runbook
 
 Status: executable external gate for production baseline item 15  
-Prerequisite: successful evidence v2 from `Software Release Candidate` for the exact candidate SHA
+Prerequisite: successful evidence v2 from the aggregate `Quality` workflow for the exact candidate SHA
 
 ## 1. Freeze and verify the candidate
 
