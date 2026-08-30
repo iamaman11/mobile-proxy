@@ -82,7 +82,7 @@
         "provider_mutation": false
       },
       "item_19_acceptance_lifecycle": {
-        "status": "slice_b_implemented_live_invocation_forbidden_until_all_item_19_gates",
+        "status": "implementation_active_live_invocation_forbidden_until_all_item_19_gates",
         "workflow": ".github/workflows/item19-acceptance-lifecycle.yml",
         "command_issue": 124,
         "command": "/item19-acceptance-ready <full_sha>",
@@ -99,6 +99,7 @@
         "provider_identity": "verified_provider_assigned_immutable_uuid_plus_exact_ownership_and_generation",
         "transport_endpoint": "ip_is_transport_only_after_verified_target_resolution_never_authority",
         "artifact_identity": "exact_candidate_sha_plus_bounded_manifest_verified_before_and_after_transport",
+        "mutation_revalidation": "exact_current_protected_main_and_signing_gate_rechecked_in_same_step_immediately_before_typed_lifecycle_entrypoint",
         "cleanup": "verified_delete_then_physical_bound_uuid_absence_confirmation_then_durable_terminal_cas",
         "provider_mutation": "bounded_item_19_only_after_exact_gates",
         "production_scope": "forbidden"
@@ -106,7 +107,7 @@
     }
   },
   "vultr_lifecycle_adapter": {
-    "status": "item_19_slice_b_bounded_acceptance_entrypoint_implemented_live_invocation_gated",
+    "status": "item_19_slice_a_typed_client_and_durable_state_active_no_live_entrypoint",
     "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
     "create_recovery_policy": "crates/proxy-core/src/provider_create_dispatch.rs",
     "provider_adapter": "apps/operator-cli/src/vultr_lifecycle.rs",
@@ -126,7 +127,7 @@
     "artifact_identity": "exact_candidate_sha_and_bounded_manifest_verified_locally_and_on_verified_target",
     "transport_endpoint_authority": "forbidden_ip_is_transport_only_after_verified_target_resolution",
     "deletion_confirmation": "bound_uuid_must_be_physically_absent_before_terminal_cas_wrong_ownership_is_not_absence",
-    "live_execution": "forbidden_until_slice_b_is_protected_on_current_main_and_exact_item_19_gates_are_satisfied",
+    "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates",
     "first_live_vm_creation_item": 19,
     "production_vultr_authority": false
   },

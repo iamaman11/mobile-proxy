@@ -243,8 +243,20 @@ class Item19AcceptanceLifecycleTests(unittest.TestCase):
             "deployments: write",
             "issues/115",
             "runs-on: ubuntu-latest",
+            "Revalidate exact-current gate and reconcile through typed acceptance lifecycle",
         ):
             self.assertIn(required, workflow)
+        self.assertGreaterEqual(
+            workflow.count('"repos/$GITHUB_REPOSITORY/branches/main"'), 3
+        )
+        self.assertGreaterEqual(workflow.count('"repos/$GITHUB_REPOSITORY/issues/115"'), 2)
+        revalidate = workflow.index(
+            "Revalidate exact-current gate and reconcile through typed acceptance lifecycle"
+        )
+        reconcile = workflow.index(
+            "item19-server-artifact/bin/item19-acceptance-lifecycle reconcile-deploy"
+        )
+        self.assertLess(revalidate, reconcile)
         for forbidden in (
             "environment: production-vultr",
             "runs-on: self-hosted",

@@ -333,10 +333,25 @@ jobs:
           printf '%s\n' "$VULTR_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/item19-vultr-ssh"
           ssh-keygen -y -f "$RUNNER_TEMP/item19-vultr-ssh" >/dev/null
 
-      - name: Reconcile and deploy through typed acceptance lifecycle
+      - name: Revalidate exact-current gate and reconcile through typed acceptance lifecycle
         shell: bash
         run: |
           set -euo pipefail
+          main_sha=$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')
+          main_protected=$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/branches/main" --jq '.protected')
+          signing_state=$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/issues/115" --jq '.state')
+          [[ "$main_sha" == "$CANDIDATE_SHA" ]]
+          [[ "$main_protected" == "true" ]]
+          [[ "$signing_state" == "closed" ]]
           item19-server-artifact/bin/item19-acceptance-lifecycle reconcile-deploy \
             --candidate-sha "$CANDIDATE_SHA" \
             --admission-evidence admission-evidence/item19-admission-evidence.json \
