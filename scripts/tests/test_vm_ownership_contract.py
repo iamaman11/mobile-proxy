@@ -16,8 +16,11 @@ COPIES = (
     "contracts/operations/production-topology-v1.json",
     "contracts/operations/github-control-plane-v1.json",
     "docs/architecture/vm-ownership-boundary.md",
+    "docs/architecture/acceptance-vm-binding-store.md",
     "crates/proxy-core/src/provider_lifecycle.rs",
     "apps/operator-cli/src/vultr_lifecycle.rs",
+    "apps/operator-cli/src/vultr_client.rs",
+    "apps/operator-cli/src/github_vm_binding_store.rs",
 )
 
 
@@ -94,32 +97,32 @@ class VmOwnershipContractTests(unittest.TestCase):
         )
         self.assertTrue(any("item 18 execution boundary" in error for error in errors))
 
-    def test_topology_cannot_regress_item18_to_not_implemented(self):
+    def test_topology_cannot_regress_item18_adapter(self):
         errors = self.validate_json_changed(
             "contracts/operations/production-topology-v1.json",
             lambda topology: topology["migration_status"].update(
                 {"vultr_adapter": "not_implemented"}
             ),
         )
-        self.assertTrue(any("must keep item 18" in error for error in errors))
+        self.assertTrue(any("keep item 18 typed Vultr adapter" in error for error in errors))
 
-    def test_topology_cannot_enable_live_lifecycle_before_item19(self):
+    def test_topology_cannot_enable_live_lifecycle_before_all_item19_gates(self):
         errors = self.validate_json_changed(
             "contracts/operations/production-topology-v1.json",
             lambda topology: topology["migration_status"].update(
                 {"vultr_live_lifecycle": "enabled"}
             ),
         )
-        self.assertTrue(any("forbidden until item 19" in error for error in errors))
+        self.assertTrue(any("live lifecycle must remain forbidden" in error for error in errors))
 
-    def test_control_plane_cannot_enable_item18_live_execution(self):
+    def test_control_plane_cannot_enable_item19_live_execution_early(self):
         errors = self.validate_json_changed(
             "contracts/operations/github-control-plane-v1.json",
             lambda control: control["vultr_lifecycle_adapter"].update(
                 {"live_execution": "enabled"}
             ),
         )
-        self.assertTrue(any("adapter status differs" in error for error in errors))
+        self.assertTrue(any("live_execution" in error for error in errors))
 
     def test_control_plane_cannot_gain_production_authority(self):
         errors = self.validate_json_changed(
@@ -128,16 +131,16 @@ class VmOwnershipContractTests(unittest.TestCase):
                 {"production_vultr_authority": True}
             ),
         )
-        self.assertTrue(any("adapter status differs" in error for error in errors))
+        self.assertTrue(any("production_vultr_authority" in error for error in errors))
 
-    def test_item17_readonly_acceptance_boundary_cannot_be_relaxed(self):
+    def test_control_plane_cannot_relax_full_provider_enumeration(self):
         errors = self.validate_json_changed(
             "contracts/operations/github-control-plane-v1.json",
-            lambda control: control["acceptance_vultr_environment"].update(
-                {"provider_mutation": "allowed"}
+            lambda control: control["vultr_lifecycle_adapter"].update(
+                {"full_provider_enumeration": "first_page_only"}
             ),
         )
-        self.assertTrue(any("item-17 acceptance-vultr" in error for error in errors))
+        self.assertTrue(any("full_provider_enumeration" in error for error in errors))
 
 
 if __name__ == "__main__":
