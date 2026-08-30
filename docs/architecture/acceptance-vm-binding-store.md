@@ -80,7 +80,7 @@ The durable state therefore distinguishes never-created, in-progress, bound, del
 
 ## Complete provider enumeration
 
-Mutation safety depends on seeing every relevant Vultr instance, not merely the first API page. The typed acceptance client requests the maximum supported page size (`per_page=500`), follows cursor pagination with a fixed page bound, rejects repeated/oversized cursors, and fails closed when pagination cannot prove a complete listing.
+The `complete provider enumeration` invariant means mutation safety depends on seeing every relevant Vultr instance, not merely the first API page. The typed acceptance client requests the maximum supported page size (`per_page=500`), follows cursor pagination with a fixed page bound, rejects repeated/oversized cursors, and fails closed when pagination cannot prove a complete listing.
 
 Provider response bodies are read through a hard byte bound instead of being fully buffered before the size check.
 
