@@ -207,10 +207,7 @@ impl<T: VultrTransport> AcceptanceClient<T> {
         decode_created_instance(&body)
     }
 
-    fn instance_ipv4(
-        &self,
-        target: &VerifiedMutationTarget,
-    ) -> Result<Ipv4Addr, VultrClientError> {
+    fn instance_ipv4(&self, target: &VerifiedMutationTarget) -> Result<Ipv4Addr, VultrClientError> {
         require_acceptance(target.intent().scope())?;
         let body = self
             .transport
@@ -697,11 +694,7 @@ mod tests {
         };
         let production_plan = planned_create(LifecycleScope::Production);
         assert_eq!(
-            production_client.create_instance_with_user_data(
-                &production_plan,
-                &spec(),
-                &valid,
-            ),
+            production_client.create_instance_with_user_data(&production_plan, &spec(), &valid,),
             Err(VultrClientError::AcceptanceScopeRequired)
         );
         assert!(production_client.transport.requests.borrow().is_empty());
