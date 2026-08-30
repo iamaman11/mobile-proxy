@@ -42,10 +42,7 @@ impl VultrAcceptanceClient {
         self.inner.create_instance(plan, spec)
     }
 
-    pub fn delete_instance(
-        &self,
-        target: &VerifiedMutationTarget,
-    ) -> Result<(), VultrClientError> {
+    pub fn delete_instance(&self, target: &VerifiedMutationTarget) -> Result<(), VultrClientError> {
         self.inner.delete_instance(target)
     }
 }
@@ -111,10 +108,9 @@ impl<T: VultrTransport> AcceptanceClient<T> {
                 query.push(("cursor".to_owned(), value.clone()));
             }
 
-            let body = self.transport.execute_with_query(
-                VultrLifecycleAdapter::list_instances_request(),
-                &query,
-            )?;
+            let body = self
+                .transport
+                .execute_with_query(VultrLifecycleAdapter::list_instances_request(), &query)?;
             let page: InstancesPage =
                 serde_json::from_slice(&body).map_err(|_| VultrClientError::InvalidResponse)?;
             let count = page.instances.len();
@@ -160,10 +156,7 @@ impl<T: VultrTransport> AcceptanceClient<T> {
         VultrLifecycleAdapter::decode_instance(envelope.instance).map_err(VultrClientError::Adapter)
     }
 
-    fn delete_instance(
-        &self,
-        target: &VerifiedMutationTarget,
-    ) -> Result<(), VultrClientError> {
+    fn delete_instance(&self, target: &VerifiedMutationTarget) -> Result<(), VultrClientError> {
         require_acceptance(target.intent().scope())?;
         self.transport
             .execute(VultrLifecycleAdapter::delete_request(target))?;
@@ -360,11 +353,7 @@ mod tests {
     }
 
     fn intent(scope: LifecycleScope) -> OwnershipIntent {
-        OwnershipIntent::new(
-            scope,
-            "candidate:0123456789abcdef0123456789abcdef01234567",
-        )
-        .unwrap()
+        OwnershipIntent::new(scope, "candidate:0123456789abcdef0123456789abcdef01234567").unwrap()
     }
 
     fn spec() -> VultrVmSpec {
@@ -435,7 +424,10 @@ mod tests {
         ));
         let requests = client.transport.requests.borrow();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].request, VultrLifecycleAdapter::list_instances_request());
+        assert_eq!(
+            requests[0].request,
+            VultrLifecycleAdapter::list_instances_request()
+        );
         assert_eq!(
             requests[0].query,
             vec![("per_page".to_owned(), INSTANCE_PAGE_SIZE.to_string())]
@@ -471,7 +463,10 @@ mod tests {
         ]);
         let client = AcceptanceClient { transport };
 
-        assert_eq!(client.list_instances(), Err(VultrClientError::InvalidPagination));
+        assert_eq!(
+            client.list_instances(),
+            Err(VultrClientError::InvalidPagination)
+        );
     }
 
     #[test]
@@ -521,15 +516,18 @@ mod tests {
             )),
             spec_fingerprint: spec().fingerprint(),
         };
-        let target = authorize_mutation(&binding, &[observed], generation, MutationKind::Delete)
-            .unwrap();
+        let target =
+            authorize_mutation(&binding, &[observed], generation, MutationKind::Delete).unwrap();
         let transport = FakeTransport::new(vec![vec![]]);
         let client = AcceptanceClient { transport };
 
         client.delete_instance(&target).unwrap();
         let requests = client.transport.requests.borrow();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].request, VultrLifecycleAdapter::delete_request(&target));
+        assert_eq!(
+            requests[0].request,
+            VultrLifecycleAdapter::delete_request(&target)
+        );
         assert!(requests[0].query.is_empty());
     }
 }
