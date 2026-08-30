@@ -367,7 +367,9 @@ def check_repository(root: Path) -> list[str]:
                 "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
                 "acceptance_authority": "implemented_candidate_quality_evidence_gate",
                 "vultr_readonly_preflight_workflow": "implemented_live_proof_passed_and_remains_read_only",
-                "phone_mutation": "blocked_by_signing_continuity_gate_issue_115",
+                "vultr_live_lifecycle": "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed",
+                "next_acceptance_lifecycle": "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent",
+                "phone_mutation": "item_20_blocked_by_signing_continuity_gate_issue_115",
             }.items()
         ):
             errors.append("production topology GitOps checkpoint differs")
