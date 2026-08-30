@@ -1,0 +1,166 @@
+name: Temporary Item 19 boundary reconciliation v2
+
+on:
+  push:
+    branches:
+      - item19-item20-boundary-reconciliation
+    paths:
+      - .github/workflows/_temp_item19_boundary_reconcile_v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: item19-item20-boundary-reconciliation
+          fetch-depth: 0
+
+      - name: Assert bounded bootstrap history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only 6764ca80a5d680683ddb45ec0804a1c1b673fc89..HEAD | sort > actual-bootstrap.txt
+          printf '%s\n' \
+            .github/workflows/_temp_item19_boundary_reconcile.yml \
+            .github/workflows/_temp_item19_boundary_reconcile_v2.yml \
+            | sort > expected-bootstrap.txt
+          diff -u expected-bootstrap.txt actual-bootstrap.txt
+
+      - name: Reapply bounded reconciliation and permanent controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import gzip
+          import re
+          from pathlib import Path
+
+          helper = Path('.github/workflows/_temp_item19_boundary_reconcile.yml').read_text(encoding='utf-8')
+          match = re.search(r"printf '%s' '([A-Za-z0-9+/=]+)' \| base64 -d \| gzip -d", helper)
+          if match is None:
+              raise SystemExit('cannot recover bounded reconciliation payload')
+          payload = gzip.decompress(base64.b64decode(match.group(1)))
+          script = Path('/tmp/item19-boundary-reconcile.py')
+          script.write_bytes(payload)
+          namespace = {'__name__': '__main__', '__file__': str(script)}
+          exec(compile(payload, str(script), 'exec'), namespace)
+          PY
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one permanent-control target, found {count}: {old!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          contract = 'contracts/operations/github-control-plane-v1.json'
+          replace_once(
+              contract,
+              '"live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_provider_gates"',
+              '"live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates"',
+          )
+
+          checker = 'scripts/check_github_control_plane.py'
+          replace_once(
+              checker,
+              '"status": "implementation_active_live_invocation_forbidden_until_all_item_19_gates",',
+              '"status": "protected_live_invocation_requires_exact_item_19_provider_gates",',
+          )
+          replace_once(
+              checker,
+              '"provider_mutation": "bounded_item_19_only_after_exact_gates",',
+              '"provider_mutation": "bounded_item_19_only_after_exact_provider_gates",',
+          )
+          replace_once(
+              checker,
+              '                    "physical_acceptance_window_ready",',
+              '                    "provider_proof_window_ready",',
+          )
+
+          matrix_path = Path('contracts/governance/invariant-enforcement.json')
+          matrix = json.loads(matrix_path.read_text(encoding='utf-8'))
+          source_p = matrix['sources']['P']
+          if source_p.get('path') != 'docs/PRODUCTION_BASELINE_PLAN.md':
+              raise SystemExit('invariant source P path drifted')
+          if source_p.get('blob_sha') != '3e5919daddc875059329da8678346537b2174cb1':
+              raise SystemExit('invariant source P baseline digest drifted before bounded re-audit')
+          source_p['blob_sha'] = '9e00f47d5f1e37bf8e4461bc11ececa188c94b8c'
+          matrix_path.write_text(json.dumps(matrix, indent=2) + '\n', encoding='utf-8')
+
+          topology_path = Path('contracts/operations/production-topology-v1.json')
+          topology = json.loads(topology_path.read_text(encoding='utf-8'))
+          migration = topology['migration_status']
+          old_topology = 'item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_physical_window_gates'
+          new_topology = 'item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_provider_proof_window_gates'
+          if migration.get('vultr_live_lifecycle') != old_topology:
+              raise SystemExit('production topology lifecycle baseline drifted')
+          migration['vultr_live_lifecycle'] = new_topology
+          topology_path.write_text(json.dumps(topology, indent=2) + '\n', encoding='utf-8')
+
+          replace_once(
+              'scripts/check_vm_ownership_contract.py',
+              '"item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_physical_window_gates"',
+              '"item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_provider_proof_window_gates"',
+          )
+          PY
+
+          cargo fmt --all
+          python3 scripts/check_architecture_boundaries.py
+          python3 -m unittest scripts.tests.test_item19_acceptance_lifecycle scripts.tests.test_private_phone_preflight
+          git diff --check
+
+      - name: Preserve desired workflow and push non-workflow reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .item19-reconciliation
+          cp .github/workflows/item19-acceptance-lifecycle.yml .item19-reconciliation/item19-acceptance-lifecycle.desired.yml
+          git checkout -- .github/workflows/item19-acceptance-lifecycle.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .item19-reconciliation/item19-acceptance-lifecycle.desired.yml \
+            apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs \
+            contracts/governance/invariant-enforcement.json \
+            contracts/operations/github-control-plane-v1.json \
+            contracts/operations/production-topology-v1.json \
+            docs/PRODUCTION_BASELINE_PLAN.md \
+            docs/operations/phone-gitops-runtime.md \
+            docs/physical-phone-acceptance-runbook.md \
+            scripts/check_github_control_plane.py \
+            scripts/check_item19_consistency.py \
+            scripts/check_vm_ownership_contract.py \
+            scripts/tests/test_item19_acceptance_lifecycle.py \
+            scripts/verify_item19_acceptance_lifecycle.py
+          git diff --cached --name-only | sort > changed.txt
+          printf '%s\n' \
+            .item19-reconciliation/item19-acceptance-lifecycle.desired.yml \
+            apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs \
+            contracts/governance/invariant-enforcement.json \
+            contracts/operations/github-control-plane-v1.json \
+            contracts/operations/production-topology-v1.json \
+            docs/PRODUCTION_BASELINE_PLAN.md \
+            docs/operations/phone-gitops-runtime.md \
+            docs/physical-phone-acceptance-runbook.md \
+            scripts/check_github_control_plane.py \
+            scripts/check_item19_consistency.py \
+            scripts/check_vm_ownership_contract.py \
+            scripts/tests/test_item19_acceptance_lifecycle.py \
+            scripts/verify_item19_acceptance_lifecycle.py \
+            | sort > expected.txt
+          diff -u expected.txt changed.txt
+          git commit -m "fix: reconcile item 19 provider proof and item 20 phone gate"
+          git push origin HEAD:item19-item20-boundary-reconciliation
