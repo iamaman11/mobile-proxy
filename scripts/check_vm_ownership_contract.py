@@ -226,7 +226,7 @@ def check_repository(root: Path) -> list[str]:
         "production_vultr_authority": False,
         "phone_mutation": False,
     }:
-        errors.append("item 18 historical execution boundary must remain non-mutating")
+        errors.append("item 18 execution boundary must remain non-mutating")
     if contract.get("item_19_slice_a") != {
         "allowed": "durable_state_typed_http_client_contracts_docs_and_non_mutating_tests",
         "live_provider_mutation": False,
@@ -241,10 +241,14 @@ def check_repository(root: Path) -> list[str]:
         if not isinstance(migration, dict):
             errors.append("production topology migration_status must be an object")
         else:
+            if migration.get("vultr_adapter") != "implemented_typed_provider_neutral_ownership_and_generation_policy":
+                errors.append("production topology must keep item 18 typed Vultr adapter protected")
             if migration.get("vultr_durable_acceptance_state") != "item_19_slice_a_active_crash_safe_dispatch_fencing_no_live_entrypoint":
                 errors.append("production topology must bind the item-19 durable state boundary")
             if migration.get("vultr_typed_http_client") != "item_19_slice_a_active_acceptance_only_bounded_full_instance_enumeration":
                 errors.append("production topology must bind the item-19 typed client boundary")
+            if migration.get("vultr_live_lifecycle") != "item_19_active_but_live_invocation_forbidden_until_bounded_workflow_exact_authority_preflight_and_physical_window_gates":
+                errors.append("production topology live lifecycle must remain forbidden until all item-19 live gates")
 
     if github:
         adapter = github.get("vultr_lifecycle_adapter")
@@ -260,6 +264,8 @@ def check_repository(root: Path) -> list[str]:
                 "delete_dispatch_fence": "durable_before_provider_delete",
                 "terminal_intent_reuse": "forbidden",
                 "full_provider_enumeration": "bounded_cursor_pagination_required_before_lifecycle_decisions",
+                "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates",
+                "first_live_vm_creation_item": 19,
                 "production_vultr_authority": False,
             }
             for key, value in required.items():
@@ -332,7 +338,7 @@ def check_repository(root: Path) -> list[str]:
             "CreateDispatched",
             "blind second POST",
             "Terminal",
-            "complete provider enumeration",
+            "Complete provider enumeration",
             "production-vultr",
         ),
         errors,
