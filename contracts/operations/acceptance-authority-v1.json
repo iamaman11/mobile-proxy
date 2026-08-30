@@ -1,0 +1,62 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "authority": "pre_release_acceptance",
+  "canonical_repository": "iamaman11/mobile-proxy",
+  "command": {
+    "issue": 90,
+    "syntax": "/accept-candidate <full_sha>",
+    "authorized_actor": "repository_owner"
+  },
+  "candidate_identity": {
+    "kind": "full_git_sha",
+    "pattern": "^[0-9a-f]{40}$",
+    "mutable_or_approximate_refs_forbidden": [
+      "main",
+      "latest",
+      "branch_name",
+      "short_sha"
+    ]
+  },
+  "candidate_evidence": {
+    "quality_workflow": "Quality",
+    "quality_workflow_path": ".github/workflows/quality.yml",
+    "required_event": "push",
+    "required_branch": "main",
+    "required_status": "completed",
+    "required_conclusion": "success",
+    "artifact_name_template": "software-release-candidate-<candidate_sha>",
+    "artifact_file": "release-candidate-evidence.json",
+    "required_format_version": 2,
+    "required_repository": "iamaman11/mobile-proxy",
+    "required_flags": {
+      "software_10_of_10_ready": true,
+      "physical_phone_acceptance_required": true,
+      "baseline_complete": false
+    }
+  },
+  "execution": {
+    "workflow": ".github/workflows/acceptance-authority.yml",
+    "executor": "github-hosted",
+    "environment": "none_in_item_16",
+    "vultr_api_access": "forbidden_in_item_16",
+    "vultr_secret_access": "forbidden_in_item_16",
+    "vm_mutation": "forbidden_in_item_16",
+    "phone_mutation": "forbidden_in_item_16"
+  },
+  "authority_separation": {
+    "final_production_authority": false,
+    "production_environment": "forbidden",
+    "final_release_tag": "forbidden",
+    "production_workflow": ".github/workflows/production-preflight.yml",
+    "production_environment_name": "production-vultr",
+    "production_ref_type": "tag",
+    "production_ref_pattern": "v*"
+  },
+  "evidence": {
+    "format_version": 1,
+    "artifact_name_template": "vultr-acceptance-authority-<candidate_sha>",
+    "secret_derived_data": "forbidden",
+    "retention_days": 90
+  }
+}
