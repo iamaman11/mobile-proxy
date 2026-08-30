@@ -10,6 +10,11 @@ assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ROOT = Path(__file__).resolve().parents[2]
+POLICY_SCRIPT = Path(__file__).resolve().parents[1] / "check_vultr_readonly_preflight_policy.py"
+POLICY_SPEC = importlib.util.spec_from_file_location("vultr_readonly_policy", POLICY_SCRIPT)
+assert POLICY_SPEC is not None and POLICY_SPEC.loader is not None
+POLICY = importlib.util.module_from_spec(POLICY_SPEC)
+POLICY_SPEC.loader.exec_module(POLICY)
 
 
 class VultrReadonlyPreflightTests(unittest.TestCase):
@@ -129,6 +134,9 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
         self.assertFalse(evidence["final_production_authority"])
         self.assertNotIn("VULTR_API_KEY", json.dumps(evidence))
         self.assertNotIn("VULTR_SSH_PRIVATE_KEY", json.dumps(evidence))
+
+    def test_repository_policy_passes(self):
+        self.assertEqual(POLICY.check_repository(ROOT), [])
 
     def test_contract_and_workflow_lock_read_only_authority_separation(self):
         contract = json.loads(
