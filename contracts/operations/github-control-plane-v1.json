@@ -4,6 +4,7 @@
   "project_authority_contract": "contracts/operations/project-authority-v1.json",
   "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
   "vultr_readonly_preflight_contract": "contracts/operations/vultr-readonly-preflight-v1.json",
+  "vm_ownership_contract": "contracts/governance/vm-ownership-v1.json",
   "source_repository": {
     "name": "iamaman11/mobile-proxy",
     "visibility": "public",
@@ -71,10 +72,23 @@
     ],
     "allowed_provider_api": "GET /v2/account only",
     "response_body_recording": "forbidden",
-    "vm_lifecycle": "forbidden",
-    "provider_mutation": "forbidden",
+    "vm_lifecycle": "forbidden_until_item_19",
+    "provider_mutation": "forbidden_until_item_19",
     "final_production_authority": false,
     "executor": "github-hosted"
+  },
+  "vultr_lifecycle_adapter": {
+    "status": "implemented_non_mutating_item_18",
+    "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
+    "provider_adapter": "apps/operator-cli/src/vultr_lifecycle.rs",
+    "ownership_contract": "contracts/governance/vm-ownership-v1.json",
+    "provider_identity": "typed_provider_assigned_immutable_uuid_id",
+    "ownership_matching": "exact_project_manager_scope_intent_generation",
+    "generation_cas": "required",
+    "idempotent_reconcile": "required",
+    "live_execution": "forbidden_until_item_19",
+    "first_live_vm_creation_item": 19,
+    "production_vultr_authority": false
   },
   "phone_control_repository": {
     "name": "iamaman11/mobile-proxy-production",
@@ -113,6 +127,7 @@
   "release_immutability": "not_enabled_until_draft_asset_checksum_sbom_attestation_publish_order_is_implemented",
   "runtime_verification": {
     "vultr_secret_access": "passed_acceptance_vultr_read_only_preflight_on_exact_candidate",
+    "vultr_lifecycle": "typed_adapter_and_rejection_tests_implemented_without_live_mutation",
     "android_runner_and_device": "passed_private_actions_read_only_preflight_on_registered_device; mutable_phone_operations_remain_blocked"
   },
   "forbidden": [
@@ -126,6 +141,8 @@
     "acceptance_authority_using_production_vultr_environment",
     "acceptance_authority_using_final_release_tag",
     "acceptance_vultr_using_production_vultr_environment",
-    "acceptance_vultr_vm_lifecycle_before_item_18"
+    "acceptance_vultr_vm_lifecycle_before_item_19",
+    "item_18_live_vultr_provider_mutation",
+    "item_18_production_vultr_authority"
   ]
 }
