@@ -78,6 +78,7 @@ and its rejection tests are implemented in the following baseline item.
 The legacy public deployment workflow is intentionally blocked. Before production deployment is
 enabled, the canonical repository must implement and verify:
 
+- an agent-invokable final release control entrypoint;
 - protected annotated-tag/release provenance flow after physical acceptance;
 - typed Vultr lifecycle satisfying the [VM ownership boundary](../architecture/vm-ownership-boundary.md);
 - GitHub-hosted Vultr preflight/apply/verify/evidence/rollback under the staged acceptance/final-production authority split;
