@@ -100,20 +100,6 @@ pub enum AcceptanceVmLifecycleState {
     Terminal { last_generation: Generation },
 }
 
-impl AcceptanceVmLifecycleState {
-    fn binding(&self) -> Option<&VmBinding> {
-        match self {
-            Self::Bound(binding)
-            | Self::DeletePrepared(binding)
-            | Self::DeleteDispatched(binding) => Some(binding),
-            Self::Empty
-            | Self::CreatePrepared { .. }
-            | Self::CreateDispatched { .. }
-            | Self::Terminal { .. } => None,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LedgerState {
     head_id: Option<u64>,
@@ -303,7 +289,6 @@ impl<B: DeploymentBackend> BindingStore<B> {
 
     fn append_transition(
         &self,
-        intent: &OwnershipIntent,
         before: &LedgerState,
         transition: LedgerTransition,
         generation: Generation,
@@ -311,6 +296,11 @@ impl<B: DeploymentBackend> BindingStore<B> {
         replacement: Option<&VmBinding>,
         expected_after: AcceptanceVmLifecycleState,
     ) -> Result<(), BindingStoreError> {
+        let intent = OwnershipIntent::new(
+            LifecycleScope::Acceptance,
+            format!("candidate:{}", self.candidate_sha),
+        )
+        .map_err(|_| BindingStoreError::InvalidOwnershipIntent)?;
         let payload = GitHubDeploymentPayload {
             format_version: LEDGER_FORMAT_VERSION,
             project: OWNERSHIP_PROJECT.to_owned(),
@@ -328,7 +318,7 @@ impl<B: DeploymentBackend> BindingStore<B> {
             candidate_sha: self.candidate_sha.clone(),
             payload,
         })?;
-        let after = self.current_state(intent)?;
+        let after = self.current_state(&intent)?;
         if after.head_id != Some(created.id) || after.phase != expected_after {
             return Err(BindingStoreError::WriteVerificationFailed);
         }
@@ -344,7 +334,6 @@ impl<B: DeploymentBackend> BindingStore<B> {
             AcceptanceVmLifecycleState::Empty => {
                 let generation = Generation::INITIAL;
                 self.append_transition(
-                    intent,
                     &before,
                     LedgerTransition::PrepareCreate,
                     generation,
@@ -371,7 +360,6 @@ impl<B: DeploymentBackend> BindingStore<B> {
             AcceptanceVmLifecycleState::CreatePrepared {
                 generation: prepared_generation,
             } if prepared_generation == generation => self.append_transition(
-                intent,
                 &before,
                 LedgerTransition::DispatchCreate,
                 generation,
@@ -401,7 +389,6 @@ impl<B: DeploymentBackend> BindingStore<B> {
         match &before.phase {
             AcceptanceVmLifecycleState::Bound(current) if current == binding => self
                 .append_transition(
-                    intent,
                     &before,
                     LedgerTransition::PrepareDelete,
                     binding.generation,
@@ -427,7 +414,6 @@ impl<B: DeploymentBackend> BindingStore<B> {
         match &before.phase {
             AcceptanceVmLifecycleState::DeletePrepared(current) if current == binding => self
                 .append_transition(
-                    intent,
                     &before,
                     LedgerTransition::DispatchDelete,
                     binding.generation,
@@ -490,7 +476,6 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
                     if generation == new_binding.generation =>
                 {
                     self.append_transition(
-                        intent,
                         &before,
                         LedgerTransition::Bind,
                         generation,
@@ -518,7 +503,6 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
                         return Err(BindingStoreError::InvalidTransition);
                     }
                     self.append_transition(
-                        intent,
                         &before,
                         LedgerTransition::Replace,
                         new_binding.generation,
@@ -535,7 +519,6 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
             (Some(old_binding), None) => match &before.phase {
                 AcceptanceVmLifecycleState::DeleteDispatched(current) if current == old_binding => {
                     self.append_transition(
-                        intent,
                         &before,
                         LedgerTransition::Clear,
                         old_binding.generation,
