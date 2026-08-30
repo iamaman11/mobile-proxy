@@ -15,7 +15,7 @@ from typing import Any
 
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _REQUIRED_TOOLS = ("adb", "python", "git", "curl")
-_REQUIRED_RUNNER_LABELS = ("self-hosted", "Windows", "X64", "android-production")
+_REQUIRED_RUNNER_LABELS = ("self-hosted", "Linux", "X64", "android-production")
 _SERIAL_ENV = "ANDROID_PRODUCTION_SERIAL"
 
 
