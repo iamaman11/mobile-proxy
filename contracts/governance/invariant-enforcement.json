@@ -552,7 +552,7 @@
       ],
       "",
       "",
-      "Import validates legacy JSON before write, rehydrates canonical SQLite for parity/diagnostic output, the production daemon is SQLite-only, and rollback-export round-trips latest state through the previous-release JSON contract in process acceptance.",
+      "Import validates legacy state before write, rehydrates canonical SQLite for parity/diagnostic output, the production daemon is SQLite-only, and rollback-export round-trips latest state through the previous-release JSON contract in process acceptance.",
       ""
     ],
     [
