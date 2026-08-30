@@ -58,7 +58,11 @@ proxy-core = "1"
         source_root = SCRIPT.parents[1]
         for relative in (
             "contracts/governance/vm-ownership-v1.json",
+            "contracts/operations/production-topology-v1.json",
+            "contracts/operations/github-control-plane-v1.json",
             "docs/architecture/vm-ownership-boundary.md",
+            "crates/proxy-core/src/provider_lifecycle.rs",
+            "apps/operator-cli/src/vultr_lifecycle.rs",
         ):
             destination = root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)

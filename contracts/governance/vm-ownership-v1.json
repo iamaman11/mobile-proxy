@@ -3,58 +3,112 @@
   "status": "protected",
   "scope": "Every provider adapter operating in an account that can contain resources not owned by mobile-proxy.",
   "owner": "operator-cli",
+  "implementation": {
+    "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
+    "vultr_adapter": "apps/operator-cli/src/vultr_lifecycle.rs",
+    "live_execution": "forbidden_in_item_18",
+    "first_live_vm_creation_item": 19
+  },
   "binding": {
     "state_store": "durable owner-controlled state outside version control",
-    "identity": "provider-assigned immutable instance UUID",
-    "generation": "monotonically advances whenever a replacement binding is committed"
+    "identity": "provider-assigned immutable instance UUID/ID",
+    "ownership_intent": "exact immutable lifecycle scope plus exact intent ID",
+    "generation": "positive monotonically increasing generation bound into provider ownership metadata",
+    "compare_and_swap": "every binding create, replace or clear requires the exact expected prior binding/generation"
   },
-  "required_tags": {
-    "project": "mobile-proxy",
-    "managed-by": "mobile-proxy"
+  "required_ownership_metadata": {
+    "static": {
+      "project": "mobile-proxy",
+      "managed-by": "mobile-proxy"
+    },
+    "binding_fields": [
+      "scope",
+      "intent",
+      "generation"
+    ],
+    "matching": "exact_only"
   },
   "operations": {
     "create": {
-      "provider_request_must_set_required_tags": true,
-      "provider_response_must_match_required_tags": true,
-      "persist_binding_before_success": true
+      "requires_no_existing_binding": true,
+      "requires_zero_ownership_compatible_resources": true,
+      "provider_request_must_set_exact_ownership_metadata": true,
+      "provider_response_must_match_exact_ownership_metadata": true,
+      "persist_binding_with_compare_and_swap_before_success": true
     },
     "manage": {
       "requires_persisted_binding": true,
-      "requires_exact_uuid": true,
-      "requires_exact_required_tags": true
+      "requires_exact_provider_identity": true,
+      "requires_exact_ownership_metadata": true,
+      "requires_expected_generation": true
+    },
+    "stop": {
+      "requires_persisted_binding": true,
+      "requires_exact_provider_identity": true,
+      "requires_exact_ownership_metadata": true,
+      "requires_expected_generation": true
+    },
+    "reconfigure": {
+      "requires_persisted_binding": true,
+      "requires_exact_provider_identity": true,
+      "requires_exact_ownership_metadata": true,
+      "requires_expected_generation": true
     },
     "snapshot": {
       "requires_persisted_binding": true,
-      "requires_exact_uuid": true,
-      "requires_exact_required_tags": true
+      "requires_exact_provider_identity": true,
+      "requires_exact_ownership_metadata": true,
+      "requires_expected_generation": true
     },
     "delete": {
       "requires_persisted_binding": true,
-      "requires_exact_uuid": true,
-      "requires_exact_required_tags": true,
-      "clear_binding_only_after_provider_confirms_delete": true
+      "requires_exact_provider_identity": true,
+      "requires_exact_ownership_metadata": true,
+      "requires_expected_generation": true,
+      "clear_binding_only_after_provider_confirms_delete": true,
+      "clear_binding_requires_compare_and_swap": true
     },
-    "recreate": {
-      "provider_request_must_set_required_tags": true,
-      "provider_response_must_match_required_tags": true,
-      "atomically_replace_uuid_and_generation_after_verification": true
+    "replace": {
+      "requires_persisted_binding": true,
+      "requires_exact_provider_identity": true,
+      "requires_exact_ownership_metadata": true,
+      "requires_expected_generation": true,
+      "replacement_generation_must_be_exactly_current_plus_one": true,
+      "replacement_must_be_verified_before_binding_swap": true,
+      "atomically_replace_provider_identity_and_generation_with_compare_and_swap": true
     }
   },
   "fail_closed": [
     "missing_binding",
     "invalid_binding",
     "provider_instance_not_found",
-    "uuid_mismatch",
-    "required_tag_missing",
-    "required_tag_mismatch",
+    "provider_identity_mismatch",
+    "missing_ownership_metadata",
+    "ownership_metadata_mismatch",
+    "conflicting_ownership_metadata",
+    "ambiguous_resource_set",
+    "duplicate_ownership_claim",
+    "neighbouring_or_unbound_resource",
+    "stale_generation",
     "binding_compare_and_swap_conflict"
   ],
   "forbidden": [
     "arbitrary_instance_uuid_from_operator_input",
     "first_matching_instance_selection",
-    "label_or_name_as_authority",
-    "operation_after_identity_or_tag_verification_failure",
-    "unverified_binding_replacement"
+    "label_name_or_ip_as_authority",
+    "fuzzy_or_prefix_ownership_matching",
+    "mutation_without_expected_generation",
+    "operation_after_identity_ownership_or_generation_verification_failure",
+    "unverified_binding_replacement",
+    "item_18_live_provider_mutation",
+    "item_18_final_production_authority"
   ],
-  "activation_condition": "A shared-account provider adapter, including Vultr, must satisfy this contract before its create, manage, snapshot, delete or recreate command is exposed."
+  "activation_condition": "A shared-account provider adapter, including Vultr, must satisfy this contract and permanent rejection tests before any live lifecycle command is exposed.",
+  "item_18_execution": {
+    "allowed": "contract_policy_adapter_and_non_mutating_tests_only",
+    "live_provider_mutation": false,
+    "real_vm_creation": false,
+    "production_vultr_authority": false,
+    "phone_mutation": false
+  }
 }

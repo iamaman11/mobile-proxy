@@ -4,6 +4,7 @@
   "project_authority_contract": "contracts/operations/project-authority-v1.json",
   "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
   "vultr_readonly_preflight_contract": "contracts/operations/vultr-readonly-preflight-v1.json",
+  "vm_ownership_contract": "contracts/governance/vm-ownership-v1.json",
   "source_repository": {
     "name": "iamaman11/mobile-proxy",
     "visibility": "public",
@@ -76,6 +77,19 @@
     "final_production_authority": false,
     "executor": "github-hosted"
   },
+  "vultr_lifecycle_adapter": {
+    "status": "implemented_non_mutating_item_18",
+    "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
+    "provider_adapter": "apps/operator-cli/src/vultr_lifecycle.rs",
+    "ownership_contract": "contracts/governance/vm-ownership-v1.json",
+    "provider_identity": "typed_provider_assigned_immutable_uuid_id",
+    "ownership_matching": "exact_project_manager_scope_intent_generation",
+    "generation_cas": "required",
+    "idempotent_reconcile": "required",
+    "live_execution": "forbidden_until_item_19",
+    "first_live_vm_creation_item": 19,
+    "production_vultr_authority": false
+  },
   "phone_control_repository": {
     "name": "iamaman11/mobile-proxy-production",
     "visibility": "private",
@@ -126,6 +140,9 @@
     "acceptance_authority_using_production_vultr_environment",
     "acceptance_authority_using_final_release_tag",
     "acceptance_vultr_using_production_vultr_environment",
-    "acceptance_vultr_vm_lifecycle_before_item_18"
+    "acceptance_vultr_vm_lifecycle_before_item_18",
+    "acceptance_vultr_vm_lifecycle_before_item_19",
+    "item_18_live_vultr_provider_mutation",
+    "item_18_production_vultr_authority"
   ]
 }
