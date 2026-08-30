@@ -72,8 +72,8 @@
     ],
     "allowed_provider_api": "GET /v2/account only",
     "response_body_recording": "forbidden",
-    "vm_lifecycle": "forbidden_until_item_19",
-    "provider_mutation": "forbidden_until_item_19",
+    "vm_lifecycle": "forbidden",
+    "provider_mutation": "forbidden",
     "final_production_authority": false,
     "executor": "github-hosted"
   },
@@ -127,7 +127,6 @@
   "release_immutability": "not_enabled_until_draft_asset_checksum_sbom_attestation_publish_order_is_implemented",
   "runtime_verification": {
     "vultr_secret_access": "passed_acceptance_vultr_read_only_preflight_on_exact_candidate",
-    "vultr_lifecycle": "typed_adapter_and_rejection_tests_implemented_without_live_mutation",
     "android_runner_and_device": "passed_private_actions_read_only_preflight_on_registered_device; mutable_phone_operations_remain_blocked"
   },
   "forbidden": [
@@ -141,6 +140,7 @@
     "acceptance_authority_using_production_vultr_environment",
     "acceptance_authority_using_final_release_tag",
     "acceptance_vultr_using_production_vultr_environment",
+    "acceptance_vultr_vm_lifecycle_before_item_18",
     "acceptance_vultr_vm_lifecycle_before_item_19",
     "item_18_live_vultr_provider_mutation",
     "item_18_production_vultr_authority"
