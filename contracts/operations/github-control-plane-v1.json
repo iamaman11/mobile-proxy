@@ -63,30 +63,56 @@
   },
   "acceptance_vultr_environment": {
     "name": "acceptance-vultr",
-    "authority": "pre_release_acceptance_read_only",
-    "entry_workflow": ".github/workflows/vultr-readonly-preflight.yml",
+    "authority": "pre_release_acceptance_credential_boundary_not_final_production_authority",
     "required_precondition": "verified_vultr_acceptance_authority_artifact_for_exact_candidate_sha",
     "required_secret_names": [
       "VULTR_API_KEY",
       "VULTR_SSH_PRIVATE_KEY"
     ],
-    "allowed_provider_api": "GET /v2/account only",
-    "response_body_recording": "forbidden",
-    "vm_lifecycle": "forbidden",
-    "provider_mutation": "forbidden",
+    "executor": "github-hosted",
     "final_production_authority": false,
-    "executor": "github-hosted"
+    "workflow_capabilities": {
+      "readonly_preflight": {
+        "workflow": ".github/workflows/vultr-readonly-preflight.yml",
+        "allowed_provider_api": [
+          "GET /v2/account"
+        ],
+        "response_body_recording": "forbidden",
+        "vm_lifecycle": false,
+        "provider_mutation": false
+      },
+      "item_19_acceptance_lifecycle": {
+        "status": "implementation_active_live_invocation_forbidden_until_all_item_19_gates",
+        "scope": "acceptance_only",
+        "required_exact_candidate_evidence": [
+          "successful_quality_push_on_protected_main",
+          "fresh_immutable_acceptance_authority",
+          "fresh_vultr_readonly_preflight",
+          "physical_acceptance_window_ready"
+        ],
+        "required_state": "durable_owner_controlled_acceptance_vm_lifecycle_state_outside_vcs",
+        "required_concurrency": "single_repository_wide_acceptance_lifecycle_writer_cancel_in_progress_false",
+        "provider_mutation": "bounded_item_19_only_after_exact_gates",
+        "production_scope": "forbidden"
+      }
+    }
   },
   "vultr_lifecycle_adapter": {
-    "status": "implemented_non_mutating_item_18",
+    "status": "item_19_slice_a_typed_client_and_durable_state_active_no_live_entrypoint",
     "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
     "provider_adapter": "apps/operator-cli/src/vultr_lifecycle.rs",
+    "typed_http_client": "apps/operator-cli/src/vultr_client.rs",
+    "durable_state": "apps/operator-cli/src/github_vm_binding_store.rs",
     "ownership_contract": "contracts/governance/vm-ownership-v1.json",
     "provider_identity": "typed_provider_assigned_immutable_uuid_id",
     "ownership_matching": "exact_project_manager_scope_intent_generation",
     "generation_cas": "required",
+    "create_dispatch_fence": "durable_before_provider_post_and_never_blindly_redispatched",
+    "delete_dispatch_fence": "durable_before_provider_delete",
+    "terminal_intent_reuse": "forbidden",
+    "full_provider_enumeration": "bounded_cursor_pagination_required_before_lifecycle_decisions",
     "idempotent_reconcile": "required",
-    "live_execution": "forbidden_until_item_19",
+    "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates",
     "first_live_vm_creation_item": 19,
     "production_vultr_authority": false
   },
@@ -140,9 +166,11 @@
     "acceptance_authority_using_production_vultr_environment",
     "acceptance_authority_using_final_release_tag",
     "acceptance_vultr_using_production_vultr_environment",
-    "acceptance_vultr_vm_lifecycle_before_item_18",
-    "acceptance_vultr_vm_lifecycle_before_item_19",
+    "acceptance_vultr_lifecycle_without_exact_item_19_authority_preflight_and_readiness_gates",
+    "acceptance_vultr_lifecycle_without_serialized_durable_state_transitions",
     "item_18_live_vultr_provider_mutation",
-    "item_18_production_vultr_authority"
+    "item_18_production_vultr_authority",
+    "item_19_production_vultr_authority",
+    "private_phone_runner_receiving_vultr_credentials"
   ]
 }
