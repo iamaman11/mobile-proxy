@@ -2,6 +2,7 @@ pub mod commands;
 pub mod constants;
 pub mod endpoints;
 pub mod fingerprints;
+pub mod provider_lifecycle;
 pub mod records;
 pub mod runtime;
 
@@ -17,6 +18,12 @@ pub use endpoints::{ProxyEndpoint, proxy_endpoints};
 pub use fingerprints::{
     BINARY_FINGERPRINT_DOMAIN, BinaryFingerprint, BinaryFingerprintInput,
     CONFIG_FINGERPRINT_DOMAIN, ConfigFingerprint, ConfigFingerprintInput, FingerprintInputError,
+};
+pub use provider_lifecycle::{
+    DesiredVm, Generation, LifecycleError, LifecycleScope, LifecycleValueError, MutationKind,
+    ObservedVm, OwnershipIntent, OwnershipMetadata, OwnershipObservation, PlannedCreate,
+    ProviderResourceId, ReconcilePlan, VerifiedMutationTarget, VmBinding, VmBindingStore,
+    authorize_mutation, plan_present,
 };
 pub use records::{
     DeviceList, DeviceRecord, HealthRecord, HeartbeatRequest, JobRecord, ProxyRuntimeRecord,
