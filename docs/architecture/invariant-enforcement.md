@@ -2,7 +2,7 @@
 
 Status: normative governance companion  
 Audit revision: `2026-08-30`  
-Baseline `main`: `213b25a5b8bc82752e32e28ae48ee85ff808613a`  
+Baseline `main`: `08bd5faa04a9f59cd248651e52570b2301f37c61`  
 Machine-readable source: `contracts/governance/invariant-enforcement.json`
 
 ## Purpose
@@ -29,9 +29,9 @@ The audit contains 67 invariant IDs:
 
 | Status | Count |
 | --- | ---: |
-| `enforced` | 33 |
+| `enforced` | 34 |
 | `partially_enforced` | 19 |
-| `planned` | 9 |
+| `planned` | 8 |
 | `not_applicable_yet` | 6 |
 | `review_only` | 0 |
 
@@ -83,6 +83,14 @@ The migration utility validates legacy JSON before writes, imports it through th
 
 This row can no longer be `not_applicable_yet`: canonical SQLite migrations now exist. The initial v1 migration is transactional and previous-release state compatibility is exercised, but no schema-version evolution has yet demonstrated an expand-migrate-contract sequence and rollback after expansion. The active rule is therefore `planned`, not prematurely enforced.
 
+### Immutable-SHA software acceptance — `UPGRADE-003`
+
+The repository already had a fail-closed bounded candidate-evidence writer and permanent regressions for exact SHA, clean checkout, workflow identity and physical-gate metadata. The historical standalone `Software Release Candidate` workflow was intentionally removed when delivery and quality control were consolidated into Git; restoring that duplicate workflow would conflict with the current rule that one aggregate `Quality Gate` avoids duplicate test work.
+
+PR #107 therefore integrates immutable candidate evidence into the existing `Quality` workflow instead of creating a second test pipeline. For a code-affecting pull request, push or explicit full dispatch, `Immutable release-candidate evidence` runs only after architecture/policy, complete Rust workspace, supply-chain and Android jobs all succeed. The existing writer then requires the checked-out commit to equal `CANDIDATE_SHA`, requires a clean worktree, records bounded runtime and rollback compatibility state, and uploads `software-release-candidate-<sha>` with ninety-day retention. The aggregate `Quality Gate` requires that job when a retained candidate is applicable. Documentation-only and merge-group paths cannot mint retained candidate evidence.
+
+The first exact-head proof on PR #107 produced `software-release-candidate-4d236d689ccd4eeba8345025250554b3255e4053`; its evidence identifies that exact SHA, `git_worktree_clean=true`, `workflow=Quality`, `physical_phone_acceptance_required=true` and `baseline_complete=false`. This proves the permanent mechanism while keeping physical acceptance separate. `UPGRADE-003` is therefore `enforced`. A software-complete release candidate is not declared until the final merged `main` SHA itself passes the full gate and produces fresh evidence for that SHA.
+
 ## External controls and freshness
 
 Repository-hosted CI and mutable platform configuration are different evidence classes.
@@ -103,7 +111,7 @@ The matrix, not this prose summary, is authoritative for exact ownership and fol
 - first real schema evolution proving expand-migrate-contract rollback (`UPGRADE-002`);
 - broader typed taxonomies and raw-string boundary enforcement;
 - repository-wide secret-log, metric-cardinality and bounded-concurrency controls;
-- physical reserve-tunnel and release acceptance on one immutable SHA.
+- physical reserve-tunnel and phone acceptance on the retained immutable candidate SHA.
 
 ## Permanent validation
 
