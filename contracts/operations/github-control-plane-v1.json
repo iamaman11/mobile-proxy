@@ -112,7 +112,7 @@
   },
   "release_immutability": "not_enabled_until_draft_asset_checksum_sbom_attestation_publish_order_is_implemented",
   "runtime_verification": {
-    "vultr_secret_access": "pending_actions_preflight",
+    "vultr_secret_access": "passed_acceptance_vultr_read_only_preflight_on_exact_candidate",
     "android_runner_and_device": "passed_private_actions_read_only_preflight_on_registered_device; mutable_phone_operations_remain_blocked"
   },
   "forbidden": [
