@@ -31,9 +31,9 @@ impl OwnershipIntent {
         let id = id.into();
         if id.is_empty()
             || id.len() > 160
-            || !id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+            || !id.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')
+            })
         {
             return Err(LifecycleValueError::InvalidOwnershipIntent);
         }
@@ -288,18 +288,34 @@ pub enum LifecycleError {
 impl fmt::Display for LifecycleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::OwnershipIntentMismatch => "binding ownership intent does not match desired intent",
-            Self::ExpectedGenerationRequired => "expected generation is required for a bound resource",
-            Self::UnexpectedGenerationForCreate => "expected generation is forbidden when no binding exists",
+            Self::OwnershipIntentMismatch => {
+                "binding ownership intent does not match desired intent"
+            }
+            Self::ExpectedGenerationRequired => {
+                "expected generation is required for a bound resource"
+            }
+            Self::UnexpectedGenerationForCreate => {
+                "expected generation is forbidden when no binding exists"
+            }
             Self::StaleGeneration => "expected or provider ownership generation is stale",
             Self::ProviderResourceNotFound => "bound provider resource was not found",
-            Self::ProviderIdentityMismatch => "provider resource identity does not match the binding",
+            Self::ProviderIdentityMismatch => {
+                "provider resource identity does not match the binding"
+            }
             Self::MissingOwnership => "bound provider resource is missing ownership metadata",
-            Self::OwnershipMetadataMismatch => "provider ownership metadata does not exactly match the binding",
-            Self::ConflictingOwnershipMetadata => "provider ownership metadata is conflicting or ambiguous",
+            Self::OwnershipMetadataMismatch => {
+                "provider ownership metadata does not exactly match the binding"
+            }
+            Self::ConflictingOwnershipMetadata => {
+                "provider ownership metadata is conflicting or ambiguous"
+            }
             Self::AmbiguousResourceSet => "multiple neighbouring resources are ambiguous",
-            Self::DuplicateOwnershipClaim => "multiple provider resources claim the same ownership intent",
-            Self::NeighboringOrUnboundResource => "neighbouring or unbound provider resource cannot be managed",
+            Self::DuplicateOwnershipClaim => {
+                "multiple provider resources claim the same ownership intent"
+            }
+            Self::NeighboringOrUnboundResource => {
+                "neighbouring or unbound provider resource cannot be managed"
+            }
         })
     }
 }
@@ -348,9 +364,10 @@ fn plan_unbound(
         .iter()
         .filter(|resource| resource.display_name == desired.display_name)
         .collect();
-    if same_name.iter().any(|resource| {
-        matches!(resource.ownership, OwnershipObservation::Conflicting)
-    }) {
+    if same_name
+        .iter()
+        .any(|resource| matches!(&resource.ownership, OwnershipObservation::Conflicting))
+    {
         return Err(LifecycleError::ConflictingOwnershipMetadata);
     }
     if same_name.len() > 1 {
@@ -375,7 +392,8 @@ fn plan_bound(
     if binding.intent != desired.intent {
         return Err(LifecycleError::OwnershipIntentMismatch);
     }
-    let expected_generation = expected_generation.ok_or(LifecycleError::ExpectedGenerationRequired)?;
+    let expected_generation =
+        expected_generation.ok_or(LifecycleError::ExpectedGenerationRequired)?;
     let target = resolve_bound_resource(binding, observed, expected_generation)?;
     let resource = observed
         .iter()
@@ -402,7 +420,7 @@ fn resolve_bound_resource(
         .iter()
         .find(|resource| resource.provider_id == binding.provider_id)
     {
-        match bound_observation.ownership {
+        match &bound_observation.ownership {
             OwnershipObservation::Missing => return Err(LifecycleError::MissingOwnership),
             OwnershipObservation::Conflicting => {
                 return Err(LifecycleError::ConflictingOwnershipMetadata);
@@ -502,7 +520,10 @@ mod tests {
             panic!("expected create plan");
         };
         assert_eq!(create.generation(), Generation::INITIAL);
-        assert_eq!(create.ownership(), OwnershipMetadata::exact(&intent(), Generation::INITIAL));
+        assert_eq!(
+            create.ownership(),
+            OwnershipMetadata::exact(&intent(), Generation::INITIAL)
+        );
     }
 
     #[test]
@@ -514,7 +535,12 @@ mod tests {
             "spec:v1",
         )];
         assert!(matches!(
-            plan_present(Some(&binding), &observed, &desired(), Some(binding.generation)),
+            plan_present(
+                Some(&binding),
+                &observed,
+                &desired(),
+                Some(binding.generation)
+            ),
             Ok(ReconcilePlan::Noop(_))
         ));
     }
@@ -528,7 +554,12 @@ mod tests {
             "spec:old",
         )];
         assert!(matches!(
-            plan_present(Some(&binding), &observed, &desired(), Some(binding.generation)),
+            plan_present(
+                Some(&binding),
+                &observed,
+                &desired(),
+                Some(binding.generation)
+            ),
             Ok(ReconcilePlan::Reconfigure(_))
         ));
     }
@@ -576,7 +607,7 @@ mod tests {
                 &binding,
                 &observed,
                 binding.generation,
-                MutationKind::Delete
+                MutationKind::Delete,
             ),
             Err(LifecycleError::ProviderIdentityMismatch)
         );
@@ -595,7 +626,7 @@ mod tests {
                 &binding,
                 &observed,
                 Generation::new(6).unwrap(),
-                MutationKind::Stop
+                MutationKind::Stop,
             ),
             Err(LifecycleError::StaleGeneration)
         );
@@ -614,7 +645,7 @@ mod tests {
                 &binding,
                 &observed,
                 binding.generation,
-                MutationKind::Reconfigure
+                MutationKind::Reconfigure,
             ),
             Err(LifecycleError::StaleGeneration)
         );
@@ -634,7 +665,7 @@ mod tests {
                 &binding,
                 &observed,
                 binding.generation,
-                MutationKind::Snapshot
+                MutationKind::Snapshot,
             ),
             Err(LifecycleError::MissingOwnership)
         );
@@ -644,11 +675,7 @@ mod tests {
     fn duplicate_ownership_claims_are_rejected() {
         let binding = binding();
         let observed = vec![
-            owned(
-                binding.provider_id.as_str(),
-                binding.generation,
-                "spec:v1",
-            ),
+            owned(binding.provider_id.as_str(), binding.generation, "spec:v1"),
             owned(
                 "22222222-2222-4222-8222-222222222222",
                 binding.generation,
@@ -660,7 +687,7 @@ mod tests {
                 &binding,
                 &observed,
                 binding.generation,
-                MutationKind::Replace
+                MutationKind::Replace,
             ),
             Err(LifecycleError::DuplicateOwnershipClaim)
         );
@@ -680,7 +707,7 @@ mod tests {
                 &binding,
                 &observed,
                 binding.generation,
-                MutationKind::Delete
+                MutationKind::Delete,
             ),
             Err(LifecycleError::ConflictingOwnershipMetadata)
         );
