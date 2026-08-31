@@ -31,7 +31,7 @@ import sys
 import tempfile
 from typing import Any, Sequence
 
-from run_private_phone_preflight import (
+from scripts.run_private_phone_preflight import (
     PreflightFailure,
     prove_registered_device,
     require_canonical_sha,
@@ -60,14 +60,20 @@ def require(condition: bool, message: str) -> None:
 
 def require_tools() -> None:
     for tool in _REQUIRED_TOOLS:
-        require(shutil.which(tool) is not None, f"required signing verifier tool is missing: {tool}")
+        require(
+            shutil.which(tool) is not None,
+            f"required signing verifier tool is missing: {tool}",
+        )
 
 
 def require_private_text(name: str, *, maximum: int) -> str:
     value = os.environ.get(name, "")
     require(bool(value), f"required private signing input is unavailable: {name}")
     require(len(value) <= maximum, f"private signing input is invalid: {name}")
-    require(not any(character in "\r\n\x00" for character in value), f"private signing input is invalid: {name}")
+    require(
+        not any(character in "\r\n\x00" for character in value),
+        f"private signing input is invalid: {name}",
+    )
     return value
 
 
@@ -113,7 +119,10 @@ def select_installed_apk_path(pm_output: str) -> str:
         require(line.startswith("package:"), "installed package path inventory is invalid")
         path = line.removeprefix("package:")
         require(path.startswith("/"), "installed package path inventory is invalid")
-        require(not any(character.isspace() for character in path), "installed package path inventory is invalid")
+        require(
+            not any(character.isspace() for character in path),
+            "installed package path inventory is invalid",
+        )
         paths.append(path)
     require(bool(paths), "installed production package is unavailable")
     base_paths = [path for path in paths if path.endswith("/base.apk")]
@@ -125,7 +134,10 @@ def select_installed_apk_path(pm_output: str) -> str:
 
 def parse_single_apksigner_sha256(output: str) -> bytes:
     matches = _APKSIGNER_SHA256_PATTERN.findall(output)
-    require(len(matches) == 1, "installed APK signer inventory is not exactly one current signer")
+    require(
+        len(matches) == 1,
+        "installed APK signer inventory is not exactly one current signer",
+    )
     try:
         return bytes.fromhex(matches[0])
     except ValueError as error:
@@ -158,9 +170,14 @@ def export_keystore_certificate(
     try:
         certificate = certificate_output.read_bytes()
     except OSError as error:
-        raise SigningIdentityFailure("recovered signing certificate export is unavailable") from error
+        raise SigningIdentityFailure(
+            "recovered signing certificate export is unavailable"
+        ) from error
     require(bool(certificate), "recovered signing certificate export is empty")
-    require(len(certificate) <= 65_536, "recovered signing certificate export is unexpectedly large")
+    require(
+        len(certificate) <= 65_536,
+        "recovered signing certificate export is unexpectedly large",
+    )
     return certificate
 
 
@@ -173,14 +190,19 @@ def verify_installed_signer(canonical_sha: str) -> dict[str, Any]:
     keystore_b64 = require_private_text(_KEYSTORE_B64_ENV, maximum=4_000_000)
     store_password = require_private_text(_KEYSTORE_PASSWORD_ENV, maximum=4096)
     alias = require_private_text(_KEY_ALIAS_ENV, maximum=256)
-    require(not any(character.isspace() for character in alias), "private signing alias is invalid")
+    require(
+        not any(character.isspace() for character in alias),
+        "private signing alias is invalid",
+    )
     keystore_bytes = decode_canonical_base64(
         keystore_b64,
         "recovered Android release keystore",
         maximum_bytes=3_000_000,
     )
 
-    with tempfile.TemporaryDirectory(prefix="mobile-proxy-signing-identity-") as temp_dir:
+    with tempfile.TemporaryDirectory(
+        prefix="mobile-proxy-signing-identity-"
+    ) as temp_dir:
         root = Path(temp_dir)
         keystore = root / "release.keystore"
         installed_apk = root / "installed-base.apk"
@@ -196,7 +218,10 @@ def verify_installed_signer(canonical_sha: str) -> dict[str, Any]:
             ["adb", "-s", expected_serial, "pull", remote_apk, str(installed_apk)],
             timeout=60,
         )
-        require(installed_apk.is_file() and installed_apk.stat().st_size > 0, "installed APK copy is unavailable")
+        require(
+            installed_apk.is_file() and installed_apk.stat().st_size > 0,
+            "installed APK copy is unavailable",
+        )
 
         signer_result = run_checked(
             ["apksigner", "verify", "--print-certs", str(installed_apk)],
