@@ -32,12 +32,20 @@ import sys
 import tempfile
 from typing import Any, Sequence
 
-from scripts.run_private_phone_preflight import (
-    PreflightFailure,
-    prove_registered_device,
-    require_canonical_sha,
-    require_expected_serial,
-)
+try:
+    from scripts.run_private_phone_preflight import (
+        PreflightFailure,
+        prove_registered_device,
+        require_canonical_sha,
+        require_expected_serial,
+    )
+except ModuleNotFoundError:
+    from run_private_phone_preflight import (  # type: ignore[no-redef]
+        PreflightFailure,
+        prove_registered_device,
+        require_canonical_sha,
+        require_expected_serial,
+    )
 
 _PACKAGE_NAME = "com.example.mobileproxy"
 _KEYSTORE_B64_ENV = "ANDROID_RELEASE_KEYSTORE_B64"
