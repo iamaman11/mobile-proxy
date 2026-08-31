@@ -4,7 +4,7 @@
 This script is canonical public logic intended to run only from the private
 `mobile-proxy-production` execution satellite on the registered phone runner.
 It performs no phone mutation and never emits the raw device identifier,
-certificate digest, keystore bytes, passwords, or alias.
+certificate fingerprint, keystore bytes, passwords, or alias.
 
 The verifier proves only one bounded fact: the certificate stored under the
 recovered private keystore alias exactly matches the current signer reported by
@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-import hashlib
 import hmac
 import json
 import os
@@ -43,8 +42,12 @@ _KEYSTORE_B64_ENV = "ANDROID_RELEASE_KEYSTORE_B64"
 _KEYSTORE_PASSWORD_ENV = "ANDROID_RELEASE_KEYSTORE_PASSWORD"
 _KEY_ALIAS_ENV = "ANDROID_RELEASE_KEY_ALIAS"
 _REQUIRED_TOOLS = ("adb", "keytool", "apksigner")
-_APKSIGNER_SHA256_PATTERN = re.compile(
+_APKSIGNER_FINGERPRINT_PATTERN = re.compile(
     r"^Signer #\d+ certificate SHA-256 digest: ([0-9A-Fa-f]{64})$",
+    re.MULTILINE,
+)
+_KEYTOOL_FINGERPRINT_PATTERN = re.compile(
+    r"^\s*SHA256:\s*((?:[0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2})\s*$",
     re.MULTILINE,
 )
 
@@ -132,53 +135,46 @@ def select_installed_apk_path(pm_output: str) -> str:
     return paths[0]
 
 
-def parse_single_apksigner_sha256(output: str) -> bytes:
-    matches = _APKSIGNER_SHA256_PATTERN.findall(output)
+def parse_single_apksigner_fingerprint(output: str) -> str:
+    matches = _APKSIGNER_FINGERPRINT_PATTERN.findall(output)
     require(
         len(matches) == 1,
         "installed APK signer inventory is not exactly one current signer",
     )
-    try:
-        return bytes.fromhex(matches[0])
-    except ValueError as error:
-        raise SigningIdentityFailure("installed APK signer digest is invalid") from error
+    return matches[0].lower()
 
 
-def export_keystore_certificate(
+def parse_single_keytool_fingerprint(output: str) -> str:
+    matches = _KEYTOOL_FINGERPRINT_PATTERN.findall(output)
+    require(
+        len(matches) == 1,
+        "recovered keystore certificate inventory is not exactly one signer",
+    )
+    return matches[0].replace(":", "").lower()
+
+
+def read_keystore_fingerprint(
     keystore: Path,
-    certificate_output: Path,
     alias: str,
     store_password: str,
-) -> bytes:
+) -> str:
     command_env = os.environ.copy()
     command_env[_KEYSTORE_PASSWORD_ENV] = store_password
-    run_checked(
+    result = run_checked(
         [
             "keytool",
-            "-exportcert",
+            "-list",
+            "-v",
             "-keystore",
             str(keystore),
             "-alias",
             alias,
             "-storepass:env",
             _KEYSTORE_PASSWORD_ENV,
-            "-file",
-            str(certificate_output),
         ],
         env=command_env,
     )
-    try:
-        certificate = certificate_output.read_bytes()
-    except OSError as error:
-        raise SigningIdentityFailure(
-            "recovered signing certificate export is unavailable"
-        ) from error
-    require(bool(certificate), "recovered signing certificate export is empty")
-    require(
-        len(certificate) <= 65_536,
-        "recovered signing certificate export is unexpectedly large",
-    )
-    return certificate
+    return parse_single_keytool_fingerprint(result.stdout)
 
 
 def verify_installed_signer(canonical_sha: str) -> dict[str, Any]:
@@ -206,7 +202,6 @@ def verify_installed_signer(canonical_sha: str) -> dict[str, Any]:
         root = Path(temp_dir)
         keystore = root / "release.keystore"
         installed_apk = root / "installed-base.apk"
-        certificate = root / "signer.der"
         keystore.write_bytes(keystore_bytes)
         os.chmod(keystore, 0o600)
 
@@ -227,16 +222,14 @@ def verify_installed_signer(canonical_sha: str) -> dict[str, Any]:
             ["apksigner", "verify", "--print-certs", str(installed_apk)],
             timeout=60,
         )
-        installed_digest = parse_single_apksigner_sha256(signer_result.stdout)
-        recovered_certificate = export_keystore_certificate(
+        installed_fingerprint = parse_single_apksigner_fingerprint(signer_result.stdout)
+        recovered_fingerprint = read_keystore_fingerprint(
             keystore,
-            certificate,
             alias,
             store_password,
         )
-        recovered_digest = hashlib.sha256(recovered_certificate).digest()
         require(
-            hmac.compare_digest(installed_digest, recovered_digest),
+            hmac.compare_digest(installed_fingerprint, recovered_fingerprint),
             "recovered signing identity does not match the installed production APK",
         )
 
