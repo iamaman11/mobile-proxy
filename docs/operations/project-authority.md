@@ -13,7 +13,10 @@ If any external or satellite state conflicts with the canonical repository, prod
 closed. Reconcile the decision or desired state in `iamaman11/mobile-proxy` first, through the normal
 protected-`main` pull-request process.
 
-The canonical GitOps architecture/status tracker is `iamaman11/mobile-proxy#90`.
+The canonical GitOps architecture/status tracker is `iamaman11/mobile-proxy#90`. Active delivery
+status is owned by `docs/PRODUCTION_BASELINE_PLAN.md`, and exact machine-readable execution state is
+owned by `contracts/operations/production-topology-v1.json` and
+`contracts/operations/github-control-plane-v1.json`.
 
 ## One project, two trust zones
 
@@ -24,7 +27,8 @@ must not be attached to the public repository.
 | Boundary | Authority | Purpose |
 | --- | --- | --- |
 | `iamaman11/mobile-proxy` | canonical | source, docs, contracts, CI, releases, reusable workflow logic, Vultr orchestration, safe evidence index |
-| `production-vultr` | external runtime state | encrypted provider credentials and tag-only deployment gate for GitHub-hosted jobs |
+| pre-release `acceptance-vultr` capability | external runtime state | encrypted provider credentials for bounded GitHub-hosted acceptance workflows after exact immutable acceptance authority; never final production authority |
+| `production-vultr` | external runtime state | encrypted provider credentials and tag-only final deployment gate for GitHub-hosted jobs after final release authority |
 | `iamaman11/mobile-proxy-production` | execution-only | thin caller/shim, private phone runner access, bounded private execution evidence |
 | `android-production` | execution-only | physical phone access; never project policy or Vultr authority |
 
@@ -41,8 +45,8 @@ private.
 
 ## Cross-repository release identity
 
-A production action never means "latest" and never trusts a mutable branch. Both trust zones refer
-to the same immutable release tuple:
+Final production never means "latest" and never trusts a mutable branch. Both trust zones refer to
+the same immutable final-release tuple:
 
 - canonical repository: `iamaman11/mobile-proxy`;
 - annotated semantic-version tag: `vMAJOR.MINOR.PATCH`;
@@ -52,24 +56,41 @@ to the same immutable release tuple:
 - provenance/attestation identity;
 - deployment ID: `mobile-proxy-<tag>-<first12sha>`.
 
-Before phone mutation, the private execution path must verify that the tag, SHA, artifact digest and
-provenance agree with the canonical public release. Ambiguity, missing evidence or mismatch fails
-closed before the self-hosted runner performs mutable work.
+Pre-release acceptance deliberately uses a separate exact immutable candidate identity plus bounded
+acceptance evidence. A moving protected `control_plane_sha` may contain newer orchestration/policy
+without redefining the immutable `candidate_sha`; these are separate semantic roles, with no rule
+requiring their values to differ. Final semantic release authority is not created until physical
+acceptance succeeds.
+
+Before mutable phone work, the private execution path must verify the exact canonical identity and
+required artifact/signing/provenance evidence for that stage. Ambiguity, missing evidence or mismatch
+fails closed before the self-hosted runner performs mutable work.
 
 ## Control and evidence flow
 
-The normal autonomous flow is:
+Pre-release acceptance is intentionally separate from final production authority:
 
 ```text
 user task
   -> canonical Issue / branch / PR
   -> Quality Gate
   -> protected main
+  -> exact immutable candidate + bounded acceptance authority
+  -> GitHub-hosted acceptance-vultr lifecycle
+  -> exact candidate server verification
+  -> private android-production physical acceptance
+  -> bounded acceptance evidence back to canonical tracking
+```
+
+Only after physical acceptance succeeds may the final production chain continue:
+
+```text
+protected main / accepted candidate
   -> protected annotated v* tag
-  -> immutable release artifacts + provenance
+  -> immutable release artifacts + checksum/SBOM/provenance
        |                         |
        |                         +-> private execution command transport
-       |                              -> verify canonical release tuple
+       |                              -> verify canonical final release tuple
        |                              -> android-production runner
        |                              -> phone verify / rollback
        |
@@ -103,22 +124,36 @@ evidence format for those values. External systems own only the runtime value.
 
 ## Current checkpoint
 
-As of the canonical-authority checkpoint completed by PR #94:
+The current protected state is later than the original PR #94 authority/bootstrap checkpoint.
+Production Baseline Items 15–19 are **COMPLETE** and Item 20 is the first unfinished delivery item.
+The canonical roadmap and machine-readable topology remain authoritative if this summary ever ages.
+
+Current proven/protected boundaries:
 
 - the canonical repository is public and protected by the `Quality Gate`/PR ruleset;
 - `v*` tags have an active no-bypass deletion/non-fast-forward ruleset;
 - public repository workflows are forbidden from using self-hosted runners or ADB;
-- `production-vultr` is the intended tag-only GitHub-hosted Vultr boundary;
-- `iamaman11/mobile-proxy-production` exists privately as the phone execution satellite;
-- private Production Control Issue #1 is the command/audit transport and a thin read-only caller is enabled;
-- the private Linux `android-production` runner has passed its bounded read-only Actions preflight
-  against exactly the registered phone, without publishing the identifier or mutating the phone;
-- legacy public production deployment is blocked fail-closed;
-- live Vultr preflight proof is still pending;
-- the typed Vultr lifecycle and final mutable phone deploy/verify/rollback workflows are still pending;
+- the private Production Control Issue #1 remains command/audit transport and the private
+  `android-production` runner/registered-device read-only preflight has passed without publishing
+  the identifier or mutating the phone;
+- immutable pre-release acceptance authority and the GitHub-hosted Vultr read-only account/key
+  preflight are implemented and proven;
+- provider-neutral lifecycle policy plus the typed Vultr UUID/ownership/generation-CAS adapter is
+  implemented;
+- Item 19 provider proof run `33342000338` deployed and verified immutable candidate
+  `d151dbdd156279e32a5361d304c90f996bd2d565`, then deterministically deleted the proof VM and
+  reached durable terminal state. That terminal Item 19 ownership intent is not reusable;
+- Item 20 protected non-live orchestration/readiness foundations exist, including pure admission-core
+  exact consumption of the bounded readiness result and a bounded readiness-artifact verifier;
+- Item 20 session-workflow composition remains incomplete and live Item 20 execution remains
+  fail-closed while signing-continuity gate #115 is OPEN;
 - the signing identity of the currently installed Android application has not been recovered into
-  the private GitHub execution boundary, so Android update/rollback is intentionally unavailable;
-- release immutability remains disabled until draft -> assets -> checksum/SBOM/attestation -> publish ordering is implemented.
+  the private GitHub execution boundary, so mutable Android update/rollback remains intentionally
+  unavailable;
+- final annotated release publication, release immutability and `production-vultr` promotion remain
+  pending and are forbidden before Item 20 succeeds;
+- legacy public production deployment remains blocked fail-closed; GCP/workstation/manual SSH/raw
+  ADB/provider CLI are not authorised acceptance or production shortcuts.
 
-This checkpoint records architecture and control boundaries only. It does not authorize VM or phone
-mutation.
+This checkpoint records architecture and control boundaries only. It grants no current VM or phone
+mutation authority.

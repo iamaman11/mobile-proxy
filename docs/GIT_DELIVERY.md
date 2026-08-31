@@ -9,6 +9,12 @@ See [project authority](operations/project-authority.md) for the rule that satel
 chat history, provider consoles and workstation state are non-authoritative when they conflict with
 this repository.
 
+Current delivery status is owned by [`PRODUCTION_BASELINE_PLAN.md`](PRODUCTION_BASELINE_PLAN.md).
+Exact machine-readable execution/control-plane state is owned by
+[`github-control-plane-v1.json`](../contracts/operations/github-control-plane-v1.json) and
+[`production-topology-v1.json`](../contracts/operations/production-topology-v1.json). Status
+summaries in this document are orientation only and must not become a parallel roadmap.
+
 ## Control-plane split
 
 | Boundary | Required responsibility |
@@ -107,37 +113,41 @@ completed. The historical public deployment route combined a workstation runner 
 and is not the target architecture. The checked-in migration-gate workflow intentionally refuses
 deployment.
 
-The phone execution foundation is proven and recorded in
-[phone GitOps runtime](operations/phone-gitops-runtime.md): the private Linux runner is online,
-the private read-only preflight passed on the registered device at one immutable canonical SHA, and
-the bounded report confirms `mutation_performed=false`. This does **not** authorize installation,
-network changes, restart, rollback or any other phone mutation.
+Production Baseline Items 15–19 are **COMPLETE**. Item 20 is the first unfinished delivery item.
+The following pre-release foundations are already protected and proven:
 
-The immutable acceptance-authority implementation is source-controlled as a distinct gate from
-final `production-vultr`. Its completion evidence is the successful post-merge Quality run and a
-successful live `/accept-candidate` run recorded in canonical Issues #90/#116. After that checkpoint,
-the next bounded item is the GitHub-hosted Vultr **read-only** account/key preflight; VM mutation is
-still forbidden until the typed ownership adapter is complete.
+- the private Linux `android-production` runner and registered-device binding passed a bounded
+  read-only Actions preflight with `mutation_performed=false`;
+- immutable pre-release acceptance authority is implemented and proven for exact candidate
+  identities;
+- the GitHub-hosted Vultr read-only account/key preflight is implemented and proven;
+- provider-neutral lifecycle policy plus the typed Vultr UUID/exact-tags/ownership/generation-CAS
+  adapter is implemented;
+- Item 19 lifecycle run `33342000338` deployed and verified immutable candidate
+  `d151dbdd156279e32a5361d304c90f996bd2d565` on one controlled proof VM, deterministically deleted
+  that VM, confirmed provider absence and reached durable terminal state. The terminal Item 19
+  ownership intent is not reusable;
+- Item 20 has protected non-live orchestration/readiness foundations. The bounded readiness result
+  is exact-matched by the pure admission core, and a pure readiness-artifact selector/verifier is
+  present. Session-workflow wiring remains explicitly incomplete and grants no live authority.
 
-The remaining later work includes:
+The remaining baseline work is bounded to the first unfinished item and its successors:
 
-1. read-only live Vultr preflight proving environment-secret availability without exposing values;
-2. provider-neutral lifecycle plus typed Vultr UUID/exact-tags/generation-CAS ownership adapter;
-3. just-in-time acceptance VM only when physical acceptance is ready;
-4. canonical phone install/update/verify/rollback logic invoked only through the private execution
-   satellite and exact `android-production` runner;
-5. recovery of the existing Android signing identity, followed by private GitHub-secret delivery
-   without exposing it to the public repository, logs or evidence;
-6. signed immutable APK handling, certificate-continuity validation and deterministic rollback to
-   a previously accepted signed artifact (never a blind rebuild of an old source revision);
-7. physical acceptance of the exact candidate before final semantic release authority;
-8. final draft -> assets -> checksum/SBOM/attestation -> publish ordering, protected annotated tag,
-   and only then `production-vultr` promotion;
-9. bounded evidence and deterministic rollback across both targets.
+1. finish the protected non-live Item 20 session/workflow composition without weakening admission;
+2. satisfy #115 by recovering and independently verifying the existing Android signing identity,
+   delivering it only through the private execution boundary, and protecting signed immutable APK
+   update/verify/rollback logic with certificate continuity and retained rollback artifacts;
+3. when #115 and the same-window private phone preflight permit a mutable physical window, run one
+   fresh Item 20 JIT acceptance session and the normative physical A–F sequence on the exact
+   immutable candidate, followed by deterministic provider cleanup and bounded evidence;
+4. only after successful physical acceptance, create the final draft -> assets ->
+   checksum/SBOM/attestation -> publish sequence and protected annotated `vMAJOR.MINOR.PATCH` tag;
+5. only from that accepted final release tuple, perform `production-vultr` promotion and prove the
+   bounded deterministic production rollback/fix-forward path.
 
 Until the relevant target path is implemented and verified, no release event, manual dispatch,
 SSH, raw ADB, provider CLI or workstation command is an authorised production shortcut. Do not
-create a VM or install an APK merely to test bootstrap.
+create an Item 20 VM or mutate the phone merely to keep work moving while #115 remains OPEN.
 
 ## Normal development and release
 
