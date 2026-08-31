@@ -95,6 +95,53 @@ than install `apps/android-app` does not bypass the phone gate above.
 The private execution satellite consumes canonical immutable identity/evidence; it does not define
 roadmap, architecture, release policy, provider desired state or acceptance policy.
 
+### Protected Item 20 endpoint handoff design
+
+`contracts/operations/item20-private-handoff-v1.json` defines the future public-provider to
+private-phone transport handoff. The contract is **design-only and not enabled** while #115 is open.
+The current private satellite therefore remains read-only and no endpoint secret or mutable Item 20
+phone workflow is installed by this checkpoint.
+
+When a later protected implementation is allowed, the transport endpoint may cross the repository
+boundary only after the public typed lifecycle has resolved and verified the exact Item 20 provider
+target. The endpoint is transport data, never provider identity or mutation authority.
+
+The required future handoff is:
+
+```text
+verified Item 20 target
+  -> derived transport endpoint
+  -> encrypted private-repository Actions secret ITEM20_SESSION_ENVELOPE
+  -> non-secret private workflow dispatch containing candidate_sha + control_plane_sha + fresh session_nonce
+  -> exact tuple verification on the private execution boundary
+  -> same-window registered-device preflight
+  -> bounded private Item 20 execution
+  -> private envelope deletion and absence confirmation
+```
+
+The envelope contains only `candidate_sha`, `control_plane_sha`, a fresh opaque session nonce and the
+derived transport endpoint. It must not contain the provider UUID, Vultr credentials, phone
+credentials or another authority selector. The dispatch payload must not contain the endpoint.
+
+A future public handoff job may use the reserved `ITEM20_PHONE_HANDOFF_TOKEN` only as a narrowly
+scoped credential for the private repository. Its required private-repository permissions are exactly
+`Actions: write` and `Secrets: write`. The token must never be passed to the self-hosted phone runner.
+The private `ITEM20_SESSION_ENVELOPE` must be encrypted with the private repository Actions public
+key before upload and live only for one serialized Item 20 session.
+
+Before replacing a stale envelope, the public control plane must prove that no prior private Item 20
+session remains active. A stale envelope must fail exact candidate/control-plane/nonce matching.
+After the private run reaches a terminal state, the envelope must be deleted and absence confirmed.
+Provider cleanup remains mandatory even if handoff-secret cleanup or private execution fails; an
+Item 20 acceptance result cannot be successful until both the private envelope is absent and the
+exact provider target has reached deterministic terminal cleanup.
+
+The endpoint, envelope, token and provider UUID must never be written to a public Issue, artifact,
+workflow output, step summary or log merely to bridge the two control planes. Private evidence also
+does not retain the endpoint after execution. Public terminal evidence may record only bounded
+non-secret identities/results such as exact candidate/control-plane identity, private workflow run
+identity/conclusion, private-secret absence and provider terminal-cleanup confirmation.
+
 ## Private signing-secret contract
 
 The following names are required only after the signing identity is recovered. They belong in
