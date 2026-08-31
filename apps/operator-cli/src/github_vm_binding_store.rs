@@ -287,10 +287,8 @@ impl fmt::Display for BindingStoreError {
 impl std::error::Error for BindingStoreError {}
 
 trait DeploymentBackend {
-    fn list_records(
-        &self,
-        candidate_sha: &str,
-    ) -> Result<Vec<DeploymentRecord>, BindingStoreError>;
+    fn list_records(&self, candidate_sha: &str)
+    -> Result<Vec<DeploymentRecord>, BindingStoreError>;
 
     fn append_record(
         &self,
@@ -931,11 +929,7 @@ mod tests {
         OwnershipIntent::new(LifecycleScope::Acceptance, namespace.intent_id(SHA)).unwrap()
     }
 
-    fn binding(
-        namespace: AcceptanceVmIntentNamespace,
-        id: &str,
-        generation: u64,
-    ) -> VmBinding {
+    fn binding(namespace: AcceptanceVmIntentNamespace, id: &str, generation: u64) -> VmBinding {
         VmBinding {
             intent: intent(namespace),
             provider_id: ProviderResourceId::new(id).unwrap(),
@@ -989,14 +983,13 @@ mod tests {
     #[test]
     fn independent_ledgers_can_share_one_immutable_candidate() {
         let backend = MemoryBackend::default();
-        let mut item19_store = store(
-            backend.clone(),
-            AcceptanceVmIntentNamespace::Item19,
-        );
-        let item19_binding =
-            bind_first(&mut item19_store, AcceptanceVmIntentNamespace::Item19);
+        let mut item19_store = store(backend.clone(), AcceptanceVmIntentNamespace::Item19);
+        let item19_binding = bind_first(&mut item19_store, AcceptanceVmIntentNamespace::Item19);
         item19_store
-            .prepare_delete(&intent(AcceptanceVmIntentNamespace::Item19), &item19_binding)
+            .prepare_delete(
+                &intent(AcceptanceVmIntentNamespace::Item19),
+                &item19_binding,
+            )
             .unwrap();
         item19_store
             .mark_delete_dispatched(
@@ -1012,18 +1005,14 @@ mod tests {
             )
             .unwrap();
 
-        let mut item20_store = store(
-            backend.clone(),
-            AcceptanceVmIntentNamespace::Item20,
-        );
+        let mut item20_store = store(backend.clone(), AcceptanceVmIntentNamespace::Item20);
         assert_eq!(
             item20_store
                 .lifecycle_state(&intent(AcceptanceVmIntentNamespace::Item20))
                 .unwrap(),
             AcceptanceVmLifecycleState::Empty
         );
-        let item20_binding =
-            bind_first(&mut item20_store, AcceptanceVmIntentNamespace::Item20);
+        let item20_binding = bind_first(&mut item20_store, AcceptanceVmIntentNamespace::Item20);
         assert_eq!(
             item20_store
                 .load(&intent(AcceptanceVmIntentNamespace::Item20))
@@ -1031,8 +1020,7 @@ mod tests {
             Some(item20_binding)
         );
         assert_eq!(
-            item19_store
-                .load(&intent(AcceptanceVmIntentNamespace::Item19)),
+            item19_store.load(&intent(AcceptanceVmIntentNamespace::Item19)),
             Err(BindingStoreError::TerminalIntentReuse)
         );
     }
@@ -1078,11 +1066,7 @@ mod tests {
         assert_eq!(backend.records.borrow().len(), before);
 
         assert_eq!(
-            writer.compare_and_swap(
-                &intent,
-                Some(&first),
-                Some(binding(namespace, ID1, 2))
-            ),
+            writer.compare_and_swap(&intent, Some(&first), Some(binding(namespace, ID1, 2))),
             Err(BindingStoreError::InvalidTransition)
         );
     }
