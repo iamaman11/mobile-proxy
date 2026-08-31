@@ -29,18 +29,13 @@ class AndroidInstalledSignerTests(unittest.TestCase):
                 "package:/data/app/example/split_config.xxhdpi.apk",
             ]
         )
-        self.assertEqual(
-            module.select_installed_apk_path(output),
-            "/data/app/example/base.apk",
-        )
+        self.assertEqual(module.select_installed_apk_path(output), "/data/app/example/base.apk")
 
     def test_rejects_missing_or_ambiguous_installed_apk_inventory(self) -> None:
         with self.assertRaises(module.SigningIdentityFailure):
             module.select_installed_apk_path("")
         with self.assertRaises(module.SigningIdentityFailure):
-            module.select_installed_apk_path(
-                "package:/data/a.apk\npackage:/data/b.apk\n"
-            )
+            module.select_installed_apk_path("package:/data/a.apk\npackage:/data/b.apk\n")
         with self.assertRaises(module.SigningIdentityFailure):
             module.select_installed_apk_path("unexpected:/data/base.apk")
 
@@ -50,10 +45,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
             "Signer #1 certificate SHA-256 digest: "
             f"{CERTIFICATE_FINGERPRINT}\n"
         )
-        self.assertEqual(
-            module.parse_single_apksigner_fingerprint(apksigner_output),
-            CERTIFICATE_FINGERPRINT,
-        )
+        self.assertEqual(module.parse_single_apksigner_fingerprint(apksigner_output), CERTIFICATE_FINGERPRINT)
         self.assertEqual(
             module.parse_single_keytool_fingerprint(
                 f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n"
@@ -78,28 +70,16 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(module.SigningIdentityFailure):
                 module.require_private_text(module._KEY_ALIAS_ENV, maximum=256)
-        with mock.patch.dict(
-            os.environ,
-            {module._KEY_ALIAS_ENV: "alias\nleak"},
-            clear=True,
-        ):
+        with mock.patch.dict(os.environ, {module._KEY_ALIAS_ENV: "alias\nleak"}, clear=True):
             with self.assertRaises(module.SigningIdentityFailure):
                 module.require_private_text(module._KEY_ALIAS_ENV, maximum=256)
 
         self.assertEqual(
-            module.decode_canonical_base64(
-                KEYSTORE_B64,
-                "keystore",
-                maximum_bytes=1024,
-            ),
+            module.decode_canonical_base64(KEYSTORE_B64, "keystore", maximum_bytes=1024),
             KEYSTORE,
         )
         with self.assertRaises(module.SigningIdentityFailure):
-            module.decode_canonical_base64(
-                "not-base64",
-                "keystore",
-                maximum_bytes=1024,
-            )
+            module.decode_canonical_base64("not-base64", "keystore", maximum_bytes=1024)
         with self.assertRaises(module.SigningIdentityFailure):
             module.decode_canonical_base64(
                 base64.b64encode(b"too-large").decode("ascii"),
@@ -116,14 +96,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         del timeout
         values = list(command)
-        if values[:6] == [
-            "adb",
-            "-s",
-            SERIAL,
-            "shell",
-            "pm",
-            "path",
-        ]:
+        if values[:6] == ["adb", "-s", SERIAL, "shell", "pm", "path"]:
             return subprocess.CompletedProcess(
                 values,
                 0,
@@ -149,17 +122,11 @@ class AndroidInstalledSignerTests(unittest.TestCase):
             self.assertNotIn("test-store-password", values)
             self.assertIsNotNone(env)
             assert env is not None
-            self.assertEqual(
-                env[module._KEYSTORE_PASSWORD_ENV],
-                "test-store-password",
-            )
+            self.assertEqual(env[module._KEYSTORE_PASSWORD_ENV], "test-store-password")
             return subprocess.CompletedProcess(
                 values,
                 0,
-                stdout=(
-                    "Certificate fingerprints:\n"
-                    f"\t SHA256: {KEYTOOL_FINGERPRINT}\n"
-                ),
+                stdout=f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n",
                 stderr="",
             )
         self.fail(f"unexpected command: {values!r}")
