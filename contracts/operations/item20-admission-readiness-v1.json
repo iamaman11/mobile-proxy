@@ -13,7 +13,7 @@
     "control_plane_sha": "exact_current_protected_main",
     "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
     "selector": "scripts/select_item20_candidate_evidence.py",
-    "session_workflow_wiring": "not_implemented",
+    "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
     "status": "protected_read_only_candidate_evidence_wiring",
     "verifier": "scripts/verify_item20_candidate_evidence.py",
     "workflow": ".github/workflows/item20-admission-readiness.yml"

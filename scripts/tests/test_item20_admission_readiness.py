@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "select_item20_candidate_evidence.py"
 CONTRACT = ROOT / "contracts" / "operations" / "item20-admission-readiness-v1.json"
 WORKFLOW = ROOT / ".github" / "workflows" / "item20-admission-readiness.yml"
+SESSION_WORKFLOW = ROOT / ".github" / "workflows" / "item20-session-orchestration.yml"
 CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
 CONTROL = "a" * 40
 OLD_CONTROL = "b" * 40
@@ -43,7 +44,10 @@ class Item20AdmissionReadinessTests(unittest.TestCase):
         selector.verify_readiness_contract(contract)
         workflow = contract["candidate_evidence_workflow"]
         self.assertEqual(workflow["admission_core_wiring"], "implemented_exact_result_match")
-        self.assertEqual(workflow["session_workflow_wiring"], "not_implemented")
+        self.assertEqual(
+            workflow["session_workflow_wiring"],
+            "implemented_exact_readiness_artifact_consumption",
+        )
         self.assertFalse(contract["authorization"]["provider_mutation_authorized"])
         self.assertFalse(contract["authorization"]["phone_mutation_authorized"])
         self.assertFalse(contract["authorization"]["live_execution_authorized"])
@@ -96,6 +100,33 @@ class Item20AdmissionReadinessTests(unittest.TestCase):
             "gh workflow run",
             "actions/workflows/acceptance-authority.yml/dispatches",
             "actions/workflows/vultr-readonly-preflight.yml/dispatches",
+            "adb ",
+        ):
+            self.assertNotIn(forbidden, workflow)
+
+    def test_session_workflow_consumes_existing_readiness_without_dispatch(self) -> None:
+        workflow = SESSION_WORKFLOW.read_text(encoding="utf-8")
+        for required in (
+            "scripts/select_item20_candidate_evidence.py verify-contract",
+            "actions/artifacts?name=item20-admission-readiness-$CONTROL_PLANE_SHA&per_page=100",
+            "scripts/verify_item20_readiness_artifact.py select-artifact",
+            "scripts/verify_item20_readiness_artifact.py verify",
+            "item20-admission-readiness-evidence.json",
+            "Readiness artifact consumed: true",
+            "Fresh acceptance authority verified: true",
+            "Fresh Vultr read-only preflight verified: true",
+        ):
+            self.assertIn(required, workflow)
+
+        for forbidden in (
+            "environment: acceptance-vultr",
+            "VULTR_API_KEY",
+            "VULTR_SSH_PRIVATE_KEY",
+            "ITEM20_PHONE_HANDOFF_TOKEN",
+            "production-vultr",
+            "/v2/instances",
+            "gh workflow run",
+            "/dispatches",
             "adb ",
         ):
             self.assertNotIn(forbidden, workflow)

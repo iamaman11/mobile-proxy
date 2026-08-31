@@ -42,7 +42,7 @@ EXPECTED_READINESS_SURFACE = {
     "live_execution": False,
     "final_production_authority": False,
     "admission_core_wiring": "implemented_exact_result_match",
-    "session_workflow_wiring": "not_implemented",
+    "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
 }
 
 EXPECTED_TOPOLOGY_EXECUTION = (
@@ -51,16 +51,16 @@ EXPECTED_TOPOLOGY_EXECUTION = (
 )
 EXPECTED_READINESS_TOPOLOGY_EXECUTION = (
     "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence against exact current "
-    "protected control-plane; bounded result is matched exactly by the pure admission core; session workflow wiring "
-    "remains not implemented; actions:read plus contents:read only; no provider credentials/API execution, provider "
-    "mutation, phone execution or endpoint handoff"
+    "protected control-plane; bounded result is matched exactly by the pure admission core and consumed as an exact "
+    "verified readiness artifact by the non-live session workflow before candidate build; actions:read plus "
+    "contents:read only; no provider credentials/API execution, provider mutation, phone execution or endpoint handoff"
 )
 EXPECTED_MIGRATION = (
     "protected_non_live_validation_and_exact_candidate_build_only_no_provider_or_phone_authority"
 )
 EXPECTED_READINESS_MIGRATION = (
-    "protected_read_only_candidate_evidence_validation_admission_core_exact_result_match_implemented_"
-    "session_workflow_not_wired_no_provider_or_phone_authority"
+    "protected_read_only_candidate_evidence_validation_admission_core_exact_result_match_and_session_exact_"
+    "readiness_artifact_consumption_implemented_no_provider_or_phone_authority"
 )
 EXPECTED_NEXT_LIFECYCLE = (
     "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_"
@@ -253,9 +253,9 @@ def check_repository(root: Path) -> list[str]:
     ):
         errors.append("Item 20 admission-readiness pure admission-core result consumption differs")
     if not isinstance(readiness_evidence, dict) or readiness_evidence.get("session_workflow_wiring") != (
-        "not_implemented"
+        "implemented_exact_readiness_artifact_consumption"
     ):
-        errors.append("Item 20 admission-readiness must keep session workflow wiring unimplemented")
+        errors.append("Item 20 admission-readiness session workflow must consume exact verified readiness artifact")
 
     orchestration = item20.get("orchestration")
     if not isinstance(orchestration, dict):
@@ -323,6 +323,10 @@ def check_repository(root: Path) -> list[str]:
             "runs-on: ubuntu-latest",
             "Verify build-only Item 20 orchestration boundary",
             "Build exact immutable candidate server artifact",
+            "scripts/select_item20_candidate_evidence.py verify-contract",
+            "scripts/verify_item20_readiness_artifact.py select-artifact",
+            "scripts/verify_item20_readiness_artifact.py verify",
+            "Readiness artifact consumed: true",
             "Provider mutation authorized: false",
             "Phone mutation authorized: false",
             "Endpoint handoff authorized: false",
@@ -343,6 +347,8 @@ def check_repository(root: Path) -> list[str]:
             "self-hosted",
             "adb ",
             "/v2/instances",
+            "gh workflow run",
+            "/dispatches",
             "curl -x post",
             "curl -x delete",
             "curl -x patch",

@@ -128,6 +128,12 @@ class Item20NonLiveOrchestrationTests(unittest.TestCase):
             "ref: ${{ needs.validate.outputs.candidate_sha }}",
             "item20-server-candidate-${{ env.CANDIDATE_SHA }}",
             "item19-acceptance-lifecycle prepare-artifact",
+            "scripts/select_item20_candidate_evidence.py verify-contract",
+            "scripts/verify_item20_readiness_artifact.py select-artifact",
+            "scripts/verify_item20_readiness_artifact.py verify",
+            "Readiness artifact consumed: true",
+            "Fresh acceptance authority verified: true",
+            "Fresh Vultr read-only preflight verified: true",
             "Provider mutation authorized: false",
             "Phone mutation authorized: false",
             "Endpoint handoff authorized: false",
@@ -140,10 +146,14 @@ class Item20NonLiveOrchestrationTests(unittest.TestCase):
             "production-vultr",
             "VULTR_API_KEY",
             "VULTR_SSH_PRIVATE_KEY",
+            "ITEM20_PHONE_HANDOFF_TOKEN",
             "self-hosted",
             "secrets.",
             "api.vultr.com",
             "/v2/instances",
+            "gh workflow run",
+            "/dispatches",
+            "adb ",
         ):
             self.assertNotIn(forbidden, body)
 
