@@ -182,6 +182,37 @@ def preflight_evidence() -> dict[str, object]:
     }
 
 
+def readiness_evidence() -> dict[str, object]:
+    return {
+        "format_version": 1,
+        "authority": "item20_fresh_candidate_evidence_verification",
+        "repository": "iamaman11/mobile-proxy",
+        "candidate_sha": CANDIDATE,
+        "control_plane_sha": CONTROL_PLANE,
+        "control_plane_quality_run_id": "123456",
+        "candidate_quality_run_id": "33341602485",
+        "candidate_quality_run_attempt": "1",
+        "acceptance_authority_run_id": "1000",
+        "acceptance_authority_artifact_id": "2000",
+        "acceptance_authority_artifact_digest": "sha256:" + "b" * 64,
+        "vultr_readonly_preflight_run_id": "1100",
+        "vultr_readonly_preflight_artifact_id": "2100",
+        "vultr_readonly_preflight_artifact_digest": "sha256:" + "b" * 64,
+        "candidate_control_plane_separation_verified": True,
+        "fresh_acceptance_authority_verified": True,
+        "fresh_vultr_readonly_preflight_verified": True,
+        "provider_probe_read_only_verified": True,
+        "provider_mutation_authorized": False,
+        "phone_mutation_authorized": False,
+        "endpoint_handoff_authorized": False,
+        "live_execution_authorized": False,
+        "final_production_authority": False,
+        "transport_endpoint_recorded": False,
+        "provider_identifier_recorded": False,
+        "secret_derived_identifier_recorded": False,
+    }
+
+
 class Item20AdmissionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
@@ -207,15 +238,17 @@ class Item20AdmissionTests(unittest.TestCase):
             "preflight_artifact": preflight_artifact(),
             "preflight_run": preflight_run(),
             "preflight_evidence": preflight_evidence(),
+            "readiness_evidence": readiness_evidence(),
         }
         values.update(overrides)
         return verify_admission(**values)  # type: ignore[arg-type]
 
-    def test_contract_is_exact_validation_only_and_consumes_fresh_chain(self) -> None:
+    def test_contract_is_exact_validation_only_and_consumes_readiness_result(self) -> None:
         verify_contract(self.contract)
         evidence = self.admit()
         self.assertEqual(evidence["candidate_sha"], CANDIDATE)
         self.assertEqual(evidence["control_plane_sha"], CONTROL_PLANE)
+        self.assertTrue(evidence["admission_readiness_result_verified"])
         self.assertTrue(evidence["fresh_acceptance_authority_verified"])
         self.assertTrue(evidence["fresh_vultr_readonly_preflight_verified"])
         self.assertTrue(evidence["provider_probe_read_only_verified"])
@@ -330,6 +363,22 @@ class Item20AdmissionTests(unittest.TestCase):
         mutated["vm_mutation_performed"] = True
         with self.assertRaisesRegex(ValueError, "preflight evidence"):
             self.admit(preflight_evidence=mutated)
+
+    def test_readiness_result_must_match_independently_verified_chain(self) -> None:
+        for field, value in (
+            ("control_plane_quality_run_id", "999999"),
+            ("acceptance_authority_run_id", "999999"),
+            ("provider_mutation_authorized", True),
+        ):
+            mutated = readiness_evidence()
+            mutated[field] = value
+            with self.assertRaisesRegex(ValueError, "readiness|candidate evidence"):
+                self.admit(readiness_evidence=mutated)
+
+        extra = readiness_evidence()
+        extra["unexpected_field"] = "forbidden"
+        with self.assertRaisesRegex(ValueError, "exactly match"):
+            self.admit(readiness_evidence=extra)
 
     def test_contract_records_consumption_but_not_workflow_wiring_or_live_authority(self) -> None:
         admission = self.contract["admission"]

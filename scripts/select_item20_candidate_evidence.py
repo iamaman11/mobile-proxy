@@ -74,7 +74,8 @@ def verify_readiness_contract(contract: Mapping[str, object]) -> None:
         "control_plane_sha": "exact_current_protected_main",
         "artifact_selection": "candidate_specific_artifact_then_exact_control_plane_run",
         "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
-        "admission_core_wiring": "not_implemented",
+        "admission_core_wiring": "implemented_exact_result_match",
+        "session_workflow_wiring": "not_implemented",
     }:
         raise ValueError("Item 20 candidate-evidence readiness wiring differs")
 

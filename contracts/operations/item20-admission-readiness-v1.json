@@ -7,12 +7,13 @@
     "provider_mutation_authorized": false
   },
   "candidate_evidence_workflow": {
-    "admission_core_wiring": "not_implemented",
+    "admission_core_wiring": "implemented_exact_result_match",
     "artifact_selection": "candidate_specific_artifact_then_exact_control_plane_run",
     "candidate_sha": "d151dbdd156279e32a5361d304c90f996bd2d565",
     "control_plane_sha": "exact_current_protected_main",
     "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
     "selector": "scripts/select_item20_candidate_evidence.py",
+    "session_workflow_wiring": "not_implemented",
     "status": "protected_read_only_candidate_evidence_wiring",
     "verifier": "scripts/verify_item20_candidate_evidence.py",
     "workflow": ".github/workflows/item20-admission-readiness.yml"

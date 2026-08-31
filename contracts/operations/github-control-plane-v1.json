@@ -142,7 +142,8 @@
     "endpoint_handoff": false,
     "live_execution": false,
     "final_production_authority": false,
-    "admission_core_wiring": "not_implemented"
+    "admission_core_wiring": "implemented_exact_result_match",
+    "session_workflow_wiring": "not_implemented"
   },
   "vultr_lifecycle_adapter": {
     "status": "item_19_slice_a_typed_client_and_durable_state_active_no_live_entrypoint",

@@ -41,7 +41,8 @@ EXPECTED_READINESS_SURFACE = {
     "endpoint_handoff": False,
     "live_execution": False,
     "final_production_authority": False,
-    "admission_core_wiring": "not_implemented",
+    "admission_core_wiring": "implemented_exact_result_match",
+    "session_workflow_wiring": "not_implemented",
 }
 
 EXPECTED_TOPOLOGY_EXECUTION = (
@@ -49,16 +50,17 @@ EXPECTED_TOPOLOGY_EXECUTION = (
     "no acceptance-vultr environment, provider credentials, provider mutation, phone execution or endpoint handoff"
 )
 EXPECTED_READINESS_TOPOLOGY_EXECUTION = (
-    "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence against exact "
-    "current protected control-plane; actions:read plus contents:read only; no provider credentials/API "
-    "execution, provider mutation, phone execution or endpoint handoff"
+    "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence against exact current "
+    "protected control-plane; bounded result is matched exactly by the pure admission core; session workflow wiring "
+    "remains not implemented; actions:read plus contents:read only; no provider credentials/API execution, provider "
+    "mutation, phone execution or endpoint handoff"
 )
 EXPECTED_MIGRATION = (
     "protected_non_live_validation_and_exact_candidate_build_only_no_provider_or_phone_authority"
 )
 EXPECTED_READINESS_MIGRATION = (
-    "protected_read_only_candidate_evidence_validation_no_provider_or_phone_authority_"
-    "admission_core_wiring_not_implemented"
+    "protected_read_only_candidate_evidence_validation_admission_core_exact_result_match_implemented_"
+    "session_workflow_not_wired_no_provider_or_phone_authority"
 )
 EXPECTED_NEXT_LIFECYCLE = (
     "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_"
@@ -246,8 +248,14 @@ def check_repository(root: Path) -> list[str]:
         "provider_mutation_authorized": False,
     }:
         errors.append("Item 20 admission-readiness authorization must remain non-live and non-mutating")
-    if not isinstance(readiness_evidence, dict) or readiness_evidence.get("admission_core_wiring") != "not_implemented":
-        errors.append("Item 20 admission-readiness must not claim admission-core live wiring")
+    if not isinstance(readiness_evidence, dict) or readiness_evidence.get("admission_core_wiring") != (
+        "implemented_exact_result_match"
+    ):
+        errors.append("Item 20 admission-readiness pure admission-core result consumption differs")
+    if not isinstance(readiness_evidence, dict) or readiness_evidence.get("session_workflow_wiring") != (
+        "not_implemented"
+    ):
+        errors.append("Item 20 admission-readiness must keep session workflow wiring unimplemented")
 
     orchestration = item20.get("orchestration")
     if not isinstance(orchestration, dict):

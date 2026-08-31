@@ -16,6 +16,7 @@ _IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
 _QUALITY_WORKFLOW = "Quality"
 _QUALITY_WORKFLOW_PATH = ".github/workflows/quality.yml"
 _CANDIDATE_EVIDENCE_VERIFIER = "scripts/verify_item20_candidate_evidence.py"
+_READINESS_AUTHORITY = "item20_fresh_candidate_evidence_verification"
 _REQUIRED_RUNNER_LABELS = ["self-hosted", "Linux", "X64", "android-production"]
 _REQUIRED_TOOLS = {"adb": True, "python": True, "git": True, "curl": True}
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -291,6 +292,28 @@ def _verify_fresh_result(
             raise ValueError(f"fresh candidate evidence result violates validation-only boundary: {field}")
 
 
+def verify_readiness_result(
+    candidate_sha: str,
+    control_plane_sha: str,
+    quality_run: Mapping[str, object],
+    fresh: Mapping[str, object],
+    readiness_evidence: Mapping[str, object],
+) -> None:
+    _verify_fresh_result(candidate_sha, control_plane_sha, readiness_evidence)
+    expected_identity = {
+        "format_version": 1,
+        "authority": _READINESS_AUTHORITY,
+        "repository": _CANONICAL_REPOSITORY,
+        "candidate_sha": candidate_sha,
+        "control_plane_sha": control_plane_sha,
+        "control_plane_quality_run_id": str(quality_run["id"]),
+    }
+    if any(readiness_evidence.get(key) != value for key, value in expected_identity.items()):
+        raise ValueError("admission-readiness result does not bind exact candidate/control-plane Quality identity")
+    if dict(readiness_evidence) != dict(fresh):
+        raise ValueError("admission-readiness result does not exactly match independently verified candidate evidence")
+
+
 def verify_admission(
     candidate_sha: str,
     control_plane_sha: str,
@@ -307,6 +330,7 @@ def verify_admission(
     preflight_artifact: Mapping[str, object],
     preflight_run: Mapping[str, object],
     preflight_evidence: Mapping[str, object],
+    readiness_evidence: Mapping[str, object],
 ) -> dict[str, object]:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
@@ -331,6 +355,7 @@ def verify_admission(
         preflight_evidence,
     )
     _verify_fresh_result(candidate_sha, control_plane_sha, fresh)
+    verify_readiness_result(candidate_sha, control_plane_sha, quality_run, fresh, readiness_evidence)
 
     return {
         "format_version": 1,
@@ -343,6 +368,7 @@ def verify_admission(
         "item20_tracker_open": True,
         "phone_signing_gate_completed": True,
         "private_phone_read_only_preflight_accepted": True,
+        "admission_readiness_result_verified": True,
         "fresh_acceptance_authority_verified": True,
         "fresh_vultr_readonly_preflight_verified": True,
         "provider_probe_read_only_verified": True,
@@ -388,6 +414,7 @@ def main() -> int:
     parser.add_argument("--preflight-artifact", type=Path, required=True)
     parser.add_argument("--preflight-run", type=Path, required=True)
     parser.add_argument("--preflight-evidence", type=Path, required=True)
+    parser.add_argument("--readiness-evidence", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -407,6 +434,7 @@ def main() -> int:
         _load_object(args.preflight_artifact),
         _load_object(args.preflight_run),
         _load_object(args.preflight_evidence),
+        _load_object(args.readiness_evidence),
     )
     _write_object(args.output, evidence)
     return 0
