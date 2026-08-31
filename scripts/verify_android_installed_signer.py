@@ -8,7 +8,9 @@ certificate fingerprint, keystore bytes, passwords, or alias.
 
 The verifier proves only one bounded fact: the certificate stored under the
 recovered private keystore alias exactly matches the current signer reported by
-`apksigner` for the APK installed as `com.example.mobileproxy`.
+`apksigner` for the APK installed as `com.example.mobileproxy`. It compares the
+SHA-256 certificate fingerprints reported by Android's signing tools; it does not
+introduce a first-party digest primitive or digest authority contract.
 
 It does not generate a signing key, sign an APK, install/update/uninstall an APK,
 restart the phone or service, mutate networking, or authorize Item 20 execution.
