@@ -49,6 +49,8 @@ def check_physical_runbook_text(physical: str) -> list[str]:
         "distinct Item 20 ownership intent",
         "terminal Item 19 proof intent is never reused",
         "private Item 20 phone execution must not call Vultr APIs",
+        "Fresh immutable `/accept-candidate <sha>` authority",
+        "Fresh `/vultr-readonly-preflight <sha>` evidence",
     ):
         if required not in physical:
             errors.append(f"physical acceptance runbook is missing Item 20 boundary {required!r}")
@@ -129,6 +131,29 @@ def check_item20_contract(contract: dict[str, object]) -> list[str]:
         "phone_signing_gate_115": "closed_completed_before_live_window",
     }:
         errors.append("Item 20 admission contract issue gates differ")
+
+    future_live = contract.get("future_live_candidate_evidence")
+    if not isinstance(future_live, dict) or future_live != {
+        "acceptance_authority": "fresh_for_exact_candidate",
+        "vultr_readonly_preflight": "fresh_for_exact_candidate",
+        "same_candidate_required": True,
+        "current_core_verification": "not_implemented",
+    }:
+        errors.append("Item 20 fresh candidate authority requirements differ")
+
+    forbidden = contract.get("forbidden")
+    if not isinstance(forbidden, list) or forbidden != [
+        "provider_mutation_from_this_admission_core",
+        "phone_mutation_from_this_admission_core",
+        "public_endpoint_or_provider_uuid_evidence",
+        "terminal_item19_intent_reuse",
+        "live_window_without_fresh_exact_candidate_acceptance_authority",
+        "live_window_without_fresh_exact_candidate_vultr_readonly_preflight",
+        "production_vultr_authority",
+        "final_release_tag_or_production_promotion",
+        "gcp_or_manual_provider_control",
+    ]:
+        errors.append("Item 20 forbidden live-boundary set differs")
 
     return errors
 
@@ -235,6 +260,8 @@ def check_repository(root: Path) -> list[str]:
         "def verify_issue_gates",
         "def verify_phone_preflight",
         "def verify_admission",
+        '"fresh_acceptance_authority_verified": False',
+        '"fresh_vultr_readonly_preflight_verified": False',
         '"provider_mutation_authorized": False',
         '"phone_mutation_authorized": False',
         '"endpoint_handoff_authorized": False',
