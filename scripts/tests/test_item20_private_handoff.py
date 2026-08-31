@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "item20_private_handoff.py"
@@ -23,9 +24,17 @@ spec.loader.exec_module(module)
 
 
 class FakeBackend:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_derivation: bool = False) -> None:
         self.sealed_plaintext: bytes | None = None
         self.sealed_key: bytes | None = None
+        self.fail_derivation = fail_derivation
+
+    def derive_public_key(self, recipient_private_key: bytes) -> bytes:
+        if self.fail_derivation:
+            raise RuntimeError("derivation failed")
+        if len(recipient_private_key) != 32:
+            raise ValueError("bad private key")
+        return bytes(reversed(recipient_private_key))
 
     def seal(self, plaintext: bytes, recipient_public_key: bytes) -> bytes:
         self.sealed_plaintext = plaintext
@@ -95,6 +104,40 @@ class Item20PrivateHandoffTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.serialize_envelope(expanded)
 
+    def test_verifies_exact_recipient_key_pair(self) -> None:
+        module.verify_recipient_key_pair(PUBLIC_KEY_B64, PRIVATE_KEY_B64, FakeBackend())
+
+        wrong_public_key = base64.b64encode(b"x" * 32).decode("ascii")
+        with self.assertRaises(ValueError):
+            module.verify_recipient_key_pair(wrong_public_key, PRIVATE_KEY_B64, FakeBackend())
+
+    def test_recipient_key_pair_verifier_rejects_invalid_keys_and_derivation_failure(self) -> None:
+        short_key = base64.b64encode(b"short").decode("ascii")
+        with self.assertRaises(ValueError):
+            module.verify_recipient_key_pair(short_key, PRIVATE_KEY_B64, FakeBackend())
+        with self.assertRaises(ValueError):
+            module.verify_recipient_key_pair(PUBLIC_KEY_B64, short_key, FakeBackend())
+        with self.assertRaises(ValueError):
+            module.verify_recipient_key_pair("not-base64", PRIVATE_KEY_B64, FakeBackend())
+        with self.assertRaises(RuntimeError):
+            module.verify_recipient_key_pair(
+                PUBLIC_KEY_B64,
+                PRIVATE_KEY_B64,
+                FakeBackend(fail_derivation=True),
+            )
+
+    def test_private_key_environment_is_fixed_and_fail_closed(self) -> None:
+        self.assertEqual(module._PRIVATE_KEY_ENV, "ITEM20_HANDOFF_PRIVATE_KEY_B64")
+        with mock.patch.dict(module.os.environ, {}, clear=True):
+            with self.assertRaises(ValueError):
+                module._read_private_key_from_environment()
+        with mock.patch.dict(
+            module.os.environ,
+            {"ITEM20_HANDOFF_PRIVATE_KEY_B64": PRIVATE_KEY_B64},
+            clear=True,
+        ):
+            self.assertEqual(module._read_private_key_from_environment(), PRIVATE_KEY_B64)
+
     def test_seal_uses_only_recipient_public_key_and_canonical_plaintext(self) -> None:
         backend = FakeBackend()
         sealed = module.seal_envelope(envelope(), PUBLIC_KEY_B64, backend)
@@ -146,6 +189,10 @@ class Item20PrivateHandoffTests(unittest.TestCase):
         self.assertIn("crypto_box_seal_open", source)
         self.assertIn("crypto_scalarmult_base", source)
         self.assertIn('find_library("sodium")', source)
+        self.assertIn('subparsers.add_parser("verify-recipient-key-pair")', source)
+        self.assertIn('_PRIVATE_KEY_ENV = "ITEM20_HANDOFF_PRIVATE_KEY_B64"', source)
+        self.assertNotIn("--private-key-env", source)
+        self.assertNotIn("verify-recipient-key\")", source)
         self.assertNotIn("subprocess.", source)
         self.assertNotIn("urllib.request", source)
         self.assertNotIn("requests.", source)
