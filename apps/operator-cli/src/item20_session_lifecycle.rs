@@ -570,9 +570,8 @@ mod tests {
             intent: &OwnershipIntent,
             generation: Generation,
         ) -> io::Result<()> {
-            if intent != &self.intent || self.state != AcceptanceVmLifecycleState::CreatePrepared {
-                generation
-            }
+            if intent != &self.intent
+                || self.state != (AcceptanceVmLifecycleState::CreatePrepared { generation })
             {
                 return Err(Self::invalid_transition());
             }
