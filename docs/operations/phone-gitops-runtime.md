@@ -91,16 +91,17 @@ must verify:
 4. signed release APK creation;
 5. APK signature validity and signer equality to the configured private key;
 6. APK package `com.example.mobileproxy`, `versionName=0.1.4`, `versionCode=1004`;
-7. exact APK checksum and bounded release evidence.
+7. exact typed BLAKE3 APK digest and bounded release evidence.
 
 Signing secrets belong only to this off-phone build/sign job. The self-hosted phone mutation job
-must receive the exact signed APK plus bounded checksum evidence, but no signing secrets.
+must receive the exact signed APK plus bounded typed-digest evidence, but no signing secrets.
 
 ### Destructive migration and emergency rollback
 
 Before uninstalling the old package, the phone job must pull and retain the exact currently installed
-`base.apk`, record only its checksum/version metadata, and verify the expected old package identity.
-This retained signed APK is the emergency migration rollback artifact. No old source is rebuilt.
+`base.apk`, record only its typed digest/version metadata, and verify the expected old package
+identity. This retained signed APK is the emergency migration rollback artifact. No old source is
+rebuilt.
 
 Every uninstall, install and runtime-supervisor restart is separately preceded by the same-run
 registered-device proof. The mutation sequence is serialized per production phone:
@@ -141,11 +142,15 @@ require another explicit destructive uninstall/install operation.
 
 ## Mutable phone gate
 
-Mutable phone execution is permitted only through a canonical workflow that satisfies all of these
-conditions:
+This is a workflow-level phone-mutation gate, not only an APK-install gate. The explicit signing-lineage
+reset narrows the old signer-continuity blocker only for the exact canonical migration workflow; it
+does not gate the public canonical provider-only Item 19 proof or grant unrelated mutable-phone
+authority.
+
+Before enabling **any mutable phone workflow**, the workflow must satisfy all of these conditions:
 
 1. Bind the action to one exact immutable canonical source/release tuple.
-2. Verify the exact signed APK checksum, package/version metadata and signing evidence before ADB
+2. Verify the exact signed APK typed digest, package/version metadata and signing evidence before ADB
    mutation.
 3. Run the registered-device preflight immediately before every mutable operation.
 4. Serialize mutable commands per production phone.
