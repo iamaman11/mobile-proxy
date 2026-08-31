@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Pure verifier for fresh Item 20 candidate authority and read-only evidence.
 
-This module deliberately performs no GitHub, provider, or phone I/O.  Callers must
-supply bounded GitHub run/artifact metadata plus downloaded JSON evidence.  The
+This module deliberately performs no GitHub, provider, or phone I/O. Callers must
+supply bounded GitHub run/artifact metadata plus downloaded JSON evidence. The
 verifier keeps the immutable software candidate distinct from the moving protected
 control-plane revision.
 """
@@ -90,7 +90,7 @@ def verify_contract(contract: Mapping[str, object]) -> int:
         "candidate_control_plane_separation_required": True,
         "selection": "candidate_specific_artifact_then_exact_control_plane_run",
         "verifier": _VERIFIER_PATH,
-        "current_core_verification": "protected_pure_verifier",
+        "current_core_verification": "protected_pure_verifier_not_consumed_by_admission_core",
         "workflow_wiring": "not_implemented",
     }
     if not isinstance(future, dict) or future != expected_future:
