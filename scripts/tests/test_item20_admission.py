@@ -92,6 +92,8 @@ class Item20AdmissionTests(unittest.TestCase):
         self.assertEqual(evidence["candidate_sha"], CANDIDATE)
         self.assertEqual(evidence["control_plane_sha"], CONTROL_PLANE)
         for field in (
+            "fresh_acceptance_authority_verified",
+            "fresh_vultr_readonly_preflight_verified",
             "provider_mutation_authorized",
             "phone_mutation_authorized",
             "endpoint_handoff_authorized",
@@ -171,6 +173,27 @@ class Item20AdmissionTests(unittest.TestCase):
         mutated["handoff"]["status"] = "implemented"
         with self.assertRaisesRegex(ValueError, "handoff boundary"):
             verify_contract(mutated)
+
+    def test_future_live_window_requires_fresh_exact_candidate_authority(self) -> None:
+        mutated = copy.deepcopy(self.contract)
+        mutated["future_live_candidate_evidence"]["acceptance_authority"] = (
+            "reuse_historical_item19_authority"
+        )
+        with self.assertRaisesRegex(ValueError, "fresh candidate authority"):
+            verify_contract(mutated)
+
+        mutated = copy.deepcopy(self.contract)
+        mutated["future_live_candidate_evidence"]["vultr_readonly_preflight"] = (
+            "reuse_historical_item19_preflight"
+        )
+        with self.assertRaisesRegex(ValueError, "fresh candidate authority"):
+            verify_contract(mutated)
+
+    def test_non_live_core_cannot_claim_fresh_external_gates_are_verified(self) -> None:
+        evidence = self.admit()
+        self.assertFalse(evidence["fresh_acceptance_authority_verified"])
+        self.assertFalse(evidence["fresh_vultr_readonly_preflight_verified"])
+        self.assertFalse(evidence["live_execution_authorized"])
 
 
 if __name__ == "__main__":

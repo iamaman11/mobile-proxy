@@ -111,6 +111,15 @@ def verify_contract(contract: Mapping[str, object]) -> None:
     }:
         raise ValueError("Item 20 admission requirements differ")
 
+    future_live = contract.get("future_live_candidate_evidence")
+    if not isinstance(future_live, dict) or future_live != {
+        "acceptance_authority": "fresh_for_exact_candidate",
+        "vultr_readonly_preflight": "fresh_for_exact_candidate",
+        "same_candidate_required": True,
+        "current_core_verification": "not_implemented",
+    }:
+        raise ValueError("Item 20 fresh candidate authority requirements differ")
+
     authorization = contract.get("authorization")
     if not isinstance(authorization, dict) or authorization != {
         "provider_mutation_authorized": False,
@@ -129,6 +138,20 @@ def verify_contract(contract: Mapping[str, object]) -> None:
         "private_phone_runner_vultr_credentials": "forbidden",
     }:
         raise ValueError("Item 20 handoff boundary differs")
+
+    forbidden = contract.get("forbidden")
+    if not isinstance(forbidden, list) or forbidden != [
+        "provider_mutation_from_this_admission_core",
+        "phone_mutation_from_this_admission_core",
+        "public_endpoint_or_provider_uuid_evidence",
+        "terminal_item19_intent_reuse",
+        "live_window_without_fresh_exact_candidate_acceptance_authority",
+        "live_window_without_fresh_exact_candidate_vultr_readonly_preflight",
+        "production_vultr_authority",
+        "final_release_tag_or_production_promotion",
+        "gcp_or_manual_provider_control",
+    ]:
+        raise ValueError("Item 20 forbidden live-boundary set differs")
 
 
 def verify_control_plane(
@@ -251,6 +274,8 @@ def verify_admission(
         "item20_tracker_open": True,
         "phone_signing_gate_completed": True,
         "private_phone_read_only_preflight_accepted": True,
+        "fresh_acceptance_authority_verified": False,
+        "fresh_vultr_readonly_preflight_verified": False,
         "provider_mutation_authorized": False,
         "phone_mutation_authorized": False,
         "endpoint_handoff_authorized": False,
