@@ -141,6 +141,12 @@ jobs:
             --output item20-readiness-consumption-evidence.json
           python3 -m json.tool item20-readiness-consumption-evidence.json >/dev/null
 
+      - name: Compile protected typed Item 20 lifecycle entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked -p operator-cli --bin item20-session-lifecycle
+
       - name: Upload bounded non-live orchestration evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -161,6 +167,8 @@ jobs:
             echo "- Control-plane Quality run: ${{ steps.quality.outputs.run_id }}"
             echo '- Readiness artifact consumed: true'
             echo '- Candidate artifact build authorized: true'
+            echo '- Typed Item 20 lifecycle entrypoint compiled: true'
+            echo '- Typed Item 20 lifecycle entrypoint invoked: false'
             echo '- Fresh acceptance authority verified: true'
             echo '- Fresh Vultr read-only preflight verified: true'
             echo '- Provider credentials consumed: false'

@@ -122,6 +122,25 @@
     "terminal_item19_intent_reuse": "forbidden",
     "transport_endpoint": "derived_only_after_verified_target_resolution_never_authority"
   },
+  "session_entrypoint": {
+    "binary": "apps/operator-cli/src/bin/item20-session-lifecycle.rs",
+    "current_workflow_endpoint_handoff": false,
+    "current_workflow_environment": "none",
+    "current_workflow_phone_execution": false,
+    "current_workflow_provider_credentials": "forbidden",
+    "current_workflow_provider_mutation": false,
+    "endpoint_resolution_command": "not_exposed",
+    "future_runtime_commands": [
+      "open",
+      "verify-target",
+      "close"
+    ],
+    "grants_live_authority": false,
+    "lifecycle_policy_owner": "apps/operator-cli/src/item20_session_lifecycle.rs",
+    "status": "protected_typed_compile_only_not_live_invoked",
+    "workflow": ".github/workflows/item20-session-orchestration.yml",
+    "workflow_wiring": "compile_only"
+  },
   "status": "protected_non_live_admission_core",
   "tracker_issue": 135
 }
