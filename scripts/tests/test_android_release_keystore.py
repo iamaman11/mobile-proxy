@@ -12,6 +12,7 @@ from scripts import verify_android_release_keystore as module
 SHA = "a" * 40
 KEYSTORE = b"bounded-test-keystore"
 KEYSTORE_B64 = base64.b64encode(KEYSTORE).decode("ascii")
+SECRET_ALIAS = "supersecretalias"
 
 
 class AndroidReleaseKeystoreTests(unittest.TestCase):
@@ -73,7 +74,7 @@ class AndroidReleaseKeystoreTests(unittest.TestCase):
         private_env = {
             "ANDROID_RELEASE_KEYSTORE_B64": KEYSTORE_B64,
             "ANDROID_RELEASE_KEYSTORE_PASSWORD": "test-store-password",
-            "ANDROID_RELEASE_KEY_ALIAS": "release",
+            "ANDROID_RELEASE_KEY_ALIAS": SECRET_ALIAS,
             "ANDROID_RELEASE_KEY_PASSWORD": "test-key-password",
         }
         with (
@@ -99,7 +100,7 @@ class AndroidReleaseKeystoreTests(unittest.TestCase):
             KEYSTORE_B64,
             "test-store-password",
             "test-key-password",
-            "release",
+            SECRET_ALIAS,
         ):
             self.assertNotIn(forbidden, serialized)
 
