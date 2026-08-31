@@ -10,7 +10,11 @@ const ANDROID_ARTIFACT_DOMAIN: DigestDomain = DigestDomain::new("mobile-proxy/an
 fn main() -> Result<()> {
     let mut arguments = env::args_os();
     let _binary = arguments.next();
-    let path = PathBuf::from(arguments.next().context("Android artifact path is required")?);
+    let path = PathBuf::from(
+        arguments
+            .next()
+            .context("Android artifact path is required")?,
+    );
     if arguments.next().is_some() {
         bail!("exactly one Android artifact path is required");
     }
