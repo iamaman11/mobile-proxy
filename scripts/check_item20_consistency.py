@@ -17,6 +17,7 @@ ITEM20_IDENTITY = Path("apps/operator-cli/src/item20_acceptance.rs")
 ITEM20_LIFECYCLE = Path("apps/operator-cli/src/item20_session_lifecycle.rs")
 ITEM20_CONTRACT = Path("contracts/operations/item20-acceptance-v1.json")
 ITEM20_ADMISSION = Path("scripts/verify_item20_admission.py")
+ITEM20_CANDIDATE_EVIDENCE = Path("scripts/verify_item20_candidate_evidence.py")
 LIB = Path("apps/operator-cli/src/lib.rs")
 
 
@@ -69,6 +70,59 @@ def check_physical_runbook_text(physical: str) -> list[str]:
     return errors
 
 
+def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
+    errors: list[str] = []
+    for required in (
+        '_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"',
+        "def validate_sha(",
+        "def verify_contract(",
+        "def verify_control_plane(",
+        "def verify_workflow_run(",
+        "def verify_artifact_metadata(",
+        "def verify_acceptance_evidence(",
+        "def verify_preflight_evidence(",
+        "def verify_fresh_order(",
+        "def verify_candidate_chain(",
+        '"item19_quality_run_id": 33341602485',
+        '"candidate_quality_run_attempt": 1',
+        '"candidate_control_plane_separation_required": True',
+        '"selection": "candidate_specific_artifact_then_exact_control_plane_run"',
+        'expected_name_prefix="vultr-acceptance-authority"',
+        'expected_name_prefix="vultr-readonly-preflight"',
+        '"provider_mutation_authorized": False',
+        '"phone_mutation_authorized": False',
+        '"endpoint_handoff_authorized": False',
+        '"live_execution_authorized": False',
+        '"final_production_authority": False',
+    ):
+        if required not in verifier:
+            errors.append(f"Item 20 pure candidate evidence verifier is missing {required!r}")
+
+    for forbidden in (
+        "VULTR_API_KEY",
+        "VULTR_SSH_PRIVATE_KEY",
+        "production-vultr",
+        "subprocess.",
+        "urllib.request",
+        "requests.",
+        "http.client",
+        "socket.",
+        "/v2/instances",
+        "create_instance(",
+        "delete_instance(",
+        "adb ",
+        "gh workflow run",
+        "secrets.create_or_update",
+        "secrets.set",
+    ):
+        if forbidden in verifier:
+            errors.append(
+                f"Item 20 pure candidate evidence verifier contains forbidden live/external-I/O token {forbidden!r}"
+            )
+
+    return errors
+
+
 def check_item20_contract(contract: dict[str, object]) -> list[str]:
     errors: list[str] = []
     expected = {
@@ -88,6 +142,8 @@ def check_item20_contract(contract: dict[str, object]) -> list[str]:
         "d151dbdd156279e32a5361d304c90f996bd2d565"
     ):
         errors.append("Item 20 admission contract candidate differs from Item 19 closeout")
+    if not isinstance(immutable, dict) or immutable.get("item19_quality_run_id") != 33341602485:
+        errors.append("Item 20 admission contract historical candidate Quality run differs")
 
     session = contract.get("session")
     if not isinstance(session, dict) or any(
@@ -141,6 +197,19 @@ def check_item20_contract(contract: dict[str, object]) -> list[str]:
     }:
         errors.append("Item 20 fresh candidate authority requirements differ")
 
+    future_verifier = contract.get("future_live_candidate_verifier")
+    if not isinstance(future_verifier, dict) or future_verifier != {
+        "candidate_control_plane_separation_required": True,
+        "candidate_quality_run_attempt": 1,
+        "grants_live_authority": False,
+        "performs_external_io": False,
+        "selection": "candidate_specific_artifact_then_exact_control_plane_run",
+        "status": "protected_pure_verifier_not_consumed_by_admission_core",
+        "verifier": "scripts/verify_item20_candidate_evidence.py",
+        "workflow_wiring": "not_implemented",
+    }:
+        errors.append("Item 20 pure candidate evidence verifier contract differs")
+
     forbidden = contract.get("forbidden")
     if not isinstance(forbidden, list) or forbidden != [
         "provider_mutation_from_this_admission_core",
@@ -169,6 +238,7 @@ def check_repository(root: Path) -> list[str]:
     item20 = _read(root, ITEM20_IDENTITY, errors)
     item20_lifecycle = _read(root, ITEM20_LIFECYCLE, errors)
     admission = _read(root, ITEM20_ADMISSION, errors)
+    candidate_evidence = _read(root, ITEM20_CANDIDATE_EVIDENCE, errors)
     contract = _load(root, ITEM20_CONTRACT, errors)
     lib = _read(root, LIB, errors)
 
@@ -283,6 +353,8 @@ def check_repository(root: Path) -> list[str]:
     ):
         if forbidden in admission:
             errors.append(f"Item 20 admission verifier contains forbidden live token {forbidden!r}")
+
+    errors.extend(check_item20_candidate_evidence_verifier_text(candidate_evidence))
 
     if contract:
         errors.extend(check_item20_contract(contract))
