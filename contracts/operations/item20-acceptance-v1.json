@@ -3,6 +3,8 @@
     "candidate_must_match_item19_closeout": true,
     "control_plane_must_be_exact_current_protected_main": true,
     "control_plane_quality_must_succeed": true,
+    "fresh_candidate_evidence_required": true,
+    "fresh_candidate_evidence_verifier": "scripts/verify_item20_candidate_evidence.py",
     "required_issue_states": {
       "item19_tracker_124": "closed_completed",
       "item20_tracker_135": "open",
@@ -44,17 +46,18 @@
   ],
   "future_live_candidate_evidence": {
     "acceptance_authority": "fresh_for_exact_candidate",
-    "current_core_verification": "not_implemented",
+    "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
     "same_candidate_required": true,
     "vultr_readonly_preflight": "fresh_for_exact_candidate"
   },
   "future_live_candidate_verifier": {
     "candidate_control_plane_separation_required": true,
+    "candidate_control_plane_value_inequality_required": false,
     "candidate_quality_run_attempt": 1,
     "grants_live_authority": false,
     "performs_external_io": false,
     "selection": "candidate_specific_artifact_then_exact_control_plane_run",
-    "status": "protected_pure_verifier_not_consumed_by_admission_core",
+    "status": "protected_pure_verifier_consumed_by_admission_core",
     "verifier": "scripts/verify_item20_candidate_evidence.py",
     "workflow_wiring": "not_implemented"
   },

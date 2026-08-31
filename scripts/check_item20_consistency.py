@@ -86,6 +86,7 @@ def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
         '"item19_quality_run_id": 33341602485',
         '"candidate_quality_run_attempt": 1',
         '"candidate_control_plane_separation_required": True',
+        '"candidate_control_plane_value_inequality_required": False',
         '"selection": "candidate_specific_artifact_then_exact_control_plane_run"',
         'expected_name_prefix="vultr-acceptance-authority"',
         'expected_name_prefix="vultr-readonly-preflight"',
@@ -99,6 +100,8 @@ def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
             errors.append(f"Item 20 pure candidate evidence verifier is missing {required!r}")
 
     for forbidden in (
+        "candidate_sha == control_plane_sha",
+        "identities to remain distinct",
         "VULTR_API_KEY",
         "VULTR_SSH_PRIVATE_KEY",
         "production-vultr",
@@ -117,7 +120,7 @@ def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
     ):
         if forbidden in verifier:
             errors.append(
-                f"Item 20 pure candidate evidence verifier contains forbidden live/external-I/O token {forbidden!r}"
+                f"Item 20 pure candidate evidence verifier contains forbidden live/external-I/O or identity token {forbidden!r}"
             )
 
     return errors
@@ -180,6 +183,12 @@ def check_item20_contract(contract: dict[str, object]) -> list[str]:
         errors.append("Item 20 admission contract handoff boundary differs")
 
     admission = contract.get("admission")
+    if not isinstance(admission, dict) or admission.get("fresh_candidate_evidence_required") is not True:
+        errors.append("Item 20 admission contract must require fresh candidate evidence")
+    if not isinstance(admission, dict) or admission.get("fresh_candidate_evidence_verifier") != (
+        "scripts/verify_item20_candidate_evidence.py"
+    ):
+        errors.append("Item 20 admission contract does not consume the protected candidate verifier")
     required_states = admission.get("required_issue_states") if isinstance(admission, dict) else None
     if required_states != {
         "item19_tracker_124": "closed_completed",
@@ -193,18 +202,19 @@ def check_item20_contract(contract: dict[str, object]) -> list[str]:
         "acceptance_authority": "fresh_for_exact_candidate",
         "vultr_readonly_preflight": "fresh_for_exact_candidate",
         "same_candidate_required": True,
-        "current_core_verification": "not_implemented",
+        "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
     }:
         errors.append("Item 20 fresh candidate authority requirements differ")
 
     future_verifier = contract.get("future_live_candidate_verifier")
     if not isinstance(future_verifier, dict) or future_verifier != {
         "candidate_control_plane_separation_required": True,
+        "candidate_control_plane_value_inequality_required": False,
         "candidate_quality_run_attempt": 1,
         "grants_live_authority": False,
         "performs_external_io": False,
         "selection": "candidate_specific_artifact_then_exact_control_plane_run",
-        "status": "protected_pure_verifier_not_consumed_by_admission_core",
+        "status": "protected_pure_verifier_consumed_by_admission_core",
         "verifier": "scripts/verify_item20_candidate_evidence.py",
         "workflow_wiring": "not_implemented",
     }:
@@ -325,13 +335,17 @@ def check_repository(root: Path) -> list[str]:
 
     for required in (
         "_IMMUTABLE_CANDIDATE",
+        "from verify_item20_candidate_evidence import verify_candidate_chain",
         "def verify_contract",
         "def verify_control_plane",
         "def verify_issue_gates",
         "def verify_phone_preflight",
+        "def _verify_fresh_result",
         "def verify_admission",
-        '"fresh_acceptance_authority_verified": False',
-        '"fresh_vultr_readonly_preflight_verified": False',
+        "verify_candidate_chain(",
+        '"fresh_acceptance_authority_verified": True',
+        '"fresh_vultr_readonly_preflight_verified": True',
+        '"provider_probe_read_only_verified": True',
         '"provider_mutation_authorized": False',
         '"phone_mutation_authorized": False',
         '"endpoint_handoff_authorized": False',
@@ -341,6 +355,9 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"Item 20 non-live admission verifier is missing {required!r}")
 
     for forbidden in (
+        "def verify_acceptance_evidence(",
+        "def verify_preflight_evidence(",
+        "def verify_artifact_metadata(",
         "VULTR_API_KEY",
         "VULTR_SSH_PRIVATE_KEY",
         "production-vultr",
@@ -352,7 +369,7 @@ def check_repository(root: Path) -> list[str]:
         "adb ",
     ):
         if forbidden in admission:
-            errors.append(f"Item 20 admission verifier contains forbidden live token {forbidden!r}")
+            errors.append(f"Item 20 admission verifier contains duplicated or forbidden live token {forbidden!r}")
 
     errors.extend(check_item20_candidate_evidence_verifier_text(candidate_evidence))
 

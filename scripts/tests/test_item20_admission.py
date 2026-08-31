@@ -35,6 +35,7 @@ def quality() -> dict[str, object]:
         "head_sha": CONTROL_PLANE,
         "status": "completed",
         "conclusion": "success",
+        "created_at": "2026-08-31T10:00:00Z",
         "repository": {"full_name": "iamaman11/mobile-proxy"},
     }
 
@@ -63,6 +64,124 @@ def phone_preflight() -> dict[str, object]:
     }
 
 
+def workflow_run(name: str, path: str, run_id: int, created_at: str) -> dict[str, object]:
+    return {
+        "id": run_id,
+        "run_attempt": 1,
+        "name": name,
+        "path": path,
+        "event": "issue_comment",
+        "head_branch": "main",
+        "head_sha": CONTROL_PLANE,
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": created_at,
+        "repository": {"full_name": "iamaman11/mobile-proxy"},
+    }
+
+
+def acceptance_run() -> dict[str, object]:
+    return workflow_run(
+        "Vultr acceptance authority",
+        ".github/workflows/acceptance-authority.yml",
+        1000,
+        "2026-08-31T10:05:00Z",
+    )
+
+
+def preflight_run() -> dict[str, object]:
+    return workflow_run(
+        "Vultr read-only acceptance preflight",
+        ".github/workflows/vultr-readonly-preflight.yml",
+        1100,
+        "2026-08-31T10:10:00Z",
+    )
+
+
+def artifact(name: str, run_id: int, created_at: str, artifact_id: int) -> dict[str, object]:
+    return {
+        "id": artifact_id,
+        "name": name,
+        "size_in_bytes": 512,
+        "expired": False,
+        "digest": "sha256:" + "b" * 64,
+        "created_at": created_at,
+        "workflow_run": {"id": run_id, "head_branch": "main", "head_sha": CONTROL_PLANE},
+    }
+
+
+def acceptance_artifact() -> dict[str, object]:
+    return artifact(
+        f"vultr-acceptance-authority-{CANDIDATE}", 1000, "2026-08-31T10:06:00Z", 2000
+    )
+
+
+def preflight_artifact() -> dict[str, object]:
+    return artifact(
+        f"vultr-readonly-preflight-{CANDIDATE}", 1100, "2026-08-31T10:11:00Z", 2100
+    )
+
+
+def acceptance_evidence() -> dict[str, object]:
+    return {
+        "format_version": 1,
+        "authority": "pre_release_acceptance",
+        "candidate_sha": CANDIDATE,
+        "repository": "iamaman11/mobile-proxy",
+        "executor": "github-hosted",
+        "acceptance_workflow": "Vultr acceptance authority",
+        "acceptance_workflow_run_id": "1000",
+        "acceptance_workflow_run_attempt": "1",
+        "command_issue": 90,
+        "command_comment_id": "3000",
+        "candidate_quality_run_id": "33341602485",
+        "candidate_quality_run_attempt": "1",
+        "candidate_evidence_artifact": f"software-release-candidate-{CANDIDATE}",
+        "candidate_evidence_file": "release-candidate-evidence.json",
+        "final_production_authority": False,
+        "production_environment_authorized": False,
+        "final_release_tag_created": False,
+        "vultr_api_access_performed": False,
+        "vm_mutation_performed": False,
+        "phone_mutation_performed": False,
+    }
+
+
+def preflight_evidence() -> dict[str, object]:
+    return {
+        "format_version": 1,
+        "authority": "pre_release_acceptance_read_only",
+        "candidate_sha": CANDIDATE,
+        "repository": "iamaman11/mobile-proxy",
+        "executor": "github-hosted",
+        "environment": "acceptance-vultr",
+        "workflow": "Vultr read-only acceptance preflight",
+        "workflow_run_id": "1100",
+        "workflow_run_attempt": "1",
+        "command_issue": 90,
+        "command_comment_id": "3100",
+        "acceptance_authority_run_id": "1000",
+        "acceptance_authority_run_attempt": "1",
+        "api_key_available": True,
+        "ssh_private_key_available": True,
+        "ssh_private_key_valid": True,
+        "provider_api_method": "GET",
+        "provider_api_path": "/v2/account",
+        "provider_api_calls": 1,
+        "account_endpoint_accessible": True,
+        "account_response_body_recorded": False,
+        "account_metadata_recorded": False,
+        "secret_values_recorded": False,
+        "secret_derived_identifiers_recorded": False,
+        "vm_lifecycle_access_performed": False,
+        "vm_mutation_performed": False,
+        "phone_mutation_performed": False,
+        "final_production_authority": False,
+        "production_environment_authorized": False,
+        "final_release_tag_created": False,
+    }
+
+
 class Item20AdmissionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
@@ -82,18 +201,25 @@ class Item20AdmissionTests(unittest.TestCase):
             "item20_issue": self.item20,
             "signing_issue": self.signing,
             "phone_preflight": self.preflight,
+            "acceptance_artifact": acceptance_artifact(),
+            "acceptance_run": acceptance_run(),
+            "acceptance_evidence": acceptance_evidence(),
+            "preflight_artifact": preflight_artifact(),
+            "preflight_run": preflight_run(),
+            "preflight_evidence": preflight_evidence(),
         }
         values.update(overrides)
         return verify_admission(**values)  # type: ignore[arg-type]
 
-    def test_contract_is_exact_and_validation_only(self) -> None:
+    def test_contract_is_exact_validation_only_and_consumes_fresh_chain(self) -> None:
         verify_contract(self.contract)
         evidence = self.admit()
         self.assertEqual(evidence["candidate_sha"], CANDIDATE)
         self.assertEqual(evidence["control_plane_sha"], CONTROL_PLANE)
+        self.assertTrue(evidence["fresh_acceptance_authority_verified"])
+        self.assertTrue(evidence["fresh_vultr_readonly_preflight_verified"])
+        self.assertTrue(evidence["provider_probe_read_only_verified"])
         for field in (
-            "fresh_acceptance_authority_verified",
-            "fresh_vultr_readonly_preflight_verified",
             "provider_mutation_authorized",
             "phone_mutation_authorized",
             "endpoint_handoff_authorized",
@@ -189,11 +315,37 @@ class Item20AdmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fresh candidate authority"):
             verify_contract(mutated)
 
-    def test_non_live_core_cannot_claim_fresh_external_gates_are_verified(self) -> None:
-        evidence = self.admit()
-        self.assertFalse(evidence["fresh_acceptance_authority_verified"])
-        self.assertFalse(evidence["fresh_vultr_readonly_preflight_verified"])
-        self.assertFalse(evidence["live_execution_authorized"])
+    def test_missing_or_mismatched_fresh_evidence_fails_closed(self) -> None:
+        wrong_artifact = acceptance_artifact()
+        wrong_artifact["name"] = "vultr-acceptance-authority-" + "b" * 40
+        with self.assertRaisesRegex(ValueError, "exact candidate"):
+            self.admit(acceptance_artifact=wrong_artifact)
+
+        stale_run = acceptance_run()
+        stale_run["created_at"] = "2026-08-31T09:59:00Z"
+        with self.assertRaisesRegex(ValueError, "stale or out of order"):
+            self.admit(acceptance_run=stale_run)
+
+        mutated = preflight_evidence()
+        mutated["vm_mutation_performed"] = True
+        with self.assertRaisesRegex(ValueError, "preflight evidence"):
+            self.admit(preflight_evidence=mutated)
+
+    def test_contract_records_consumption_but_not_workflow_wiring_or_live_authority(self) -> None:
+        admission = self.contract["admission"]
+        assert isinstance(admission, dict)
+        self.assertTrue(admission["fresh_candidate_evidence_required"])
+        self.assertEqual(
+            admission["fresh_candidate_evidence_verifier"],
+            "scripts/verify_item20_candidate_evidence.py",
+        )
+        verifier = self.contract["future_live_candidate_verifier"]
+        assert isinstance(verifier, dict)
+        self.assertEqual(
+            verifier["status"], "protected_pure_verifier_consumed_by_admission_core"
+        )
+        self.assertEqual(verifier["workflow_wiring"], "not_implemented")
+        self.assertFalse(self.contract["authorization"]["live_execution_authorized"])
 
 
 if __name__ == "__main__":

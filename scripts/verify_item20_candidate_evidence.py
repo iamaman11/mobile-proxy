@@ -3,7 +3,8 @@
 
 No GitHub, provider, or phone I/O is performed here. Callers supply bounded run and
 artifact metadata plus downloaded JSON evidence. The immutable software candidate
-stays distinct from the moving protected control-plane revision.
+and moving protected control-plane revision are separate identity roles; their SHA
+values are not required to differ.
 """
 
 from __future__ import annotations
@@ -91,18 +92,19 @@ def verify_contract(contract: Mapping[str, object]) -> tuple[int, int]:
         "acceptance_authority": "fresh_for_exact_candidate",
         "vultr_readonly_preflight": "fresh_for_exact_candidate",
         "same_candidate_required": True,
-        "current_core_verification": "not_implemented",
+        "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
     }:
         raise ValueError("Item 20 future live candidate evidence requirement differs")
 
     verifier = contract.get("future_live_candidate_verifier")
     expected_verifier = {
         "candidate_control_plane_separation_required": True,
+        "candidate_control_plane_value_inequality_required": False,
         "candidate_quality_run_attempt": 1,
         "grants_live_authority": False,
         "performs_external_io": False,
         "selection": "candidate_specific_artifact_then_exact_control_plane_run",
-        "status": "protected_pure_verifier_not_consumed_by_admission_core",
+        "status": "protected_pure_verifier_consumed_by_admission_core",
         "verifier": _VERIFIER_PATH,
         "workflow_wiring": "not_implemented",
     }
@@ -347,10 +349,6 @@ def verify_candidate_chain(
 ) -> dict[str, object]:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
-    if candidate_sha == control_plane_sha:
-        raise ValueError(
-            "Item 20 verifier requires candidate/control-plane identities to remain distinct"
-        )
     if candidate_sha != _IMMUTABLE_CANDIDATE:
         raise ValueError("candidate SHA does not match the protected Item 19 closeout")
 
