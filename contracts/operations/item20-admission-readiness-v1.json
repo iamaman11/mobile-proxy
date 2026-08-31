@@ -1,0 +1,48 @@
+{
+  "authorization": {
+    "endpoint_handoff_authorized": false,
+    "final_production_authority": false,
+    "live_execution_authorized": false,
+    "phone_mutation_authorized": false,
+    "provider_mutation_authorized": false
+  },
+  "candidate_evidence_workflow": {
+    "admission_core_wiring": "not_implemented",
+    "artifact_selection": "candidate_specific_artifact_then_exact_control_plane_run",
+    "candidate_sha": "d151dbdd156279e32a5361d304c90f996bd2d565",
+    "control_plane_sha": "exact_current_protected_main",
+    "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
+    "selector": "scripts/select_item20_candidate_evidence.py",
+    "status": "protected_read_only_candidate_evidence_wiring",
+    "verifier": "scripts/verify_item20_candidate_evidence.py",
+    "workflow": ".github/workflows/item20-admission-readiness.yml"
+  },
+  "canonical_repository": "iamaman11/mobile-proxy",
+  "contract_version": 1,
+  "execution_boundary": {
+    "environment": "none",
+    "executor": "github-hosted",
+    "permissions": [
+      "actions:read",
+      "contents:read"
+    ],
+    "phone_execution": false,
+    "provider_api_execution": false,
+    "provider_credentials": "forbidden",
+    "trigger": "workflow_dispatch"
+  },
+  "forbidden": [
+    "acceptance_or_preflight_workflow_dispatch_from_readiness",
+    "provider_api_call_from_readiness",
+    "provider_credentials_in_readiness",
+    "provider_mutation_from_readiness",
+    "phone_execution_from_readiness",
+    "endpoint_handoff_from_readiness",
+    "production_vultr_authority",
+    "final_release_or_production_promotion",
+    "public_provider_uuid_or_transport_endpoint_recording"
+  ],
+  "phone_signing_gate_issue": 115,
+  "status": "protected_read_only_foundation_not_live_authority",
+  "tracker_issue": 135
+}

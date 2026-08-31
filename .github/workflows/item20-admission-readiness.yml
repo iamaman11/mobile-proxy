@@ -1,0 +1,170 @@
+name: Item 20 read-only admission readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact immutable Item 19-proven software candidate SHA
+        required: true
+        type: string
+        default: d151dbdd156279e32a5361d304c90f996bd2d565
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: item20-read-only-admission-readiness
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify exact fresh candidate evidence without live authority
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate trusted canonical control-plane ref
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "iamaman11/mobile-proxy" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$REF_PROTECTED" == "true" ]]
+
+      - name: Check out exact protected control-plane policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify read-only readiness contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/select_item20_candidate_evidence.py verify-contract \
+            --contract contracts/operations/item20-admission-readiness-v1.json
+
+      - name: Fetch exact current protected state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/branches/main" > current-main.json
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?branch=main&event=push&status=success&head_sha=$CONTROL_PLANE_SHA&per_page=100" \
+            > quality-runs.json
+          python3 scripts/verify_item20_orchestration.py select-quality-run \
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --runs quality-runs.json \
+            --output selected-quality-run.json >/dev/null
+
+      - name: Select and download exact acceptance-authority evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=vultr-acceptance-authority-$CANDIDATE_SHA&per_page=100" \
+            > acceptance-artifacts.json
+          run_id=$(python3 scripts/select_item20_candidate_evidence.py select-artifact \
+            --kind acceptance \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --artifacts acceptance-artifacts.json \
+            --output selected-acceptance-artifact.json)
+          artifact_id=$(python3 -c 'import json; print(json.load(open("selected-acceptance-artifact.json", encoding="utf-8"))["id"])')
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > selected-acceptance-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > acceptance-evidence.zip
+          mkdir acceptance-evidence
+          unzip -q acceptance-evidence.zip -d acceptance-evidence
+          test -f acceptance-evidence/acceptance-authority-evidence.json
+          test "$(find acceptance-evidence -maxdepth 2 -type f | wc -l)" -eq 1
+
+      - name: Select and download exact Vultr read-only preflight evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=vultr-readonly-preflight-$CANDIDATE_SHA&per_page=100" \
+            > preflight-artifacts.json
+          run_id=$(python3 scripts/select_item20_candidate_evidence.py select-artifact \
+            --kind preflight \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --artifacts preflight-artifacts.json \
+            --output selected-preflight-artifact.json)
+          artifact_id=$(python3 -c 'import json; print(json.load(open("selected-preflight-artifact.json", encoding="utf-8"))["id"])')
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > selected-preflight-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > preflight-evidence.zip
+          mkdir preflight-evidence
+          unzip -q preflight-evidence.zip -d preflight-evidence
+          test -f preflight-evidence/vultr-readonly-preflight-evidence.json
+          test "$(find preflight-evidence -maxdepth 2 -type f | wc -l)" -eq 1
+
+      - name: Verify full fresh candidate evidence chain
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_item20_candidate_evidence.py \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --contract contracts/operations/item20-acceptance-v1.json \
+            --main-branch current-main.json \
+            --control-plane-quality-run selected-quality-run.json \
+            --acceptance-artifact selected-acceptance-artifact.json \
+            --acceptance-run selected-acceptance-run.json \
+            --acceptance-evidence acceptance-evidence/acceptance-authority-evidence.json \
+            --preflight-artifact selected-preflight-artifact.json \
+            --preflight-run selected-preflight-run.json \
+            --preflight-evidence preflight-evidence/vultr-readonly-preflight-evidence.json \
+            --output item20-admission-readiness-evidence.json
+          python3 -m json.tool item20-admission-readiness-evidence.json >/dev/null
+
+      - name: Upload bounded read-only readiness evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: item20-admission-readiness-${{ github.sha }}
+          path: item20-admission-readiness-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record validation-only result
+        shell: bash
+        run: |
+          {
+            echo '## Item 20 read-only admission readiness'
+            echo "- Candidate SHA: ${{ inputs.candidate_sha }}"
+            echo "- Control-plane SHA: ${{ github.sha }}"
+            echo '- Fresh acceptance authority verified: true'
+            echo '- Fresh Vultr read-only preflight verified: true'
+            echo '- Provider credentials consumed by this workflow: false'
+            echo '- Provider API called by this workflow: false'
+            echo '- Provider mutation authorized: false'
+            echo '- Phone execution invoked: false'
+            echo '- Phone mutation authorized: false'
+            echo '- Endpoint handoff authorized: false'
+            echo '- Live execution authorized: false'
+            echo '- Final production authority: false'
+          } >> "$GITHUB_STEP_SUMMARY"
