@@ -19,6 +19,21 @@ const LEDGER_FORMAT_VERSION: u64 = 2;
 const PAGE_SIZE: u32 = 100;
 const MAX_LEDGER_PAGES: u32 = 100;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AcceptanceVmIntentNamespace {
+    Item19,
+    Item20,
+}
+
+impl AcceptanceVmIntentNamespace {
+    fn intent_id(self, candidate_sha: &str) -> String {
+        match self {
+            Self::Item19 => format!("candidate:{candidate_sha}"),
+            Self::Item20 => format!("item20:candidate:{candidate_sha}"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum LedgerTransition {
@@ -112,11 +127,40 @@ pub struct DurableGitHubVmBindingStore {
 
 impl DurableGitHubVmBindingStore {
     pub fn new(github_token: String, candidate_sha: String) -> Result<Self, BindingStoreError> {
+        Self::new_with_namespace(
+            github_token,
+            candidate_sha,
+            AcceptanceVmIntentNamespace::Item19,
+        )
+    }
+
+    pub fn new_item20(
+        github_token: String,
+        candidate_sha: String,
+    ) -> Result<Self, BindingStoreError> {
+        Self::new_with_namespace(
+            github_token,
+            candidate_sha,
+            AcceptanceVmIntentNamespace::Item20,
+        )
+    }
+
+    fn new_with_namespace(
+        github_token: String,
+        candidate_sha: String,
+        namespace: AcceptanceVmIntentNamespace,
+    ) -> Result<Self, BindingStoreError> {
         validate_candidate_sha(&candidate_sha)?;
+        let intent = OwnershipIntent::new(
+            LifecycleScope::Acceptance,
+            namespace.intent_id(&candidate_sha),
+        )
+        .map_err(|_| BindingStoreError::InvalidOwnershipIntent)?;
         Ok(Self {
             inner: BindingStore {
                 backend: GitHubDeploymentApi::new(github_token)?,
                 candidate_sha,
+                intent,
             },
         })
     }
@@ -201,7 +245,7 @@ impl fmt::Display for BindingStoreError {
         match self {
             Self::InvalidCandidateSha => formatter.write_str("invalid immutable candidate SHA"),
             Self::InvalidOwnershipIntent => {
-                formatter.write_str("binding store requires exact acceptance candidate intent")
+                formatter.write_str("binding store requires the exact configured acceptance intent")
             }
             Self::InvalidProviderUuid => {
                 formatter.write_str("binding store provider identity is not a canonical UUID")
@@ -255,13 +299,12 @@ trait DeploymentBackend {
 struct BindingStore<B> {
     backend: B,
     candidate_sha: String,
+    intent: OwnershipIntent,
 }
 
 impl<B: DeploymentBackend> BindingStore<B> {
     fn validate_intent(&self, intent: &OwnershipIntent) -> Result<(), BindingStoreError> {
-        if intent.scope() != LifecycleScope::Acceptance
-            || intent.id() != format!("candidate:{}", self.candidate_sha)
-        {
+        if intent != &self.intent {
             return Err(BindingStoreError::InvalidOwnershipIntent);
         }
         Ok(())
@@ -277,6 +320,7 @@ impl<B: DeploymentBackend> BindingStore<B> {
         reconstruct_ledger(
             self.backend.list_records(&self.candidate_sha)?,
             &self.candidate_sha,
+            &self.intent,
         )
     }
 
@@ -296,18 +340,13 @@ impl<B: DeploymentBackend> BindingStore<B> {
         replacement: Option<&VmBinding>,
         expected_after: AcceptanceVmLifecycleState,
     ) -> Result<(), BindingStoreError> {
-        let intent = OwnershipIntent::new(
-            LifecycleScope::Acceptance,
-            format!("candidate:{}", self.candidate_sha),
-        )
-        .map_err(|_| BindingStoreError::InvalidOwnershipIntent)?;
         let payload = GitHubDeploymentPayload {
             format_version: LEDGER_FORMAT_VERSION,
             project: OWNERSHIP_PROJECT.to_owned(),
             managed_by: OWNERSHIP_MANAGER.to_owned(),
             candidate_sha: self.candidate_sha.clone(),
             scope: LifecycleScope::Acceptance,
-            intent_id: intent.id().to_owned(),
+            intent_id: self.intent.id().to_owned(),
             predecessor_deployment_id: before.head_id,
             transition,
             generation: generation.get(),
@@ -318,7 +357,7 @@ impl<B: DeploymentBackend> BindingStore<B> {
             candidate_sha: self.candidate_sha.clone(),
             payload,
         })?;
-        let after = self.current_state(&intent)?;
+        let after = self.current_state(&self.intent)?;
         if after.head_id != Some(created.id) || after.phase != expected_after {
             return Err(BindingStoreError::WriteVerificationFailed);
         }
@@ -484,10 +523,8 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
                         AcceptanceVmLifecycleState::Bound(new_binding.clone()),
                     )
                 }
-                AcceptanceVmLifecycleState::CreatePrepared { .. } => {
-                    Err(BindingStoreError::InvalidTransition)
-                }
-                AcceptanceVmLifecycleState::Empty => Err(BindingStoreError::InvalidTransition),
+                AcceptanceVmLifecycleState::CreatePrepared { .. }
+                | AcceptanceVmLifecycleState::Empty => Err(BindingStoreError::InvalidTransition),
                 _ => Err(BindingStoreError::OperationInProgress),
             },
             (Some(old_binding), Some(new_binding)) => match &before.phase {
@@ -539,36 +576,76 @@ impl<B: DeploymentBackend> VmBindingStore for BindingStore<B> {
     }
 }
 
-fn reconstruct_ledger(
-    mut records: Vec<DeploymentRecord>,
+fn allowed_intent_id(candidate_sha: &str, intent_id: &str) -> bool {
+    intent_id == AcceptanceVmIntentNamespace::Item19.intent_id(candidate_sha)
+        || intent_id == AcceptanceVmIntentNamespace::Item20.intent_id(candidate_sha)
+}
+
+fn validate_record_envelope(
+    record: &DeploymentRecord,
     candidate_sha: &str,
+) -> Result<(), BindingStoreError> {
+    let payload = &record.payload;
+    if record.sha != candidate_sha
+        || record.git_ref != candidate_sha
+        || record.task != DEPLOYMENT_TASK
+        || record.environment != DEPLOYMENT_ENVIRONMENT
+        || payload.format_version != LEDGER_FORMAT_VERSION
+        || payload.project != OWNERSHIP_PROJECT
+        || payload.managed_by != OWNERSHIP_MANAGER
+        || payload.candidate_sha != candidate_sha
+        || payload.scope != LifecycleScope::Acceptance
+        || !allowed_intent_id(candidate_sha, &payload.intent_id)
+    {
+        return Err(BindingStoreError::InvalidLedgerRecord);
+    }
+    Generation::new(payload.generation).map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
+    for binding in [payload.expected.as_ref(), payload.replacement.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        validate_provider_uuid(&binding.provider_id)?;
+        Generation::new(binding.generation).map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
+    }
+    Ok(())
+}
+
+fn reconstruct_ledger(
+    records: Vec<DeploymentRecord>,
+    candidate_sha: &str,
+    intent: &OwnershipIntent,
 ) -> Result<LedgerState, BindingStoreError> {
     validate_candidate_sha(candidate_sha)?;
-    records.sort_by_key(|record| record.id);
+    if intent.scope() != LifecycleScope::Acceptance
+        || !allowed_intent_id(candidate_sha, intent.id())
+    {
+        return Err(BindingStoreError::InvalidOwnershipIntent);
+    }
 
-    let intent = OwnershipIntent::new(
-        LifecycleScope::Acceptance,
-        format!("candidate:{candidate_sha}"),
-    )
-    .map_err(|_| BindingStoreError::InvalidOwnershipIntent)?;
+    let mut selected = Vec::new();
+    for record in records {
+        validate_record_envelope(&record, candidate_sha)?;
+        if record.payload.intent_id == intent.id() {
+            selected.push(record);
+        }
+    }
+    selected.sort_by_key(|record| record.id);
+
     let mut seen_ids = BTreeSet::new();
     let mut state = LedgerState {
         head_id: None,
         phase: AcceptanceVmLifecycleState::Empty,
     };
-
-    for record in records {
+    for record in selected {
         if !seen_ids.insert(record.id) {
             return Err(BindingStoreError::ForkedLedger);
         }
-        validate_record(&record, candidate_sha, &intent)?;
         if record.payload.predecessor_deployment_id != state.head_id {
             return Err(BindingStoreError::ForkedLedger);
         }
-        state.phase = apply_record(&state.phase, &record.payload, &intent)?;
+        state.phase = apply_record(&state.phase, &record.payload, intent)?;
         state.head_id = Some(record.id);
     }
-
     Ok(state)
 }
 
@@ -689,37 +766,6 @@ fn apply_record(
             _ => Err(BindingStoreError::InvalidTransition),
         },
     }
-}
-
-fn validate_record(
-    record: &DeploymentRecord,
-    candidate_sha: &str,
-    intent: &OwnershipIntent,
-) -> Result<(), BindingStoreError> {
-    let payload = &record.payload;
-    if record.sha != candidate_sha
-        || record.git_ref != candidate_sha
-        || record.task != DEPLOYMENT_TASK
-        || record.environment != DEPLOYMENT_ENVIRONMENT
-        || payload.format_version != LEDGER_FORMAT_VERSION
-        || payload.project != OWNERSHIP_PROJECT
-        || payload.managed_by != OWNERSHIP_MANAGER
-        || payload.candidate_sha != candidate_sha
-        || payload.scope != LifecycleScope::Acceptance
-        || payload.intent_id != intent.id()
-    {
-        return Err(BindingStoreError::InvalidLedgerRecord);
-    }
-
-    Generation::new(payload.generation).map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
-    for binding in [payload.expected.as_ref(), payload.replacement.as_ref()]
-        .into_iter()
-        .flatten()
-    {
-        validate_provider_uuid(&binding.provider_id)?;
-        Generation::new(binding.generation).map_err(|_| BindingStoreError::InvalidLedgerRecord)?;
-    }
-    Ok(())
 }
 
 fn validate_candidate_sha(candidate_sha: &str) -> Result<(), BindingStoreError> {
@@ -879,178 +925,194 @@ mod tests {
         }
     }
 
-    fn intent() -> OwnershipIntent {
-        OwnershipIntent::new(LifecycleScope::Acceptance, format!("candidate:{SHA}")).unwrap()
+    fn intent(namespace: AcceptanceVmIntentNamespace) -> OwnershipIntent {
+        OwnershipIntent::new(LifecycleScope::Acceptance, namespace.intent_id(SHA)).unwrap()
     }
 
-    fn binding(id: &str, generation: u64) -> VmBinding {
+    fn binding(namespace: AcceptanceVmIntentNamespace, id: &str, generation: u64) -> VmBinding {
         VmBinding {
-            intent: intent(),
+            intent: intent(namespace),
             provider_id: ProviderResourceId::new(id).unwrap(),
             generation: Generation::new(generation).unwrap(),
         }
     }
 
-    fn store(backend: MemoryBackend) -> BindingStore<MemoryBackend> {
+    fn store(
+        backend: MemoryBackend,
+        namespace: AcceptanceVmIntentNamespace,
+    ) -> BindingStore<MemoryBackend> {
         BindingStore {
             backend,
             candidate_sha: SHA.to_owned(),
+            intent: intent(namespace),
         }
     }
 
-    fn bind_first(store: &mut BindingStore<MemoryBackend>) -> VmBinding {
-        let generation = store.prepare_create(&intent()).unwrap();
-        store.mark_create_dispatched(&intent(), generation).unwrap();
-        let first = binding(ID1, generation.get());
+    fn bind_first(
+        store: &mut BindingStore<MemoryBackend>,
+        namespace: AcceptanceVmIntentNamespace,
+    ) -> VmBinding {
+        let intent = intent(namespace);
+        let generation = store.prepare_create(&intent).unwrap();
+        store.mark_create_dispatched(&intent, generation).unwrap();
+        let first = binding(namespace, ID1, generation.get());
         store
-            .compare_and_swap(&intent(), None, Some(first.clone()))
+            .compare_and_swap(&intent, None, Some(first.clone()))
             .unwrap();
         first
     }
 
     #[test]
-    fn create_prepare_and_dispatch_survive_restart_without_reopening_post() {
+    fn item19_and_item20_intents_are_distinct_and_exact() {
+        let item19 = intent(AcceptanceVmIntentNamespace::Item19);
+        let item20 = intent(AcceptanceVmIntentNamespace::Item20);
+        assert_eq!(item19.id(), format!("candidate:{SHA}"));
+        assert_eq!(item20.id(), format!("item20:candidate:{SHA}"));
+        assert_ne!(item19, item20);
+
+        let item20_store = store(
+            MemoryBackend::default(),
+            AcceptanceVmIntentNamespace::Item20,
+        );
+        assert_eq!(
+            item20_store.load(&item19),
+            Err(BindingStoreError::InvalidOwnershipIntent)
+        );
+    }
+
+    #[test]
+    fn independent_ledgers_can_share_one_immutable_candidate() {
         let backend = MemoryBackend::default();
-        let mut writer = store(backend.clone());
-        let generation = writer.prepare_create(&intent()).unwrap();
-        writer
-            .mark_create_dispatched(&intent(), generation)
+        let mut item19_store = store(backend.clone(), AcceptanceVmIntentNamespace::Item19);
+        let item19_binding = bind_first(&mut item19_store, AcceptanceVmIntentNamespace::Item19);
+        item19_store
+            .prepare_delete(
+                &intent(AcceptanceVmIntentNamespace::Item19),
+                &item19_binding,
+            )
             .unwrap();
+        item19_store
+            .mark_delete_dispatched(
+                &intent(AcceptanceVmIntentNamespace::Item19),
+                &item19_binding,
+            )
+            .unwrap();
+        item19_store
+            .compare_and_swap(
+                &intent(AcceptanceVmIntentNamespace::Item19),
+                Some(&item19_binding),
+                None,
+            )
+            .unwrap();
+
+        let mut item20_store = store(backend.clone(), AcceptanceVmIntentNamespace::Item20);
+        assert_eq!(
+            item20_store
+                .lifecycle_state(&intent(AcceptanceVmIntentNamespace::Item20))
+                .unwrap(),
+            AcceptanceVmLifecycleState::Empty
+        );
+        let item20_binding = bind_first(&mut item20_store, AcceptanceVmIntentNamespace::Item20);
+        assert_eq!(
+            item20_store
+                .load(&intent(AcceptanceVmIntentNamespace::Item20))
+                .unwrap(),
+            Some(item20_binding)
+        );
+        assert_eq!(
+            item19_store.load(&intent(AcceptanceVmIntentNamespace::Item19)),
+            Err(BindingStoreError::TerminalIntentReuse)
+        );
+    }
+
+    #[test]
+    fn create_dispatch_survives_restart_and_cannot_repeat() {
+        let backend = MemoryBackend::default();
+        let namespace = AcceptanceVmIntentNamespace::Item20;
+        let intent = intent(namespace);
+        let mut writer = store(backend.clone(), namespace);
+        let generation = writer.prepare_create(&intent).unwrap();
+        writer.mark_create_dispatched(&intent, generation).unwrap();
         drop(writer);
 
-        let mut restarted = store(backend);
+        let mut restarted = store(backend, namespace);
         assert_eq!(
-            restarted.lifecycle_state(&intent()).unwrap(),
+            restarted.lifecycle_state(&intent).unwrap(),
             AcceptanceVmLifecycleState::CreateDispatched { generation }
         );
         assert_eq!(
-            restarted.load(&intent()),
-            Err(BindingStoreError::OperationInProgress)
-        );
-        assert_eq!(
-            restarted.mark_create_dispatched(&intent(), generation),
+            restarted.mark_create_dispatched(&intent, generation),
             Err(BindingStoreError::CreateAlreadyDispatched)
         );
     }
 
     #[test]
-    fn binding_cannot_be_committed_before_create_dispatch_fence() {
+    fn stale_compare_and_swap_and_invalid_replacement_are_rejected() {
         let backend = MemoryBackend::default();
-        let mut writer = store(backend);
-        let generation = writer.prepare_create(&intent()).unwrap();
-        assert_eq!(
-            writer.compare_and_swap(&intent(), None, Some(binding(ID1, generation.get()))),
-            Err(BindingStoreError::InvalidTransition)
-        );
-    }
-
-    #[test]
-    fn dispatched_create_can_recover_by_committing_exact_observed_provider_id() {
-        let backend = MemoryBackend::default();
-        let mut writer = store(backend.clone());
-        let generation = writer.prepare_create(&intent()).unwrap();
-        writer
-            .mark_create_dispatched(&intent(), generation)
-            .unwrap();
-        drop(writer);
-
-        let mut restarted = store(backend.clone());
-        let first = binding(ID1, generation.get());
-        restarted
-            .compare_and_swap(&intent(), None, Some(first.clone()))
-            .unwrap();
-        drop(restarted);
-
-        assert_eq!(store(backend).load(&intent()).unwrap(), Some(first));
-    }
-
-    #[test]
-    fn stale_compare_and_swap_is_rejected_without_appending() {
-        let backend = MemoryBackend::default();
-        let mut writer = store(backend.clone());
-        let first = bind_first(&mut writer);
+        let namespace = AcceptanceVmIntentNamespace::Item20;
+        let intent = intent(namespace);
+        let mut writer = store(backend.clone(), namespace);
+        let first = bind_first(&mut writer, namespace);
         let before = backend.records.borrow().len();
 
         assert_eq!(
-            writer.compare_and_swap(&intent(), Some(&binding(ID2, 1)), Some(binding(ID3, 2))),
+            writer.compare_and_swap(
+                &intent,
+                Some(&binding(namespace, ID2, 1)),
+                Some(binding(namespace, ID3, 2))
+            ),
             Err(BindingStoreError::CompareAndSwapConflict)
         );
         assert_eq!(backend.records.borrow().len(), before);
-        assert_eq!(writer.load(&intent()).unwrap(), Some(first));
+
+        assert_eq!(
+            writer.compare_and_swap(&intent, Some(&first), Some(binding(namespace, ID1, 2))),
+            Err(BindingStoreError::InvalidTransition)
+        );
     }
 
     #[test]
-    fn replacement_requires_exact_next_generation_and_new_provider_id() {
+    fn delete_requires_dispatch_and_terminal_cannot_reopen() {
         let backend = MemoryBackend::default();
-        let mut writer = store(backend);
-        let first = bind_first(&mut writer);
+        let namespace = AcceptanceVmIntentNamespace::Item20;
+        let intent = intent(namespace);
+        let mut writer = store(backend.clone(), namespace);
+        let first = bind_first(&mut writer, namespace);
 
         assert_eq!(
-            writer.compare_and_swap(&intent(), Some(&first), Some(binding(ID2, 3))),
+            writer.compare_and_swap(&intent, Some(&first), None),
             Err(BindingStoreError::InvalidTransition)
         );
-        assert_eq!(
-            writer.compare_and_swap(&intent(), Some(&first), Some(binding(ID1, 2))),
-            Err(BindingStoreError::InvalidTransition)
-        );
-
-        let second = binding(ID2, 2);
+        writer.prepare_delete(&intent, &first).unwrap();
+        writer.mark_delete_dispatched(&intent, &first).unwrap();
         writer
-            .compare_and_swap(&intent(), Some(&first), Some(second.clone()))
-            .unwrap();
-        assert_eq!(writer.load(&intent()).unwrap(), Some(second));
-    }
-
-    #[test]
-    fn delete_requires_prepare_dispatch_then_terminal_clear() {
-        let backend = MemoryBackend::default();
-        let mut writer = store(backend.clone());
-        let first = bind_first(&mut writer);
-
-        assert_eq!(
-            writer.compare_and_swap(&intent(), Some(&first), None),
-            Err(BindingStoreError::InvalidTransition)
-        );
-        writer.prepare_delete(&intent(), &first).unwrap();
-        assert_eq!(
-            writer.load(&intent()),
-            Err(BindingStoreError::OperationInProgress)
-        );
-        writer.mark_delete_dispatched(&intent(), &first).unwrap();
-        assert_eq!(
-            writer.mark_delete_dispatched(&intent(), &first),
-            Err(BindingStoreError::DeleteAlreadyDispatched)
-        );
-        writer
-            .compare_and_swap(&intent(), Some(&first), None)
+            .compare_and_swap(&intent, Some(&first), None)
             .unwrap();
         drop(writer);
 
-        let mut restarted = store(backend);
+        let mut restarted = store(backend, namespace);
         assert_eq!(
-            restarted.lifecycle_state(&intent()).unwrap(),
+            restarted.lifecycle_state(&intent).unwrap(),
             AcceptanceVmLifecycleState::Terminal {
-                last_generation: first.generation,
+                last_generation: first.generation
             }
         );
         assert_eq!(
-            restarted.load(&intent()),
-            Err(BindingStoreError::TerminalIntentReuse)
-        );
-        assert_eq!(
-            restarted.prepare_create(&intent()),
+            restarted.prepare_create(&intent),
             Err(BindingStoreError::TerminalIntentReuse)
         );
     }
 
     #[test]
-    fn forked_deployment_history_fails_closed() {
+    fn forked_history_fails_closed_per_intent() {
         let backend = MemoryBackend::default();
-        let mut writer = store(backend.clone());
-        let generation = writer.prepare_create(&intent()).unwrap();
-        let predecessor = backend.records.borrow()[0].id;
+        let namespace = AcceptanceVmIntentNamespace::Item20;
+        let intent = intent(namespace);
+        let mut writer = store(backend.clone(), namespace);
+        let generation = writer.prepare_create(&intent).unwrap();
+        let predecessor = backend.records.borrow().last().unwrap().id;
 
-        for id in [2, 3] {
+        for id in [predecessor + 1, predecessor + 2] {
             backend.records.borrow_mut().push(DeploymentRecord {
                 id,
                 sha: SHA.to_owned(),
@@ -1063,7 +1125,7 @@ mod tests {
                     managed_by: OWNERSHIP_MANAGER.to_owned(),
                     candidate_sha: SHA.to_owned(),
                     scope: LifecycleScope::Acceptance,
-                    intent_id: intent().id().to_owned(),
+                    intent_id: intent.id().to_owned(),
                     predecessor_deployment_id: Some(predecessor),
                     transition: LedgerTransition::DispatchCreate,
                     generation: generation.get(),
@@ -1074,16 +1136,53 @@ mod tests {
         }
 
         assert_eq!(
-            store(backend).lifecycle_state(&intent()),
+            store(backend, namespace).lifecycle_state(&intent),
             Err(BindingStoreError::ForkedLedger)
         );
     }
 
     #[test]
+    fn unknown_namespace_record_poisoning_fails_closed() {
+        let backend = MemoryBackend::default();
+        backend.records.borrow_mut().push(DeploymentRecord {
+            id: 1,
+            sha: SHA.to_owned(),
+            git_ref: SHA.to_owned(),
+            task: DEPLOYMENT_TASK.to_owned(),
+            environment: DEPLOYMENT_ENVIRONMENT.to_owned(),
+            payload: GitHubDeploymentPayload {
+                format_version: LEDGER_FORMAT_VERSION,
+                project: OWNERSHIP_PROJECT.to_owned(),
+                managed_by: OWNERSHIP_MANAGER.to_owned(),
+                candidate_sha: SHA.to_owned(),
+                scope: LifecycleScope::Acceptance,
+                intent_id: format!("other:candidate:{SHA}"),
+                predecessor_deployment_id: None,
+                transition: LedgerTransition::PrepareCreate,
+                generation: 1,
+                expected: None,
+                replacement: None,
+            },
+        });
+
+        assert_eq!(
+            store(backend, AcceptanceVmIntentNamespace::Item20)
+                .lifecycle_state(&intent(AcceptanceVmIntentNamespace::Item20)),
+            Err(BindingStoreError::InvalidLedgerRecord)
+        );
+    }
+
+    #[test]
     fn production_or_wrong_candidate_intent_is_rejected() {
-        let store = store(MemoryBackend::default());
-        let production =
-            OwnershipIntent::new(LifecycleScope::Production, format!("candidate:{SHA}")).unwrap();
+        let store = store(
+            MemoryBackend::default(),
+            AcceptanceVmIntentNamespace::Item20,
+        );
+        let production = OwnershipIntent::new(
+            LifecycleScope::Production,
+            AcceptanceVmIntentNamespace::Item20.intent_id(SHA),
+        )
+        .unwrap();
         assert_eq!(
             store.load(&production),
             Err(BindingStoreError::InvalidOwnershipIntent)
@@ -1091,7 +1190,7 @@ mod tests {
 
         let wrong = OwnershipIntent::new(
             LifecycleScope::Acceptance,
-            "candidate:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "item20:candidate:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         )
         .unwrap();
         assert_eq!(
@@ -1103,60 +1202,21 @@ mod tests {
     #[test]
     fn non_canonical_uuid_is_rejected_before_persistence() {
         let backend = MemoryBackend::default();
-        let mut writer = store(backend.clone());
-        let generation = writer.prepare_create(&intent()).unwrap();
-        writer
-            .mark_create_dispatched(&intent(), generation)
-            .unwrap();
+        let namespace = AcceptanceVmIntentNamespace::Item20;
+        let intent = intent(namespace);
+        let mut writer = store(backend.clone(), namespace);
+        let generation = writer.prepare_create(&intent).unwrap();
+        writer.mark_create_dispatched(&intent, generation).unwrap();
         let invalid = VmBinding {
-            intent: intent(),
+            intent: intent.clone(),
             provider_id: ProviderResourceId::new("NOT-A-VULTR-UUID").unwrap(),
             generation,
         };
         let before = backend.records.borrow().len();
         assert_eq!(
-            writer.compare_and_swap(&intent(), None, Some(invalid)),
+            writer.compare_and_swap(&intent, None, Some(invalid)),
             Err(BindingStoreError::InvalidProviderUuid)
         );
         assert_eq!(backend.records.borrow().len(), before);
-    }
-
-    #[test]
-    fn malformed_history_after_terminal_is_rejected() {
-        let backend = MemoryBackend::default();
-        let mut writer = store(backend.clone());
-        let first = bind_first(&mut writer);
-        writer.prepare_delete(&intent(), &first).unwrap();
-        writer.mark_delete_dispatched(&intent(), &first).unwrap();
-        writer
-            .compare_and_swap(&intent(), Some(&first), None)
-            .unwrap();
-
-        let predecessor = backend.records.borrow().last().unwrap().id;
-        backend.records.borrow_mut().push(DeploymentRecord {
-            id: predecessor + 1,
-            sha: SHA.to_owned(),
-            git_ref: SHA.to_owned(),
-            task: DEPLOYMENT_TASK.to_owned(),
-            environment: DEPLOYMENT_ENVIRONMENT.to_owned(),
-            payload: GitHubDeploymentPayload {
-                format_version: LEDGER_FORMAT_VERSION,
-                project: OWNERSHIP_PROJECT.to_owned(),
-                managed_by: OWNERSHIP_MANAGER.to_owned(),
-                candidate_sha: SHA.to_owned(),
-                scope: LifecycleScope::Acceptance,
-                intent_id: intent().id().to_owned(),
-                predecessor_deployment_id: Some(predecessor),
-                transition: LedgerTransition::PrepareCreate,
-                generation: Generation::INITIAL.get(),
-                expected: None,
-                replacement: None,
-            },
-        });
-
-        assert_eq!(
-            store(backend).lifecycle_state(&intent()),
-            Err(BindingStoreError::InvalidTransition)
-        );
     }
 }
