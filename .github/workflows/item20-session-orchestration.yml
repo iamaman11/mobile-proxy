@@ -1,0 +1,196 @@
+name: Item 20 non-live session orchestration
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact immutable Item 19-proven software candidate SHA
+        required: true
+        type: string
+        default: d151dbdd156279e32a5361d304c90f996bd2d565
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: item20-non-live-session-orchestration
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate protected non-live orchestration identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
+      control_plane_sha: ${{ steps.identity.outputs.control_plane_sha }}
+    steps:
+      - name: Validate trusted canonical control-plane ref
+        shell: bash
+        env:
+          REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "iamaman11/mobile-proxy" ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$REF_PROTECTED" == "true" ]]
+
+      - name: Check out exact control-plane policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Fetch exact-current protected state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/branches/main" \
+            > current-main.json
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?branch=main&event=push&status=success&head_sha=$CONTROL_PLANE_SHA&per_page=100" \
+            > quality-runs.json
+          gh api "repos/$GITHUB_REPOSITORY/issues/124" > item19-issue.json
+          gh api "repos/$GITHUB_REPOSITORY/issues/135" > item20-issue.json
+          gh api "repos/$GITHUB_REPOSITORY/issues/115" > signing-issue.json
+
+      - name: Select exact successful control-plane Quality push
+        id: quality
+        shell: bash
+        env:
+          CONTROL_PLANE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          run_id=$(python3 scripts/verify_item20_orchestration.py select-quality-run \
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --runs quality-runs.json \
+            --output selected-quality-run.json)
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Verify build-only Item 20 orchestration boundary
+        id: identity
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_item20_orchestration.py verify \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --contract contracts/operations/item20-acceptance-v1.json \
+            --main-branch current-main.json \
+            --quality-run selected-quality-run.json \
+            --item19-issue item19-issue.json \
+            --item20-issue item20-issue.json \
+            --signing-issue signing-issue.json \
+            --output item20-non-live-orchestration-evidence.json
+          python3 -m json.tool item20-non-live-orchestration-evidence.json >/dev/null
+          printf 'candidate_sha=%s\n' "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          printf 'control_plane_sha=%s\n' "$CONTROL_PLANE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bounded non-live orchestration evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: item20-non-live-orchestration-${{ steps.identity.outputs.control_plane_sha }}
+          path: item20-non-live-orchestration-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record validation-only result
+        shell: bash
+        run: |
+          {
+            echo '## Item 20 non-live session orchestration'
+            echo "- Candidate SHA: ${{ steps.identity.outputs.candidate_sha }}"
+            echo "- Control-plane SHA: ${{ steps.identity.outputs.control_plane_sha }}"
+            echo "- Control-plane Quality run: ${{ steps.quality.outputs.run_id }}"
+            echo '- Candidate artifact build authorized: true'
+            echo '- Fresh acceptance authority verified: false'
+            echo '- Fresh Vultr read-only preflight verified: false'
+            echo '- Provider credentials consumed: false'
+            echo '- Provider mutation authorized: false'
+            echo '- Phone mutation authorized: false'
+            echo '- Endpoint handoff authorized: false'
+            echo '- Live execution authorized: false'
+            echo '- Final production authority: false'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build-candidate:
+    name: Build exact immutable candidate server artifact
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CANDIDATE_SHA: ${{ needs.validate.outputs.candidate_sha }}
+    steps:
+      - name: Check out exact immutable software candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.validate.outputs.candidate_sha }}
+
+      - name: Assert immutable candidate source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Build exact candidate server and artifact verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --locked \
+            -p control-plane \
+            -p relay-gate \
+            -p reverse-tunnel-server
+          cargo build --release --locked \
+            -p operator-cli --bin item19-acceptance-lifecycle
+
+      - name: Assemble and seal exact candidate artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p item20-server-artifact/bin
+          install -m 0755 target/release/control-plane item20-server-artifact/bin/control-plane
+          install -m 0755 target/release/relay-gate item20-server-artifact/bin/relay-gate
+          install -m 0755 target/release/reverse-tunnel-server item20-server-artifact/bin/reverse-tunnel-server
+          install -m 0755 target/release/item19-acceptance-lifecycle item20-server-artifact/bin/item19-acceptance-lifecycle
+          item20-server-artifact/bin/item19-acceptance-lifecycle prepare-artifact \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --root item20-server-artifact \
+            --manifest item20-server-artifact/manifest.json
+          item20-server-artifact/bin/item19-acceptance-lifecycle verify-artifact \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --root item20-server-artifact \
+            --manifest item20-server-artifact/manifest.json
+
+      - name: Upload exact immutable candidate server artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: item20-server-candidate-${{ env.CANDIDATE_SHA }}
+          path: item20-server-artifact/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Record build-only boundary
+        shell: bash
+        run: |
+          {
+            echo '## Item 20 exact candidate artifact'
+            echo "- Candidate SHA: $CANDIDATE_SHA"
+            echo "- Control-plane SHA: ${{ needs.validate.outputs.control_plane_sha }}"
+            echo '- Source checkout: exact immutable candidate'
+            echo '- Provider lifecycle invoked: false'
+            echo '- Phone execution invoked: false'
+            echo '- Endpoint handoff performed: false'
+          } >> "$GITHUB_STEP_SUMMARY"
