@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -13,6 +14,9 @@ ITEM19_CLOSEOUT = Path("docs/operations/item19-provider-proof-closeout.md")
 ITEM19_LIFECYCLE = Path("apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs")
 BINDING_STORE = Path("apps/operator-cli/src/github_vm_binding_store.rs")
 ITEM20_IDENTITY = Path("apps/operator-cli/src/item20_acceptance.rs")
+ITEM20_LIFECYCLE = Path("apps/operator-cli/src/item20_session_lifecycle.rs")
+ITEM20_CONTRACT = Path("contracts/operations/item20-acceptance-v1.json")
+ITEM20_ADMISSION = Path("scripts/verify_item20_admission.py")
 LIB = Path("apps/operator-cli/src/lib.rs")
 
 
@@ -22,6 +26,18 @@ def _read(root: Path, path: Path, errors: list[str]) -> str:
     except OSError as error:
         errors.append(f"cannot read {path}: {error}")
         return ""
+
+
+def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
+    try:
+        value = json.loads((root / path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"cannot load {path}: {error}")
+        return {}
+    if not isinstance(value, dict):
+        errors.append(f"{path} root must be an object")
+        return {}
+    return value
 
 
 def check_physical_runbook_text(physical: str) -> list[str]:
@@ -51,6 +67,72 @@ def check_physical_runbook_text(physical: str) -> list[str]:
     return errors
 
 
+def check_item20_contract(contract: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    expected = {
+        "contract_version": 1,
+        "status": "protected_non_live_admission_core",
+        "canonical_repository": "iamaman11/mobile-proxy",
+        "tracker_issue": 135,
+        "completed_provider_proof_issue": 124,
+        "phone_signing_gate_issue": 115,
+    }
+    for key, value in expected.items():
+        if contract.get(key) != value:
+            errors.append(f"Item 20 admission contract {key!r} differs from protected value")
+
+    immutable = contract.get("immutable_candidate")
+    if not isinstance(immutable, dict) or immutable.get("candidate_sha") != (
+        "d151dbdd156279e32a5361d304c90f996bd2d565"
+    ):
+        errors.append("Item 20 admission contract candidate differs from Item 19 closeout")
+
+    session = contract.get("session")
+    if not isinstance(session, dict) or any(
+        session.get(key) != value
+        for key, value in {
+            "identity_module": "apps/operator-cli/src/item20_acceptance.rs",
+            "lifecycle_module": "apps/operator-cli/src/item20_session_lifecycle.rs",
+            "ownership_intent_template": "item20:candidate:<candidate_sha>",
+            "scope": "acceptance_only",
+            "max_controlled_vms": 1,
+            "terminal_item19_intent_reuse": "forbidden",
+            "transport_endpoint": "derived_only_after_verified_target_resolution_never_authority",
+        }.items()
+    ):
+        errors.append("Item 20 admission contract typed-session boundary differs")
+
+    authorization = contract.get("authorization")
+    if not isinstance(authorization, dict) or authorization != {
+        "provider_mutation_authorized": False,
+        "phone_mutation_authorized": False,
+        "endpoint_handoff_authorized": False,
+        "live_execution_authorized": False,
+        "final_production_authority": False,
+    }:
+        errors.append("Item 20 admission contract must remain validation-only")
+
+    handoff = contract.get("handoff")
+    if not isinstance(handoff, dict) or handoff != {
+        "status": "not_implemented",
+        "public_provider_uuid_recording": "forbidden",
+        "public_transport_endpoint_recording": "forbidden",
+        "private_phone_runner_vultr_credentials": "forbidden",
+    }:
+        errors.append("Item 20 admission contract handoff boundary differs")
+
+    admission = contract.get("admission")
+    required_states = admission.get("required_issue_states") if isinstance(admission, dict) else None
+    if required_states != {
+        "item19_tracker_124": "closed_completed",
+        "item20_tracker_135": "open",
+        "phone_signing_gate_115": "closed_completed_before_live_window",
+    }:
+        errors.append("Item 20 admission contract issue gates differ")
+
+    return errors
+
+
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     plan = _read(root, PLAN, errors)
@@ -60,6 +142,9 @@ def check_repository(root: Path) -> list[str]:
     item19 = _read(root, ITEM19_LIFECYCLE, errors)
     binding_store = _read(root, BINDING_STORE, errors)
     item20 = _read(root, ITEM20_IDENTITY, errors)
+    item20_lifecycle = _read(root, ITEM20_LIFECYCLE, errors)
+    admission = _read(root, ITEM20_ADMISSION, errors)
+    contract = _load(root, ITEM20_CONTRACT, errors)
     lib = _read(root, LIB, errors)
 
     for required in (
@@ -131,8 +216,58 @@ def check_repository(root: Path) -> list[str]:
         if forbidden in item20:
             errors.append(f"typed Item 20 identity contains forbidden boundary token {forbidden!r}")
 
+    for required in (
+        "pub trait Item20LifecycleStore",
+        "pub trait Item20AcceptanceProvider",
+        "pub fn open_item20_session",
+        "pub fn verified_item20_target",
+        "pub fn verified_item20_endpoint",
+        "pub fn close_item20_session",
+        "terminal Item 20 acceptance intent cannot be reused",
+    ):
+        if required not in item20_lifecycle:
+            errors.append(f"typed Item 20 session lifecycle is missing {required!r}")
+
+    for required in (
+        "_IMMUTABLE_CANDIDATE",
+        "def verify_contract",
+        "def verify_control_plane",
+        "def verify_issue_gates",
+        "def verify_phone_preflight",
+        "def verify_admission",
+        '"provider_mutation_authorized": False',
+        '"phone_mutation_authorized": False',
+        '"endpoint_handoff_authorized": False',
+        '"live_execution_authorized": False',
+    ):
+        if required not in admission:
+            errors.append(f"Item 20 non-live admission verifier is missing {required!r}")
+
+    for forbidden in (
+        "VULTR_API_KEY",
+        "VULTR_SSH_PRIVATE_KEY",
+        "production-vultr",
+        "subprocess.",
+        "urllib.request",
+        "requests.",
+        "delete_instance(",
+        "create_instance",
+        "adb ",
+    ):
+        if forbidden in admission:
+            errors.append(f"Item 20 admission verifier contains forbidden live token {forbidden!r}")
+
+    if contract:
+        errors.extend(check_item20_contract(contract))
+        immutable = contract.get("immutable_candidate")
+        candidate = immutable.get("candidate_sha") if isinstance(immutable, dict) else None
+        if not isinstance(candidate, str) or candidate not in closeout:
+            errors.append("Item 20 admission contract candidate is not anchored in Item 19 closeout")
+
     if "pub mod item20_acceptance;" not in lib:
         errors.append("operator-cli does not export the typed Item 20 acceptance identity")
+    if "pub mod item20_session_lifecycle;" not in lib:
+        errors.append("operator-cli does not export the typed Item 20 session lifecycle")
 
     return errors
 

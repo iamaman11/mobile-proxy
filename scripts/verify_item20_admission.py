@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Validate the non-live Production Baseline Item 20 admission boundary."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import re
+from typing import Mapping
+
+_CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
+_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
+_QUALITY_WORKFLOW = "Quality"
+_QUALITY_WORKFLOW_PATH = ".github/workflows/quality.yml"
+_REQUIRED_RUNNER_LABELS = ["self-hosted", "Linux", "X64", "android-production"]
+_REQUIRED_TOOLS = {"adb": True, "python": True, "git": True, "curl": True}
+_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
+def validate_sha(value: object, kind: str) -> str:
+    if not isinstance(value, str) or _SHA_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{kind} SHA must be an exact lowercase 40-character hexadecimal identity")
+    return value
+
+
+def verify_contract(contract: Mapping[str, object]) -> None:
+    expected_top = {
+        "contract_version": 1,
+        "status": "protected_non_live_admission_core",
+        "canonical_repository": _CANONICAL_REPOSITORY,
+        "tracker_issue": 135,
+        "completed_provider_proof_issue": 124,
+        "phone_signing_gate_issue": 115,
+    }
+    mismatched = [key for key, value in expected_top.items() if contract.get(key) != value]
+    if mismatched:
+        raise ValueError("Item 20 admission contract identity mismatch: " + ", ".join(sorted(mismatched)))
+
+    immutable = contract.get("immutable_candidate")
+    if not isinstance(immutable, dict) or immutable != {
+        "candidate_sha": _IMMUTABLE_CANDIDATE,
+        "closeout_record": "docs/operations/item19-provider-proof-closeout.md",
+        "item19_quality_run_id": 33341602485,
+        "acceptance_authority_run_id": 33341737260,
+        "vultr_readonly_preflight_run_id": 33341760002,
+        "item19_lifecycle_run_id": 33342000338,
+    }:
+        raise ValueError("Item 20 immutable candidate handoff differs from protected Item 19 closeout")
+
+    separation = contract.get("identity_separation")
+    if not isinstance(separation, dict) or separation != {
+        "candidate_sha": "immutable_item19_proven_software_identity",
+        "control_plane_sha": "exact_current_protected_main_revision",
+        "control_plane_may_advance_without_redefining_candidate": True,
+        "must_be_verified_independently": True,
+    }:
+        raise ValueError("Item 20 candidate/control-plane identity separation is not exact")
+
+    control = contract.get("control_plane")
+    if not isinstance(control, dict) or control != {
+        "branch": "main",
+        "protected": True,
+        "quality_workflow": _QUALITY_WORKFLOW,
+        "quality_workflow_path": _QUALITY_WORKFLOW_PATH,
+        "quality_event": "push",
+        "required_status": "completed",
+        "required_conclusion": "success",
+        "required_check": "Quality Gate",
+    }:
+        raise ValueError("Item 20 protected control-plane contract differs")
+
+    session = contract.get("session")
+    if not isinstance(session, dict) or session != {
+        "identity_module": "apps/operator-cli/src/item20_acceptance.rs",
+        "lifecycle_module": "apps/operator-cli/src/item20_session_lifecycle.rs",
+        "ownership_intent_template": "item20:candidate:<candidate_sha>",
+        "scope": "acceptance_only",
+        "max_controlled_vms": 1,
+        "terminal_item19_intent_reuse": "forbidden",
+        "transport_endpoint": "derived_only_after_verified_target_resolution_never_authority",
+    }:
+        raise ValueError("Item 20 typed session contract differs")
+
+    phone = contract.get("phone_preflight")
+    if not isinstance(phone, dict) or phone != {
+        "repository": "iamaman11/mobile-proxy-production",
+        "authority": "execution_only",
+        "workflow": ".github/workflows/phone-preflight.yml",
+        "artifact_name_template": "phone-read-only-preflight-<control_plane_sha>",
+        "canonical_logic": "scripts/run_private_phone_preflight.py",
+        "required_runner_labels": _REQUIRED_RUNNER_LABELS,
+        "mode": "read_only",
+        "raw_device_identifier_recorded": False,
+        "mutation_performed": False,
+    }:
+        raise ValueError("Item 20 private phone preflight contract differs")
+
+    admission = contract.get("admission")
+    if not isinstance(admission, dict) or admission != {
+        "verifier": "scripts/verify_item20_admission.py",
+        "required_issue_states": {
+            "item19_tracker_124": "closed_completed",
+            "item20_tracker_135": "open",
+            "phone_signing_gate_115": "closed_completed_before_live_window",
+        },
+        "candidate_must_match_item19_closeout": True,
+        "control_plane_must_be_exact_current_protected_main": True,
+        "control_plane_quality_must_succeed": True,
+        "same_window_private_phone_preflight_required_before_live_window": True,
+    }:
+        raise ValueError("Item 20 admission requirements differ")
+
+    authorization = contract.get("authorization")
+    if not isinstance(authorization, dict) or authorization != {
+        "provider_mutation_authorized": False,
+        "phone_mutation_authorized": False,
+        "endpoint_handoff_authorized": False,
+        "live_execution_authorized": False,
+        "final_production_authority": False,
+    }:
+        raise ValueError("Item 20 admission core must remain validation-only")
+
+    handoff = contract.get("handoff")
+    if not isinstance(handoff, dict) or handoff != {
+        "status": "not_implemented",
+        "public_provider_uuid_recording": "forbidden",
+        "public_transport_endpoint_recording": "forbidden",
+        "private_phone_runner_vultr_credentials": "forbidden",
+    }:
+        raise ValueError("Item 20 handoff boundary differs")
+
+
+def verify_control_plane(
+    control_plane_sha: str,
+    branch: Mapping[str, object],
+    quality_run: Mapping[str, object],
+) -> None:
+    control_plane_sha = validate_sha(control_plane_sha, "control-plane")
+    commit = branch.get("commit")
+    if (
+        branch.get("name") != "main"
+        or branch.get("protected") is not True
+        or not isinstance(commit, dict)
+        or commit.get("sha") != control_plane_sha
+    ):
+        raise ValueError("control-plane SHA is not the exact current protected main")
+
+    repository = quality_run.get("repository")
+    expected = {
+        "name": _QUALITY_WORKFLOW,
+        "path": _QUALITY_WORKFLOW_PATH,
+        "event": "push",
+        "head_branch": "main",
+        "head_sha": control_plane_sha,
+        "status": "completed",
+        "conclusion": "success",
+    }
+    if not isinstance(repository, dict) or repository.get("full_name") != _CANONICAL_REPOSITORY:
+        raise ValueError("control-plane Quality run is not from the canonical repository")
+    if any(quality_run.get(key) != value for key, value in expected.items()):
+        raise ValueError("control-plane Quality run does not match exact protected main")
+    for field in ("id", "run_attempt"):
+        value = quality_run.get(field)
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError(f"control-plane Quality run has invalid {field}")
+
+
+def _verify_issue(
+    issue: Mapping[str, object],
+    number: int,
+    state: str,
+    state_reason: str | None,
+    label: str,
+) -> None:
+    if issue.get("number") != number or issue.get("state") != state:
+        raise ValueError(f"{label} issue state does not satisfy Item 20 admission")
+    if state_reason is not None and issue.get("state_reason") != state_reason:
+        raise ValueError(f"{label} issue state_reason does not satisfy Item 20 admission")
+
+
+def verify_issue_gates(
+    item19_issue: Mapping[str, object],
+    item20_issue: Mapping[str, object],
+    signing_issue: Mapping[str, object],
+) -> None:
+    _verify_issue(item19_issue, 124, "closed", "completed", "Item 19")
+    _verify_issue(item20_issue, 135, "open", None, "Item 20")
+    _verify_issue(signing_issue, 115, "closed", "completed", "phone signing-continuity gate")
+
+
+def verify_phone_preflight(
+    control_plane_sha: str,
+    report: Mapping[str, object],
+) -> None:
+    control_plane_sha = validate_sha(control_plane_sha, "control-plane")
+    if any(
+        report.get(key) != value
+        for key, value in {
+            "format_version": 1,
+            "repository": _CANONICAL_REPOSITORY,
+            "canonical_sha": control_plane_sha,
+            "mode": "read_only",
+            "required_runner_labels": _REQUIRED_RUNNER_LABELS,
+            "required_tools": _REQUIRED_TOOLS,
+            "raw_device_identifier_recorded": False,
+            "mutation_performed": False,
+            "accepted": True,
+        }.items()
+    ):
+        raise ValueError("private phone preflight evidence does not match the exact control plane")
+
+    device = report.get("device")
+    if not isinstance(device, dict) or device != {
+        "device_count": 1,
+        "registered_device_match": True,
+        "adb_state": "device",
+        "shell_probe": True,
+    }:
+        raise ValueError("private phone preflight does not prove one exact registered online device")
+
+
+def verify_admission(
+    candidate_sha: str,
+    control_plane_sha: str,
+    contract: Mapping[str, object],
+    branch: Mapping[str, object],
+    quality_run: Mapping[str, object],
+    item19_issue: Mapping[str, object],
+    item20_issue: Mapping[str, object],
+    signing_issue: Mapping[str, object],
+    phone_preflight: Mapping[str, object],
+) -> dict[str, object]:
+    candidate_sha = validate_sha(candidate_sha, "candidate")
+    control_plane_sha = validate_sha(control_plane_sha, "control-plane")
+    verify_contract(contract)
+    if candidate_sha != _IMMUTABLE_CANDIDATE:
+        raise ValueError("candidate SHA does not match the protected Item 19 closeout")
+    verify_control_plane(control_plane_sha, branch, quality_run)
+    verify_issue_gates(item19_issue, item20_issue, signing_issue)
+    verify_phone_preflight(control_plane_sha, phone_preflight)
+
+    return {
+        "format_version": 1,
+        "authority": "item20_non_live_admission_validation",
+        "repository": _CANONICAL_REPOSITORY,
+        "candidate_sha": candidate_sha,
+        "control_plane_sha": control_plane_sha,
+        "control_plane_quality_run_id": str(quality_run["id"]),
+        "item19_tracker_completed": True,
+        "item20_tracker_open": True,
+        "phone_signing_gate_completed": True,
+        "private_phone_read_only_preflight_accepted": True,
+        "provider_mutation_authorized": False,
+        "phone_mutation_authorized": False,
+        "endpoint_handoff_authorized": False,
+        "live_execution_authorized": False,
+        "final_production_authority": False,
+        "transport_endpoint_recorded": False,
+        "provider_identifier_recorded": False,
+        "raw_phone_identifier_recorded": False,
+    }
+
+
+def _load_object(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot load JSON {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"JSON value must be an object: {path}")
+    return value
+
+
+def _write_object(path: Path, value: Mapping[str, object]) -> None:
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--candidate-sha", required=True)
+    parser.add_argument("--control-plane-sha", required=True)
+    parser.add_argument("--contract", type=Path, required=True)
+    parser.add_argument("--main-branch", type=Path, required=True)
+    parser.add_argument("--quality-run", type=Path, required=True)
+    parser.add_argument("--item19-issue", type=Path, required=True)
+    parser.add_argument("--item20-issue", type=Path, required=True)
+    parser.add_argument("--signing-issue", type=Path, required=True)
+    parser.add_argument("--phone-preflight", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+
+    evidence = verify_admission(
+        args.candidate_sha,
+        args.control_plane_sha,
+        _load_object(args.contract),
+        _load_object(args.main_branch),
+        _load_object(args.quality_run),
+        _load_object(args.item19_issue),
+        _load_object(args.item20_issue),
+        _load_object(args.signing_issue),
+        _load_object(args.phone_preflight),
+    )
+    _write_object(args.output, evidence)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
