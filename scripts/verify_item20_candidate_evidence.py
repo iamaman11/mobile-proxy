@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Pure verifier for fresh Item 20 candidate authority and read-only evidence.
 
-This module deliberately performs no GitHub, provider, or phone I/O. Callers must
-supply bounded GitHub run/artifact metadata plus downloaded JSON evidence. The
-verifier keeps the immutable software candidate distinct from the moving protected
-control-plane revision.
+No GitHub, provider, or phone I/O is performed here. Callers supply bounded run and
+artifact metadata plus downloaded JSON evidence. The immutable software candidate
+stays distinct from the moving protected control-plane revision.
 """
 
 from __future__ import annotations
@@ -32,7 +31,9 @@ _DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 def validate_sha(value: object, kind: str) -> str:
     if not isinstance(value, str) or _SHA_PATTERN.fullmatch(value) is None:
-        raise ValueError(f"{kind} SHA must be an exact lowercase 40-character hexadecimal identity")
+        raise ValueError(
+            f"{kind} SHA must be an exact lowercase 40-character hexadecimal identity"
+        )
     return value
 
 
@@ -61,40 +62,52 @@ def _parse_time(value: object, field: str) -> datetime:
     return parsed
 
 
-def verify_contract(contract: Mapping[str, object]) -> int:
-    if any(
-        contract.get(key) != value
-        for key, value in {
-            "contract_version": 1,
-            "status": "protected_non_live_admission_core",
-            "canonical_repository": _CANONICAL_REPOSITORY,
-            "tracker_issue": 135,
-            "completed_provider_proof_issue": 124,
-            "phone_signing_gate_issue": 115,
-        }.items()
-    ):
+def verify_contract(contract: Mapping[str, object]) -> tuple[int, int]:
+    expected_top = {
+        "contract_version": 1,
+        "status": "protected_non_live_admission_core",
+        "canonical_repository": _CANONICAL_REPOSITORY,
+        "tracker_issue": 135,
+        "completed_provider_proof_issue": 124,
+        "phone_signing_gate_issue": 115,
+    }
+    if any(contract.get(key) != value for key, value in expected_top.items()):
         raise ValueError("Item 20 admission contract identity mismatch")
 
     immutable = contract.get("immutable_candidate")
-    if not isinstance(immutable, dict) or immutable.get("candidate_sha") != _IMMUTABLE_CANDIDATE:
+    expected_immutable = {
+        "candidate_sha": _IMMUTABLE_CANDIDATE,
+        "closeout_record": "docs/operations/item19-provider-proof-closeout.md",
+        "item19_quality_run_id": 33341602485,
+        "acceptance_authority_run_id": 33341737260,
+        "vultr_readonly_preflight_run_id": 33341760002,
+        "item19_lifecycle_run_id": 33342000338,
+    }
+    if not isinstance(immutable, dict) or immutable != expected_immutable:
         raise ValueError("Item 20 immutable candidate differs from protected Item 19 closeout")
-    candidate_quality_run_id = _positive_int(
-        immutable.get("item19_quality_run_id"), "immutable candidate Quality run id"
-    )
 
-    future = contract.get("future_live_candidate_evidence")
-    expected_future = {
+    future_evidence = contract.get("future_live_candidate_evidence")
+    if not isinstance(future_evidence, dict) or future_evidence != {
         "acceptance_authority": "fresh_for_exact_candidate",
         "vultr_readonly_preflight": "fresh_for_exact_candidate",
         "same_candidate_required": True,
+        "current_core_verification": "not_implemented",
+    }:
+        raise ValueError("Item 20 future live candidate evidence requirement differs")
+
+    verifier = contract.get("future_live_candidate_verifier")
+    expected_verifier = {
         "candidate_control_plane_separation_required": True,
+        "candidate_quality_run_attempt": 1,
+        "grants_live_authority": False,
+        "performs_external_io": False,
         "selection": "candidate_specific_artifact_then_exact_control_plane_run",
+        "status": "protected_pure_verifier_not_consumed_by_admission_core",
         "verifier": _VERIFIER_PATH,
-        "current_core_verification": "protected_pure_verifier_not_consumed_by_admission_core",
         "workflow_wiring": "not_implemented",
     }
-    if not isinstance(future, dict) or future != expected_future:
-        raise ValueError("Item 20 fresh candidate evidence verification contract differs")
+    if not isinstance(verifier, dict) or verifier != expected_verifier:
+        raise ValueError("Item 20 pure candidate evidence verifier contract differs")
 
     authorization = contract.get("authorization")
     if not isinstance(authorization, dict) or authorization != {
@@ -105,7 +118,10 @@ def verify_contract(contract: Mapping[str, object]) -> int:
         "provider_mutation_authorized": False,
     }:
         raise ValueError("Item 20 candidate evidence verifier cannot grant live authority")
-    return candidate_quality_run_id
+
+    return int(expected_immutable["item19_quality_run_id"]), int(
+        expected_verifier["candidate_quality_run_attempt"]
+    )
 
 
 def verify_control_plane(
@@ -182,8 +198,7 @@ def verify_artifact_metadata(
     validate_sha(candidate_sha, "candidate")
     validate_sha(control_plane_sha, "control-plane")
     run_id = _positive_int(run.get("id"), f"{label} run id")
-    expected_name = f"{expected_name_prefix}-{candidate_sha}"
-    if artifact.get("name") != expected_name:
+    if artifact.get("name") != f"{expected_name_prefix}-{candidate_sha}":
         raise ValueError(f"{label} artifact name does not bind the exact candidate")
     if artifact.get("expired") is not False:
         raise ValueError(f"{label} artifact is expired or expiry is ambiguous")
@@ -209,6 +224,7 @@ def verify_artifact_metadata(
 def verify_acceptance_evidence(
     candidate_sha: str,
     candidate_quality_run_id: int,
+    candidate_quality_run_attempt: int,
     acceptance_run: Mapping[str, object],
     evidence: Mapping[str, object],
 ) -> None:
@@ -226,6 +242,7 @@ def verify_acceptance_evidence(
         "acceptance_workflow_run_attempt": str(run_attempt),
         "command_issue": 90,
         "candidate_quality_run_id": str(candidate_quality_run_id),
+        "candidate_quality_run_attempt": str(candidate_quality_run_attempt),
         "candidate_evidence_artifact": f"software-release-candidate-{candidate_sha}",
         "candidate_evidence_file": "release-candidate-evidence.json",
         "final_production_authority": False,
@@ -242,9 +259,6 @@ def verify_acceptance_evidence(
             + ", ".join(sorted(mismatched))
         )
     _positive_decimal(evidence.get("command_comment_id"), "acceptance command_comment_id")
-    _positive_decimal(
-        evidence.get("candidate_quality_run_attempt"), "candidate Quality run attempt"
-    )
 
 
 def verify_preflight_evidence(
@@ -334,12 +348,15 @@ def verify_candidate_chain(
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
     if candidate_sha == control_plane_sha:
-        raise ValueError("Item 20 verifier requires candidate/control-plane identities to remain distinct")
-    candidate_quality_run_id = verify_contract(contract)
+        raise ValueError(
+            "Item 20 verifier requires candidate/control-plane identities to remain distinct"
+        )
     if candidate_sha != _IMMUTABLE_CANDIDATE:
         raise ValueError("candidate SHA does not match the protected Item 19 closeout")
 
+    candidate_quality_run_id, candidate_quality_run_attempt = verify_contract(contract)
     verify_control_plane(control_plane_sha, branch, control_plane_quality_run)
+
     verify_workflow_run(
         control_plane_sha,
         acceptance_run,
@@ -356,7 +373,11 @@ def verify_candidate_chain(
         label="acceptance",
     )
     verify_acceptance_evidence(
-        candidate_sha, candidate_quality_run_id, acceptance_run, acceptance_evidence
+        candidate_sha,
+        candidate_quality_run_id,
+        candidate_quality_run_attempt,
+        acceptance_run,
+        acceptance_evidence,
     )
 
     verify_workflow_run(
@@ -396,6 +417,7 @@ def verify_candidate_chain(
         "control_plane_sha": control_plane_sha,
         "control_plane_quality_run_id": str(quality_id),
         "candidate_quality_run_id": str(candidate_quality_run_id),
+        "candidate_quality_run_attempt": str(candidate_quality_run_attempt),
         "acceptance_authority_run_id": str(acceptance_id),
         "acceptance_authority_artifact_id": str(
             _positive_int(acceptance_artifact.get("id"), "acceptance artifact id")
