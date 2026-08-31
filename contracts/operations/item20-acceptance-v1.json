@@ -62,10 +62,16 @@
     "workflow_wiring": "not_implemented"
   },
   "handoff": {
+    "contract": "contracts/operations/item20-private-handoff-v1.json",
+    "sealed_envelope_primitive": "scripts/item20_private_handoff.py",
+    "sealed_envelope_primitive_status": "implemented_protected_not_wired",
     "private_phone_runner_vultr_credentials": "forbidden",
     "public_provider_uuid_recording": "forbidden",
     "public_transport_endpoint_recording": "forbidden",
-    "status": "not_implemented"
+    "recipient_public_key": "not_configured",
+    "private_workflow": "not_implemented",
+    "workflow_dispatch": "not_enabled",
+    "status": "sealed_primitive_implemented_handoff_not_enabled"
   },
   "identity_separation": {
     "candidate_sha": "immutable_item19_proven_software_identity",
@@ -84,7 +90,7 @@
   "orchestration": {
     "candidate_source": "exact_immutable_item19_proven_sha",
     "control_plane_source": "exact_current_protected_main",
-    "endpoint_handoff": "not_implemented",
+    "endpoint_handoff": "sealed_primitive_implemented_not_wired_or_enabled",
     "executor": "github-hosted",
     "phone_execution": false,
     "provider_credentials": "forbidden",
