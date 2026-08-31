@@ -108,26 +108,26 @@ Provider API calls are confined to the protected public typed acceptance lifecyc
 
 ### 4.1 Private endpoint handoff design boundary
 
-The protected design in `contracts/operations/item20-private-handoff-v1.json` is **not an enabled live capability**. While #115 remains open, the public Item 20 workflow must not write the reserved private endpoint secret, dispatch a mutable private Item 20 workflow or create a provider VM merely to test the handoff.
+The protected design in `contracts/operations/item20-private-handoff-v1.json` is **not an enabled live capability**. While #115 remains open, the public Item 20 workflow must not dispatch a mutable private Item 20 workflow or create a provider VM merely to test the handoff.
 
-For a future admitted live window, the public provider plane may hand the already-derived transport endpoint to the private phone plane only through an encrypted private-repository Actions secret envelope. The endpoint must never be passed as a workflow input, public artifact, public output, public summary, Issue comment or log.
+For a future admitted live window, the public provider plane may hand the already-derived transport endpoint to the private phone plane only as **application-level sealed ciphertext**. The public job must never write, update or delete a private-repository Actions secret as part of this handoff.
 
-The future envelope name is `ITEM20_SESSION_ENVELOPE`. Its payload is limited to:
+Before dispatch, the public job forms a plaintext envelope containing only:
 
 - exact immutable `candidate_sha`;
 - exact protected `control_plane_sha`;
 - one fresh opaque session nonce with at least 128 bits of entropy;
 - the derived transport endpoint.
 
-The envelope must not contain provider UUID, Vultr credentials, phone credentials or any alternative mutation selector. It is encrypted using the private repository Actions public key before upload and exists for one serialized Item 20 session only.
+Provider UUID, Vultr credentials, phone credentials and alternative mutation selectors are forbidden. The envelope is sealed with libsodium sealed-box semantics to a dedicated private-execution recipient public key. That public key is non-secret but must be introduced later as an exact protected canonical value before live implementation is enabled. The matching private key remains only in the private repository as `ITEM20_HANDOFF_PRIVATE_KEY_B64` and never reaches a public runner.
 
-The future private workflow dispatch carries only non-secret `candidate_sha`, `control_plane_sha` and `session_nonce`. It must exact-match all three values against the decrypted private envelope before the endpoint can be consumed. A stale or mismatched envelope fails closed.
+The future private `workflow_dispatch` carries `candidate_sha`, `control_plane_sha`, `session_nonce` and `sealed_session_envelope`. The **plaintext endpoint is forbidden from workflow inputs**. The private workflow decrypts the ciphertext and must exact-match candidate/control-plane/nonce before the endpoint can be consumed. Stale or replayed ciphertext fails closed.
 
-The future public handoff job may use `ITEM20_PHONE_HANDOFF_TOKEN` only as a narrowly scoped credential for `iamaman11/mobile-proxy-production`, with exactly `Actions: write` and `Secrets: write` repository permissions. That token must never reach the private self-hosted phone runner. The private phone runner still receives no Vultr credentials.
+The future public handoff job may use `ITEM20_PHONE_HANDOFF_TOKEN` only as a repository-scoped credential for `iamaman11/mobile-proxy-production`, with exactly `Actions: write`. `Secrets: write` and `Contents: write` are forbidden. This prevents the public provider job from replacing private device/signing secrets or private repository content. The handoff token must never reach the private self-hosted phone runner. The private phone runner still receives no Vultr credentials.
 
-Before writing a new envelope, the public control plane must prove no prior private Item 20 session remains active. After the private run reaches a terminal state, the envelope must be deleted and its absence confirmed. If private execution or envelope cleanup fails, deterministic cleanup of the exact verified provider target still runs. Acceptance cannot be marked successful until both the private envelope is absent and provider terminal cleanup is confirmed.
+Each ciphertext is single-use under its fresh session nonce. If dispatch, decryption or private execution fails, deterministic cleanup of the exact verified provider target still runs. Acceptance cannot be marked successful until the private workflow reaches its required terminal result and provider terminal cleanup is confirmed.
 
-The public evidence tuple may record the private workflow run identity/conclusion and cleanup booleans, but not endpoint, provider UUID, envelope contents, nonce value, token or other secret-derived material. Private evidence must not retain the endpoint after execution.
+The public evidence tuple may record the private workflow run identity/conclusion and cleanup state, but not plaintext endpoint, provider UUID, envelope plaintext, nonce value, handoff token, decryption key or other secret-derived material. Private evidence must not retain the plaintext endpoint after execution; the private dispatch may retain only sealed ciphertext.
 
 ## 5. Phone execution boundary
 
@@ -273,7 +273,8 @@ Reject the candidate and stop advancement for any of the following:
 - missing/wrong/conflicting ownership or generation;
 - signing-continuity or private-phone binding gate is not satisfied;
 - phone target is ambiguous or does not match the private registered binding;
-- private endpoint envelope is stale, mismatched, publicly exposed or still present after terminal private execution;
+- private endpoint envelope is unsealed, stale, replayed, mismatched or publicly exposed;
+- private dispatch credential would require `Secrets: write`, `Contents: write` or broader private-repository authority;
 - wrong tunnel or Android VPN owner;
 - stale/mismatched tunnel authority;
 - plaintext downgrade;
