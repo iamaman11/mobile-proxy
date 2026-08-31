@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "verify_android_release_contract.py"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("verify_android_release_contract", MODULE_PATH)
 module = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -11,6 +12,11 @@ SPEC.loader.exec_module(module)
 
 
 class AndroidReleaseContractTests(unittest.TestCase):
+    def test_current_repository_release_contract(self):
+        report = module.verify_contract(REPOSITORY_ROOT)
+        self.assertTrue(report["accepted"])
+        self.assertEqual(report["application_id"], "com.example.mobileproxy")
+
     def test_semver_maps_to_monotonic_android_version_code(self):
         self.assertEqual(module.android_version_code("0.1.3"), 1003)
         self.assertEqual(module.android_version_code("0.1.4"), 1004)
