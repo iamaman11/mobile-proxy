@@ -28,29 +28,31 @@
     "transport_endpoint": "derived_only_after_exact_verified_target_resolution_never_authority"
   },
   "transport": {
-    "mechanism": "private_repository_actions_secret_envelope_plus_non_secret_workflow_dispatch",
-    "private_secret_name": "ITEM20_SESSION_ENVELOPE",
+    "mechanism": "application_level_sealed_envelope_in_private_workflow_dispatch",
     "public_dispatch_credential_secret_name": "ITEM20_PHONE_HANDOFF_TOKEN",
     "public_dispatch_credential_scope": "private_repository_only",
     "required_private_repository_permissions": [
-      "Actions: write",
-      "Secrets: write"
+      "Actions: write"
     ],
     "private_dispatch_inputs": [
       "candidate_sha",
       "control_plane_sha",
-      "session_nonce"
+      "session_nonce",
+      "sealed_session_envelope"
     ],
-    "endpoint_in_dispatch_inputs": false,
-    "provider_uuid_in_envelope": false,
+    "plaintext_endpoint_in_dispatch_inputs": false,
+    "sealed_ciphertext_in_dispatch_inputs": true,
     "public_persistence": "forbidden",
-    "private_secret_encryption": "github_actions_repository_public_key_libsodium",
-    "private_secret_lifetime": "single_serialized_item20_session_only",
-    "dispatch_run_correlation": "fresh_session_nonce_without_endpoint_or_provider_identity"
+    "encryption": "libsodium_crypto_box_seal_to_dedicated_private_execution_recipient_key",
+    "recipient_public_key": "future_protected_canonical_public_value_not_secret",
+    "recipient_private_key_secret_name": "ITEM20_HANDOFF_PRIVATE_KEY_B64",
+    "recipient_private_key_location": "private_repository_actions_secret_only",
+    "public_job_private_secret_write": "forbidden",
+    "dispatch_run_correlation": "fresh_session_nonce_without_plaintext_endpoint_or_provider_identity"
   },
   "envelope": {
     "format_version": 1,
-    "fields": [
+    "plaintext_fields_before_sealing": [
       "candidate_sha",
       "control_plane_sha",
       "session_nonce",
@@ -64,27 +66,25 @@
     "serialized_public_lifecycle": true,
     "serialized_private_session": true,
     "stale_envelope_must_fail_tuple_match": true,
-    "no_active_prior_private_session_before_new_write": true,
-    "stale_secret_cleanup_before_replacement": true,
-    "private_secret_delete_after_terminal_private_run": true,
-    "private_secret_absence_must_be_confirmed": true,
-    "provider_cleanup_runs_even_if_handoff_cleanup_fails": true,
-    "acceptance_success_requires_private_secret_absence": true,
+    "ciphertext_single_use_by_session_nonce": true,
+    "private_decryption_key_not_mutated_by_public_job": true,
+    "provider_cleanup_runs_even_if_dispatch_or_private_execution_fails": true,
+    "acceptance_success_requires_terminal_private_result": true,
     "acceptance_success_requires_provider_terminal_cleanup": true
   },
   "evidence": {
     "public_endpoint_recording": false,
     "public_provider_uuid_recording": false,
     "public_secret_or_token_recording": false,
-    "private_endpoint_evidence_recording": false,
+    "private_plaintext_endpoint_evidence_recording": false,
     "public_dispatch_payload_may_record": [
       "candidate_sha",
       "control_plane_sha"
     ],
+    "private_dispatch_may_retain_only_sealed_ciphertext": true,
     "public_terminal_evidence_may_record": [
       "private_workflow_run_id",
       "private_workflow_conclusion",
-      "private_secret_absent",
       "provider_terminal_cleanup_confirmed"
     ]
   },
@@ -94,10 +94,12 @@
     "endpoint_in_public_output",
     "endpoint_in_public_summary",
     "endpoint_in_public_log",
-    "endpoint_in_workflow_dispatch_input",
+    "plaintext_endpoint_in_workflow_dispatch_input",
     "provider_uuid_in_handoff_envelope_or_dispatch",
     "vultr_credentials_on_private_phone_runner",
     "handoff_token_on_private_phone_runner",
+    "private_handoff_decryption_key_on_public_runner",
+    "public_handoff_job_with_private_repository_secrets_write",
     "handoff_while_issue_115_open",
     "handoff_without_fresh_exact_candidate_acceptance_authority",
     "handoff_without_fresh_exact_candidate_vultr_readonly_preflight",
