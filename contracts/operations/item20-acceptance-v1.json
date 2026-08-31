@@ -50,6 +50,7 @@
   },
   "future_live_candidate_verifier": {
     "candidate_control_plane_separation_required": true,
+    "candidate_quality_run_attempt": 1,
     "grants_live_authority": false,
     "performs_external_io": false,
     "selection": "candidate_specific_artifact_then_exact_control_plane_run",
