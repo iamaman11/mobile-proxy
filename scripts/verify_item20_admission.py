@@ -9,10 +9,13 @@ from pathlib import Path
 import re
 from typing import Mapping
 
+from verify_item20_candidate_evidence import verify_candidate_chain
+
 _CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
 _IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
 _QUALITY_WORKFLOW = "Quality"
 _QUALITY_WORKFLOW_PATH = ".github/workflows/quality.yml"
+_CANDIDATE_EVIDENCE_VERIFIER = "scripts/verify_item20_candidate_evidence.py"
 _REQUIRED_RUNNER_LABELS = ["self-hosted", "Linux", "X64", "android-production"]
 _REQUIRED_TOOLS = {"adb": True, "python": True, "git": True, "curl": True}
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -99,6 +102,8 @@ def verify_contract(contract: Mapping[str, object]) -> None:
     admission = contract.get("admission")
     if not isinstance(admission, dict) or admission != {
         "verifier": "scripts/verify_item20_admission.py",
+        "fresh_candidate_evidence_verifier": _CANDIDATE_EVIDENCE_VERIFIER,
+        "fresh_candidate_evidence_required": True,
         "required_issue_states": {
             "item19_tracker_124": "closed_completed",
             "item20_tracker_135": "open",
@@ -116,9 +121,23 @@ def verify_contract(contract: Mapping[str, object]) -> None:
         "acceptance_authority": "fresh_for_exact_candidate",
         "vultr_readonly_preflight": "fresh_for_exact_candidate",
         "same_candidate_required": True,
-        "current_core_verification": "not_implemented",
+        "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
     }:
         raise ValueError("Item 20 fresh candidate authority requirements differ")
+
+    future_verifier = contract.get("future_live_candidate_verifier")
+    if not isinstance(future_verifier, dict) or future_verifier != {
+        "candidate_control_plane_separation_required": True,
+        "candidate_control_plane_value_inequality_required": False,
+        "candidate_quality_run_attempt": 1,
+        "grants_live_authority": False,
+        "performs_external_io": False,
+        "selection": "candidate_specific_artifact_then_exact_control_plane_run",
+        "status": "protected_pure_verifier_consumed_by_admission_core",
+        "verifier": _CANDIDATE_EVIDENCE_VERIFIER,
+        "workflow_wiring": "not_implemented",
+    }:
+        raise ValueError("Item 20 fresh candidate verifier contract differs")
 
     authorization = contract.get("authorization")
     if not isinstance(authorization, dict) or authorization != {
@@ -243,6 +262,35 @@ def verify_phone_preflight(
         raise ValueError("private phone preflight does not prove one exact registered online device")
 
 
+def _verify_fresh_result(
+    candidate_sha: str,
+    control_plane_sha: str,
+    evidence: Mapping[str, object],
+) -> None:
+    if evidence.get("candidate_sha") != candidate_sha or evidence.get("control_plane_sha") != control_plane_sha:
+        raise ValueError("fresh candidate evidence result does not bind the exact admission identities")
+    for field in (
+        "candidate_control_plane_separation_verified",
+        "fresh_acceptance_authority_verified",
+        "fresh_vultr_readonly_preflight_verified",
+        "provider_probe_read_only_verified",
+    ):
+        if evidence.get(field) is not True:
+            raise ValueError(f"fresh candidate evidence result did not verify {field}")
+    for field in (
+        "provider_mutation_authorized",
+        "phone_mutation_authorized",
+        "endpoint_handoff_authorized",
+        "live_execution_authorized",
+        "final_production_authority",
+        "transport_endpoint_recorded",
+        "provider_identifier_recorded",
+        "secret_derived_identifier_recorded",
+    ):
+        if evidence.get(field) is not False:
+            raise ValueError(f"fresh candidate evidence result violates validation-only boundary: {field}")
+
+
 def verify_admission(
     candidate_sha: str,
     control_plane_sha: str,
@@ -253,6 +301,12 @@ def verify_admission(
     item20_issue: Mapping[str, object],
     signing_issue: Mapping[str, object],
     phone_preflight: Mapping[str, object],
+    acceptance_artifact: Mapping[str, object],
+    acceptance_run: Mapping[str, object],
+    acceptance_evidence: Mapping[str, object],
+    preflight_artifact: Mapping[str, object],
+    preflight_run: Mapping[str, object],
+    preflight_evidence: Mapping[str, object],
 ) -> dict[str, object]:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
@@ -262,6 +316,21 @@ def verify_admission(
     verify_control_plane(control_plane_sha, branch, quality_run)
     verify_issue_gates(item19_issue, item20_issue, signing_issue)
     verify_phone_preflight(control_plane_sha, phone_preflight)
+
+    fresh = verify_candidate_chain(
+        candidate_sha,
+        control_plane_sha,
+        contract,
+        branch,
+        quality_run,
+        acceptance_artifact,
+        acceptance_run,
+        acceptance_evidence,
+        preflight_artifact,
+        preflight_run,
+        preflight_evidence,
+    )
+    _verify_fresh_result(candidate_sha, control_plane_sha, fresh)
 
     return {
         "format_version": 1,
@@ -274,8 +343,9 @@ def verify_admission(
         "item20_tracker_open": True,
         "phone_signing_gate_completed": True,
         "private_phone_read_only_preflight_accepted": True,
-        "fresh_acceptance_authority_verified": False,
-        "fresh_vultr_readonly_preflight_verified": False,
+        "fresh_acceptance_authority_verified": True,
+        "fresh_vultr_readonly_preflight_verified": True,
+        "provider_probe_read_only_verified": True,
         "provider_mutation_authorized": False,
         "phone_mutation_authorized": False,
         "endpoint_handoff_authorized": False,
@@ -312,6 +382,12 @@ def main() -> int:
     parser.add_argument("--item20-issue", type=Path, required=True)
     parser.add_argument("--signing-issue", type=Path, required=True)
     parser.add_argument("--phone-preflight", type=Path, required=True)
+    parser.add_argument("--acceptance-artifact", type=Path, required=True)
+    parser.add_argument("--acceptance-run", type=Path, required=True)
+    parser.add_argument("--acceptance-evidence", type=Path, required=True)
+    parser.add_argument("--preflight-artifact", type=Path, required=True)
+    parser.add_argument("--preflight-run", type=Path, required=True)
+    parser.add_argument("--preflight-evidence", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -325,6 +401,12 @@ def main() -> int:
         _load_object(args.item20_issue),
         _load_object(args.signing_issue),
         _load_object(args.phone_preflight),
+        _load_object(args.acceptance_artifact),
+        _load_object(args.acceptance_run),
+        _load_object(args.acceptance_evidence),
+        _load_object(args.preflight_artifact),
+        _load_object(args.preflight_run),
+        _load_object(args.preflight_evidence),
     )
     _write_object(args.output, evidence)
     return 0

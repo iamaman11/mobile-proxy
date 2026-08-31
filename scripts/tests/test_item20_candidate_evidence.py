@@ -20,11 +20,13 @@ CONTROL_PLANE = "a" * 40
 CONTRACT = ROOT / "contracts/operations/item20-acceptance-v1.json"
 
 
-def branch() -> dict[str, object]:
-    return {"name": "main", "protected": True, "commit": {"sha": CONTROL_PLANE}}
+def branch(control_plane_sha: str = CONTROL_PLANE) -> dict[str, object]:
+    return {"name": "main", "protected": True, "commit": {"sha": control_plane_sha}}
 
 
-def workflow_run(*, name: str, path: str, run_id: int, created_at: str) -> dict[str, object]:
+def workflow_run(
+    *, name: str, path: str, run_id: int, created_at: str, control_plane_sha: str = CONTROL_PLANE
+) -> dict[str, object]:
     return {
         "id": run_id,
         "run_attempt": 1,
@@ -32,7 +34,7 @@ def workflow_run(*, name: str, path: str, run_id: int, created_at: str) -> dict[
         "path": path,
         "event": "issue_comment",
         "head_branch": "main",
-        "head_sha": CONTROL_PLANE,
+        "head_sha": control_plane_sha,
         "status": "completed",
         "conclusion": "success",
         "created_at": created_at,
@@ -40,7 +42,7 @@ def workflow_run(*, name: str, path: str, run_id: int, created_at: str) -> dict[
     }
 
 
-def control_quality() -> dict[str, object]:
+def control_quality(control_plane_sha: str = CONTROL_PLANE) -> dict[str, object]:
     return {
         "id": 900,
         "run_attempt": 1,
@@ -48,7 +50,7 @@ def control_quality() -> dict[str, object]:
         "path": ".github/workflows/quality.yml",
         "event": "push",
         "head_branch": "main",
-        "head_sha": CONTROL_PLANE,
+        "head_sha": control_plane_sha,
         "status": "completed",
         "conclusion": "success",
         "created_at": "2026-08-31T10:00:00Z",
@@ -56,25 +58,33 @@ def control_quality() -> dict[str, object]:
     }
 
 
-def acceptance_run() -> dict[str, object]:
+def acceptance_run(control_plane_sha: str = CONTROL_PLANE) -> dict[str, object]:
     return workflow_run(
         name="Vultr acceptance authority",
         path=".github/workflows/acceptance-authority.yml",
         run_id=1000,
         created_at="2026-08-31T10:05:00Z",
+        control_plane_sha=control_plane_sha,
     )
 
 
-def preflight_run() -> dict[str, object]:
+def preflight_run(control_plane_sha: str = CONTROL_PLANE) -> dict[str, object]:
     return workflow_run(
         name="Vultr read-only acceptance preflight",
         path=".github/workflows/vultr-readonly-preflight.yml",
         run_id=1100,
         created_at="2026-08-31T10:10:00Z",
+        control_plane_sha=control_plane_sha,
     )
 
 
-def artifact(name: str, run_id: int, created_at: str, artifact_id: int) -> dict[str, object]:
+def artifact(
+    name: str,
+    run_id: int,
+    created_at: str,
+    artifact_id: int,
+    control_plane_sha: str = CONTROL_PLANE,
+) -> dict[str, object]:
     return {
         "id": artifact_id,
         "name": name,
@@ -87,26 +97,28 @@ def artifact(name: str, run_id: int, created_at: str, artifact_id: int) -> dict[
             "repository_id": 1231016170,
             "head_repository_id": 1231016170,
             "head_branch": "main",
-            "head_sha": CONTROL_PLANE,
+            "head_sha": control_plane_sha,
         },
     }
 
 
-def acceptance_artifact() -> dict[str, object]:
+def acceptance_artifact(control_plane_sha: str = CONTROL_PLANE) -> dict[str, object]:
     return artifact(
         f"vultr-acceptance-authority-{CANDIDATE}",
         1000,
         "2026-08-31T10:06:00Z",
         2000,
+        control_plane_sha,
     )
 
 
-def preflight_artifact() -> dict[str, object]:
+def preflight_artifact(control_plane_sha: str = CONTROL_PLANE) -> dict[str, object]:
     return artifact(
         f"vultr-readonly-preflight-{CANDIDATE}",
         1100,
         "2026-08-31T10:11:00Z",
         2100,
+        control_plane_sha,
     )
 
 
@@ -216,9 +228,19 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         self.assertNotIn("VULTR_SSH_PRIVATE_KEY", serialized)
         self.assertNotIn("provider_uuid", serialized)
 
-    def test_candidate_cannot_be_reinterpreted_as_control_plane(self) -> None:
-        with self.assertRaisesRegex(ValueError, "identities to remain distinct"):
-            self.verify(control_plane_sha=CANDIDATE)
+    def test_identity_roles_can_share_the_same_sha_value(self) -> None:
+        evidence = self.verify(
+            control_plane_sha=CANDIDATE,
+            branch=branch(CANDIDATE),
+            control_plane_quality_run=control_quality(CANDIDATE),
+            acceptance_artifact=acceptance_artifact(CANDIDATE),
+            acceptance_run=acceptance_run(CANDIDATE),
+            preflight_artifact=preflight_artifact(CANDIDATE),
+            preflight_run=preflight_run(CANDIDATE),
+        )
+        self.assertEqual(evidence["candidate_sha"], CANDIDATE)
+        self.assertEqual(evidence["control_plane_sha"], CANDIDATE)
+        self.assertTrue(evidence["candidate_control_plane_separation_verified"])
 
     def test_acceptance_run_must_use_exact_control_plane_not_candidate(self) -> None:
         run = acceptance_run()
@@ -290,16 +312,20 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale or out of order"):
             self.verify(preflight_artifact=metadata)
 
-    def test_pure_verifier_remains_separate_from_admission_and_workflow_wiring(self) -> None:
+    def test_pure_verifier_is_consumed_by_admission_but_workflow_wiring_remains_disabled(self) -> None:
         future = self.contract["future_live_candidate_evidence"]
         assert isinstance(future, dict)
-        self.assertEqual(future["current_core_verification"], "not_implemented")
+        self.assertEqual(
+            future["current_core_verification"],
+            "protected_pure_verifier_consumed_by_admission_core",
+        )
 
         verifier = self.contract["future_live_candidate_verifier"]
         assert isinstance(verifier, dict)
         self.assertEqual(
-            verifier["status"], "protected_pure_verifier_not_consumed_by_admission_core"
+            verifier["status"], "protected_pure_verifier_consumed_by_admission_core"
         )
+        self.assertFalse(verifier["candidate_control_plane_value_inequality_required"])
         self.assertEqual(verifier["verifier"], "scripts/verify_item20_candidate_evidence.py")
         self.assertEqual(verifier["workflow_wiring"], "not_implemented")
         self.assertFalse(verifier["performs_external_io"])
