@@ -44,9 +44,13 @@
   ],
   "future_live_candidate_evidence": {
     "acceptance_authority": "fresh_for_exact_candidate",
-    "current_core_verification": "not_implemented",
+    "candidate_control_plane_separation_required": true,
+    "current_core_verification": "protected_pure_verifier_not_consumed_by_admission_core",
     "same_candidate_required": true,
-    "vultr_readonly_preflight": "fresh_for_exact_candidate"
+    "selection": "candidate_specific_artifact_then_exact_control_plane_run",
+    "verifier": "scripts/verify_item20_candidate_evidence.py",
+    "vultr_readonly_preflight": "fresh_for_exact_candidate",
+    "workflow_wiring": "not_implemented"
   },
   "handoff": {
     "private_phone_runner_vultr_credentials": "forbidden",
