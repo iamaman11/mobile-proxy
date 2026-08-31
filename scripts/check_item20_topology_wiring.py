@@ -10,6 +10,7 @@ from pathlib import Path
 ITEM20_CONTRACT = Path("contracts/operations/item20-acceptance-v1.json")
 ITEM20_READINESS_CONTRACT = Path("contracts/operations/item20-admission-readiness-v1.json")
 ITEM20_HANDOFF_CONTRACT = Path("contracts/operations/item20-private-handoff-v1.json")
+ITEM20_HANDOFF_PRIMITIVE = Path("scripts/item20_private_handoff.py")
 GITHUB_CONTRACT = Path("contracts/operations/github-control-plane-v1.json")
 TOPOLOGY_CONTRACT = Path("contracts/operations/production-topology-v1.json")
 ITEM20_WORKFLOW = Path(".github/workflows/item20-session-orchestration.yml")
@@ -67,6 +68,8 @@ EXPECTED_NEXT_LIFECYCLE = (
     "and_never_reuse_terminal_item_19_intent"
 )
 EXPECTED_HANDOFF_IMPLEMENTATION = {
+    "sealed_envelope_primitive": "scripts/item20_private_handoff.py",
+    "sealed_envelope_primitive_implemented": True,
     "public_handoff_enabled": False,
     "private_phone_workflow_enabled": False,
     "private_secret_write_enabled": False,
@@ -85,7 +88,7 @@ EXPECTED_HANDOFF_PRECONDITIONS = {
 EXPECTED_HANDOFF_IDENTITY = {
     "candidate_sha": "exact_immutable_item19_proven_candidate",
     "control_plane_sha": "exact_current_protected_main",
-    "session_nonce": "fresh_opaque_random_at_least_128_bits",
+    "session_nonce": "fresh_exact_128_bit_lowercase_hex_generated_with_os_csprng",
     "transport_endpoint": "derived_only_after_exact_verified_target_resolution_never_authority",
 }
 EXPECTED_HANDOFF_TRANSPORT = {
@@ -103,6 +106,7 @@ EXPECTED_HANDOFF_TRANSPORT = {
     "sealed_ciphertext_in_dispatch_inputs": True,
     "public_persistence": "forbidden",
     "encryption": "libsodium_crypto_box_seal_to_dedicated_private_execution_recipient_key",
+    "encryption_implementation": "system_libsodium_via_python_ctypes_fail_closed_if_unavailable",
     "recipient_public_key": "future_protected_canonical_public_value_not_secret",
     "recipient_private_key_secret_name": "ITEM20_HANDOFF_PRIVATE_KEY_B64",
     "recipient_private_key_location": "private_repository_actions_secret_only",
@@ -111,12 +115,14 @@ EXPECTED_HANDOFF_TRANSPORT = {
 }
 EXPECTED_HANDOFF_ENVELOPE = {
     "format_version": 1,
+    "canonical_json": "sorted_keys_compact_utf8",
     "plaintext_fields_before_sealing": [
         "candidate_sha",
         "control_plane_sha",
         "session_nonce",
         "transport_endpoint",
     ],
+    "plaintext_endpoint_cli_argument": "forbidden_file_only",
     "provider_uuid": "forbidden",
     "provider_credentials": "forbidden",
     "phone_credentials": "forbidden",
@@ -182,7 +188,7 @@ def _check_handoff_contract(handoff: dict[str, object]) -> list[str]:
     errors: list[str] = []
     expected_top = {
         "contract_version": 1,
-        "status": "protected_design_only_not_enabled",
+        "status": "protected_sealed_primitive_not_enabled",
         "canonical_repository": "iamaman11/mobile-proxy",
         "private_execution_repository": "iamaman11/mobile-proxy-production",
         "tracker_issue": 135,
@@ -205,6 +211,42 @@ def _check_handoff_contract(handoff: dict[str, object]) -> list[str]:
     for key, value in expected_sections.items():
         if handoff.get(key) != value:
             errors.append(f"Item 20 handoff contract section {key!r} differs from protected design")
+    return errors
+
+
+def _check_handoff_primitive(root: Path) -> list[str]:
+    errors: list[str] = []
+    path = root / ITEM20_HANDOFF_PRIMITIVE
+    if not path.is_file():
+        return ["protected Item 20 sealed handoff primitive is missing"]
+    source = path.read_text(encoding="utf-8")
+    for required in (
+        'find_library("sodium")',
+        "crypto_box_seal",
+        "crypto_box_seal_open",
+        "crypto_scalarmult_base",
+        "secrets.token_hex(16)",
+        'seal.add_argument("--endpoint-file"',
+        'unseal.add_argument("--endpoint-output"',
+    ):
+        if required not in source:
+            errors.append(f"Item 20 sealed handoff primitive is missing boundary token {required!r}")
+    lowered = source.lower()
+    for forbidden in (
+        "subprocess.",
+        "urllib.request",
+        "requests.",
+        "http.client",
+        "socket.",
+        "vultr_api_key",
+        "vultr_ssh_private_key",
+        "gh workflow run",
+        "adb ",
+        'add_argument("--endpoint"',
+        "print(",
+    ):
+        if forbidden in lowered:
+            errors.append(f"Item 20 sealed handoff primitive contains forbidden live token {forbidden!r}")
     return errors
 
 
@@ -286,11 +328,23 @@ def check_repository(root: Path) -> list[str]:
         errors.append("Item 20 protected contract must remain non-live and non-mutating")
 
     current_handoff = item20.get("handoff")
-    if not isinstance(current_handoff, dict) or current_handoff.get("status") != "not_implemented":
-        errors.append("Item 20 active acceptance contract must keep endpoint handoff unimplemented")
+    if not isinstance(current_handoff, dict) or current_handoff != {
+        "contract": "contracts/operations/item20-private-handoff-v1.json",
+        "sealed_envelope_primitive": "scripts/item20_private_handoff.py",
+        "sealed_envelope_primitive_status": "implemented_protected_not_wired",
+        "private_phone_runner_vultr_credentials": "forbidden",
+        "public_provider_uuid_recording": "forbidden",
+        "public_transport_endpoint_recording": "forbidden",
+        "recipient_public_key": "not_configured",
+        "private_workflow": "not_implemented",
+        "workflow_dispatch": "not_enabled",
+        "status": "sealed_primitive_implemented_handoff_not_enabled",
+    }:
+        errors.append("Item 20 active acceptance contract must keep sealed handoff primitive non-live and unwired")
 
     if handoff:
         errors.extend(_check_handoff_contract(handoff))
+    errors.extend(_check_handoff_primitive(root))
 
     execution = topology.get("execution")
     if not isinstance(execution, dict):
