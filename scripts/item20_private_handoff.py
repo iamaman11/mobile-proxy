@@ -7,7 +7,9 @@ contracts/operations/item20-private-handoff-v1.json.
 
 Plaintext transport endpoints are accepted only through caller-provided files and
 are never printed. Sealing/unsealing uses the system libsodium crypto_box_seal /
-crypto_box_seal_open API through ctypes. Missing libsodium fails closed.
+crypto_box_seal_open API through ctypes. Recipient key-pair consistency is checked
+locally from the private key with crypto_scalarmult_base. Missing libsodium fails
+closed.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from typing import Mapping, Protocol
 _CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
 _PRIVATE_REPOSITORY = "iamaman11/mobile-proxy-production"
 _IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
+_PRIVATE_KEY_ENV = "ITEM20_HANDOFF_PRIVATE_KEY_B64"
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _NONCE_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _KEY_BYTES = 32
@@ -45,6 +48,8 @@ class SealedBoxBackend(Protocol):
     def seal(self, plaintext: bytes, recipient_public_key: bytes) -> bytes: ...
 
     def unseal(self, ciphertext: bytes, recipient_private_key: bytes) -> bytes: ...
+
+    def derive_public_key(self, recipient_private_key: bytes) -> bytes: ...
 
 
 class LibsodiumSealedBox:
@@ -87,6 +92,16 @@ class LibsodiumSealedBox:
         array_type = ctypes.c_ubyte * len(data)
         return array_type.from_buffer_copy(data)
 
+    def derive_public_key(self, recipient_private_key: bytes) -> bytes:
+        if len(recipient_private_key) != _KEY_BYTES:
+            raise ValueError("recipient private key must decode to exactly 32 bytes")
+        secret_key = self._buffer(recipient_private_key)
+        public_key_type = ctypes.c_ubyte * _KEY_BYTES
+        public_key = public_key_type()
+        if self._lib.crypto_scalarmult_base(public_key, secret_key) != 0:
+            raise RuntimeError("libsodium recipient public-key derivation failed")
+        return bytes(public_key)
+
     def seal(self, plaintext: bytes, recipient_public_key: bytes) -> bytes:
         if len(recipient_public_key) != _KEY_BYTES:
             raise ValueError("recipient public key must decode to exactly 32 bytes")
@@ -105,17 +120,11 @@ class LibsodiumSealedBox:
         return bytes(output)
 
     def unseal(self, ciphertext: bytes, recipient_private_key: bytes) -> bytes:
-        if len(recipient_private_key) != _KEY_BYTES:
-            raise ValueError("recipient private key must decode to exactly 32 bytes")
         if len(ciphertext) <= _SEAL_OVERHEAD:
             raise ValueError("sealed ciphertext is too short")
 
         secret_key = self._buffer(recipient_private_key)
-        public_key_type = ctypes.c_ubyte * _KEY_BYTES
-        public_key = public_key_type()
-        if self._lib.crypto_scalarmult_base(public_key, secret_key) != 0:
-            raise RuntimeError("libsodium recipient public-key derivation failed")
-
+        public_key = self._buffer(self.derive_public_key(recipient_private_key))
         sealed = self._buffer(ciphertext)
         plaintext_type = ctypes.c_ubyte * (len(ciphertext) - _SEAL_OVERHEAD)
         plaintext = plaintext_type()
@@ -164,6 +173,18 @@ def _decode_key(value: str, kind: str) -> bytes:
     if base64.b64encode(decoded).decode("ascii") != value:
         raise ValueError(f"{kind} must use canonical padded base64")
     return decoded
+
+
+def verify_recipient_key_pair(
+    recipient_public_key_b64: str,
+    recipient_private_key_b64: str,
+    backend: SealedBoxBackend | None = None,
+) -> None:
+    expected_public_key = _decode_key(recipient_public_key_b64, "recipient public key")
+    private_key = _decode_key(recipient_private_key_b64, "recipient private key")
+    derived_public_key = (backend or LibsodiumSealedBox()).derive_public_key(private_key)
+    if not secrets.compare_digest(derived_public_key, expected_public_key):
+        raise ValueError("recipient private key does not match the provided recipient public key")
 
 
 def build_envelope(
@@ -275,6 +296,13 @@ def _read_text(path: Path, field: str) -> str:
     return value
 
 
+def _read_private_key_from_environment() -> str:
+    private_key = os.environ.get(_PRIVATE_KEY_ENV, "")
+    if not private_key:
+        raise ValueError("private handoff decryption key is unavailable")
+    return private_key
+
+
 def _write_private_text(path: Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
     os.chmod(path, 0o600)
@@ -286,6 +314,9 @@ def main() -> int:
 
     nonce = subparsers.add_parser("generate-nonce")
     nonce.add_argument("--output", type=Path, required=True)
+
+    key_pair = subparsers.add_parser("verify-recipient-key-pair")
+    key_pair.add_argument("--recipient-public-key-b64", required=True)
 
     seal = subparsers.add_parser("seal")
     seal.add_argument("--candidate-sha", required=True)
@@ -300,12 +331,18 @@ def main() -> int:
     unseal.add_argument("--control-plane-sha", required=True)
     unseal.add_argument("--session-nonce", required=True)
     unseal.add_argument("--sealed-envelope-file", type=Path, required=True)
-    unseal.add_argument("--private-key-env", default="ITEM20_HANDOFF_PRIVATE_KEY_B64")
     unseal.add_argument("--endpoint-output", type=Path, required=True)
 
     args = parser.parse_args()
     if args.command == "generate-nonce":
         _write_private_text(args.output, generate_session_nonce())
+        return 0
+
+    if args.command == "verify-recipient-key-pair":
+        verify_recipient_key_pair(
+            args.recipient_public_key_b64,
+            _read_private_key_from_environment(),
+        )
         return 0
 
     if args.command == "seal":
@@ -319,12 +356,9 @@ def main() -> int:
         _write_private_text(args.output, sealed)
         return 0
 
-    private_key = os.environ.get(args.private_key_env, "")
-    if not private_key:
-        raise ValueError("private handoff decryption key is unavailable")
     envelope = unseal_envelope(
         _read_text(args.sealed_envelope_file, "sealed handoff envelope"),
-        private_key,
+        _read_private_key_from_environment(),
         args.candidate_sha,
         args.control_plane_sha,
         args.session_nonce,
