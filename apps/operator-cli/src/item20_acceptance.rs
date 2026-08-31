@@ -16,7 +16,10 @@ pub struct Item20SessionIdentity {
 }
 
 impl Item20SessionIdentity {
-    pub fn new(candidate_sha: impl Into<String>, control_plane_sha: impl Into<String>) -> Result<Self> {
+    pub fn new(
+        candidate_sha: impl Into<String>,
+        control_plane_sha: impl Into<String>,
+    ) -> Result<Self> {
         let candidate_sha = candidate_sha.into();
         let control_plane_sha = control_plane_sha.into();
         validate_full_sha(&candidate_sha, "candidate")?;
@@ -96,7 +99,13 @@ mod tests {
         let identity = Item20SessionIdentity::new(CANDIDATE, CONTROL_PLANE).unwrap();
         assert_eq!(identity.candidate_sha(), CANDIDATE);
         assert_eq!(identity.control_plane_sha(), CONTROL_PLANE);
-        assert!(!identity.ownership_intent().unwrap().id().contains(CONTROL_PLANE));
+        assert!(
+            !identity
+                .ownership_intent()
+                .unwrap()
+                .id()
+                .contains(CONTROL_PLANE)
+        );
     }
 
     #[test]
