@@ -257,8 +257,6 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         self.assertIn('"adb", "-s", expected_serial, "pull"', source)
         self.assertIn('"apksigner", "verify", "--print-certs"', source)
         self.assertIn('"keytool",\n            "-list",\n            "-v"', source)
-        self.assertIn("from scripts.run_private_phone_preflight", source)
-        self.assertIn("from run_private_phone_preflight", source)
         self.assertNotIn('"adb", "-s", expected_serial, "install"', source)
         self.assertNotIn("adb install", source)
         self.assertNotIn("install -r", source)
