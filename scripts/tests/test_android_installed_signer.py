@@ -22,13 +22,11 @@ KEYSTORE_B64 = base64.b64encode(KEYSTORE).decode("ascii")
 
 class AndroidInstalledSignerTests(unittest.TestCase):
     def test_selects_unique_base_apk_from_split_inventory(self) -> None:
-        output = "\n".join(
-            [
-                "package:/data/app/example/split_config.en.apk",
-                "package:/data/app/example/base.apk",
-                "package:/data/app/example/split_config.xxhdpi.apk",
-            ]
-        )
+        output = "\n".join([
+            "package:/data/app/example/split_config.en.apk",
+            "package:/data/app/example/base.apk",
+            "package:/data/app/example/split_config.xxhdpi.apk",
+        ])
         self.assertEqual(module.select_installed_apk_path(output), "/data/app/example/base.apk")
 
     def test_rejects_missing_or_ambiguous_installed_apk_inventory(self) -> None:
