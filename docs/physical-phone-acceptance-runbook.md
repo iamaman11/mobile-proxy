@@ -1,9 +1,10 @@
 # Immutable-SHA Physical Phone Acceptance Runbook
 
-Status: **normative execution contract for Production Baseline item 20; not yet authorized for live execution while item 19 and the mutable-phone gate remain incomplete**.
+Status: **normative execution contract for Production Baseline item 20. Item 19 provider proof is COMPLETE; live Item 20 execution remains blocked while #115 is unresolved and until the protected Item 20 admission/session capability is complete.**
 
 Canonical roadmap: `docs/PRODUCTION_BASELINE_PLAN.md`  
-Item-19 tracker: #124  
+Item-20 tracker: #135  
+Completed Item-19 tracker: #124  
 Phone GitOps boundary: `docs/operations/phone-gitops-runtime.md`  
 Production topology: `contracts/operations/production-topology-v1.json`
 
@@ -13,7 +14,7 @@ Physical acceptance is split across two deliberately separate execution planes:
 
 ```text
 public canonical repository
-  -> GitHub-hosted item-19 Vultr acceptance lifecycle
+  -> GitHub-hosted Item 20 acceptance-session lifecycle
   -> exact accepted candidate on one controlled acceptance VM
 
 private execution satellite
@@ -28,16 +29,16 @@ The boundaries are mandatory:
 - the private phone runner must never receive `VULTR_API_KEY` or `VULTR_SSH_PRIVATE_KEY`;
 - the public Vultr job must never receive the private phone serial, ADB credentials or Android signing secrets;
 - GCP/Google Cloud, `gcloud`, workstation-managed VM lifecycle and manual provider SSH are not acceptance fallbacks;
-- provider mutation is performed only through the item-19 typed Vultr lifecycle and durable binding state;
+- provider mutation is performed only through the protected typed acceptance lifecycle and durable binding state under the distinct Item 20 ownership intent;
 - phone mutation is performed only through the private `android-production` execution boundary.
 
-This runbook describes item 20. It does **not** authorize item-20 phone mutation while item 19 is ACTIVE or while the canonical signing-continuity gate is unresolved.
+This runbook describes Item 20. It does **not** authorize Item 20 provider or phone mutation while #115 is unresolved or before the exact-current Item 20 admission/session gates are protected and satisfied.
 
 ## 2. Required gates before opening the physical window
 
-All of the following must be true before the first mutable phone action:
+All of the following must be true before the first Item 20 provider mutation or mutable phone action:
 
-1. Items 15, 16, 17 and 18 are `COMPLETE`.
+1. Items 15, 16, 17, 18 and 19 are `COMPLETE`.
 2. Item 19 is live-complete for the exact candidate used by this run:
    - one or zero controlled acceptance-VM semantics proven;
    - exact provider UUID/ownership/generation binding verified;
@@ -47,12 +48,13 @@ All of the following must be true before the first mutable phone action:
 3. The exact full lowercase 40-character candidate SHA has a successful canonical `Quality` push on protected `main` and immutable candidate evidence.
 4. Fresh immutable `/accept-candidate <sha>` authority exists for that same SHA.
 5. Fresh `/vultr-readonly-preflight <sha>` evidence exists for that same SHA.
-6. The private `android-production` read-only preflight passes for exactly the registered device in the same execution window.
-7. The signing-continuity gate in #115 / `docs/operations/phone-gitops-runtime.md` is resolved sufficiently to enable a mutable phone workflow.
-8. No unresolved P0/P1 defect exists.
-9. The final protected `v*` release tag is still absent; item 20 precedes final release publication.
+6. The current protected Item 20 control-plane SHA has successful exact post-merge `Quality` evidence and is kept distinct from the immutable software candidate SHA.
+7. The private `android-production` read-only preflight passes for exactly the registered device in the same execution window.
+8. The signing-continuity gate in #115 / `docs/operations/phone-gitops-runtime.md` is resolved sufficiently to enable the mutable phone workflow.
+9. No unresolved P0/P1 defect exists.
+10. The final protected `v*` release tag is still absent; Item 20 precedes final release publication.
 
-If any gate is absent, stale, ambiguous or belongs to a different SHA, stop before phone mutation.
+If any gate is absent, stale, ambiguous or belongs to a different candidate/control-plane identity, stop before provider or phone mutation.
 
 ### Signing gate is not APK-step-specific
 
@@ -62,46 +64,49 @@ Changing that policy would require an explicit architecture/security decision. I
 
 ## 3. Exact candidate and deployment identity
 
-The item-20 workflow must receive the exact accepted candidate SHA and immutable evidence identities from canonical GitHub evidence. It must not select `latest`, a moving branch, an arbitrary artifact or a manually entered provider resource.
+The Item 20 workflow must receive the exact accepted candidate SHA and immutable evidence identities from canonical GitHub evidence. It must independently bind the protected `control_plane_sha` that contains the Item 20 orchestration logic. It must not select `latest`, a moving branch, an arbitrary artifact or a manually entered provider resource.
 
 Before traffic tests, verify and record bounded evidence for:
 
-- exact candidate SHA;
-- canonical Quality run identity;
+- exact immutable candidate SHA;
+- exact protected Item 20 control-plane SHA;
+- canonical Quality run identities for the candidate and current control plane as required by policy;
 - immutable candidate artifact identity and digest;
-- item-19 acceptance-authority/preflight identities;
-- item-19 acceptance lifecycle evidence identity;
+- Item 19 acceptance-authority/preflight identities;
+- Item 19 provider-proof lifecycle evidence identity;
+- Item 20 fresh-session evidence identity;
 - exact server artifact identity/digest;
 - exact bound provider UUID represented only in the provider lifecycle evidence allowed by policy;
 - exact phone release/package identity;
 - private phone execution run identity;
 - tester and UTC timestamps.
 
-Never record credentials, private keys, raw phone serials, full proxy URLs or unrestricted logs in public evidence.
+Never record credentials, private keys, raw phone serials, provider UUID/IP, full proxy URLs or unrestricted logs in public evidence.
 
-## 4. Fresh Item 20 acceptance session from the protected Item 19 capability
+## 4. Fresh Item 20 acceptance session from the protected typed lifecycle
 
 Item 20 does not select or adopt an arbitrary or pre-existing VM. The public canonical control plane
 opens exactly one fresh JIT acceptance VM through the protected typed lifecycle under a distinct
 Item 20 ownership intent. The terminal Item 19 proof intent is never reused.
 
-The lifecycle capability and proof are handed off from Item 19. The fresh Item 20 server session is
+The lifecycle capability and provider-proof invariants are handed off from Item 19. The fresh Item 20 server session is
 accepted only when the canonical provider lifecycle proves:
 
 - `LifecycleScope::Acceptance`;
-- exact immutable ownership intent for the candidate;
+- exact immutable Item 20 ownership intent for the candidate;
 - provider-assigned immutable UUID is the authority;
 - exact project/manager/scope/intent/generation tags;
 - complete provider enumeration was used before lifecycle decisions;
 - deployed server bytes/manifest/SHA match the exact candidate;
 - public listeners and controlled probes required for the physical test are healthy;
 - the fresh session uses a distinct Item 20 ownership intent and does not reuse terminal Item 19 state;
+- the immutable `candidate_sha` remains distinct from the protected `control_plane_sha`;
 - the lifecycle remains under the single repository-wide serialized acceptance writer;
 - deterministic cleanup runs after the physical session and confirms provider absence before terminal CAS.
 
-IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority.
+IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority, and the raw endpoint must not be published in public evidence.
 
-Item 20 must not call GCP APIs, Vultr APIs, `gcloud`, a Vultr CLI or a workstation VM-provisioning script.
+Item 20 must not call GCP APIs, `gcloud`, a Vultr CLI or a workstation VM-provisioning script. Vultr API access is confined to the canonical protected typed GitHub-hosted acceptance lifecycle.
 
 ## 5. Phone execution boundary
 
@@ -175,7 +180,7 @@ After recovery prove:
 
 ### Stage C — forced TLS/TCP reserve
 
-The public item-20 server-side test helper, operating only on the already verified item-19 acceptance target, must block the QUIC path while leaving certificate-pinned TLS/TCP reserve reachable.
+The public Item 20 server-side test helper, operating only on the already verified Item 20 acceptance target, must block the QUIC path while leaving certificate-pinned TLS/TCP reserve reachable.
 
 This is a bounded test action against the verified acceptance target, not a new provider lifecycle selection.
 
@@ -222,16 +227,18 @@ Prove:
 The final physical acceptance summary must prove one coherent tuple:
 
 ```text
-exact candidate SHA
+exact immutable candidate SHA
++ exact protected Item 20 control-plane SHA
 + immutable candidate evidence
-+ item-19 acceptance authority/preflight/lifecycle evidence
++ Item 19 acceptance authority/preflight/provider-proof lifecycle evidence
++ fresh Item 20 acceptance-session evidence
 + exact server artifact identity
 + exact private phone release identity
 + one registered physical device binding
 + all required physical stages
 ```
 
-Evidence from different source SHAs, different server artifact digests or a rebuilt phone release cannot be combined.
+Evidence from different candidate SHAs, different control-plane sessions, different server artifact digests or a rebuilt phone release cannot be combined.
 
 Public evidence must be bounded and non-secret. Private phone evidence may contain only the minimum sensitive data required for execution/debugging and must not turn the private satellite into canonical project authority.
 
@@ -239,8 +246,10 @@ Public evidence must be bounded and non-secret. Private phone evidence may conta
 
 Reject the candidate and stop advancement for any of the following:
 
-- source SHA or immutable artifact identity changes during the run;
-- item-19 lifecycle evidence does not match the candidate;
+- candidate SHA or immutable artifact identity changes during the run;
+- protected Item 20 control-plane identity changes during the admitted session;
+- Item 19 provider-proof evidence does not match the candidate;
+- Item 20 session identity or ownership intent does not match the admitted candidate/control plane;
 - server artifact identity cannot be verified;
 - provider target would need to be selected by name, IP, list order or arbitrary UUID input;
 - more than one resource claims the acceptance ownership intent;
@@ -258,10 +267,10 @@ Reject the candidate and stop advancement for any of the following:
 - unresolved P0/P1 defect;
 - report-set mismatch.
 
-Any source change requires a new immutable candidate and fresh evidence/authority for the new SHA.
+Any software candidate change requires a new immutable candidate and fresh candidate evidence/authority. Any control-plane change after admission requires a fresh Item 20 admission bound to the new protected control-plane SHA.
 
 ## 10. Completion boundary
 
-Successful item-20 physical acceptance authorizes work on item 21; it does not itself create the final release or grant production-Vultr authority.
+Successful Item 20 physical acceptance authorizes work on Item 21; it does not itself create the final release or grant production-Vultr authority.
 
 Item 21 may create the final immutable release evidence and protected annotated `vMAJOR.MINOR.PATCH` tag only after this physical proof succeeds. Item 22 may perform production promotion only from that accepted final release tuple.
