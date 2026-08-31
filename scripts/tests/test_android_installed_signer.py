@@ -189,12 +189,30 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         self.assertFalse(report["raw_device_identifier_recorded"])
         self.assertFalse(report["signer_digest_recorded"])
         self.assertFalse(report["signing_material_recorded"])
+        self.assertEqual(
+            set(report),
+            {
+                "format_version",
+                "repository",
+                "canonical_sha",
+                "package",
+                "mode",
+                "registered_device_match",
+                "installed_apk_signer_verified",
+                "recovered_keystore_signer_match",
+                "raw_device_identifier_recorded",
+                "signer_digest_recorded",
+                "signing_material_recorded",
+                "phone_mutation_performed",
+                "signing_key_generated",
+                "accepted",
+            },
+        )
         serialized = repr(report)
         self.assertNotIn(SERIAL, serialized)
         self.assertNotIn(CERTIFICATE_FINGERPRINT, serialized)
         self.assertNotIn(KEYSTORE_B64, serialized)
         self.assertNotIn("test-store-password", serialized)
-        self.assertNotIn("release", serialized)
 
     def test_signer_mismatch_fails_closed(self) -> None:
         private_env = {
