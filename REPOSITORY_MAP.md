@@ -1,6 +1,6 @@
 # Repository Map
 
-Updated: 2026-08-30  
+Updated: 2026-08-31  
 Canonical repository: `iamaman11/mobile-proxy`
 
 ## Authority
@@ -18,6 +18,11 @@ The exact current Rust workspace dependency graph is machine-readable in
 `contracts/governance/module-boundaries-v1.json`. Current authoritative/operational mutable-state
 ownership is registered in `contracts/governance/state-ownership-v1.json`. Both are enforced by the
 required Quality Gate.
+
+Current delivery status belongs to `docs/PRODUCTION_BASELINE_PLAN.md`; exact execution/control-plane
+state belongs to `contracts/operations/production-topology-v1.json` and
+`contracts/operations/github-control-plane-v1.json`. Status summaries in navigation documents are
+orientation only and must not become parallel roadmaps.
 
 ## Top-level ownership
 
@@ -61,10 +66,12 @@ required Quality Gate.
 ```text
 iamaman11/mobile-proxy (PUBLIC, canonical)
   -> PR / Quality Gate / protected main
-  -> annotated protected release tag
-  -> release artifacts + provenance
-  -> GitHub-hosted Vultr execution
-  -> private phone execution command
+  -> exact immutable pre-release candidate + acceptance evidence
+  -> GitHub-hosted bounded Vultr acceptance lifecycle
+  -> private phone execution command for physical acceptance
+  -> only after physical acceptance: protected annotated release tag
+  -> immutable release artifacts + provenance
+  -> GitHub-hosted production-vultr promotion
 
 iamaman11/mobile-proxy-production (PRIVATE, execution-only)
   -> thin caller/shim
@@ -160,15 +167,28 @@ change.
 
 ## Current production-control status
 
-The codebase has a working legacy runtime and canonical SQLite/reverse-tunnel components, but the
-new production-control migration is intentionally incomplete:
+Production Baseline Items 15–19 are **COMPLETE**. Item 20 is the first unfinished item and its live
+physical execution is fail-closed while signing-continuity gate #115 remains OPEN.
+
+Current protected/proven state:
 
 - public GitHub governance and trust-zone contracts are established;
 - legacy public deployment is blocked fail-closed;
-- typed Vultr provider lifecycle is still pending;
-- live read-only Vultr preflight is pending;
-- private phone execution workflow and live read-only phone preflight are pending;
-- autonomous release-control entrypoint and corrected immutable-release publication are pending.
+- private `android-production` read-only runner/registered-device preflight has passed;
+- immutable pre-release acceptance authority and GitHub-hosted Vultr read-only preflight have passed;
+- provider-neutral lifecycle policy and typed Vultr UUID/ownership/generation adapter are implemented;
+- Item 19 bounded provider proof deployed and verified immutable candidate
+  `d151dbdd156279e32a5361d304c90f996bd2d565`, then deterministically deleted the proof VM and
+  reached durable terminal state;
+- Item 20 has protected non-live orchestration/readiness foundations, including exact readiness
+  consumption in the pure admission core and a bounded readiness-artifact verifier.
+
+Still pending/blocked:
+
+- complete Item 20 session/workflow composition and the later live physical sequence;
+- mutable phone install/update/verify/rollback until #115 signing continuity is satisfied;
+- final protected annotated release/tag publication ordering;
+- final `production-vultr` promotion and end-to-end production rollback proof.
 
 Do not interpret existing `operator-cli`, GCP manifests or historical ADB/SSH procedures as an
 authorised production shortcut while those gates are pending.

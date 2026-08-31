@@ -18,7 +18,7 @@ If context is missing, start with:
 
 `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` is the normative **acceptance matrix**, not a competing implementation roadmap. `docs/future/` is non-active future direction. After reading the entry documents, inspect current `main`, open PRs and the latest permanent workflow results as required by the Production Baseline context-loss protocol.
 
-The canonical GitOps migration/status tracker is Issue #90 in this repository.
+The canonical GitOps migration/status tracker is Issue #90 in this repository. The active delivery status is owned by `docs/PRODUCTION_BASELINE_PLAN.md`, and the machine-readable execution topology is owned by `contracts/operations/production-topology-v1.json`; copied status summaries must not override either source.
 
 `iamaman11/mobile-proxy-production` is a **private execution satellite only**. Its Issue #1 is a
 reserved phone command/audit transport, not a roadmap or source of project truth.
@@ -37,7 +37,8 @@ Do not create a competing short-term plan here. In particular, bulk governance J
 - protected `main`: PR + `Quality Gate`, no bypass, no deletion/non-fast-forward;
 - protected `v*` tags: no bypass, no deletion/non-fast-forward;
 - public repository self-hosted runners: forbidden;
-- Vultr execution: GitHub-hosted only through tag-only `production-vultr`;
+- pre-release Vultr acceptance: GitHub-hosted only through the bounded `acceptance-vultr` workflow capability;
+- final Vultr production: GitHub-hosted only through tag-only `production-vultr` after final release authority exists;
 - phone execution: private `mobile-proxy-production` caller context -> `android-production` runner;
 - legacy public deploy: intentionally fail-closed;
 - release immutability: not enabled until publish ordering is fixed.
@@ -46,15 +47,24 @@ The machine-readable state is under `contracts/operations/`.
 
 ## Current production-migration status
 
-Not yet enabled:
+Canonical delivery status: Production Baseline Items 15–19 are **COMPLETE** and Item 20 is the first unfinished item.
 
-- agent-invokable protected annotated-tag creation/release control;
-- typed Vultr lifecycle adapter and live Vultr deployment;
-- live read-only Vultr preflight proof;
-- private phone preflight/deploy/verify/rollback workflow;
-- live read-only phone runner/device proof;
-- final Android signing/release path;
-- deterministic end-to-end production rollback proof.
+Already proven/protected:
+
+- private read-only `android-production` runner/registered-device preflight;
+- immutable pre-release acceptance authority;
+- GitHub-hosted Vultr read-only account/key preflight;
+- provider-neutral lifecycle plus typed Vultr UUID/ownership/generation-CAS adapter;
+- bounded Item 19 provider proof for immutable candidate `d151dbdd156279e32a5361d304c90f996bd2d565`, including exact-candidate deployment/verification and deterministic proof-VM cleanup;
+- protected non-live Item 20 foundation, including exact readiness-result consumption in the pure admission core and a bounded readiness-artifact verifier.
+
+Still blocked/not complete:
+
+- Item 20 session-workflow consumption/wiring beyond the current non-live foundation;
+- mutable phone install/update/network/reboot/rollback while signing-continuity gate #115 is OPEN;
+- final Android signing/release path and retained signed rollback artifacts;
+- final annotated `v*` release authority and corrected immutable publication ordering;
+- `production-vultr` promotion and deterministic end-to-end production rollback proof.
 
 Do not use a workstation command, raw ADB, manual SSH, GCP/Vultr CLI or the legacy deployment
 workflow as a shortcut around these gates.
@@ -71,7 +81,7 @@ job logs.
 
 ## Immutable release identity
 
-Both VM and phone targets must refer to the same canonical release tuple:
+Both VM and phone targets must refer to the same canonical release tuple for final production:
 
 - annotated `vMAJOR.MINOR.PATCH` tag;
 - full Git SHA;
@@ -80,7 +90,7 @@ Both VM and phone targets must refer to the same canonical release tuple:
 - provenance/attestation identity;
 - deployment ID `mobile-proxy-<tag>-<first12sha>`.
 
-There is no production meaning for `latest` or for a mutable branch.
+Pre-release acceptance deliberately uses an exact immutable candidate SHA plus its verified acceptance evidence instead of creating the final tag early. There is no production or acceptance meaning for `latest` or for a mutable branch.
 
 ## Runtime/product compatibility
 
