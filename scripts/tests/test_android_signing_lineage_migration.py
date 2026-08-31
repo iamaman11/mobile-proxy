@@ -23,58 +23,61 @@ class AndroidSigningLineageMigrationTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(name, "1.1.0")
 
+    def release_evidence(self, *, source_preserved: bool = True) -> dict[str, object]:
+        return {
+            "format_version": 1,
+            "repository": "iamaman11/mobile-proxy",
+            "canonical_sha": "a" * 40,
+            "android_baseline_ref": "v0.1.3",
+            "android_functional_source_preserved": source_preserved,
+            "application_id": "com.example.mobileproxy",
+            "version_name": "0.1.4",
+            "version_code": 1004,
+            "release_contract_verified": True,
+            "keystore_verified": True,
+            "apk_signature_verified": True,
+            "apk_signer_matches_private_key": True,
+            "production_apk_signed": True,
+            "phone_access_performed": False,
+            "phone_mutation_performed": False,
+            "artifact_digest": "b3:" + "b" * 64,
+            "artifact_digest_algorithm": "blake3-256",
+            "artifact_digest_domain": "mobile-proxy/android-apk/v1",
+            "accepted": True,
+        }
+
     def test_release_evidence_requires_preserved_august_source(self):
         with tempfile.TemporaryDirectory() as raw:
             apk = Path(raw) / "app.apk"
             apk.write_bytes(b"signed-apk")
-            evidence = {
-                "format_version": 1,
-                "repository": "iamaman11/mobile-proxy",
-                "canonical_sha": "a" * 40,
-                "android_baseline_ref": "v0.1.3",
-                "android_functional_source_preserved": False,
-                "application_id": "com.example.mobileproxy",
-                "version_name": "0.1.4",
-                "version_code": 1004,
-                "release_contract_verified": True,
-                "keystore_verified": True,
-                "apk_signature_verified": True,
-                "apk_signer_matches_private_key": True,
-                "production_apk_signed": True,
-                "phone_access_performed": False,
-                "phone_mutation_performed": False,
-                "artifact_sha256": "b" * 64,
-                "accepted": True,
-            }
             with self.assertRaises(module.MigrationFailure):
-                module.verify_release_evidence(evidence, "a" * 40, apk, "0.1.4", 1004)
+                module.verify_release_evidence(
+                    self.release_evidence(source_preserved=False),
+                    "a" * 40,
+                    apk,
+                    Path(raw) / "digest-tool",
+                    "0.1.4",
+                    1004,
+                )
 
-    def test_release_evidence_requires_exact_apk_checksum(self):
+    def test_release_evidence_requires_exact_apk_digest(self):
         with tempfile.TemporaryDirectory() as raw:
             apk = Path(raw) / "app.apk"
             apk.write_bytes(b"signed-apk")
-            evidence = {
-                "format_version": 1,
-                "repository": "iamaman11/mobile-proxy",
-                "canonical_sha": "a" * 40,
-                "android_baseline_ref": "v0.1.3",
-                "android_functional_source_preserved": True,
-                "application_id": "com.example.mobileproxy",
-                "version_name": "0.1.4",
-                "version_code": 1004,
-                "release_contract_verified": True,
-                "keystore_verified": True,
-                "apk_signature_verified": True,
-                "apk_signer_matches_private_key": True,
-                "production_apk_signed": True,
-                "phone_access_performed": False,
-                "phone_mutation_performed": False,
-                "artifact_sha256": "b" * 64,
-                "accepted": True,
-            }
-            with mock.patch.object(module, "sha256_file", return_value="c" * 64):
+            with mock.patch.object(
+                module,
+                "typed_artifact_digest",
+                return_value="b3:" + "c" * 64,
+            ):
                 with self.assertRaises(module.MigrationFailure):
-                    module.verify_release_evidence(evidence, "a" * 40, apk, "0.1.4", 1004)
+                    module.verify_release_evidence(
+                        self.release_evidence(),
+                        "a" * 40,
+                        apk,
+                        Path(raw) / "digest-tool",
+                        "0.1.4",
+                        1004,
+                    )
 
     def test_each_mutation_calls_registered_device_preflight_first(self):
         serial = "registered-device"
@@ -86,8 +89,14 @@ class AndroidSigningLineageMigrationTests(unittest.TestCase):
             module.uninstall(serial)
             module.install(serial, apk)
         self.assertEqual(preflight.call_count, 2)
-        self.assertEqual(adb_call.call_args_list[0].args[:3], (serial, "uninstall", module._PACKAGE))
-        self.assertEqual(adb_call.call_args_list[1].args[:3], (serial, "install", str(apk)))
+        self.assertEqual(
+            adb_call.call_args_list[0].args[:3],
+            (serial, "uninstall", module._PACKAGE),
+        )
+        self.assertEqual(
+            adb_call.call_args_list[1].args[:3],
+            (serial, "install", str(apk)),
+        )
 
     def test_supervisor_restart_is_exact_runtime_process_only(self):
         shell = module._supervisor_restart_shell()
