@@ -41,9 +41,9 @@ class Item20AdmissionReadinessTests(unittest.TestCase):
     def test_contract_is_exact_validation_only(self) -> None:
         contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
         selector.verify_readiness_contract(contract)
-        self.assertEqual(
-            contract["candidate_evidence_workflow"]["admission_core_wiring"], "not_implemented"
-        )
+        workflow = contract["candidate_evidence_workflow"]
+        self.assertEqual(workflow["admission_core_wiring"], "implemented_exact_result_match")
+        self.assertEqual(workflow["session_workflow_wiring"], "not_implemented")
         self.assertFalse(contract["authorization"]["provider_mutation_authorized"])
         self.assertFalse(contract["authorization"]["phone_mutation_authorized"])
         self.assertFalse(contract["authorization"]["live_execution_authorized"])
