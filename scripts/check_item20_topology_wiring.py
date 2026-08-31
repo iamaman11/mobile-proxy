@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep protected Item 20 non-live orchestration wired into canonical control-plane contracts."""
+"""Keep protected Item 20 non-live surfaces wired into canonical control-plane contracts."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 ITEM20_CONTRACT = Path("contracts/operations/item20-acceptance-v1.json")
+ITEM20_READINESS_CONTRACT = Path("contracts/operations/item20-admission-readiness-v1.json")
 ITEM20_HANDOFF_CONTRACT = Path("contracts/operations/item20-private-handoff-v1.json")
 GITHUB_CONTRACT = Path("contracts/operations/github-control-plane-v1.json")
 TOPOLOGY_CONTRACT = Path("contracts/operations/production-topology-v1.json")
@@ -26,13 +27,38 @@ EXPECTED_SURFACE = {
     "live_execution": False,
     "final_production_authority": False,
 }
+EXPECTED_READINESS_SURFACE = {
+    "contract": "contracts/operations/item20-admission-readiness-v1.json",
+    "status": "protected_read_only_foundation_not_live_authority",
+    "workflow": ".github/workflows/item20-admission-readiness.yml",
+    "executor": "github-hosted",
+    "environment": "none",
+    "permissions": ["actions:read", "contents:read"],
+    "provider_credentials": "forbidden",
+    "provider_api_execution": False,
+    "provider_mutation": False,
+    "phone_execution": False,
+    "endpoint_handoff": False,
+    "live_execution": False,
+    "final_production_authority": False,
+    "admission_core_wiring": "not_implemented",
+}
 
 EXPECTED_TOPOLOGY_EXECUTION = (
     "GitHub-hosted exact-current protected-main validation plus exact immutable candidate build only; "
     "no acceptance-vultr environment, provider credentials, provider mutation, phone execution or endpoint handoff"
 )
+EXPECTED_READINESS_TOPOLOGY_EXECUTION = (
+    "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence against exact "
+    "current protected control-plane; actions:read plus contents:read only; no provider credentials/API "
+    "execution, provider mutation, phone execution or endpoint handoff"
+)
 EXPECTED_MIGRATION = (
     "protected_non_live_validation_and_exact_candidate_build_only_no_provider_or_phone_authority"
+)
+EXPECTED_READINESS_MIGRATION = (
+    "protected_read_only_candidate_evidence_validation_no_provider_or_phone_authority_"
+    "admission_core_wiring_not_implemented"
 )
 EXPECTED_NEXT_LIFECYCLE = (
     "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_"
@@ -183,16 +209,45 @@ def _check_handoff_contract(handoff: dict[str, object]) -> list[str]:
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     item20 = _load(root, ITEM20_CONTRACT, errors)
+    readiness = _load(root, ITEM20_READINESS_CONTRACT, errors)
     handoff = _load(root, ITEM20_HANDOFF_CONTRACT, errors)
     github = _load(root, GITHUB_CONTRACT, errors)
     topology = _load(root, TOPOLOGY_CONTRACT, errors)
 
     if github.get("item20_acceptance_contract") != str(ITEM20_CONTRACT):
         errors.append("GitHub control plane does not bind the protected Item 20 contract")
+    if github.get("item20_admission_readiness_contract") != str(ITEM20_READINESS_CONTRACT):
+        errors.append("GitHub control plane does not bind the protected Item 20 admission-readiness contract")
     if github.get("item20_private_handoff_contract") != str(ITEM20_HANDOFF_CONTRACT):
         errors.append("GitHub control plane does not bind the protected Item 20 private handoff design")
     if github.get("item20_non_live_orchestration") != EXPECTED_SURFACE:
         errors.append("GitHub Item 20 non-live orchestration wiring differs from protected value")
+    if github.get("item20_admission_readiness") != EXPECTED_READINESS_SURFACE:
+        errors.append("GitHub Item 20 admission-readiness wiring differs from protected read-only value")
+
+    readiness_boundary = readiness.get("execution_boundary")
+    readiness_authorization = readiness.get("authorization")
+    readiness_evidence = readiness.get("candidate_evidence_workflow")
+    if not isinstance(readiness_boundary, dict) or readiness_boundary != {
+        "environment": "none",
+        "executor": "github-hosted",
+        "permissions": ["actions:read", "contents:read"],
+        "phone_execution": False,
+        "provider_api_execution": False,
+        "provider_credentials": "forbidden",
+        "trigger": "workflow_dispatch",
+    }:
+        errors.append("Item 20 admission-readiness execution boundary differs from protected read-only value")
+    if not isinstance(readiness_authorization, dict) or readiness_authorization != {
+        "endpoint_handoff_authorized": False,
+        "final_production_authority": False,
+        "live_execution_authorized": False,
+        "phone_mutation_authorized": False,
+        "provider_mutation_authorized": False,
+    }:
+        errors.append("Item 20 admission-readiness authorization must remain non-live and non-mutating")
+    if not isinstance(readiness_evidence, dict) or readiness_evidence.get("admission_core_wiring") != "not_implemented":
+        errors.append("Item 20 admission-readiness must not claim admission-core live wiring")
 
     orchestration = item20.get("orchestration")
     if not isinstance(orchestration, dict):
@@ -230,8 +285,13 @@ def check_repository(root: Path) -> list[str]:
         errors.extend(_check_handoff_contract(handoff))
 
     execution = topology.get("execution")
-    if not isinstance(execution, dict) or execution.get("item20_non_live") != EXPECTED_TOPOLOGY_EXECUTION:
-        errors.append("production topology does not expose the protected Item 20 non-live boundary")
+    if not isinstance(execution, dict):
+        errors.append("production topology execution block is missing")
+    else:
+        if execution.get("item20_non_live") != EXPECTED_TOPOLOGY_EXECUTION:
+            errors.append("production topology does not expose the protected Item 20 non-live boundary")
+        if execution.get("item20_admission_readiness") != EXPECTED_READINESS_TOPOLOGY_EXECUTION:
+            errors.append("production topology does not expose the protected Item 20 admission-readiness boundary")
 
     migration = topology.get("migration_status")
     if not isinstance(migration, dict):
@@ -239,6 +299,8 @@ def check_repository(root: Path) -> list[str]:
     else:
         if migration.get("item_20_non_live_orchestration") != EXPECTED_MIGRATION:
             errors.append("production topology Item 20 non-live checkpoint differs")
+        if migration.get("item_20_admission_readiness") != EXPECTED_READINESS_MIGRATION:
+            errors.append("production topology Item 20 admission-readiness checkpoint differs")
         if migration.get("next_acceptance_lifecycle") != EXPECTED_NEXT_LIFECYCLE:
             errors.append("production topology Item 20 live-session gate differs")
         if migration.get("phone_mutation") != "item_20_blocked_by_signing_continuity_gate_issue_115":
