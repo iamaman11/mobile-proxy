@@ -28,6 +28,16 @@
     "required_conclusion": "success",
     "artifact_name_template": "vultr-acceptance-authority-<candidate_sha>",
     "artifact_file": "acceptance-authority-evidence.json",
+    "selection": {
+      "strategy": "candidate_specific_artifact_then_exact_control_plane_run",
+      "required_artifact_expired": false,
+      "required_artifact_digest": "sha256",
+      "required_artifact_run_branch": "main",
+      "required_artifact_run_head_sha": "control_plane_sha",
+      "candidate_identity_role": "artifact_name_and_evidence_binding",
+      "control_plane_identity_role": "workflow_run_head_binding",
+      "candidate_sha_must_not_select_run_head": true
+    },
     "required_authority": "pre_release_acceptance",
     "final_production_authority": false,
     "production_environment_authorized": false,

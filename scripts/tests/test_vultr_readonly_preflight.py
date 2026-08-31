@@ -18,7 +18,11 @@ POLICY_SPEC.loader.exec_module(POLICY)
 
 
 class VultrReadonlyPreflightTests(unittest.TestCase):
-    def acceptance_run(self, sha="a" * 40, run_id=123):
+    candidate_sha = "a" * 40
+    control_plane_sha = "c" * 40
+
+    def acceptance_run(self, control_plane_sha=None, run_id=123):
+        sha = control_plane_sha or self.control_plane_sha
         return {
             "id": run_id,
             "run_attempt": 1,
@@ -32,7 +36,32 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
             "repository": {"full_name": "iamaman11/mobile-proxy"},
         }
 
-    def acceptance_evidence(self, sha="a" * 40, run_id=123):
+    def acceptance_artifact(
+        self,
+        candidate_sha=None,
+        control_plane_sha=None,
+        artifact_id=500,
+        run_id=123,
+        created_at="2026-08-31T12:00:00Z",
+    ):
+        candidate = candidate_sha or self.candidate_sha
+        control = control_plane_sha or self.control_plane_sha
+        return {
+            "id": artifact_id,
+            "name": f"vultr-acceptance-authority-{candidate}",
+            "size_in_bytes": 321,
+            "expired": False,
+            "digest": "sha256:" + "d" * 64,
+            "created_at": created_at,
+            "workflow_run": {
+                "id": run_id,
+                "head_branch": "main",
+                "head_sha": control,
+            },
+        }
+
+    def acceptance_evidence(self, candidate_sha=None, run_id=123):
+        sha = candidate_sha or self.candidate_sha
         return {
             "format_version": 1,
             "authority": "pre_release_acceptance",
@@ -68,7 +97,7 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
         }
 
     def test_exact_command_only(self):
-        sha = "a" * 40
+        sha = self.candidate_sha
         self.assertEqual(MODULE.parse_command(f"/vultr-readonly-preflight {sha}"), sha)
         for value in (
             "/vultr-readonly-preflight main",
@@ -82,42 +111,94 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     MODULE.parse_command(value)
 
-    def test_selects_latest_exact_successful_acceptance_run(self):
-        sha = "a" * 40
-        older = self.acceptance_run(sha, 100)
-        newer = self.acceptance_run(sha, 200)
-        wrong_sha = self.acceptance_run("b" * 40, 300)
-        failed = self.acceptance_run(sha, 400)
-        failed["conclusion"] = "failure"
-        selected = MODULE.select_acceptance_run(
-            sha, {"workflow_runs": [older, wrong_sha, failed, newer]}
+    def test_selects_latest_candidate_artifact_on_exact_control_plane(self):
+        older = self.acceptance_artifact(artifact_id=100, run_id=10, created_at="2026-08-31T10:00:00Z")
+        newer = self.acceptance_artifact(artifact_id=200, run_id=20, created_at="2026-08-31T11:00:00Z")
+        wrong_candidate = self.acceptance_artifact(candidate_sha="b" * 40, artifact_id=300, run_id=30)
+        wrong_control = self.acceptance_artifact(control_plane_sha="e" * 40, artifact_id=400, run_id=40)
+        selected = MODULE.select_acceptance_artifact(
+            self.candidate_sha,
+            self.control_plane_sha,
+            {"artifacts": [older, wrong_candidate, wrong_control, newer]},
         )
         self.assertEqual(selected["id"], 200)
+        self.assertEqual(selected["workflow_run"]["id"], 20)
 
-    def test_missing_or_noncanonical_acceptance_run_fails_closed(self):
-        sha = "a" * 40
-        with self.assertRaisesRegex(ValueError, "no successful"):
-            MODULE.select_acceptance_run(sha, {"workflow_runs": []})
-        wrong = self.acceptance_run(sha, 123)
-        wrong["repository"] = {"full_name": "other/repo"}
-        with self.assertRaisesRegex(ValueError, "no successful"):
-            MODULE.select_acceptance_run(sha, {"workflow_runs": [wrong]})
+    def test_selector_separates_roles_without_requiring_different_sha_values(self):
+        artifact = self.acceptance_artifact(
+            candidate_sha=self.candidate_sha,
+            control_plane_sha=self.candidate_sha,
+            artifact_id=700,
+            run_id=70,
+        )
+        selected = MODULE.select_acceptance_artifact(
+            self.candidate_sha,
+            self.candidate_sha,
+            {"artifacts": [artifact]},
+        )
+        self.assertEqual(selected["id"], 700)
+        self.assertEqual(selected["workflow_run"]["head_sha"], self.candidate_sha)
 
-    def test_acceptance_evidence_must_match_candidate_and_run(self):
-        sha = "a" * 40
-        run = self.acceptance_run(sha, 123)
-        MODULE.verify_acceptance_evidence(sha, run, self.acceptance_evidence(sha, 123))
-        mismatched = self.acceptance_evidence(sha, 123)
+    def test_missing_expired_or_invalid_digest_artifact_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "no unexpired"):
+            MODULE.select_acceptance_artifact(
+                self.candidate_sha, self.control_plane_sha, {"artifacts": []}
+            )
+        expired = self.acceptance_artifact()
+        expired["expired"] = True
+        with self.assertRaisesRegex(ValueError, "no unexpired"):
+            MODULE.select_acceptance_artifact(
+                self.candidate_sha, self.control_plane_sha, {"artifacts": [expired]}
+            )
+        missing_digest = self.acceptance_artifact()
+        missing_digest["digest"] = None
+        with self.assertRaisesRegex(ValueError, "no unexpired"):
+            MODULE.select_acceptance_artifact(
+                self.candidate_sha, self.control_plane_sha, {"artifacts": [missing_digest]}
+            )
+
+    def test_exact_artifact_run_must_match_current_control_plane(self):
+        artifact = self.acceptance_artifact(run_id=123)
+        run = self.acceptance_run(run_id=123)
+        MODULE.verify_acceptance_run(self.candidate_sha, self.control_plane_sha, artifact, run)
+
+        wrong_head = self.acceptance_run(control_plane_sha="e" * 40, run_id=123)
+        with self.assertRaisesRegex(ValueError, "exact artifact/control-plane"):
+            MODULE.verify_acceptance_run(
+                self.candidate_sha, self.control_plane_sha, artifact, wrong_head
+            )
+
+        wrong_run = self.acceptance_run(run_id=999)
+        with self.assertRaisesRegex(ValueError, "exact artifact/control-plane"):
+            MODULE.verify_acceptance_run(
+                self.candidate_sha, self.control_plane_sha, artifact, wrong_run
+            )
+
+    def test_acceptance_evidence_must_match_candidate_and_exact_artifact_run(self):
+        artifact = self.acceptance_artifact(run_id=123)
+        run = self.acceptance_run(run_id=123)
+        MODULE.verify_acceptance_evidence(
+            self.candidate_sha,
+            self.control_plane_sha,
+            artifact,
+            run,
+            self.acceptance_evidence(run_id=123),
+        )
+        mismatched = self.acceptance_evidence(run_id=123)
         mismatched["candidate_sha"] = "b" * 40
         with self.assertRaisesRegex(ValueError, "does not match"):
-            MODULE.verify_acceptance_evidence(sha, run, mismatched)
-        elevated = self.acceptance_evidence(sha, 123)
+            MODULE.verify_acceptance_evidence(
+                self.candidate_sha, self.control_plane_sha, artifact, run, mismatched
+            )
+        elevated = self.acceptance_evidence(run_id=123)
         elevated["final_production_authority"] = True
         with self.assertRaisesRegex(ValueError, "does not match"):
-            MODULE.verify_acceptance_evidence(sha, run, elevated)
+            MODULE.verify_acceptance_evidence(
+                self.candidate_sha, self.control_plane_sha, artifact, run, elevated
+            )
 
     def test_bounded_evidence_is_read_only_and_non_secret(self):
-        evidence = MODULE.build_preflight_evidence("a" * 40, self.environment())
+        evidence = MODULE.build_preflight_evidence(self.candidate_sha, self.environment())
         self.assertEqual(evidence["authority"], "pre_release_acceptance_read_only")
         self.assertEqual(evidence["environment"], "acceptance-vultr")
         self.assertEqual(evidence["provider_api_method"], "GET")
@@ -138,7 +219,7 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
     def test_repository_policy_passes(self):
         self.assertEqual(POLICY.check_repository(ROOT), [])
 
-    def test_contract_and_workflow_lock_read_only_authority_separation(self):
+    def test_contract_and_workflow_lock_artifact_first_read_only_selection(self):
         contract = json.loads(
             (ROOT / "contracts/operations/vultr-readonly-preflight-v1.json").read_text(
                 encoding="utf-8"
@@ -151,6 +232,16 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
         )
         self.assertTrue(contract["authority_separation"]["environments_must_differ"])
         self.assertFalse(contract["authority_separation"]["final_production_authority"])
+        selection = contract["acceptance_evidence"]["selection"]
+        self.assertEqual(
+            selection["strategy"],
+            "candidate_specific_artifact_then_exact_control_plane_run",
+        )
+        self.assertEqual(selection["required_artifact_run_head_sha"], "control_plane_sha")
+        self.assertEqual(selection["candidate_identity_role"], "artifact_name_and_evidence_binding")
+        self.assertEqual(selection["control_plane_identity_role"], "workflow_run_head_binding")
+        self.assertTrue(selection["candidate_sha_must_not_select_run_head"])
+        self.assertNotIn("candidate_sha_equals_control_plane_sha", selection)
         self.assertEqual(contract["provider_probe"]["method"], "GET")
         self.assertEqual(contract["provider_probe"]["url"], "https://api.vultr.com/v2/account")
         self.assertEqual(contract["provider_probe"]["allowed_api_calls"], 1)
@@ -163,14 +254,21 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
         for required in (
             "runs-on: ubuntu-latest",
             "environment: acceptance-vultr",
+            "actions/artifacts?name=vultr-acceptance-authority-$CANDIDATE_SHA&per_page=100",
+            "actions/runs/$run_id",
+            "actions/artifacts/$ACCEPTANCE_ARTIFACT_ID/zip",
+            "select-artifact",
+            '--control-plane-sha "$CONTROL_PLANE_SHA"',
+            "--selected-artifact selected-acceptance-artifact.json",
             "--request GET",
             "--output /dev/null",
             "https://api.vultr.com/v2/account",
-            "vultr-acceptance-authority-",
             "verify_vultr_readonly_preflight.py",
         ):
             self.assertIn(required, workflow)
         for forbidden in (
+            "head_sha=$CANDIDATE_SHA",
+            "select-run",
             "environment: production-vultr",
             "/v2/instances",
             "/v2/snapshots",

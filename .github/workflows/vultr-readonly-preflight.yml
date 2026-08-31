@@ -53,42 +53,52 @@ jobs:
           candidate_sha=$(python3 scripts/verify_vultr_readonly_preflight.py parse-command --body-env COMMAND_BODY)
           printf 'sha=%s\n' "$candidate_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Find successful immutable acceptance authority
+      - name: Select candidate-specific acceptance authority on exact control plane
         id: acceptance
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           gh api \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
-            "repos/$GITHUB_REPOSITORY/actions/runs?event=issue_comment&status=success&head_sha=$CANDIDATE_SHA&per_page=100" \
-            > acceptance-runs.json
-          run_id=$(python3 scripts/verify_vultr_readonly_preflight.py select-run \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=vultr-acceptance-authority-$CANDIDATE_SHA&per_page=100" \
+            > acceptance-artifacts.json
+          run_id=$(python3 scripts/verify_vultr_readonly_preflight.py select-artifact \
             --candidate-sha "$CANDIDATE_SHA" \
-            --runs acceptance-runs.json \
-            --output selected-acceptance-run.json)
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --artifacts acceptance-artifacts.json \
+            --output selected-acceptance-artifact.json)
+          artifact_id=$(python3 -c 'import json; print(json.load(open("selected-acceptance-artifact.json", encoding="utf-8"))["id"])')
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" \
+            > selected-acceptance-run.json
           run_attempt=$(python3 -c 'import json; print(json.load(open("selected-acceptance-run.json", encoding="utf-8"))["run_attempt"])')
           {
+            echo "artifact_id=$artifact_id"
             echo "run_id=$run_id"
             echo "run_attempt=$run_attempt"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Download exact acceptance-authority evidence
+      - name: Download exact acceptance-authority artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
-          ACCEPTANCE_RUN_ID: ${{ steps.acceptance.outputs.run_id }}
+          ACCEPTANCE_ARTIFACT_ID: ${{ steps.acceptance.outputs.artifact_id }}
         run: |
           set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ACCEPTANCE_ARTIFACT_ID/zip" \
+            > acceptance-evidence.zip
           mkdir acceptance-evidence
-          gh run download "$ACCEPTANCE_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name "vultr-acceptance-authority-$CANDIDATE_SHA" \
-            --dir acceptance-evidence
+          unzip -q acceptance-evidence.zip -d acceptance-evidence
           test -f acceptance-evidence/acceptance-authority-evidence.json
           test "$(find acceptance-evidence -maxdepth 2 -type f | wc -l)" -eq 1
 
@@ -96,10 +106,13 @@ jobs:
         shell: bash
         env:
           CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          CONTROL_PLANE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           python3 scripts/verify_vultr_readonly_preflight.py verify-acceptance \
             --candidate-sha "$CANDIDATE_SHA" \
+            --control-plane-sha "$CONTROL_PLANE_SHA" \
+            --selected-artifact selected-acceptance-artifact.json \
             --selected-run selected-acceptance-run.json \
             --acceptance-evidence acceptance-evidence/acceptance-authority-evidence.json
 
