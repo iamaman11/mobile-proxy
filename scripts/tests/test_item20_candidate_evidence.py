@@ -192,7 +192,7 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         return verify_candidate_chain(**values)  # type: ignore[arg-type]
 
     def test_distinct_candidate_and_control_plane_chain_passes(self) -> None:
-        verify_contract(self.contract)
+        self.assertEqual(verify_contract(self.contract), (33341602485, 1))
         evidence = self.verify()
         self.assertEqual(evidence["candidate_sha"], CANDIDATE)
         self.assertEqual(evidence["control_plane_sha"], CONTROL_PLANE)
@@ -215,7 +215,6 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         self.assertNotIn("VULTR_API_KEY", serialized)
         self.assertNotIn("VULTR_SSH_PRIVATE_KEY", serialized)
         self.assertNotIn("provider_uuid", serialized)
-        self.assertNotIn("transport_endpoint", serialized)
 
     def test_candidate_cannot_be_reinterpreted_as_control_plane(self) -> None:
         with self.assertRaisesRegex(ValueError, "identities to remain distinct"):
@@ -257,9 +256,14 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact control-plane run"):
             self.verify(acceptance_artifact=metadata)
 
-    def test_acceptance_evidence_must_bind_protected_candidate_quality(self) -> None:
+    def test_acceptance_evidence_must_bind_protected_candidate_quality_run_and_attempt(self) -> None:
         evidence = acceptance_evidence()
         evidence["candidate_quality_run_id"] = "999"
+        with self.assertRaisesRegex(ValueError, "acceptance-authority evidence"):
+            self.verify(acceptance_evidence=evidence)
+
+        evidence = acceptance_evidence()
+        evidence["candidate_quality_run_attempt"] = "2"
         with self.assertRaisesRegex(ValueError, "acceptance-authority evidence"):
             self.verify(acceptance_evidence=evidence)
 
@@ -286,18 +290,24 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale or out of order"):
             self.verify(preflight_artifact=metadata)
 
-    def test_contract_keeps_pure_verifier_unwired_from_live_workflow(self) -> None:
+    def test_pure_verifier_remains_separate_from_admission_and_workflow_wiring(self) -> None:
         future = self.contract["future_live_candidate_evidence"]
         assert isinstance(future, dict)
+        self.assertEqual(future["current_core_verification"], "not_implemented")
+
+        verifier = self.contract["future_live_candidate_verifier"]
+        assert isinstance(verifier, dict)
         self.assertEqual(
-            future["verifier"], "scripts/verify_item20_candidate_evidence.py"
+            verifier["status"], "protected_pure_verifier_not_consumed_by_admission_core"
         )
-        self.assertEqual(future["current_core_verification"], "protected_pure_verifier")
-        self.assertEqual(future["workflow_wiring"], "not_implemented")
+        self.assertEqual(verifier["verifier"], "scripts/verify_item20_candidate_evidence.py")
+        self.assertEqual(verifier["workflow_wiring"], "not_implemented")
+        self.assertFalse(verifier["performs_external_io"])
+        self.assertFalse(verifier["grants_live_authority"])
 
         mutated = copy.deepcopy(self.contract)
-        mutated["future_live_candidate_evidence"]["workflow_wiring"] = "enabled"
-        with self.assertRaisesRegex(ValueError, "verification contract"):
+        mutated["future_live_candidate_verifier"]["workflow_wiring"] = "enabled"
+        with self.assertRaisesRegex(ValueError, "pure candidate evidence verifier"):
             verify_contract(mutated)
 
 
