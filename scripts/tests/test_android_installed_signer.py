@@ -32,11 +32,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         self.assertEqual(module.select_installed_apk_path(output), "/data/app/example/base.apk")
 
     def test_rejects_missing_or_ambiguous_installed_apk_inventory(self) -> None:
-        for output in (
-            "",
-            "package:/data/a.apk\npackage:/data/b.apk\n",
-            "unexpected:/data/base.apk",
-        ):
+        for output in ("", "package:/data/a.apk\npackage:/data/b.apk\n", "unexpected:/data/base.apk"):
             with self.assertRaises(module.SigningIdentityFailure):
                 module.select_installed_apk_path(output)
 
@@ -46,28 +42,19 @@ class AndroidInstalledSignerTests(unittest.TestCase):
             "Signer #1 certificate SHA-256 digest: "
             f"{CERTIFICATE_FINGERPRINT}\n"
         )
+        self.assertEqual(module.parse_single_apksigner_fingerprint(apksigner_output), CERTIFICATE_FINGERPRINT)
         self.assertEqual(
-            module.parse_single_apksigner_fingerprint(apksigner_output), CERTIFICATE_FINGERPRINT
-        )
-        self.assertEqual(
-            module.parse_single_keytool_fingerprint(
-                f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n"
-            ),
+            module.parse_single_keytool_fingerprint(f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n"),
             CERTIFICATE_FINGERPRINT,
         )
         with self.assertRaises(module.SigningIdentityFailure):
             module.parse_single_apksigner_fingerprint("")
         with self.assertRaises(module.SigningIdentityFailure):
             module.parse_single_apksigner_fingerprint(
-                apksigner_output
-                + "Signer #2 certificate SHA-256 digest: "
-                + CERTIFICATE_FINGERPRINT
-                + "\n"
+                apksigner_output + "Signer #2 certificate SHA-256 digest: " + CERTIFICATE_FINGERPRINT + "\n"
             )
         with self.assertRaises(module.SigningIdentityFailure):
-            module.parse_single_keytool_fingerprint(
-                f"SHA256: {KEYTOOL_FINGERPRINT}\nSHA256: {KEYTOOL_FINGERPRINT}\n"
-            )
+            module.parse_single_keytool_fingerprint(f"SHA256: {KEYTOOL_FINGERPRINT}\nSHA256: {KEYTOOL_FINGERPRINT}\n")
 
     def test_private_inputs_are_required_and_canonical(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -76,16 +63,11 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {module._KEY_ALIAS_ENV: "alias\nleak"}, clear=True):
             with self.assertRaises(module.SigningIdentityFailure):
                 module.require_private_text(module._KEY_ALIAS_ENV, maximum=256)
-        self.assertEqual(
-            module.decode_canonical_base64(KEYSTORE_B64, "keystore", maximum_bytes=1024),
-            KEYSTORE,
-        )
+        self.assertEqual(module.decode_canonical_base64(KEYSTORE_B64, "keystore", maximum_bytes=1024), KEYSTORE)
         with self.assertRaises(module.SigningIdentityFailure):
             module.decode_canonical_base64("not-base64", "keystore", maximum_bytes=1024)
         with self.assertRaises(module.SigningIdentityFailure):
-            module.decode_canonical_base64(
-                base64.b64encode(b"too-large").decode("ascii"), "keystore", maximum_bytes=2
-            )
+            module.decode_canonical_base64(base64.b64encode(b"too-large").decode("ascii"), "keystore", maximum_bytes=2)
 
     def _fake_run_checked(
         self,
@@ -97,9 +79,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         del timeout
         values = list(command)
         if values[:6] == ["adb", "-s", SERIAL, "shell", "pm", "path"]:
-            return subprocess.CompletedProcess(
-                values, 0, stdout="package:/data/app/production/base.apk\n", stderr=""
-            )
+            return subprocess.CompletedProcess(values, 0, stdout="package:/data/app/production/base.apk\n", stderr="")
         if values[:4] == ["adb", "-s", SERIAL, "pull"]:
             Path(values[-1]).write_bytes(b"installed-apk")
             return subprocess.CompletedProcess(values, 0, stdout="", stderr="")
@@ -120,12 +100,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
             self.assertIsNotNone(env)
             assert env is not None
             self.assertEqual(env[module._KEYSTORE_PASSWORD_ENV], "test-store-password")
-            return subprocess.CompletedProcess(
-                values,
-                0,
-                stdout=f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n",
-                stderr="",
-            )
+            return subprocess.CompletedProcess(values, 0, stdout=f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n", stderr="")
         self.fail(f"unexpected command: {values!r}")
 
     def test_verifies_recovered_keystore_against_installed_apk_without_secret_evidence(self) -> None:
