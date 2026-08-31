@@ -7,7 +7,7 @@ const ACCEPTANCE_REGION: &str = "waw";
 const ACCEPTANCE_PLAN: &str = "vc2-1c-2gb";
 const ACCEPTANCE_OS_ID: u64 = 2284;
 const ACCEPTANCE_LABEL: &str = "mobile-proxy-acceptance";
-const ITEM20_INTENT_PREFIX: &str = "item20-physical:candidate:";
+const ITEM20_INTENT_PREFIX: &str = "item20:candidate:";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Item20SessionIdentity {
@@ -86,7 +86,7 @@ mod tests {
         assert_eq!(intent.scope(), LifecycleScope::Acceptance);
         assert_eq!(
             intent.id(),
-            "item20-physical:candidate:d151dbdd156279e32a5361d304c90f996bd2d565"
+            "item20:candidate:d151dbdd156279e32a5361d304c90f996bd2d565"
         );
         assert_ne!(intent.id(), format!("candidate:{CANDIDATE}"));
     }
