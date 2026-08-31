@@ -16,6 +16,7 @@ from check_digest_policy import check_repository as check_digest_policy
 from check_github_control_plane import check_repository as check_github_control_plane
 from check_invariant_enforcement import validate_repository as check_invariant_enforcement
 from check_item19_consistency import check_repository as check_item19_consistency
+from check_item20_topology_wiring import check_repository as check_item20_topology_wiring
 from check_module_boundaries import validate_repository as check_module_boundaries
 from check_native_runtime_policy import check_repository as check_native_runtime_policy
 from check_state_ownership import validate_repository as check_state_ownership
@@ -107,6 +108,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_native_runtime_policy(root))
     errors.extend(check_vm_ownership_contract(root))
     errors.extend(check_item19_consistency(root))
+    errors.extend(check_item20_topology_wiring(root))
     return errors
 
 
