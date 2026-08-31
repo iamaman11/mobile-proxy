@@ -81,14 +81,26 @@ class Item20TopologyWiringTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("section 'implementation'" in error for error in errors))
 
-    def test_endpoint_cannot_enter_dispatch_inputs(self):
+    def test_plaintext_endpoint_cannot_enter_dispatch_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_tree(root)
             path = root / "contracts/operations/item20-private-handoff-v1.json"
             contract = json.loads(path.read_text(encoding="utf-8"))
             contract["transport"]["private_dispatch_inputs"].append("transport_endpoint")
-            contract["transport"]["endpoint_in_dispatch_inputs"] = True
+            contract["transport"]["plaintext_endpoint_in_dispatch_inputs"] = True
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("section 'transport'" in error for error in errors))
+
+    def test_sealed_ciphertext_dispatch_is_required(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_tree(root)
+            path = root / "contracts/operations/item20-private-handoff-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["transport"]["private_dispatch_inputs"].remove("sealed_session_envelope")
+            contract["transport"]["sealed_ciphertext_in_dispatch_inputs"] = False
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("section 'transport'" in error for error in errors))
@@ -99,13 +111,26 @@ class Item20TopologyWiringTests(unittest.TestCase):
             copy_tree(root)
             path = root / "contracts/operations/item20-private-handoff-v1.json"
             contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["envelope"]["fields"].append("provider_uuid")
+            contract["envelope"]["plaintext_fields_before_sealing"].append("provider_uuid")
             contract["envelope"]["provider_uuid"] = "allowed"
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("section 'envelope'" in error for error in errors))
 
-    def test_handoff_token_permissions_cannot_be_broadened(self):
+    def test_handoff_token_permissions_cannot_gain_secrets_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_tree(root)
+            path = root / "contracts/operations/item20-private-handoff-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["transport"]["required_private_repository_permissions"].append(
+                "Secrets: write"
+            )
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("section 'transport'" in error for error in errors))
+
+    def test_handoff_token_permissions_cannot_gain_contents_write(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_tree(root)
@@ -118,13 +143,36 @@ class Item20TopologyWiringTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("section 'transport'" in error for error in errors))
 
+    def test_private_decryption_key_cannot_move_to_public_job(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_tree(root)
+            path = root / "contracts/operations/item20-private-handoff-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["transport"]["recipient_private_key_location"] = "public_job"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("section 'transport'" in error for error in errors))
+
     def test_current_non_live_workflow_cannot_reference_reserved_handoff_secret(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_tree(root)
             path = root / ".github/workflows/item20-session-orchestration.yml"
             path.write_text(
-                path.read_text(encoding="utf-8") + "\n# ITEM20_SESSION_ENVELOPE\n",
+                path.read_text(encoding="utf-8") + "\n# ITEM20_PHONE_HANDOFF_TOKEN\n",
+                encoding="utf-8",
+            )
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("forbidden live token" in error for error in errors))
+
+    def test_current_non_live_workflow_cannot_reference_private_decryption_key(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_tree(root)
+            path = root / ".github/workflows/item20-session-orchestration.yml"
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\n# ITEM20_HANDOFF_PRIVATE_KEY_B64\n",
                 encoding="utf-8",
             )
             errors = MODULE.check_repository(root)
