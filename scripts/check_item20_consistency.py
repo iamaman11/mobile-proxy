@@ -24,6 +24,33 @@ def _read(root: Path, path: Path, errors: list[str]) -> str:
         return ""
 
 
+def check_physical_runbook_text(physical: str) -> list[str]:
+    errors: list[str] = []
+
+    for required in (
+        "Item 19 provider proof is COMPLETE",
+        "protected typed Item 20 acceptance lifecycle",
+        "distinct Item 20 ownership intent",
+        "terminal Item 19 proof intent is never reused",
+        "private Item 20 phone execution must not call Vultr APIs",
+    ):
+        if required not in physical:
+            errors.append(f"physical acceptance runbook is missing Item 20 boundary {required!r}")
+
+    lowered = physical.lower()
+    for forbidden in (
+        "while item 19 and the mutable-phone gate remain incomplete",
+        "github-hosted item-19 vultr acceptance lifecycle",
+        "provider mutation is performed only through the item-19 typed vultr lifecycle",
+        "while item 19 is active",
+        "already verified item-19 acceptance target",
+    ):
+        if forbidden in lowered:
+            errors.append(f"physical acceptance runbook contains stale Item 19 state {forbidden!r}")
+
+    return errors
+
+
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     plan = _read(root, PLAN, errors)
@@ -43,12 +70,7 @@ def check_repository(root: Path) -> list[str]:
         if required not in plan:
             errors.append(f"canonical baseline plan is missing Item 20 boundary {required!r}")
 
-    for required in (
-        "distinct Item 20 ownership intent",
-        "terminal Item 19 proof intent is never reused",
-    ):
-        if required not in physical:
-            errors.append(f"physical acceptance runbook is missing Item 20 identity boundary {required!r}")
+    errors.extend(check_physical_runbook_text(physical))
 
     for required in (
         "The physical item-20 window opens only after the Item 19 provider proof is complete",
