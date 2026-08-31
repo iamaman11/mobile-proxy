@@ -91,7 +91,7 @@
     "vultr_live_preflight": "exact_candidate_d151dbdd156279e32a5361d304c90f996bd2d565_read_only_preflight_run_33341760002_passed_before_item_19_mutation",
     "vultr_live_lifecycle": "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed",
     "item_20_non_live_orchestration": "protected_non_live_validation_and_exact_candidate_build_only_no_provider_or_phone_authority",
-    "next_acceptance_lifecycle": "item_20_live_jit_session_deferred_until_issue_115_completed_fresh_exact_candidate_gates_and_private_endpoint_handoff_are_implemented",
+    "next_acceptance_lifecycle": "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent",
     "phone_workflows": "read_only_preflight_implemented",
     "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
     "phone_mutation": "item_20_blocked_by_signing_continuity_gate_issue_115",
