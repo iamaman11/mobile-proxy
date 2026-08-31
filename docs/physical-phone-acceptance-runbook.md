@@ -1,12 +1,13 @@
 # Immutable-SHA Physical Phone Acceptance Runbook
 
-Status: **normative execution contract for Production Baseline item 20; Item 19 provider proof is COMPLETE; live Item 20 execution remains blocked by #115 and by incomplete protected Item 20 orchestration**.
+Status: **normative execution contract for Production Baseline item 20; Item 19 provider proof is COMPLETE; protected Item 20 non-live orchestration/build is present; live Item 20 execution remains blocked by #115 and by unimplemented live private endpoint handoff/phone execution**.
 
 Canonical roadmap: `docs/PRODUCTION_BASELINE_PLAN.md`  
 Item-20 tracker: #135  
 Completed Item-19 tracker: #124  
 Phone GitOps boundary: `docs/operations/phone-gitops-runtime.md`  
-Production topology: `contracts/operations/production-topology-v1.json`
+Production topology: `contracts/operations/production-topology-v1.json`  
+Private endpoint handoff design: `contracts/operations/item20-private-handoff-v1.json`
 
 ## 1. Control-plane boundary
 
@@ -33,7 +34,7 @@ The boundaries are mandatory:
 - provider mutation is performed only through the protected typed Item 20 acceptance lifecycle and durable binding state under the distinct Item 20 ownership intent; the terminal Item 19 proof intent is never reused;
 - phone mutation is performed only through the private `android-production` execution boundary.
 
-This runbook describes item 20. The Item 19 provider proof is COMPLETE. It does **not** authorize live Item-20 provider or phone mutation while #115 is unresolved or while the protected Item 20 orchestration is incomplete.
+This runbook describes item 20. The Item 19 provider proof is COMPLETE. It does **not** authorize live Item-20 provider or phone mutation while #115 is unresolved or while the protected live Item 20 endpoint handoff/private execution path is unimplemented.
 
 ## 2. Required gates before opening the physical window
 
@@ -104,6 +105,29 @@ ownership intent and durable lifecycle state. It is accepted only when the canon
 IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority and must not be published through public evidence merely to bridge the public provider plane to the private phone plane.
 
 Provider API calls are confined to the protected public typed acceptance lifecycle. The private Item 20 phone execution must not call Vultr APIs, GCP APIs, `gcloud`, a Vultr CLI or a workstation VM-provisioning script.
+
+### 4.1 Private endpoint handoff design boundary
+
+The protected design in `contracts/operations/item20-private-handoff-v1.json` is **not an enabled live capability**. While #115 remains open, the public Item 20 workflow must not write the reserved private endpoint secret, dispatch a mutable private Item 20 workflow or create a provider VM merely to test the handoff.
+
+For a future admitted live window, the public provider plane may hand the already-derived transport endpoint to the private phone plane only through an encrypted private-repository Actions secret envelope. The endpoint must never be passed as a workflow input, public artifact, public output, public summary, Issue comment or log.
+
+The future envelope name is `ITEM20_SESSION_ENVELOPE`. Its payload is limited to:
+
+- exact immutable `candidate_sha`;
+- exact protected `control_plane_sha`;
+- one fresh opaque session nonce with at least 128 bits of entropy;
+- the derived transport endpoint.
+
+The envelope must not contain provider UUID, Vultr credentials, phone credentials or any alternative mutation selector. It is encrypted using the private repository Actions public key before upload and exists for one serialized Item 20 session only.
+
+The future private workflow dispatch carries only non-secret `candidate_sha`, `control_plane_sha` and `session_nonce`. It must exact-match all three values against the decrypted private envelope before the endpoint can be consumed. A stale or mismatched envelope fails closed.
+
+The future public handoff job may use `ITEM20_PHONE_HANDOFF_TOKEN` only as a narrowly scoped credential for `iamaman11/mobile-proxy-production`, with exactly `Actions: write` and `Secrets: write` repository permissions. That token must never reach the private self-hosted phone runner. The private phone runner still receives no Vultr credentials.
+
+Before writing a new envelope, the public control plane must prove no prior private Item 20 session remains active. After the private run reaches a terminal state, the envelope must be deleted and its absence confirmed. If private execution or envelope cleanup fails, deterministic cleanup of the exact verified provider target still runs. Acceptance cannot be marked successful until both the private envelope is absent and provider terminal cleanup is confirmed.
+
+The public evidence tuple may record the private workflow run identity/conclusion and cleanup booleans, but not endpoint, provider UUID, envelope contents, nonce value, token or other secret-derived material. Private evidence must not retain the endpoint after execution.
 
 ## 5. Phone execution boundary
 
@@ -249,6 +273,7 @@ Reject the candidate and stop advancement for any of the following:
 - missing/wrong/conflicting ownership or generation;
 - signing-continuity or private-phone binding gate is not satisfied;
 - phone target is ambiguous or does not match the private registered binding;
+- private endpoint envelope is stale, mismatched, publicly exposed or still present after terminal private execution;
 - wrong tunnel or Android VPN owner;
 - stale/mismatched tunnel authority;
 - plaintext downgrade;
