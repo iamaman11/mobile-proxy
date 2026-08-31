@@ -45,7 +45,9 @@ class AndroidInstalledSignerTests(unittest.TestCase):
             "Signer #1 certificate SHA-256 digest: "
             f"{CERTIFICATE_FINGERPRINT}\n"
         )
-        self.assertEqual(module.parse_single_apksigner_fingerprint(apksigner_output), CERTIFICATE_FINGERPRINT)
+        self.assertEqual(
+            module.parse_single_apksigner_fingerprint(apksigner_output), CERTIFICATE_FINGERPRINT
+        )
         self.assertEqual(
             module.parse_single_keytool_fingerprint(
                 f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n"
@@ -82,9 +84,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
             module.decode_canonical_base64("not-base64", "keystore", maximum_bytes=1024)
         with self.assertRaises(module.SigningIdentityFailure):
             module.decode_canonical_base64(
-                base64.b64encode(b"too-large").decode("ascii"),
-                "keystore",
-                maximum_bytes=2,
+                base64.b64encode(b"too-large").decode("ascii"), "keystore", maximum_bytes=2
             )
 
     def _fake_run_checked(
@@ -98,10 +98,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         values = list(command)
         if values[:6] == ["adb", "-s", SERIAL, "shell", "pm", "path"]:
             return subprocess.CompletedProcess(
-                values,
-                0,
-                stdout="package:/data/app/production/base.apk\n",
-                stderr="",
+                values, 0, stdout="package:/data/app/production/base.apk\n", stderr=""
             )
         if values[:4] == ["adb", "-s", SERIAL, "pull"]:
             Path(values[-1]).write_bytes(b"installed-apk")
