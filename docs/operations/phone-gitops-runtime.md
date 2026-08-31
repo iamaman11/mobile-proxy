@@ -95,6 +95,62 @@ than install `apps/android-app` does not bypass the phone gate above.
 The private execution satellite consumes canonical immutable identity/evidence; it does not define
 roadmap, architecture, release policy, provider desired state or acceptance policy.
 
+### Protected Item 20 endpoint handoff design
+
+`contracts/operations/item20-private-handoff-v1.json` defines the future public-provider to
+private-phone transport handoff. The contract is **design-only and not enabled** while #115 is open.
+The current private satellite therefore remains read-only and no mutable Item 20 phone workflow or
+runtime endpoint handoff is installed by this checkpoint.
+
+When a later protected implementation is allowed, the transport endpoint may cross the repository
+boundary only after the public typed lifecycle has resolved and verified the exact Item 20 provider
+target. The endpoint is transport data, never provider identity or mutation authority.
+
+The required future handoff is:
+
+```text
+verified Item 20 target
+  -> derived transport endpoint
+  -> seal candidate_sha + control_plane_sha + fresh session_nonce + endpoint
+     to a dedicated private-execution recipient public key
+  -> private workflow_dispatch carrying candidate_sha + control_plane_sha + session_nonce + ciphertext
+  -> private runner decrypts with ITEM20_HANDOFF_PRIVATE_KEY_B64
+  -> exact tuple verification on the private execution boundary
+  -> same-window registered-device preflight
+  -> bounded private Item 20 execution
+```
+
+The plaintext envelope before sealing contains only `candidate_sha`, `control_plane_sha`, a fresh
+opaque session nonce and the derived transport endpoint. It must not contain provider UUID, Vultr
+credentials, phone credentials or another authority selector. The plaintext endpoint must never be a
+workflow input. Only sealed ciphertext may accompany the non-secret tuple in the private dispatch.
+
+A future public handoff job may use the reserved `ITEM20_PHONE_HANDOFF_TOKEN` only as a narrowly
+scoped credential for `iamaman11/mobile-proxy-production`. Its required private-repository permission
+is exactly `Actions: write`. **`Secrets: write` and `Contents: write` are forbidden.** This prevents
+the public provider job from replacing private device/signing secrets or private repository content.
+The token must never be passed to the self-hosted phone runner.
+
+The private handoff decryption key is a distinct private repository Actions secret named
+`ITEM20_HANDOFF_PRIVATE_KEY_B64`. The public job never receives that private key and never writes,
+updates or deletes any private repository secret. Its matching recipient public key is non-secret but
+must be introduced later as an exact protected canonical value before the live implementation is
+enabled. The future implementation must use libsodium sealed-box semantics and fail closed if the
+recipient key, candidate SHA, control-plane SHA or session nonce does not match the protected contract.
+
+Each ciphertext is single-use under its fresh session nonce. A stale or replayed envelope must fail
+exact candidate/control-plane/nonce matching. Provider cleanup remains mandatory even if dispatch,
+decryption or private execution fails; an Item 20 acceptance result cannot be successful until the
+private workflow reaches its required terminal result and the exact provider target reaches
+deterministic terminal cleanup.
+
+The plaintext endpoint, token, private decryption key and provider UUID must never be written to a
+public Issue, artifact, workflow output, step summary or log merely to bridge the two control planes.
+Private evidence also does not retain the plaintext endpoint after execution. The private workflow
+dispatch may retain only the sealed ciphertext. Public terminal evidence may record only bounded
+non-secret identities/results such as exact candidate/control-plane identity, private workflow run
+identity/conclusion and provider terminal-cleanup confirmation.
+
 ## Private signing-secret contract
 
 The following names are required only after the signing identity is recovered. They belong in

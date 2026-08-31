@@ -1,12 +1,13 @@
 # Immutable-SHA Physical Phone Acceptance Runbook
 
-Status: **normative execution contract for Production Baseline item 20; Item 19 provider proof is COMPLETE; live Item 20 execution remains blocked by #115 and by incomplete protected Item 20 orchestration**.
+Status: **normative execution contract for Production Baseline item 20; Item 19 provider proof is COMPLETE; protected Item 20 non-live orchestration/build is present; live Item 20 execution remains blocked by #115 and by unimplemented live private endpoint handoff/phone execution**.
 
 Canonical roadmap: `docs/PRODUCTION_BASELINE_PLAN.md`  
 Item-20 tracker: #135  
 Completed Item-19 tracker: #124  
 Phone GitOps boundary: `docs/operations/phone-gitops-runtime.md`  
-Production topology: `contracts/operations/production-topology-v1.json`
+Production topology: `contracts/operations/production-topology-v1.json`  
+Private endpoint handoff design: `contracts/operations/item20-private-handoff-v1.json`
 
 ## 1. Control-plane boundary
 
@@ -33,7 +34,7 @@ The boundaries are mandatory:
 - provider mutation is performed only through the protected typed Item 20 acceptance lifecycle and durable binding state under the distinct Item 20 ownership intent; the terminal Item 19 proof intent is never reused;
 - phone mutation is performed only through the private `android-production` execution boundary.
 
-This runbook describes item 20. The Item 19 provider proof is COMPLETE. It does **not** authorize live Item-20 provider or phone mutation while #115 is unresolved or while the protected Item 20 orchestration is incomplete.
+This runbook describes item 20. The Item 19 provider proof is COMPLETE. It does **not** authorize live Item-20 provider or phone mutation while #115 is unresolved or while the protected live Item 20 endpoint handoff/private execution path is unimplemented.
 
 ## 2. Required gates before opening the physical window
 
@@ -104,6 +105,29 @@ ownership intent and durable lifecycle state. It is accepted only when the canon
 IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority and must not be published through public evidence merely to bridge the public provider plane to the private phone plane.
 
 Provider API calls are confined to the protected public typed acceptance lifecycle. The private Item 20 phone execution must not call Vultr APIs, GCP APIs, `gcloud`, a Vultr CLI or a workstation VM-provisioning script.
+
+### 4.1 Private endpoint handoff design boundary
+
+The protected design in `contracts/operations/item20-private-handoff-v1.json` is **not an enabled live capability**. While #115 remains open, the public Item 20 workflow must not dispatch a mutable private Item 20 workflow or create a provider VM merely to test the handoff.
+
+For a future admitted live window, the public provider plane may hand the already-derived transport endpoint to the private phone plane only as **application-level sealed ciphertext**. The public job must never write, update or delete a private-repository Actions secret as part of this handoff.
+
+Before dispatch, the public job forms a plaintext envelope containing only:
+
+- exact immutable `candidate_sha`;
+- exact protected `control_plane_sha`;
+- one fresh opaque session nonce with at least 128 bits of entropy;
+- the derived transport endpoint.
+
+Provider UUID, Vultr credentials, phone credentials and alternative mutation selectors are forbidden. The envelope is sealed with libsodium sealed-box semantics to a dedicated private-execution recipient public key. That public key is non-secret but must be introduced later as an exact protected canonical value before live implementation is enabled. The matching private key remains only in the private repository as `ITEM20_HANDOFF_PRIVATE_KEY_B64` and never reaches a public runner.
+
+The future private `workflow_dispatch` carries `candidate_sha`, `control_plane_sha`, `session_nonce` and `sealed_session_envelope`. The **plaintext endpoint is forbidden from workflow inputs**. The private workflow decrypts the ciphertext and must exact-match candidate/control-plane/nonce before the endpoint can be consumed. Stale or replayed ciphertext fails closed.
+
+The future public handoff job may use `ITEM20_PHONE_HANDOFF_TOKEN` only as a repository-scoped credential for `iamaman11/mobile-proxy-production`, with exactly `Actions: write`. `Secrets: write` and `Contents: write` are forbidden. This prevents the public provider job from replacing private device/signing secrets or private repository content. The handoff token must never reach the private self-hosted phone runner. The private phone runner still receives no Vultr credentials.
+
+Each ciphertext is single-use under its fresh session nonce. If dispatch, decryption or private execution fails, deterministic cleanup of the exact verified provider target still runs. Acceptance cannot be marked successful until the private workflow reaches its required terminal result and provider terminal cleanup is confirmed.
+
+The public evidence tuple may record the private workflow run identity/conclusion and cleanup state, but not plaintext endpoint, provider UUID, envelope plaintext, nonce value, handoff token, decryption key or other secret-derived material. Private evidence must not retain the plaintext endpoint after execution; the private dispatch may retain only sealed ciphertext.
 
 ## 5. Phone execution boundary
 
@@ -249,6 +273,8 @@ Reject the candidate and stop advancement for any of the following:
 - missing/wrong/conflicting ownership or generation;
 - signing-continuity or private-phone binding gate is not satisfied;
 - phone target is ambiguous or does not match the private registered binding;
+- private endpoint envelope is unsealed, stale, replayed, mismatched or publicly exposed;
+- private dispatch credential would require `Secrets: write`, `Contents: write` or broader private-repository authority;
 - wrong tunnel or Android VPN owner;
 - stale/mismatched tunnel authority;
 - plaintext downgrade;
