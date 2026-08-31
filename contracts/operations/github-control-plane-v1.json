@@ -5,6 +5,7 @@
   "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
   "vultr_readonly_preflight_contract": "contracts/operations/vultr-readonly-preflight-v1.json",
   "item20_acceptance_contract": "contracts/operations/item20-acceptance-v1.json",
+  "item20_admission_readiness_contract": "contracts/operations/item20-admission-readiness-v1.json",
   "item20_private_handoff_contract": "contracts/operations/item20-private-handoff-v1.json",
   "vm_ownership_contract": "contracts/governance/vm-ownership-v1.json",
   "source_repository": {
@@ -124,6 +125,25 @@
     "live_execution": false,
     "final_production_authority": false
   },
+  "item20_admission_readiness": {
+    "contract": "contracts/operations/item20-admission-readiness-v1.json",
+    "status": "protected_read_only_foundation_not_live_authority",
+    "workflow": ".github/workflows/item20-admission-readiness.yml",
+    "executor": "github-hosted",
+    "environment": "none",
+    "permissions": [
+      "actions:read",
+      "contents:read"
+    ],
+    "provider_credentials": "forbidden",
+    "provider_api_execution": false,
+    "provider_mutation": false,
+    "phone_execution": false,
+    "endpoint_handoff": false,
+    "live_execution": false,
+    "final_production_authority": false,
+    "admission_core_wiring": "not_implemented"
+  },
   "vultr_lifecycle_adapter": {
     "status": "item_19_slice_a_typed_client_and_durable_state_active_no_live_entrypoint",
     "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
@@ -206,6 +226,8 @@
     "item_19_production_vultr_authority",
     "private_phone_runner_receiving_vultr_credentials",
     "item_20_non_live_orchestration_receiving_vultr_credentials",
-    "item_20_non_live_orchestration_authorizing_provider_or_phone_mutation"
+    "item_20_non_live_orchestration_authorizing_provider_or_phone_mutation",
+    "item_20_admission_readiness_receiving_provider_credentials",
+    "item_20_admission_readiness_authorizing_provider_phone_or_handoff_mutation"
   ]
 }
