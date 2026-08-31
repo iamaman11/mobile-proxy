@@ -99,7 +99,10 @@ fn main() -> Result<()> {
     }
 }
 
-fn verified_identity(candidate_sha: &str, control_plane_sha: &str) -> Result<Item20SessionIdentity> {
+fn verified_identity(
+    candidate_sha: &str,
+    control_plane_sha: &str,
+) -> Result<Item20SessionIdentity> {
     verify_canonical_runtime(control_plane_sha)?;
     Item20SessionIdentity::new(candidate_sha, control_plane_sha)
 }
@@ -120,7 +123,8 @@ fn verify_canonical_runtime(control_plane_sha: &str) -> Result<()> {
 }
 
 fn required_env(name: &str) -> Result<String> {
-    let value = env::var(name).map_err(|_| anyhow::anyhow!("required workflow credential is absent"))?;
+    let value =
+        env::var(name).map_err(|_| anyhow::anyhow!("required workflow credential is absent"))?;
     if value.is_empty() {
         bail!("required workflow credential is absent");
     }
@@ -240,7 +244,9 @@ fn verify_target(
     let intent = identity.ownership_intent()?;
     let binding = match store.lifecycle_state(&intent)? {
         AcceptanceVmLifecycleState::Bound(binding) => binding,
-        _ => bail!("Item 20 lifecycle is not in the exact bound state required for target verification"),
+        _ => bail!(
+            "Item 20 lifecycle is not in the exact bound state required for target verification"
+        ),
     };
     let _target = verified_item20_target(&provider, &identity, &binding)?;
     write_evidence(
