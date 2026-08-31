@@ -43,6 +43,46 @@ def validate_control_plane_sha(control_plane_sha: str) -> str:
     return control_plane_sha
 
 
+def select_acceptance_run(candidate_sha: str, payload: Mapping[str, object]) -> dict[str, object]:
+    """Legacy Item 19 selector retained for historical protected verification only."""
+    validate_candidate_sha(candidate_sha)
+    runs = payload.get("workflow_runs")
+    if not isinstance(runs, list):
+        raise ValueError("Actions response is missing workflow_runs")
+
+    eligible: list[dict[str, object]] = []
+    for raw in runs:
+        if not isinstance(raw, dict):
+            continue
+        repository = raw.get("repository")
+        if not isinstance(repository, dict) or repository.get("full_name") != _CANONICAL_REPOSITORY:
+            continue
+        if any(
+            raw.get(key) != value
+            for key, value in {
+                "name": _ACCEPTANCE_WORKFLOW,
+                "path": _ACCEPTANCE_WORKFLOW_PATH,
+                "event": "issue_comment",
+                "head_branch": "main",
+                "head_sha": candidate_sha,
+                "status": "completed",
+                "conclusion": "success",
+            }.items()
+        ):
+            continue
+        run_id = raw.get("id")
+        run_attempt = raw.get("run_attempt")
+        if not isinstance(run_id, int) or run_id <= 0:
+            continue
+        if not isinstance(run_attempt, int) or run_attempt <= 0:
+            continue
+        eligible.append(raw)
+
+    if not eligible:
+        raise ValueError("candidate has no successful immutable acceptance-authority run")
+    return max(eligible, key=lambda run: (int(run["id"]), int(run["run_attempt"])))
+
+
 def _positive_int(value: object, field: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError(f"invalid {field}")
@@ -146,14 +186,12 @@ def verify_acceptance_run(
     _positive_int(acceptance_run.get("run_attempt"), "selected acceptance run attempt")
 
 
-def verify_acceptance_evidence(
+def _verify_acceptance_evidence_payload(
     candidate_sha: str,
-    control_plane_sha: str,
-    selected_artifact: Mapping[str, object],
     acceptance_run: Mapping[str, object],
     evidence: Mapping[str, object],
 ) -> None:
-    verify_acceptance_run(candidate_sha, control_plane_sha, selected_artifact, acceptance_run)
+    validate_candidate_sha(candidate_sha)
     run_id = acceptance_run.get("id")
     run_attempt = acceptance_run.get("run_attempt")
     if not isinstance(run_id, int) or not isinstance(run_attempt, int):
@@ -188,6 +226,35 @@ def verify_acceptance_evidence(
         value = evidence.get(name)
         if not isinstance(value, str) or not value.isdecimal() or int(value) <= 0:
             raise ValueError(f"acceptance-authority evidence has invalid {name}")
+
+
+def verify_acceptance_evidence(
+    candidate_sha: str,
+    control_plane_sha_or_run: str | Mapping[str, object],
+    selected_artifact_or_evidence: Mapping[str, object],
+    acceptance_run: Mapping[str, object] | None = None,
+    evidence: Mapping[str, object] | None = None,
+) -> None:
+    """Verify new artifact-first evidence while preserving the closed Item 19 helper API."""
+    if acceptance_run is None and evidence is None:
+        if isinstance(control_plane_sha_or_run, str):
+            raise ValueError("legacy acceptance verification requires a selected run")
+        _verify_acceptance_evidence_payload(
+            candidate_sha,
+            control_plane_sha_or_run,
+            selected_artifact_or_evidence,
+        )
+        return
+
+    if not isinstance(control_plane_sha_or_run, str) or acceptance_run is None or evidence is None:
+        raise ValueError("artifact-first acceptance verification arguments are incomplete")
+    verify_acceptance_run(
+        candidate_sha,
+        control_plane_sha_or_run,
+        selected_artifact_or_evidence,
+        acceptance_run,
+    )
+    _verify_acceptance_evidence_payload(candidate_sha, acceptance_run, evidence)
 
 
 def _required(env: Mapping[str, str], name: str, maximum: int = 256) -> str:
