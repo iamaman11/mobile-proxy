@@ -34,8 +34,8 @@ EXPECTED_MIGRATION = (
     "protected_non_live_validation_and_exact_candidate_build_only_no_provider_or_phone_authority"
 )
 EXPECTED_NEXT_LIFECYCLE = (
-    "item_20_live_jit_session_deferred_until_issue_115_completed_fresh_exact_candidate_gates_"
-    "and_private_endpoint_handoff_are_implemented"
+    "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_"
+    "and_never_reuse_terminal_item_19_intent"
 )
 
 
