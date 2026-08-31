@@ -5,6 +5,7 @@
   "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
   "vultr_readonly_preflight_contract": "contracts/operations/vultr-readonly-preflight-v1.json",
   "item20_acceptance_contract": "contracts/operations/item20-acceptance-v1.json",
+  "item20_private_handoff_contract": "contracts/operations/item20-private-handoff-v1.json",
   "vm_ownership_contract": "contracts/governance/vm-ownership-v1.json",
   "source_repository": {
     "name": "iamaman11/mobile-proxy",
