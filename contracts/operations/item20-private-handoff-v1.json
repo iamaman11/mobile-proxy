@@ -1,11 +1,13 @@
 {
   "contract_version": 1,
-  "status": "protected_design_only_not_enabled",
+  "status": "protected_sealed_primitive_not_enabled",
   "canonical_repository": "iamaman11/mobile-proxy",
   "private_execution_repository": "iamaman11/mobile-proxy-production",
   "tracker_issue": 135,
   "phone_signing_gate_issue": 115,
   "implementation": {
+    "sealed_envelope_primitive": "scripts/item20_private_handoff.py",
+    "sealed_envelope_primitive_implemented": true,
     "public_handoff_enabled": false,
     "private_phone_workflow_enabled": false,
     "private_secret_write_enabled": false,
@@ -24,7 +26,7 @@
   "identity": {
     "candidate_sha": "exact_immutable_item19_proven_candidate",
     "control_plane_sha": "exact_current_protected_main",
-    "session_nonce": "fresh_opaque_random_at_least_128_bits",
+    "session_nonce": "fresh_exact_128_bit_lowercase_hex_generated_with_os_csprng",
     "transport_endpoint": "derived_only_after_exact_verified_target_resolution_never_authority"
   },
   "transport": {
@@ -44,6 +46,7 @@
     "sealed_ciphertext_in_dispatch_inputs": true,
     "public_persistence": "forbidden",
     "encryption": "libsodium_crypto_box_seal_to_dedicated_private_execution_recipient_key",
+    "encryption_implementation": "system_libsodium_via_python_ctypes_fail_closed_if_unavailable",
     "recipient_public_key": "future_protected_canonical_public_value_not_secret",
     "recipient_private_key_secret_name": "ITEM20_HANDOFF_PRIVATE_KEY_B64",
     "recipient_private_key_location": "private_repository_actions_secret_only",
@@ -52,12 +55,14 @@
   },
   "envelope": {
     "format_version": 1,
+    "canonical_json": "sorted_keys_compact_utf8",
     "plaintext_fields_before_sealing": [
       "candidate_sha",
       "control_plane_sha",
       "session_nonce",
       "transport_endpoint"
     ],
+    "plaintext_endpoint_cli_argument": "forbidden_file_only",
     "provider_uuid": "forbidden",
     "provider_credentials": "forbidden",
     "phone_credentials": "forbidden"
