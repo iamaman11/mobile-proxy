@@ -68,6 +68,21 @@
     "item19_quality_run_id": 33341602485,
     "vultr_readonly_preflight_run_id": 33341760002
   },
+  "orchestration": {
+    "candidate_source": "exact_immutable_item19_proven_sha",
+    "control_plane_source": "exact_current_protected_main",
+    "endpoint_handoff": "not_implemented",
+    "executor": "github-hosted",
+    "phone_execution": false,
+    "provider_credentials": "forbidden",
+    "provider_environment": "none",
+    "provider_mutation": false,
+    "server_artifact_name_template": "item20-server-candidate-<candidate_sha>",
+    "status": "protected_validation_and_candidate_build_only",
+    "trigger": "workflow_dispatch",
+    "verifier": "scripts/verify_item20_orchestration.py",
+    "workflow": ".github/workflows/item20-session-orchestration.yml"
+  },
   "phone_preflight": {
     "artifact_name_template": "phone-read-only-preflight-<control_plane_sha>",
     "authority": "execution_only",
