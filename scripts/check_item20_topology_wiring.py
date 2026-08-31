@@ -329,18 +329,12 @@ def check_repository(root: Path) -> list[str]:
 
     current_handoff = item20.get("handoff")
     if not isinstance(current_handoff, dict) or current_handoff != {
-        "contract": "contracts/operations/item20-private-handoff-v1.json",
-        "sealed_envelope_primitive": "scripts/item20_private_handoff.py",
-        "sealed_envelope_primitive_status": "implemented_protected_not_wired",
         "private_phone_runner_vultr_credentials": "forbidden",
         "public_provider_uuid_recording": "forbidden",
         "public_transport_endpoint_recording": "forbidden",
-        "recipient_public_key": "not_configured",
-        "private_workflow": "not_implemented",
-        "workflow_dispatch": "not_enabled",
-        "status": "sealed_primitive_implemented_handoff_not_enabled",
+        "status": "not_implemented",
     }:
-        errors.append("Item 20 active acceptance contract must keep sealed handoff primitive non-live and unwired")
+        errors.append("Item 20 active acceptance contract must keep endpoint handoff unimplemented")
 
     if handoff:
         errors.extend(_check_handoff_contract(handoff))
