@@ -4,6 +4,7 @@
   "project_authority_contract": "contracts/operations/project-authority-v1.json",
   "acceptance_authority_contract": "contracts/operations/acceptance-authority-v1.json",
   "vultr_readonly_preflight_contract": "contracts/operations/vultr-readonly-preflight-v1.json",
+  "item20_acceptance_contract": "contracts/operations/item20-acceptance-v1.json",
   "vm_ownership_contract": "contracts/governance/vm-ownership-v1.json",
   "source_repository": {
     "name": "iamaman11/mobile-proxy",
@@ -109,6 +110,19 @@
       }
     }
   },
+  "item20_non_live_orchestration": {
+    "contract": "contracts/operations/item20-acceptance-v1.json",
+    "status": "protected_validation_and_candidate_build_only",
+    "workflow": ".github/workflows/item20-session-orchestration.yml",
+    "executor": "github-hosted",
+    "environment": "none",
+    "provider_credentials": "forbidden",
+    "provider_mutation": false,
+    "phone_execution": false,
+    "endpoint_handoff": "not_implemented",
+    "live_execution": false,
+    "final_production_authority": false
+  },
   "vultr_lifecycle_adapter": {
     "status": "item_19_slice_a_typed_client_and_durable_state_active_no_live_entrypoint",
     "provider_neutral_policy": "crates/proxy-core/src/provider_lifecycle.rs",
@@ -189,6 +203,8 @@
     "item_18_live_vultr_provider_mutation",
     "item_18_production_vultr_authority",
     "item_19_production_vultr_authority",
-    "private_phone_runner_receiving_vultr_credentials"
+    "private_phone_runner_receiving_vultr_credentials",
+    "item_20_non_live_orchestration_receiving_vultr_credentials",
+    "item_20_non_live_orchestration_authorizing_provider_or_phone_mutation"
   ]
 }
