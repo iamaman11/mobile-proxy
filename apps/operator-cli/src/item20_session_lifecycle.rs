@@ -12,9 +12,7 @@ use std::net::Ipv4Addr;
 use std::thread;
 use std::time::Duration;
 
-use crate::github_vm_binding_store::{
-    AcceptanceVmLifecycleState, DurableGitHubVmBindingStore,
-};
+use crate::github_vm_binding_store::{AcceptanceVmLifecycleState, DurableGitHubVmBindingStore};
 use crate::item20_acceptance::{Item20SessionIdentity, acceptance_spec};
 use crate::vultr_client::VultrAcceptanceClient;
 use crate::vultr_lifecycle::VultrVmSpec;
@@ -187,13 +185,7 @@ where
             SessionOpenOrigin::Created,
         ),
         AcceptanceVmLifecycleState::CreatePrepared { generation } => (
-            dispatch_create(
-                store,
-                provider,
-                &desired,
-                user_data_b64,
-                Some(generation),
-            )?,
+            dispatch_create(store, provider, &desired, user_data_b64, Some(generation))?,
             SessionOpenOrigin::Created,
         ),
         AcceptanceVmLifecycleState::CreateDispatched { generation } => (
@@ -243,12 +235,7 @@ where
         bail!("Item 20 binding does not match the admitted session identity");
     }
     let observed = provider.list_instances()?;
-    match plan_present(
-        Some(binding),
-        &observed,
-        &desired,
-        Some(binding.generation),
-    )? {
+    match plan_present(Some(binding), &observed, &desired, Some(binding.generation))? {
         ReconcilePlan::Noop(target) => Ok(target),
         ReconcilePlan::Reconfigure(_) => {
             bail!("Item 20 acceptance VM specification drifted before target resolution")
@@ -429,12 +416,7 @@ where
 {
     for attempt in 0..DELETE_CONFIRM_ATTEMPTS {
         let observed = provider.list_instances()?;
-        match authorize_mutation(
-            binding,
-            &observed,
-            binding.generation,
-            MutationKind::Delete,
-        ) {
+        match authorize_mutation(binding, &observed, binding.generation, MutationKind::Delete) {
             Err(LifecycleError::ProviderResourceNotFound) => return Ok(()),
             Ok(_) => {
                 if attempt + 1 < DELETE_CONFIRM_ATTEMPTS {
@@ -455,12 +437,7 @@ where
     P::Error: std::error::Error + Send + Sync + 'static,
 {
     let observed = provider.list_instances()?;
-    match authorize_mutation(
-        binding,
-        &observed,
-        binding.generation,
-        MutationKind::Delete,
-    ) {
+    match authorize_mutation(binding, &observed, binding.generation, MutationKind::Delete) {
         Err(LifecycleError::ProviderResourceNotFound) => {
             store.compare_and_swap(&binding.intent, Some(binding), None)?;
         }
@@ -492,9 +469,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proxy_core::{
-        DesiredVm, OwnershipMetadata, OwnershipObservation, ProviderResourceId,
-    };
+    use proxy_core::{DesiredVm, OwnershipMetadata, OwnershipObservation, ProviderResourceId};
     use std::cell::{Cell, RefCell};
     use std::io;
 
@@ -557,11 +532,9 @@ mod tests {
                     self.state = AcceptanceVmLifecycleState::Bound(binding);
                     Ok(())
                 }
-                (
-                    AcceptanceVmLifecycleState::DeleteDispatched(current),
-                    Some(expected),
-                    None,
-                ) if current == expected => {
+                (AcceptanceVmLifecycleState::DeleteDispatched(current), Some(expected), None)
+                    if current == expected =>
+                {
                     self.state = AcceptanceVmLifecycleState::Terminal {
                         last_generation: current.generation,
                     };
@@ -597,8 +570,9 @@ mod tests {
             intent: &OwnershipIntent,
             generation: Generation,
         ) -> io::Result<()> {
-            if intent != &self.intent
-                || self.state != AcceptanceVmLifecycleState::CreatePrepared { generation }
+            if intent != &self.intent || self.state != AcceptanceVmLifecycleState::CreatePrepared {
+                generation
+            }
             {
                 return Err(Self::invalid_transition());
             }
@@ -750,10 +724,7 @@ mod tests {
         let provider = FakeProvider::default();
         let desired: DesiredVm = identity.desired_vm().unwrap();
         provider.observed.borrow_mut().push(ObservedVm {
-            provider_id: ProviderResourceId::new(
-                "22222222-2222-4222-8222-222222222222",
-            )
-            .unwrap(),
+            provider_id: ProviderResourceId::new("22222222-2222-4222-8222-222222222222").unwrap(),
             display_name: desired.display_name,
             ownership: OwnershipObservation::Missing,
             spec_fingerprint: desired.spec_fingerprint,
