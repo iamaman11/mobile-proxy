@@ -52,7 +52,7 @@
     "phone_logic": "canonical public logic pinned to immutable SHA or verified canonical release artifact",
     "cross_boundary_secret_rule": "private phone runner never receives Vultr credentials and public Vultr jobs never receive raw phone identifiers or phone-control secrets",
     "item20_non_live": "GitHub-hosted exact-current protected-main validation plus exact immutable candidate build only; no acceptance-vultr environment, provider credentials, provider mutation, phone execution or endpoint handoff",
-    "item20_admission_readiness": "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence against exact current protected control-plane; bounded result is matched exactly by the pure admission core; session workflow wiring remains not implemented; actions:read plus contents:read only; no provider credentials/API execution, provider mutation, phone execution or endpoint handoff"
+    "item20_admission_readiness": "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence against exact current protected control-plane; bounded result is matched exactly by the pure admission core and consumed as an exact verified readiness artifact by the non-live session workflow before candidate build; actions:read plus contents:read only; no provider credentials/API execution, provider mutation, phone execution or endpoint handoff"
   },
   "release_link": {
     "source_repository": "iamaman11/mobile-proxy",
@@ -92,7 +92,7 @@
     "vultr_live_preflight": "exact_candidate_d151dbdd156279e32a5361d304c90f996bd2d565_read_only_preflight_run_33341760002_passed_before_item_19_mutation",
     "vultr_live_lifecycle": "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed",
     "item_20_non_live_orchestration": "protected_non_live_validation_and_exact_candidate_build_only_no_provider_or_phone_authority",
-    "item_20_admission_readiness": "protected_read_only_candidate_evidence_validation_admission_core_exact_result_match_implemented_session_workflow_not_wired_no_provider_or_phone_authority",
+    "item_20_admission_readiness": "protected_read_only_candidate_evidence_validation_admission_core_exact_result_match_and_session_exact_readiness_artifact_consumption_implemented_no_provider_or_phone_authority",
     "next_acceptance_lifecycle": "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent",
     "phone_workflows": "read_only_preflight_implemented",
     "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",

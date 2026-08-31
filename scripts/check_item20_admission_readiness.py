@@ -29,7 +29,7 @@ _EXPECTED_CONTRACT = {
         "control_plane_sha": "exact_current_protected_main",
         "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
         "selector": "scripts/select_item20_candidate_evidence.py",
-        "session_workflow_wiring": "not_implemented",
+        "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
         "status": "protected_read_only_candidate_evidence_wiring",
         "verifier": "scripts/verify_item20_candidate_evidence.py",
         "workflow": ".github/workflows/item20-admission-readiness.yml",
@@ -175,6 +175,7 @@ def check_repository(root: Path) -> list[str]:
         "test_selector_uses_exact_candidate_then_control_plane",
         "test_selector_rejects_old_or_invalid_artifacts",
         "test_workflow_is_read_only_and_consumes_protected_verifier",
+        "test_session_workflow_consumes_existing_readiness_without_dispatch",
     ):
         if required not in tests:
             errors.append(f"Item 20 readiness regression coverage is missing {required!r}")
