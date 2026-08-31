@@ -46,7 +46,9 @@ def check_repository(root: Path) -> list[str]:
         "required_artifact_digest": "sha256",
         "required_artifact_run_branch": "main",
         "required_artifact_run_head_sha": "control_plane_sha",
-        "candidate_sha_equals_control_plane_sha": False,
+        "candidate_identity_role": "artifact_name_and_evidence_binding",
+        "control_plane_identity_role": "workflow_run_head_binding",
+        "candidate_sha_must_not_select_run_head": True,
     }
     if not isinstance(acceptance, dict) or acceptance.get("selection") != expected_selection:
         errors.append("Vultr read-only preflight does not protect candidate/artifact/control-plane selection")

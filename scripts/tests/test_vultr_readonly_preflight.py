@@ -124,6 +124,21 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
         self.assertEqual(selected["id"], 200)
         self.assertEqual(selected["workflow_run"]["id"], 20)
 
+    def test_selector_separates_roles_without_requiring_different_sha_values(self):
+        artifact = self.acceptance_artifact(
+            candidate_sha=self.candidate_sha,
+            control_plane_sha=self.candidate_sha,
+            artifact_id=700,
+            run_id=70,
+        )
+        selected = MODULE.select_acceptance_artifact(
+            self.candidate_sha,
+            self.candidate_sha,
+            {"artifacts": [artifact]},
+        )
+        self.assertEqual(selected["id"], 700)
+        self.assertEqual(selected["workflow_run"]["head_sha"], self.candidate_sha)
+
     def test_missing_expired_or_invalid_digest_artifact_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "no unexpired"):
             MODULE.select_acceptance_artifact(
@@ -217,17 +232,16 @@ class VultrReadonlyPreflightTests(unittest.TestCase):
         )
         self.assertTrue(contract["authority_separation"]["environments_must_differ"])
         self.assertFalse(contract["authority_separation"]["final_production_authority"])
+        selection = contract["acceptance_evidence"]["selection"]
         self.assertEqual(
-            contract["acceptance_evidence"]["selection"]["strategy"],
+            selection["strategy"],
             "candidate_specific_artifact_then_exact_control_plane_run",
         )
-        self.assertEqual(
-            contract["acceptance_evidence"]["selection"]["required_artifact_run_head_sha"],
-            "control_plane_sha",
-        )
-        self.assertFalse(
-            contract["acceptance_evidence"]["selection"]["candidate_sha_equals_control_plane_sha"]
-        )
+        self.assertEqual(selection["required_artifact_run_head_sha"], "control_plane_sha")
+        self.assertEqual(selection["candidate_identity_role"], "artifact_name_and_evidence_binding")
+        self.assertEqual(selection["control_plane_identity_role"], "workflow_run_head_binding")
+        self.assertTrue(selection["candidate_sha_must_not_select_run_head"])
+        self.assertNotIn("candidate_sha_equals_control_plane_sha", selection)
         self.assertEqual(contract["provider_probe"]["method"], "GET")
         self.assertEqual(contract["provider_probe"]["url"], "https://api.vultr.com/v2/account")
         self.assertEqual(contract["provider_probe"]["allowed_api_calls"], 1)
