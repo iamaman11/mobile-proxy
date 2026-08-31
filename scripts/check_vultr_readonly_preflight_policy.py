@@ -38,6 +38,19 @@ def check_repository(root: Path) -> list[str]:
         "provider_mutation": "forbidden",
     }:
         errors.append("Vultr provider preflight scope is not exact read-only /v2/account")
+
+    acceptance = contract.get("acceptance_evidence")
+    expected_selection = {
+        "strategy": "candidate_specific_artifact_then_exact_control_plane_run",
+        "required_artifact_expired": False,
+        "required_artifact_digest": "sha256",
+        "required_artifact_run_branch": "main",
+        "required_artifact_run_head_sha": "control_plane_sha",
+        "candidate_sha_equals_control_plane_sha": False,
+    }
+    if not isinstance(acceptance, dict) or acceptance.get("selection") != expected_selection:
+        errors.append("Vultr read-only preflight does not protect candidate/artifact/control-plane selection")
+
     separation = contract.get("authority_separation")
     if not isinstance(separation, dict) or any(
         separation.get(key) != value
@@ -102,7 +115,12 @@ def check_repository(root: Path) -> list[str]:
         "startsWith(github.event.comment.body, '/vultr-readonly-preflight ')",
         "runs-on: ubuntu-latest",
         "environment: acceptance-vultr",
-        "vultr-acceptance-authority-",
+        "actions/artifacts?name=vultr-acceptance-authority-$CANDIDATE_SHA&per_page=100",
+        "actions/runs/$run_id",
+        "actions/artifacts/$ACCEPTANCE_ARTIFACT_ID/zip",
+        "select-artifact",
+        "--control-plane-sha \"$CONTROL_PLANE_SHA\"",
+        "--selected-artifact selected-acceptance-artifact.json",
         "verify_vultr_readonly_preflight.py",
         "--request GET",
         "--output /dev/null",
@@ -111,6 +129,8 @@ def check_repository(root: Path) -> list[str]:
     if any(token not in workflow for token in required_workflow):
         errors.append("Vultr read-only workflow is missing a required immutable/read-only control")
     forbidden_workflow = (
+        "head_sha=$CANDIDATE_SHA",
+        "select-run",
         "environment: production-vultr",
         "runs-on: self-hosted",
         "/v2/instances",
@@ -123,7 +143,7 @@ def check_repository(root: Path) -> list[str]:
         "gcloud",
     )
     if any(token in workflow for token in forbidden_workflow):
-        errors.append("Vultr read-only workflow contains production, mutation, or phone authority")
+        errors.append("Vultr read-only workflow contains stale selection, production, mutation, or phone authority")
     if workflow.count("https://api.vultr.com/v2/account") != 1:
         errors.append("Vultr read-only workflow must contain exactly one provider account endpoint")
 
