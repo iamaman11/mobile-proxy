@@ -11,6 +11,7 @@ PHYSICAL_RUNBOOK = Path("docs/physical-phone-acceptance-runbook.md")
 PHONE_RUNTIME = Path("docs/operations/phone-gitops-runtime.md")
 ITEM19_CLOSEOUT = Path("docs/operations/item19-provider-proof-closeout.md")
 ITEM19_LIFECYCLE = Path("apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs")
+BINDING_STORE = Path("apps/operator-cli/src/github_vm_binding_store.rs")
 ITEM20_IDENTITY = Path("apps/operator-cli/src/item20_acceptance.rs")
 LIB = Path("apps/operator-cli/src/lib.rs")
 
@@ -30,6 +31,7 @@ def check_repository(root: Path) -> list[str]:
     phone = _read(root, PHONE_RUNTIME, errors)
     closeout = _read(root, ITEM19_CLOSEOUT, errors)
     item19 = _read(root, ITEM19_LIFECYCLE, errors)
+    binding_store = _read(root, BINDING_STORE, errors)
     item20 = _read(root, ITEM20_IDENTITY, errors)
     lib = _read(root, LIB, errors)
 
@@ -69,7 +71,22 @@ def check_repository(root: Path) -> list[str]:
         errors.append("Item 19 historical ownership intent semantics changed")
 
     for required in (
-        'const ITEM20_INTENT_PREFIX: &str = "item20-physical:candidate:";',
+        "pub enum AcceptanceVmIntentNamespace",
+        "Item19,",
+        "Item20,",
+        'Self::Item19 => format!("candidate:{candidate_sha}"),',
+        'Self::Item20 => format!("item20:candidate:{candidate_sha}"),',
+        "pub fn new_item20",
+        "BindingStoreError::TerminalIntentReuse",
+        "item19_and_item20_intents_are_distinct_and_exact",
+        "independent_ledgers_can_share_one_immutable_candidate",
+        "unknown_namespace_record_poisoning_fails_closed",
+    ):
+        if required not in binding_store:
+            errors.append(f"durable acceptance store is missing Item 20 namespace guard {required!r}")
+
+    for required in (
+        'const ITEM20_INTENT_PREFIX: &str = "item20:candidate:";',
         "pub struct Item20SessionIdentity",
         "candidate_sha: String",
         "control_plane_sha: String",
@@ -82,6 +99,7 @@ def check_repository(root: Path) -> list[str]:
 
     for forbidden in (
         legacy_item19_intent,
+        "item20-physical:candidate:",
         "LifecycleScope::Production",
         "production-vultr",
         "VULTR_API_KEY",
