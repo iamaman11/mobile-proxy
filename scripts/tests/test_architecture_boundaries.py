@@ -80,6 +80,7 @@ proxy-core = "1"
             patch.object(MODULE, "check_invariant_enforcement", return_value=[]),
             patch.object(MODULE, "check_vm_ownership_contract", return_value=[]),
             patch.object(MODULE, "check_item19_consistency", return_value=[]),
+            patch.object(MODULE, "check_item20_topology_wiring", return_value=[]),
         ):
             return MODULE.check_repository(root)
 
