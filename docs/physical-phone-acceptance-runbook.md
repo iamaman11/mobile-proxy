@@ -1,9 +1,10 @@
 # Immutable-SHA Physical Phone Acceptance Runbook
 
-Status: **normative execution contract for Production Baseline item 20; not yet authorized for live execution while item 19 and the mutable-phone gate remain incomplete**.
+Status: **normative execution contract for Production Baseline item 20; Item 19 provider proof is COMPLETE; live Item 20 execution remains blocked by #115 and by incomplete protected Item 20 orchestration**.
 
 Canonical roadmap: `docs/PRODUCTION_BASELINE_PLAN.md`  
-Item-19 tracker: #124  
+Item-20 tracker: #135  
+Completed Item-19 tracker: #124  
 Phone GitOps boundary: `docs/operations/phone-gitops-runtime.md`  
 Production topology: `contracts/operations/production-topology-v1.json`
 
@@ -13,8 +14,9 @@ Physical acceptance is split across two deliberately separate execution planes:
 
 ```text
 public canonical repository
-  -> GitHub-hosted item-19 Vultr acceptance lifecycle
-  -> exact accepted candidate on one controlled acceptance VM
+  -> protected typed Item 20 acceptance lifecycle
+  -> fresh distinct Item 20 ownership intent
+  -> exact immutable Item-19-proven candidate on one controlled acceptance VM
 
 private execution satellite
   -> android-production self-hosted runner
@@ -28,10 +30,10 @@ The boundaries are mandatory:
 - the private phone runner must never receive `VULTR_API_KEY` or `VULTR_SSH_PRIVATE_KEY`;
 - the public Vultr job must never receive the private phone serial, ADB credentials or Android signing secrets;
 - GCP/Google Cloud, `gcloud`, workstation-managed VM lifecycle and manual provider SSH are not acceptance fallbacks;
-- provider mutation is performed only through the item-19 typed Vultr lifecycle and durable binding state;
+- provider mutation is performed only through the protected typed Item 20 acceptance lifecycle and durable binding state under the distinct Item 20 ownership intent; the terminal Item 19 proof intent is never reused;
 - phone mutation is performed only through the private `android-production` execution boundary.
 
-This runbook describes item 20. It does **not** authorize item-20 phone mutation while item 19 is ACTIVE or while the canonical signing-continuity gate is unresolved.
+This runbook describes item 20. The Item 19 provider proof is COMPLETE. It does **not** authorize live Item-20 provider or phone mutation while #115 is unresolved or while the protected Item 20 orchestration is incomplete.
 
 ## 2. Required gates before opening the physical window
 
@@ -79,14 +81,14 @@ Before traffic tests, verify and record bounded evidence for:
 
 Never record credentials, private keys, raw phone serials, full proxy URLs or unrestricted logs in public evidence.
 
-## 4. Fresh Item 20 acceptance session from the protected Item 19 capability
+## 4. Fresh Item 20 acceptance session from the protected typed acceptance capability
 
 Item 20 does not select or adopt an arbitrary or pre-existing VM. The public canonical control plane
 opens exactly one fresh JIT acceptance VM through the protected typed lifecycle under a distinct
 Item 20 ownership intent. The terminal Item 19 proof intent is never reused.
 
-The lifecycle capability and proof are handed off from Item 19. The fresh Item 20 server session is
-accepted only when the canonical provider lifecycle proves:
+The lifecycle capability was proven by Item 19, but the fresh Item 20 server session has its own
+ownership intent and durable lifecycle state. It is accepted only when the canonical provider lifecycle proves:
 
 - `LifecycleScope::Acceptance`;
 - exact immutable ownership intent for the candidate;
@@ -99,9 +101,9 @@ accepted only when the canonical provider lifecycle proves:
 - the lifecycle remains under the single repository-wide serialized acceptance writer;
 - deterministic cleanup runs after the physical session and confirms provider absence before terminal CAS.
 
-IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority.
+IP address or DNS name may be supplied to the physical test only as a transport endpoint derived from that already verified target. They are never lifecycle selectors or ownership authority and must not be published through public evidence merely to bridge the public provider plane to the private phone plane.
 
-Item 20 must not call GCP APIs, Vultr APIs, `gcloud`, a Vultr CLI or a workstation VM-provisioning script.
+Provider API calls are confined to the protected public typed acceptance lifecycle. The private Item 20 phone execution must not call Vultr APIs, GCP APIs, `gcloud`, a Vultr CLI or a workstation VM-provisioning script.
 
 ## 5. Phone execution boundary
 
@@ -175,7 +177,7 @@ After recovery prove:
 
 ### Stage C — forced TLS/TCP reserve
 
-The public item-20 server-side test helper, operating only on the already verified item-19 acceptance target, must block the QUIC path while leaving certificate-pinned TLS/TCP reserve reachable.
+The public item-20 server-side test helper, operating only on the already verified Item 20 acceptance target, must block the QUIC path while leaving certificate-pinned TLS/TCP reserve reachable.
 
 This is a bounded test action against the verified acceptance target, not a new provider lifecycle selection.
 
