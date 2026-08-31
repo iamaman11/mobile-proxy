@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hmac
 import json
 import os
@@ -51,7 +50,8 @@ _PACKAGE_PATTERN = re.compile(
     r"^package: name='([^']+)' versionCode='([0-9]+)' versionName='([^']+)'",
     re.MULTILINE,
 )
-_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_CONTENT_DIGEST_PATTERN = re.compile(r"^b3:[0-9a-f]{64}$")
+_ARTIFACT_DIGEST_DOMAIN = "mobile-proxy/android-apk/v1"
 
 
 class AndroidBuildFailure(RuntimeError):
@@ -122,7 +122,10 @@ def prove_exact_source(root: Path, canonical_sha: str, android_baseline_ref: str
         cwd=root,
         timeout=30,
     ).stdout.splitlines()
-    require(set(changed) == _ALLOWED_MIGRATION_ANDROID_DIFF, "Android functional source differs from the approved migration baseline")
+    require(
+        set(changed) == _ALLOWED_MIGRATION_ANDROID_DIFF,
+        "Android functional source differs from the approved migration baseline",
+    )
 
 
 def parse_apk_identity(aapt_output: str) -> tuple[str, int, str]:
@@ -131,10 +134,26 @@ def parse_apk_identity(aapt_output: str) -> tuple[str, int, str]:
     return match.group(1), int(match.group(2)), match.group(3)
 
 
-def sha256_file(path: Path) -> str:
-    result = run_checked(["sha256sum", str(path)], timeout=60).stdout.split()
-    require(len(result) >= 1 and _SHA256_PATTERN.fullmatch(result[0]) is not None, "signed APK checksum is invalid")
-    return result[0]
+def typed_artifact_digest(root: Path, path: Path) -> str:
+    result = run_checked(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "--release",
+            "-p",
+            "operator-cli",
+            "--bin",
+            "android-artifact-digest",
+            "--",
+            str(path),
+        ],
+        cwd=root,
+        timeout=600,
+    ).stdout.strip()
+    require(_CONTENT_DIGEST_PATTERN.fullmatch(result) is not None, "typed Android artifact digest is invalid")
+    return result
 
 
 def build_signed_release(
@@ -157,7 +176,11 @@ def build_signed_release(
     store_password = require_private_text(_KEYSTORE_PASSWORD_ENV, maximum=4096)
     alias = require_private_text(_KEY_ALIAS_ENV, maximum=256)
     key_password = require_private_text(_KEY_PASSWORD_ENV, maximum=4096)
-    keystore_bytes = decode_canonical_base64(keystore_b64, "Android release keystore", maximum_bytes=3_000_000)
+    keystore_bytes = decode_canonical_base64(
+        keystore_b64,
+        "Android release keystore",
+        maximum_bytes=3_000_000,
+    )
 
     apksigner = resolve_android_build_tool("apksigner")
     aapt = resolve_android_build_tool("aapt")
@@ -172,7 +195,14 @@ def build_signed_release(
 
         build_env = os.environ.copy()
         for name in (
-            "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"
+            "http_proxy",
+            "https_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
         ):
             build_env.pop(name, None)
         build_env["ANDROID_RELEASE_KEYSTORE_PATH"] = str(keystore)
@@ -181,16 +211,33 @@ def build_signed_release(
         build_env[_KEY_PASSWORD_ENV] = key_password
 
         run_checked(
-            ["bash", "./gradlew", "--no-daemon", "clean", "testDebugUnitTest", "lintDebug", "assembleRelease"],
+            [
+                "bash",
+                "./gradlew",
+                "--no-daemon",
+                "clean",
+                "testDebugUnitTest",
+                "lintDebug",
+                "assembleRelease",
+            ],
             cwd=gradle_root,
             env=build_env,
         )
-        require(built_apk.is_file() and built_apk.stat().st_size > 0, "signed release APK was not produced")
+        require(
+            built_apk.is_file() and built_apk.stat().st_size > 0,
+            "signed release APK was not produced",
+        )
 
-        signer = run_checked([apksigner, "verify", "--print-certs", str(built_apk)], timeout=120)
+        signer = run_checked(
+            [apksigner, "verify", "--print-certs", str(built_apk)],
+            timeout=120,
+        )
         apk_fingerprint = parse_single_apksigner_fingerprint(signer.stdout)
         key_fingerprint = read_keystore_fingerprint(keystore, alias, store_password)
-        require(hmac.compare_digest(apk_fingerprint, key_fingerprint), "signed APK signer differs from configured production key")
+        require(
+            hmac.compare_digest(apk_fingerprint, key_fingerprint),
+            "signed APK signer differs from configured production key",
+        )
 
         identity = run_checked([aapt, "dump", "badging", str(built_apk)], timeout=120)
         package, actual_code, actual_name = parse_apk_identity(identity.stdout)
@@ -201,7 +248,7 @@ def build_signed_release(
         output_dir.mkdir(parents=True, exist_ok=True)
         target = output_dir / f"mobile-proxy-android-v{version}.apk"
         shutil.copyfile(built_apk, target)
-        checksum = sha256_file(target)
+        artifact_digest = typed_artifact_digest(root, target)
 
     report = {
         "format_version": 1,
@@ -213,7 +260,9 @@ def build_signed_release(
         "version_name": version,
         "version_code": version_code,
         "artifact_name": target.name,
-        "artifact_sha256": checksum,
+        "artifact_digest": artifact_digest,
+        "artifact_digest_algorithm": "blake3-256",
+        "artifact_digest_domain": _ARTIFACT_DIGEST_DOMAIN,
         "release_contract_verified": True,
         "keystore_verified": True,
         "apk_signature_verified": True,
