@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -11,7 +13,9 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from check_item20_consistency import (
+    ITEM20_CONTRACT,
     PHYSICAL_RUNBOOK,
+    check_item20_contract,
     check_physical_runbook_text,
     check_repository,
 )
@@ -42,6 +46,22 @@ class Item20ConsistencyTests(unittest.TestCase):
             1,
         )
         self.assertNotEqual(check_physical_runbook_text(stale), [])
+
+    def test_item20_admission_contract_is_validation_only(self) -> None:
+        contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
+        self.assertEqual(check_item20_contract(contract), [])
+
+    def test_item20_admission_contract_cannot_grant_provider_mutation(self) -> None:
+        contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
+        mutated = copy.deepcopy(contract)
+        mutated["authorization"]["provider_mutation_authorized"] = True
+        self.assertNotEqual(check_item20_contract(mutated), [])
+
+    def test_item20_admission_contract_cannot_claim_endpoint_handoff(self) -> None:
+        contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
+        mutated = copy.deepcopy(contract)
+        mutated["handoff"]["status"] = "implemented"
+        self.assertNotEqual(check_item20_contract(mutated), [])
 
 
 if __name__ == "__main__":
