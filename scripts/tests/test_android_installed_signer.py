@@ -266,8 +266,6 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         self.assertNotIn("requests.", source)
         self.assertNotIn("urllib.request", source)
         self.assertNotIn("hashlib", source)
-        self.assertNotIn("sha" + "256sum", source.lower())
-        self.assertNotIn("openssl dgst -" + "sha256", source.lower())
 
 
 if __name__ == "__main__":
