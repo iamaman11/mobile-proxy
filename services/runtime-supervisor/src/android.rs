@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -22,6 +23,30 @@ pub fn provision_android_egress(port: u16, username: &str, password: &str) -> Re
     Ok(())
 }
 
+fn ensure_android_egress_files_dir(uid: u32) -> Result<()> {
+    let directory = Path::new(APP_EGRESS_FILES_DIR);
+    match fs::create_dir(directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to create {}", directory.display()));
+        }
+    }
+    if !directory.is_dir() {
+        bail!("Android egress files path is not a directory")
+    }
+    #[cfg(unix)]
+    fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+    run_command(
+        "chown",
+        &[
+            &format!("{uid}:{uid}"),
+            directory.to_string_lossy().as_ref(),
+        ],
+    )?;
+    Ok(())
+}
+
 fn write_android_egress_config(uid: u32, port: u16, username: &str, password: &str) -> Result<()> {
     if !(1024..=65535).contains(&port)
         || username.is_empty()
@@ -30,9 +55,8 @@ fn write_android_egress_config(uid: u32, port: u16, username: &str, password: &s
     {
         bail!("Android egress configuration is invalid")
     }
+    ensure_android_egress_files_dir(uid)?;
     let directory = Path::new(APP_EGRESS_FILES_DIR);
-    fs::create_dir_all(directory)
-        .with_context(|| format!("failed to create {}", directory.display()))?;
     let target = directory.join("cellular-egress.json");
     let temporary = directory.join("cellular-egress.json.tmp");
     let body = serde_json::to_vec(&serde_json::json!({

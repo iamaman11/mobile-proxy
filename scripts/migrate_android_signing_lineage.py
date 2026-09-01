@@ -3,7 +3,8 @@
 
 The migration is fail-closed and retains the currently-installed signed APK before
 uninstall. If the new signed APK cannot be installed or made locally healthy, the
-script attempts a destructive rollback to that exact retained old APK.
+script attempts a destructive rollback to that exact retained old APK and records
+bounded stage-by-stage rollback evidence.
 """
 
 from __future__ import annotations
@@ -40,10 +41,14 @@ except ModuleNotFoundError:
 _PACKAGE = "com.example.mobileproxy"
 _AUTHORIZATION = "DESTROY_OLD_SIGNING_LINEAGE_AND_APP_DATA"
 _RUNTIME_ROOT = "/data/adb/mobile-proxy-node/current"
+_SERVICE_ENTRYPOINT = f"{_RUNTIME_ROOT}/service.sh"
 _SUPERVISOR = f"{_RUNTIME_ROOT}/bin/runtime-supervisor"
+_APP_DE_ROOT = f"/data/user_de/0/{_PACKAGE}"
+_APP_DE_FILES = f"{_APP_DE_ROOT}/files"
 _EGRESS_SERVICE = "com.example.mobileproxy/.CellularEgressService"
 _VERSION_CODE_PATTERN = re.compile(r"^\s*versionCode=([0-9]+)\b", re.MULTILINE)
 _VERSION_NAME_PATTERN = re.compile(r"^\s*versionName=([^\s]+)\s*$", re.MULTILINE)
+_UID_PATTERN = re.compile(r"(?:^|\s)uid:([0-9]+)(?:\s|$)")
 _CONTENT_DIGEST_PATTERN = re.compile(r"^b3:[0-9a-f]{64}$")
 _ARTIFACT_DIGEST_DOMAIN = "mobile-proxy/android-apk/v1"
 
@@ -109,6 +114,16 @@ def parse_package_version(output: str) -> tuple[int, str]:
     return int(codes[0]), names[0]
 
 
+def parse_package_uid(output: str) -> int:
+    matches = []
+    for line in output.splitlines():
+        if f"package:{_PACKAGE}" not in line:
+            continue
+        matches.extend(_UID_PATTERN.findall(line))
+    require(len(matches) == 1, "installed package UID is unavailable or ambiguous")
+    return int(matches[0])
+
+
 def package_version(serial: str) -> tuple[int, str]:
     result = adb(serial, "shell", "dumpsys", "package", _PACKAGE, timeout=60)
     require(
@@ -117,6 +132,21 @@ def package_version(serial: str) -> tuple[int, str]:
         "production package is not installed",
     )
     return parse_package_version(result.stdout)
+
+
+def package_uid(serial: str) -> int:
+    result = adb(
+        serial,
+        "shell",
+        "cmd",
+        "package",
+        "list",
+        "packages",
+        "-U",
+        _PACKAGE,
+        timeout=30,
+    )
+    return parse_package_uid(result.stdout)
 
 
 def package_present(serial: str) -> bool:
@@ -259,25 +289,19 @@ def install(serial: str, apk: Path) -> None:
     require(package_present(serial), "Android package is absent after install")
 
 
-def _supervisor_restart_shell() -> str:
+def _private_storage_prepare_shell(uid: int) -> str:
     return f'''set -eu
-found=0
-for proc in /proc/[0-9]*; do
-  [ -r "$proc/cmdline" ] || continue
-  cmd="$(tr '\\000' ' ' < "$proc/cmdline")"
-  case "$cmd" in
-    "{_SUPERVISOR} --runtime-root {_RUNTIME_ROOT} "*)
-      pid="${{proc#/proc/}}"
-      kill -TERM "$pid"
-      found=1
-      ;;
-  esac
-done
-[ "$found" -eq 1 ]
+root="{_APP_DE_ROOT}"
+files="{_APP_DE_FILES}"
+[ -d "$root" ]
+mkdir -p "$files"
+chown {uid}:{uid} "$files"
+chmod 0700 "$files"
 '''
 
 
-def restart_runtime_supervisor(serial: str) -> None:
+def prepare_android_private_storage(serial: str) -> None:
+    uid = package_uid(serial)
     exact_preflight(serial)
     adb(
         serial,
@@ -286,18 +310,52 @@ def restart_runtime_supervisor(serial: str) -> None:
         "0",
         "sh",
         "-c",
-        _supervisor_restart_shell(),
+        _private_storage_prepare_shell(uid),
+        timeout=60,
+    )
+
+
+def _runtime_bootstrap_shell() -> str:
+    return f'''set -eu
+[ -f "{_SERVICE_ENTRYPOINT}" ]
+[ -x "{_SUPERVISOR}" ]
+for proc in /proc/[0-9]*; do
+  [ -r "$proc/cmdline" ] || continue
+  cmd="$(tr '\\000' ' ' < "$proc/cmdline")"
+  case "$cmd" in
+    "{_SUPERVISOR} --runtime-root {_RUNTIME_ROOT} "*)
+      kill -TERM "${{proc#/proc/}}"
+      ;;
+  esac
+done
+sh "{_SERVICE_ENTRYPOINT}"
+'''
+
+
+def bootstrap_runtime(serial: str) -> None:
+    exact_preflight(serial)
+    adb(
+        serial,
+        "shell",
+        "su",
+        "0",
+        "sh",
+        "-c",
+        _runtime_bootstrap_shell(),
         timeout=60,
     )
 
 
 def _root_test(serial: str, shell: str) -> bool:
-    result = subprocess.run(
-        ["adb", "-s", serial, "shell", "su", "0", "sh", "-c", shell],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=20,
-    )
+    try:
+        result = subprocess.run(
+            ["adb", "-s", serial, "shell", "su", "0", "sh", "-c", shell],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0
 
 
@@ -314,39 +372,70 @@ exit 1
     return _root_test(serial, shell)
 
 
-def local_proxy_ports_ready(serial: str) -> bool:
-    shell = '''BB=""
+def local_port_ready(serial: str, port: int) -> bool:
+    shell = f'''BB=""
 for candidate in /data/adb/magisk/busybox /debug_ramdisk/.magisk/busybox/busybox; do
   [ -x "$candidate" ] && BB="$candidate" && break
 done
 [ -n "$BB" ] || exit 1
-"$BB" nc -z -w 2 127.0.0.1 18080 >/dev/null 2>&1
-"$BB" nc -z -w 2 127.0.0.1 1080 >/dev/null 2>&1
+"$BB" nc -z -w 2 127.0.0.1 {port} >/dev/null 2>&1
 '''
     return _root_test(serial, shell)
 
 
 def egress_service_running(serial: str) -> bool:
-    result = subprocess.run(
-        ["adb", "-s", serial, "shell", "dumpsys", "activity", "services", _PACKAGE],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    try:
+        result = subprocess.run(
+            ["adb", "-s", serial, "shell", "dumpsys", "activity", "services", _PACKAGE],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return result.returncode == 0 and _EGRESS_SERVICE in result.stdout
 
 
-def wait_for_local_health(serial: str, *, timeout_seconds: int = 60) -> None:
+def local_health_state(serial: str) -> dict[str, bool]:
+    return {
+        "runtime_supervisor_running": supervisor_running(serial),
+        "cellular_egress_service_running": egress_service_running(serial),
+        "local_app_egress_port_ready": local_port_ready(serial, 18080),
+        "local_proxy_port_ready": local_port_ready(serial, 1080),
+    }
+
+
+def wait_for_local_health(
+    serial: str,
+    *,
+    timeout_seconds: int = 60,
+) -> dict[str, bool]:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if (
-            supervisor_running(serial)
-            and egress_service_running(serial)
-            and local_proxy_ports_ready(serial)
-        ):
-            return
+        state = local_health_state(serial)
+        if all(state.values()):
+            return state
         time.sleep(2)
-    raise MigrationFailure("new Android signing generation did not become locally healthy")
+    raise MigrationFailure("Android signing generation did not become locally healthy")
+
+
+def _rollback_defaults() -> dict[str, Any]:
+    return {
+        "rollback_attempted": False,
+        "rollback_existing_package_removed": False,
+        "rollback_apk_reinstalled": False,
+        "rollback_apk_version_verified": False,
+        "rollback_apk_digest_verified": False,
+        "rollback_private_storage_prepared": False,
+        "rollback_runtime_bootstrap_invoked": False,
+        "rollback_runtime_supervisor_running": False,
+        "rollback_cellular_egress_service_running": False,
+        "rollback_local_app_egress_port_ready": False,
+        "rollback_local_proxy_port_ready": False,
+        "rollback_local_health_verified": False,
+        "rollback_failure_stage": None,
+        "rollback_succeeded": False,
+    }
 
 
 def restore_old_generation(
@@ -354,21 +443,63 @@ def restore_old_generation(
     old_apk: Path,
     old_code: int,
     old_name: str,
-) -> bool:
+    old_digest: str,
+    digest_tool: Path,
+) -> dict[str, Any]:
+    report = _rollback_defaults()
+    report["rollback_attempted"] = True
+    stage = "remove_failed_generation"
     try:
         if package_present(serial):
             uninstall(serial)
+            report["rollback_existing_package_removed"] = True
+        stage = "reinstall_retained_apk"
         install(serial, old_apk)
+        report["rollback_apk_reinstalled"] = True
+        stage = "verify_retained_version"
         restored_code, restored_name = package_version(serial)
         require(
             (restored_code, restored_name) == (old_code, old_name),
             "rollback APK version differs from retained old package",
         )
-        restart_runtime_supervisor(serial)
-        wait_for_local_health(serial)
-        return True
+        report["rollback_apk_version_verified"] = True
+        stage = "verify_retained_digest"
+        verify_installed_apk_digest(serial, old_digest, digest_tool)
+        report["rollback_apk_digest_verified"] = True
+        stage = "prepare_private_storage"
+        prepare_android_private_storage(serial)
+        report["rollback_private_storage_prepared"] = True
+        stage = "bootstrap_runtime"
+        bootstrap_runtime(serial)
+        report["rollback_runtime_bootstrap_invoked"] = True
+        stage = "verify_local_health"
+        health = wait_for_local_health(serial)
+        report["rollback_runtime_supervisor_running"] = health["runtime_supervisor_running"]
+        report["rollback_cellular_egress_service_running"] = health[
+            "cellular_egress_service_running"
+        ]
+        report["rollback_local_app_egress_port_ready"] = health[
+            "local_app_egress_port_ready"
+        ]
+        report["rollback_local_proxy_port_ready"] = health["local_proxy_port_ready"]
+        report["rollback_local_health_verified"] = True
+        report["rollback_succeeded"] = True
+        return report
     except (MigrationFailure, PreflightFailure, OSError, subprocess.TimeoutExpired):
-        return False
+        if stage == "verify_local_health":
+            health = local_health_state(serial)
+            report["rollback_runtime_supervisor_running"] = health[
+                "runtime_supervisor_running"
+            ]
+            report["rollback_cellular_egress_service_running"] = health[
+                "cellular_egress_service_running"
+            ]
+            report["rollback_local_app_egress_port_ready"] = health[
+                "local_app_egress_port_ready"
+            ]
+            report["rollback_local_proxy_port_ready"] = health["local_proxy_port_ready"]
+        report["rollback_failure_stage"] = stage
+        return report
 
 
 def migrate(args: argparse.Namespace) -> tuple[dict[str, Any], bool]:
@@ -407,7 +538,7 @@ def migrate(args: argparse.Namespace) -> tuple[dict[str, Any], bool]:
     old_digest = capture_installed_apk(serial, args.retained_old_apk, args.digest_tool)
 
     report: dict[str, Any] = {
-        "format_version": 1,
+        "format_version": 2,
         "repository": "iamaman11/mobile-proxy",
         "canonical_sha": canonical_sha,
         "package": _PACKAGE,
@@ -425,15 +556,29 @@ def migrate(args: argparse.Namespace) -> tuple[dict[str, Any], bool]:
         "phone_identifier_recorded": False,
         "signer_fingerprint_recorded": False,
         "signing_material_recorded": False,
-        "rollback_attempted": False,
-        "rollback_succeeded": False,
+        "old_package_removed": False,
+        "new_package_installed": False,
+        "new_package_version_verified": False,
+        "installed_new_apk_digest_verified": False,
+        "new_private_storage_prepared": False,
+        "runtime_bootstrap_invoked": False,
+        "runtime_supervisor_running": False,
+        "cellular_egress_service_running": False,
+        "local_app_egress_port_ready": False,
+        "local_proxy_port_ready": False,
+        "failure_stage": None,
+        **_rollback_defaults(),
         "accepted": False,
     }
 
+    stage = "remove_old_package"
     try:
         uninstall(serial)
         report["old_package_removed"] = True
+        stage = "install_new_package"
         install(serial, args.apk)
+        report["new_package_installed"] = True
+        stage = "verify_new_version"
         new_code, new_name = package_version(serial)
         require(
             new_code == args.expected_version_code,
@@ -443,26 +588,34 @@ def migrate(args: argparse.Namespace) -> tuple[dict[str, Any], bool]:
             new_name == args.expected_version_name,
             "installed new Android versionName differs",
         )
-        report["new_package_installed"] = True
         report["new_package_version_verified"] = True
+        stage = "verify_new_digest"
         verify_installed_apk_digest(serial, new_digest, args.digest_tool)
         report["installed_new_apk_digest_verified"] = True
-        restart_runtime_supervisor(serial)
-        report["runtime_supervisor_restarted"] = True
-        wait_for_local_health(serial)
-        report["runtime_supervisor_running"] = True
-        report["cellular_egress_service_running"] = True
-        report["local_app_egress_port_ready"] = True
-        report["local_proxy_port_ready"] = True
+        stage = "prepare_new_private_storage"
+        prepare_android_private_storage(serial)
+        report["new_private_storage_prepared"] = True
+        stage = "bootstrap_new_runtime"
+        bootstrap_runtime(serial)
+        report["runtime_bootstrap_invoked"] = True
+        stage = "verify_new_local_health"
+        health = wait_for_local_health(serial)
+        report.update(health)
         report["accepted"] = True
         return report, True
     except (MigrationFailure, PreflightFailure, OSError, subprocess.TimeoutExpired):
-        report["rollback_attempted"] = True
-        report["rollback_succeeded"] = restore_old_generation(
-            serial,
-            args.retained_old_apk,
-            old_code,
-            old_name,
+        report["failure_stage"] = stage
+        if stage == "verify_new_local_health":
+            report.update(local_health_state(serial))
+        report.update(
+            restore_old_generation(
+                serial,
+                args.retained_old_apk,
+                old_code,
+                old_name,
+                old_digest,
+                args.digest_tool,
+            )
         )
         return report, False
 

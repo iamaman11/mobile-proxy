@@ -25,6 +25,14 @@ class AndroidSigningLineageMigrationTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(name, "1.1.0")
 
+    def test_parse_package_uid_requires_one_exact_package(self):
+        self.assertEqual(
+            module.parse_package_uid("package:com.example.mobileproxy uid:10209\n"),
+            10209,
+        )
+        with self.assertRaises(module.MigrationFailure):
+            module.parse_package_uid("package:com.example.other uid:10209\n")
+
     def release_evidence(self, *, source_preserved: bool = True) -> dict[str, object]:
         return {
             "format_version": 1,
@@ -109,30 +117,43 @@ class AndroidSigningLineageMigrationTests(unittest.TestCase):
             )
         capture.assert_called_once()
 
-    def test_post_install_identity_mismatch_triggers_existing_rollback(self):
+    def migration_args(self, root: Path) -> argparse.Namespace:
+        apk = root / "candidate.apk"
+        apk.write_bytes(b"signed-apk")
+        evidence = root / "release.json"
+        evidence.write_text("{}", encoding="utf-8")
+        digest_tool = root / "android-artifact-digest"
+        digest_tool.write_text("tool", encoding="utf-8")
+        os.chmod(digest_tool, 0o700)
+        return argparse.Namespace(
+            canonical_sha="a" * 40,
+            authorization=module._AUTHORIZATION,
+            apk=apk,
+            release_evidence=evidence,
+            digest_tool=digest_tool,
+            retained_old_apk=root / "old.apk",
+            expected_old_version_name="1.1.0",
+            expected_old_version_code=2,
+            expected_version_name="0.1.4",
+            expected_version_code=1004,
+        )
+
+    def test_post_install_identity_mismatch_records_staged_rollback(self):
         new_digest = "b3:" + "b" * 64
         old_digest = "b3:" + "c" * 64
+        rollback_report = {
+            **module._rollback_defaults(),
+            "rollback_attempted": True,
+            "rollback_apk_reinstalled": True,
+            "rollback_apk_version_verified": True,
+            "rollback_apk_digest_verified": True,
+            "rollback_private_storage_prepared": True,
+            "rollback_runtime_bootstrap_invoked": True,
+            "rollback_local_health_verified": True,
+            "rollback_succeeded": True,
+        }
         with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            apk = root / "candidate.apk"
-            apk.write_bytes(b"signed-apk")
-            evidence = root / "release.json"
-            evidence.write_text("{}", encoding="utf-8")
-            digest_tool = root / "android-artifact-digest"
-            digest_tool.write_text("tool", encoding="utf-8")
-            os.chmod(digest_tool, 0o700)
-            args = argparse.Namespace(
-                canonical_sha="a" * 40,
-                authorization=module._AUTHORIZATION,
-                apk=apk,
-                release_evidence=evidence,
-                digest_tool=digest_tool,
-                retained_old_apk=root / "old.apk",
-                expected_old_version_name="1.1.0",
-                expected_old_version_code=2,
-                expected_version_name="0.1.4",
-                expected_version_code=1004,
-            )
+            args = self.migration_args(Path(raw))
             with (
                 mock.patch.object(module, "require_expected_serial", return_value="registered-device"),
                 mock.patch.object(module.shutil, "which", return_value="/usr/bin/adb"),
@@ -148,20 +169,109 @@ class AndroidSigningLineageMigrationTests(unittest.TestCase):
                     "verify_installed_apk_digest",
                     side_effect=module.MigrationFailure("installed candidate differs"),
                 ),
-                mock.patch.object(module, "restart_runtime_supervisor") as restart,
+                mock.patch.object(module, "prepare_android_private_storage") as storage,
+                mock.patch.object(module, "bootstrap_runtime") as bootstrap,
                 mock.patch.object(module, "wait_for_local_health") as health,
-                mock.patch.object(module, "restore_old_generation", return_value=True) as rollback,
+                mock.patch.object(module, "restore_old_generation", return_value=rollback_report) as rollback,
             ):
                 report, accepted = module.migrate(args)
 
         self.assertFalse(accepted)
+        self.assertEqual(report["format_version"], 2)
+        self.assertEqual(report["failure_stage"], "verify_new_digest")
         self.assertTrue(report["rollback_attempted"])
+        self.assertTrue(report["rollback_apk_reinstalled"])
         self.assertTrue(report["rollback_succeeded"])
         rollback.assert_called_once()
-        restart.assert_not_called()
+        storage.assert_not_called()
+        bootstrap.assert_not_called()
         health.assert_not_called()
 
-    def test_each_mutation_calls_registered_device_preflight_first(self):
+    def test_success_prepares_storage_bootstraps_and_records_split_health(self):
+        new_digest = "b3:" + "b" * 64
+        old_digest = "b3:" + "c" * 64
+        health = {
+            "runtime_supervisor_running": True,
+            "cellular_egress_service_running": True,
+            "local_app_egress_port_ready": True,
+            "local_proxy_port_ready": True,
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.migration_args(Path(raw))
+            with (
+                mock.patch.object(module, "require_expected_serial", return_value="registered-device"),
+                mock.patch.object(module.shutil, "which", return_value="/usr/bin/adb"),
+                mock.patch.object(module, "load_json", return_value={}),
+                mock.patch.object(module, "verify_release_evidence", return_value=new_digest),
+                mock.patch.object(module, "exact_preflight"),
+                mock.patch.object(module, "package_version", side_effect=[(2, "1.1.0"), (1004, "0.1.4")]),
+                mock.patch.object(module, "capture_installed_apk", return_value=old_digest),
+                mock.patch.object(module, "uninstall"),
+                mock.patch.object(module, "install"),
+                mock.patch.object(module, "verify_installed_apk_digest"),
+                mock.patch.object(module, "prepare_android_private_storage") as storage,
+                mock.patch.object(module, "bootstrap_runtime") as bootstrap,
+                mock.patch.object(module, "wait_for_local_health", return_value=health),
+            ):
+                report, accepted = module.migrate(args)
+
+        self.assertTrue(accepted)
+        self.assertTrue(report["new_private_storage_prepared"])
+        self.assertTrue(report["runtime_bootstrap_invoked"])
+        self.assertTrue(report["cellular_egress_service_running"])
+        self.assertTrue(report["local_app_egress_port_ready"])
+        self.assertTrue(report["local_proxy_port_ready"])
+        self.assertTrue(report["accepted"])
+        storage.assert_called_once_with("registered-device")
+        bootstrap.assert_called_once_with("registered-device")
+
+    def test_rollback_partial_failure_keeps_reinstall_evidence(self):
+        old_digest = "b3:" + "c" * 64
+        with (
+            mock.patch.object(module, "package_present", return_value=True),
+            mock.patch.object(module, "uninstall"),
+            mock.patch.object(module, "install"),
+            mock.patch.object(module, "package_version", return_value=(2, "1.1.0")),
+            mock.patch.object(module, "verify_installed_apk_digest"),
+            mock.patch.object(module, "prepare_android_private_storage"),
+            mock.patch.object(module, "bootstrap_runtime"),
+            mock.patch.object(
+                module,
+                "wait_for_local_health",
+                side_effect=module.MigrationFailure("not healthy"),
+            ),
+            mock.patch.object(
+                module,
+                "local_health_state",
+                return_value={
+                    "runtime_supervisor_running": True,
+                    "cellular_egress_service_running": False,
+                    "local_app_egress_port_ready": False,
+                    "local_proxy_port_ready": True,
+                },
+            ),
+        ):
+            report = module.restore_old_generation(
+                "registered-device",
+                Path("old.apk"),
+                2,
+                "1.1.0",
+                old_digest,
+                Path("digest-tool"),
+            )
+
+        self.assertTrue(report["rollback_apk_reinstalled"])
+        self.assertTrue(report["rollback_apk_version_verified"])
+        self.assertTrue(report["rollback_apk_digest_verified"])
+        self.assertTrue(report["rollback_private_storage_prepared"])
+        self.assertTrue(report["rollback_runtime_bootstrap_invoked"])
+        self.assertFalse(report["rollback_local_health_verified"])
+        self.assertFalse(report["rollback_succeeded"])
+        self.assertEqual(report["rollback_failure_stage"], "verify_local_health")
+        self.assertTrue(report["rollback_runtime_supervisor_running"])
+        self.assertFalse(report["rollback_cellular_egress_service_running"])
+
+    def test_each_apk_mutation_calls_registered_device_preflight_first(self):
         serial = "registered-device"
         apk = Path("app.apk")
         with mock.patch.object(module, "exact_preflight") as preflight, mock.patch.object(
@@ -180,10 +290,26 @@ class AndroidSigningLineageMigrationTests(unittest.TestCase):
             (serial, "install", str(apk)),
         )
 
-    def test_supervisor_restart_is_exact_runtime_process_only(self):
-        shell = module._supervisor_restart_shell()
+    def test_private_storage_preparation_is_bound_to_current_package_uid(self):
+        with (
+            mock.patch.object(module, "package_uid", return_value=10209) as uid,
+            mock.patch.object(module, "exact_preflight") as preflight,
+            mock.patch.object(module, "adb") as adb_call,
+        ):
+            module.prepare_android_private_storage("registered-device")
+        uid.assert_called_once_with("registered-device")
+        preflight.assert_called_once_with("registered-device")
+        shell = adb_call.call_args.args[-1]
+        self.assertIn('/data/user_de/0/com.example.mobileproxy/files', shell)
+        self.assertIn("chown 10209:10209", shell)
+        self.assertIn("chmod 0700", shell)
+        self.assertNotIn("10209", str(module._rollback_defaults()))
+
+    def test_runtime_bootstrap_is_exact_runtime_only(self):
+        shell = module._runtime_bootstrap_shell()
         self.assertIn("/data/adb/mobile-proxy-node/current/bin/runtime-supervisor", shell)
         self.assertIn("--runtime-root /data/adb/mobile-proxy-node/current", shell)
+        self.assertIn('/data/adb/mobile-proxy-node/current/service.sh', shell)
         self.assertNotIn("reboot", shell)
         self.assertNotIn("svc data", shell)
         self.assertNotIn("airplane", shell)
