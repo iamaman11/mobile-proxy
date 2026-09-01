@@ -151,7 +151,7 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"production baseline release ordering drifted: missing {token!r}")
 
     phone_required = (
-        "final-release authority ordering",
+        "Final release authority ordering",
         "No final `v0.1.4` tag or GitHub Release is an input to the signing-generation migration.",
         "exact canonical SHA plus retained signed-candidate evidence",
     )
