@@ -8,10 +8,11 @@
   },
   "candidate_evidence_workflow": {
     "admission_core_wiring": "implemented_exact_result_match",
-    "artifact_selection": "candidate_specific_artifact_then_exact_control_plane_run",
-    "candidate_sha": "d151dbdd156279e32a5361d304c90f996bd2d565",
+    "artifact_selection": "exact_same_sha_candidate_artifact_bound_to_exact_current_protected_main_run",
+    "candidate_sha": "same_exact_current_protected_main_as_control_plane",
+    "candidate_control_plane_exact_equality_required": true,
     "control_plane_sha": "exact_current_protected_main",
-    "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
+    "output_artifact_name_template": "item20-admission-readiness-<candidate_sha>",
     "selector": "scripts/select_item20_candidate_evidence.py",
     "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
     "status": "protected_read_only_candidate_evidence_wiring",
@@ -33,6 +34,8 @@
     "trigger": "workflow_dispatch"
   },
   "forbidden": [
+    "candidate_control_plane_sha_mismatch",
+    "historical_item19_candidate_as_active_item20_candidate",
     "acceptance_or_preflight_workflow_dispatch_from_readiness",
     "provider_api_call_from_readiness",
     "provider_credentials_in_readiness",
