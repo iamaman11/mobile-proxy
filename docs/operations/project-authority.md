@@ -18,6 +18,10 @@ status is owned by `docs/PRODUCTION_BASELINE_PLAN.md`, and exact machine-readabl
 owned by `contracts/operations/production-topology-v1.json` and
 `contracts/operations/github-control-plane-v1.json`.
 
+Final release authority ordering is additionally protected by
+`contracts/operations/final-release-authority-v1.json` and documented in
+`docs/operations/final-release-authority-order.md`.
+
 ## One project, two trust zones
 
 `iamaman11/mobile-proxy-production` is not a second project and is not a second source of truth. It
@@ -62,6 +66,11 @@ without redefining the immutable `candidate_sha`; these are separate semantic ro
 requiring their values to differ. Final semantic release authority is not created until physical
 acceptance succeeds.
 
+Android version metadata used to build the explicitly authorized signing-generation migration is
+also not final release authority. In particular, a protected SHA may carry Android/workspace version
+`0.1.4` and produce an exact retained signed migration candidate while the final annotated `v0.1.4`
+tag remains absent. #162 consumes exact SHA + signed-candidate evidence, not a final `v*` tag.
+
 Before mutable phone work, the private execution path must verify the exact canonical identity and
 required artifact/signing/provenance evidence for that stage. Ambiguity, missing evidence or mismatch
 fails closed before the self-hosted runner performs mutable work.
@@ -82,12 +91,27 @@ user task
   -> bounded acceptance evidence back to canonical tracking
 ```
 
-Only after physical acceptance succeeds may the final production chain continue:
+The one-time Android signing-generation reset is a pre-Item20 prerequisite with a narrower authority:
 
 ```text
-protected main / accepted candidate
+protected exact canonical SHA
+  -> off-phone signing proof + exact signed Android candidate
+  -> private retained candidate evidence
+  -> #162 serialized registered-phone migration
+  -> bounded health / rollback proof
+  -> #115 completed only when its acceptance criteria are satisfied
+```
+
+That path creates no final tag, GitHub Release, provider authority or production promotion.
+
+Only after physical Item 20 acceptance succeeds may the final production chain continue:
+
+```text
+completed Item 20 + exact final_release_control_plane_sha
+  -> owner release-tag command on canonical #90
   -> protected annotated v* tag
-  -> immutable release artifacts + checksum/SBOM/provenance
+  -> exact tag Quality success
+  -> immutable release artifacts + provenance
        |                         |
        |                         +-> private execution command transport
        |                              -> verify canonical final release tuple
@@ -124,7 +148,6 @@ evidence format for those values. External systems own only the runtime value.
 
 ## Current checkpoint
 
-The current protected state is later than the original PR #94 authority/bootstrap checkpoint.
 Production Baseline Items 15–19 are **COMPLETE** and Item 20 is the first unfinished delivery item.
 The canonical roadmap and machine-readable topology remain authoritative if this summary ever ages.
 
@@ -141,19 +164,29 @@ Current proven/protected boundaries:
 - provider-neutral lifecycle policy plus the typed Vultr UUID/ownership/generation-CAS adapter is
   implemented;
 - Item 19 provider proof run `33342000338` deployed and verified immutable candidate
-  `d151dbdd156279e32a5361d304c90f996bd2d565`, then deterministically deleted the proof VM and
+  `d151dbdd156279e32a5361d304c90f996bd2d565`, then deterministically deleted its proof VM and
   reached durable terminal state. That terminal Item 19 ownership intent is not reusable;
 - Item 20 protected non-live orchestration/readiness foundations exist, including pure admission-core
-  exact consumption of the bounded readiness result and a bounded readiness-artifact verifier;
-- Item 20 session-workflow composition remains incomplete and live Item 20 execution remains
-  fail-closed while signing-continuity gate #115 is OPEN;
-- the signing identity of the currently installed Android application has not been recovered into
-  the private GitHub execution boundary, so mutable Android update/rollback remains intentionally
-  unavailable;
-- final annotated release publication, release immutability and `production-vultr` promotion remain
-  pending and are forbidden before Item 20 succeeds;
+  exact consumption of the bounded readiness result and exact verified readiness-artifact
+  consumption by the non-live session workflow;
+- a typed Item 20 lifecycle entrypoint is protected and compile-checked, while live Item 20 provider
+  and phone execution remains disabled;
+- the historical signer of the currently installed Android application remains unrecoverable, but a
+  replacement production signing identity has been proven usable offline in the private execution
+  boundary and the repository owner explicitly approved the narrow destructive #162 signing-lineage
+  migration;
+- canonical Android 0.1.4 build/sign/migration logic is protected; the first off-phone signed build
+  failed closed on an `apksigner` v3.1 output-format parser assumption, and that parser was corrected
+  through the normal public PR/Quality path without phone access or mutation;
+- the next signing-generation step is to rebuild and retain the exact signed candidate from the next
+  synchronized protected SHA, then execute #162 only through its exact gates; #115 remains OPEN until
+  its acceptance criteria actually pass;
+- no mutable phone operation has yet occurred in this signing-generation work;
+- no final `v0.1.4` tag/release exists or is authorized before Item 20 completion; final release
+  creation is now separately fail-closed on #115/#135 completion plus the exact Item 20 release SHA
+  marker;
 - legacy public production deployment remains blocked fail-closed; GCP/workstation/manual SSH/raw
   ADB/provider CLI are not authorised acceptance or production shortcuts.
 
-This checkpoint records architecture and control boundaries only. It grants no current VM or phone
-mutation authority.
+This checkpoint records architecture and control boundaries only. It grants no current Item 20 VM,
+endpoint-handoff or unrelated phone mutation authority.
