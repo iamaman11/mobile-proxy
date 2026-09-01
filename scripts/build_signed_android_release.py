@@ -52,6 +52,8 @@ _PACKAGE_PATTERN = re.compile(
 )
 _CONTENT_DIGEST_PATTERN = re.compile(r"^b3:[0-9a-f]{64}$")
 _ARTIFACT_DIGEST_DOMAIN = "mobile-proxy/android-apk/v1"
+_SAFE_APKSIGNER_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9._+() -]{1,80}$")
+_SAFE_SIGNER_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9 #().,=:+-]{1,180}$")
 
 
 class AndroidBuildFailure(RuntimeError):
@@ -104,6 +106,45 @@ def resolve_android_build_tool(name: str) -> str:
         candidates.extend(path for path in build_tools.glob(f"*/{name}") if path.is_file())
     require(bool(candidates), f"required Android build tool is unavailable: {name}")
     return str(sorted(candidates, key=lambda path: path.parent.name)[-1])
+
+
+def safe_apksigner_version(apksigner: str) -> str:
+    try:
+        result = subprocess.run(
+            [apksigner, "version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "unavailable"
+    version = result.stdout.strip()
+    if _SAFE_APKSIGNER_VERSION_PATTERN.fullmatch(version) is None:
+        return "unavailable"
+    return version
+
+
+def safe_apksigner_signer_shapes(output: str) -> list[str]:
+    shapes: list[str] = []
+    marker = "certificate SHA-256 digest:"
+    for raw_line in output.splitlines():
+        if marker not in raw_line:
+            continue
+        label = raw_line.partition(marker)[0].strip()
+        if _SAFE_SIGNER_LABEL_PATTERN.fullmatch(label) is None:
+            shapes.append("<unavailable-label> certificate SHA-256 digest: <redacted>")
+            continue
+        shapes.append(f"{label} certificate SHA-256 digest: <redacted>")
+    return shapes
+
+
+def emit_safe_apksigner_diagnostic(apksigner: str, output: str) -> None:
+    shapes = safe_apksigner_signer_shapes(output)
+    print(f"apksigner safe version: {safe_apksigner_version(apksigner)}", file=sys.stderr)
+    print(f"apksigner signer digest record count: {len(shapes)}", file=sys.stderr)
+    for index, shape in enumerate(shapes, start=1):
+        print(f"apksigner signer digest record {index}: {shape}", file=sys.stderr)
 
 
 def prove_exact_source(root: Path, canonical_sha: str, android_baseline_ref: str | None) -> None:
@@ -232,7 +273,11 @@ def build_signed_release(
             [apksigner, "verify", "--print-certs", str(built_apk)],
             timeout=120,
         )
-        apk_fingerprint = parse_single_apksigner_fingerprint(signer.stdout)
+        try:
+            apk_fingerprint = parse_single_apksigner_fingerprint(signer.stdout)
+        except Exception:
+            emit_safe_apksigner_diagnostic(apksigner, signer.stdout)
+            raise
         key_fingerprint = read_keystore_fingerprint(keystore, alias, store_password)
         require(
             hmac.compare_digest(apk_fingerprint, key_fingerprint),
