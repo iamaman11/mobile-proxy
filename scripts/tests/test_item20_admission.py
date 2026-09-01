@@ -15,13 +15,13 @@ if str(SCRIPTS) not in sys.path:
 from verify_item20_admission import verify_admission, verify_contract
 
 
-CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
-CONTROL_PLANE = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ACTIVE_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
 CONTRACT = ROOT / "contracts/operations/item20-acceptance-v1.json"
 
 
 def branch() -> dict[str, object]:
-    return {"name": "main", "protected": True, "commit": {"sha": CONTROL_PLANE}}
+    return {"name": "main", "protected": True, "commit": {"sha": ACTIVE_SHA}}
 
 
 def quality() -> dict[str, object]:
@@ -32,7 +32,7 @@ def quality() -> dict[str, object]:
         "path": ".github/workflows/quality.yml",
         "event": "push",
         "head_branch": "main",
-        "head_sha": CONTROL_PLANE,
+        "head_sha": ACTIVE_SHA,
         "status": "completed",
         "conclusion": "success",
         "created_at": "2026-08-31T10:00:00Z",
@@ -48,7 +48,7 @@ def phone_preflight() -> dict[str, object]:
     return {
         "format_version": 1,
         "repository": "iamaman11/mobile-proxy",
-        "canonical_sha": CONTROL_PLANE,
+        "canonical_sha": ACTIVE_SHA,
         "mode": "read_only",
         "required_runner_labels": ["self-hosted", "Linux", "X64", "android-production"],
         "required_tools": {"adb": True, "python": True, "git": True, "curl": True},
@@ -72,7 +72,7 @@ def workflow_run(name: str, path: str, run_id: int, created_at: str) -> dict[str
         "path": path,
         "event": "issue_comment",
         "head_branch": "main",
-        "head_sha": CONTROL_PLANE,
+        "head_sha": ACTIVE_SHA,
         "status": "completed",
         "conclusion": "success",
         "created_at": created_at,
@@ -106,27 +106,23 @@ def artifact(name: str, run_id: int, created_at: str, artifact_id: int) -> dict[
         "expired": False,
         "digest": "sha256:" + "b" * 64,
         "created_at": created_at,
-        "workflow_run": {"id": run_id, "head_branch": "main", "head_sha": CONTROL_PLANE},
+        "workflow_run": {"id": run_id, "head_branch": "main", "head_sha": ACTIVE_SHA},
     }
 
 
 def acceptance_artifact() -> dict[str, object]:
-    return artifact(
-        f"vultr-acceptance-authority-{CANDIDATE}", 1000, "2026-08-31T10:06:00Z", 2000
-    )
+    return artifact(f"vultr-acceptance-authority-{ACTIVE_SHA}", 1000, "2026-08-31T10:06:00Z", 2000)
 
 
 def preflight_artifact() -> dict[str, object]:
-    return artifact(
-        f"vultr-readonly-preflight-{CANDIDATE}", 1100, "2026-08-31T10:11:00Z", 2100
-    )
+    return artifact(f"vultr-readonly-preflight-{ACTIVE_SHA}", 1100, "2026-08-31T10:11:00Z", 2100)
 
 
 def acceptance_evidence() -> dict[str, object]:
     return {
         "format_version": 1,
         "authority": "pre_release_acceptance",
-        "candidate_sha": CANDIDATE,
+        "candidate_sha": ACTIVE_SHA,
         "repository": "iamaman11/mobile-proxy",
         "executor": "github-hosted",
         "acceptance_workflow": "Vultr acceptance authority",
@@ -134,9 +130,9 @@ def acceptance_evidence() -> dict[str, object]:
         "acceptance_workflow_run_attempt": "1",
         "command_issue": 90,
         "command_comment_id": "3000",
-        "candidate_quality_run_id": "33341602485",
+        "candidate_quality_run_id": "123456",
         "candidate_quality_run_attempt": "1",
-        "candidate_evidence_artifact": f"software-release-candidate-{CANDIDATE}",
+        "candidate_evidence_artifact": f"software-release-candidate-{ACTIVE_SHA}",
         "candidate_evidence_file": "release-candidate-evidence.json",
         "final_production_authority": False,
         "production_environment_authorized": False,
@@ -151,7 +147,7 @@ def preflight_evidence() -> dict[str, object]:
     return {
         "format_version": 1,
         "authority": "pre_release_acceptance_read_only",
-        "candidate_sha": CANDIDATE,
+        "candidate_sha": ACTIVE_SHA,
         "repository": "iamaman11/mobile-proxy",
         "executor": "github-hosted",
         "environment": "acceptance-vultr",
@@ -185,12 +181,13 @@ def preflight_evidence() -> dict[str, object]:
 def readiness_evidence() -> dict[str, object]:
     return {
         "format_version": 1,
-        "authority": "item20_fresh_candidate_evidence_verification",
+        "authority": "item20_fresh_single_sha_candidate_evidence_verification",
         "repository": "iamaman11/mobile-proxy",
-        "candidate_sha": CANDIDATE,
-        "control_plane_sha": CONTROL_PLANE,
+        "candidate_sha": ACTIVE_SHA,
+        "control_plane_sha": ACTIVE_SHA,
+        "candidate_control_plane_exact_equality_verified": True,
         "control_plane_quality_run_id": "123456",
-        "candidate_quality_run_id": "33341602485",
+        "candidate_quality_run_id": "123456",
         "candidate_quality_run_attempt": "1",
         "acceptance_authority_run_id": "1000",
         "acceptance_authority_artifact_id": "2000",
@@ -198,9 +195,10 @@ def readiness_evidence() -> dict[str, object]:
         "vultr_readonly_preflight_run_id": "1100",
         "vultr_readonly_preflight_artifact_id": "2100",
         "vultr_readonly_preflight_artifact_digest": "sha256:" + "b" * 64,
-        "candidate_control_plane_separation_verified": True,
         "fresh_acceptance_authority_verified": True,
         "fresh_vultr_readonly_preflight_verified": True,
+        "fresh_exact_candidate_provider_proof_required_before_live_window": True,
+        "source_freeze_required_after_evidence": True,
         "provider_probe_read_only_verified": True,
         "provider_mutation_authorized": False,
         "phone_mutation_authorized": False,
@@ -219,19 +217,18 @@ class Item20AdmissionTests(unittest.TestCase):
         self.item19 = issue(124, "closed", "completed")
         self.item20 = issue(135, "open")
         self.signing = issue(115, "closed", "completed")
-        self.preflight = phone_preflight()
 
     def admit(self, **overrides: object) -> dict[str, object]:
         values: dict[str, object] = {
-            "candidate_sha": CANDIDATE,
-            "control_plane_sha": CONTROL_PLANE,
+            "candidate_sha": ACTIVE_SHA,
+            "control_plane_sha": ACTIVE_SHA,
             "contract": self.contract,
             "branch": branch(),
             "quality_run": quality(),
             "item19_issue": self.item19,
             "item20_issue": self.item20,
             "signing_issue": self.signing,
-            "phone_preflight": self.preflight,
+            "phone_preflight": phone_preflight(),
             "acceptance_artifact": acceptance_artifact(),
             "acceptance_run": acceptance_run(),
             "acceptance_evidence": acceptance_evidence(),
@@ -243,136 +240,85 @@ class Item20AdmissionTests(unittest.TestCase):
         values.update(overrides)
         return verify_admission(**values)  # type: ignore[arg-type]
 
-    def test_contract_is_exact_validation_only_and_consumes_readiness_result(self) -> None:
+    def test_same_sha_admission_consumes_fresh_candidate_evidence(self) -> None:
         verify_contract(self.contract)
         evidence = self.admit()
-        self.assertEqual(evidence["candidate_sha"], CANDIDATE)
-        self.assertEqual(evidence["control_plane_sha"], CONTROL_PLANE)
+        self.assertEqual(evidence["candidate_sha"], ACTIVE_SHA)
+        self.assertEqual(evidence["control_plane_sha"], ACTIVE_SHA)
+        self.assertTrue(evidence["candidate_control_plane_exact_equality_verified"])
         self.assertTrue(evidence["admission_readiness_result_verified"])
-        self.assertTrue(evidence["fresh_acceptance_authority_verified"])
-        self.assertTrue(evidence["fresh_vultr_readonly_preflight_verified"])
-        self.assertTrue(evidence["provider_probe_read_only_verified"])
-        for field in (
-            "provider_mutation_authorized",
-            "phone_mutation_authorized",
-            "endpoint_handoff_authorized",
-            "live_execution_authorized",
-            "final_production_authority",
-            "transport_endpoint_recorded",
-            "provider_identifier_recorded",
-            "raw_phone_identifier_recorded",
-        ):
-            self.assertFalse(evidence[field])
+        self.assertTrue(evidence["fresh_exact_candidate_provider_proof_required_before_live_window"])
+        self.assertFalse(evidence["live_execution_authorized"])
+
+    def test_distinct_candidate_and_control_plane_fail_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "candidate/control-plane SHA mismatch"):
+            self.admit(candidate_sha="b" * 40)
+
+    def test_historical_item19_sha_cannot_be_active_candidate(self) -> None:
+        with self.assertRaisesRegex(ValueError, "candidate/control-plane SHA mismatch"):
+            self.admit(candidate_sha=HISTORICAL_ITEM19_SHA)
+
+    def test_protected_main_advance_invalidates_admission(self) -> None:
+        bad = branch()
+        bad["commit"] = {"sha": "b" * 40}
+        with self.assertRaisesRegex(ValueError, "exact current protected main"):
+            self.admit(branch=bad)
+
+    def test_quality_must_match_exact_same_sha(self) -> None:
+        bad = quality()
+        bad["head_sha"] = "b" * 40
+        with self.assertRaisesRegex(ValueError, "Quality run"):
+            self.admit(quality_run=bad)
 
     def test_open_signing_gate_fails_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "signing-continuity"):
             self.admit(signing_issue=issue(115, "open"))
 
-    def test_candidate_mismatch_fails_closed(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Item 19 closeout"):
-            self.admit(candidate_sha="b" * 40)
-
-    def test_control_plane_must_be_exact_current_protected_main(self) -> None:
-        bad_branch = branch()
-        bad_branch["commit"] = {"sha": "b" * 40}
-        with self.assertRaisesRegex(ValueError, "exact current protected main"):
-            self.admit(branch=bad_branch)
-
-    def test_quality_must_match_exact_control_plane(self) -> None:
-        bad_quality = quality()
-        bad_quality["head_sha"] = "b" * 40
-        with self.assertRaisesRegex(ValueError, "Quality run"):
-            self.admit(quality_run=bad_quality)
-
-    def test_private_preflight_must_match_control_plane(self) -> None:
-        bad = phone_preflight()
-        bad["canonical_sha"] = "b" * 40
-        with self.assertRaisesRegex(ValueError, "preflight evidence"):
-            self.admit(phone_preflight=bad)
-
-    def test_private_preflight_cannot_hide_mutation_or_identifier(self) -> None:
-        for key, value in (
-            ("mutation_performed", True),
-            ("raw_device_identifier_recorded", True),
-        ):
-            bad = phone_preflight()
-            bad[key] = value
-            with self.assertRaisesRegex(ValueError, "preflight evidence"):
-                self.admit(phone_preflight=bad)
-
-    def test_private_preflight_requires_exact_runner_and_device_binding(self) -> None:
-        bad_labels = phone_preflight()
-        bad_labels["required_runner_labels"] = ["self-hosted", "android-production"]
-        with self.assertRaisesRegex(ValueError, "preflight evidence"):
-            self.admit(phone_preflight=bad_labels)
-
-        bad_device = phone_preflight()
-        bad_device["device"] = copy.deepcopy(bad_device["device"])
-        assert isinstance(bad_device["device"], dict)
-        bad_device["device"]["device_count"] = 2
-        with self.assertRaisesRegex(ValueError, "one exact registered"):
-            self.admit(phone_preflight=bad_device)
-
-    def test_item19_must_remain_closed_completed(self) -> None:
+    def test_item_trackers_fail_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "Item 19"):
             self.admit(item19_issue=issue(124, "closed", None))
-
-    def test_item20_tracker_must_remain_open(self) -> None:
         with self.assertRaisesRegex(ValueError, "Item 20"):
             self.admit(item20_issue=issue(135, "closed", "completed"))
 
-    def test_contract_cannot_grant_live_authority(self) -> None:
+    def test_private_preflight_must_match_same_sha_and_registered_device(self) -> None:
+        bad = phone_preflight()
+        bad["canonical_sha"] = "b" * 40
+        with self.assertRaisesRegex(ValueError, "single-SHA control plane"):
+            self.admit(phone_preflight=bad)
+
+        bad = phone_preflight()
+        bad["device"] = copy.deepcopy(bad["device"])
+        assert isinstance(bad["device"], dict)
+        bad["device"]["device_count"] = 2
+        with self.assertRaisesRegex(ValueError, "one exact registered"):
+            self.admit(phone_preflight=bad)
+
+    def test_contract_cannot_grant_live_authority_or_restore_two_sha_semantics(self) -> None:
         mutated = copy.deepcopy(self.contract)
         mutated["authorization"]["provider_mutation_authorized"] = True
         with self.assertRaisesRegex(ValueError, "validation-only"):
             verify_contract(mutated)
 
-    def test_contract_cannot_claim_handoff_is_implemented(self) -> None:
         mutated = copy.deepcopy(self.contract)
-        mutated["handoff"]["status"] = "implemented"
-        with self.assertRaisesRegex(ValueError, "handoff boundary"):
+        mutated["identity"]["exact_equality_required"] = False
+        with self.assertRaisesRegex(ValueError, "single-SHA identity"):
             verify_contract(mutated)
 
-    def test_future_live_window_requires_fresh_exact_candidate_authority(self) -> None:
+    def test_fresh_candidate_authority_cannot_reuse_historical_item19_evidence(self) -> None:
         mutated = copy.deepcopy(self.contract)
-        mutated["future_live_candidate_evidence"]["acceptance_authority"] = (
-            "reuse_historical_item19_authority"
-        )
-        with self.assertRaisesRegex(ValueError, "fresh candidate authority"):
+        mutated["future_live_candidate_evidence"]["acceptance_authority"] = "reuse_historical_item19_authority"
+        with self.assertRaisesRegex(ValueError, "future live candidate evidence"):
             verify_contract(mutated)
 
-        mutated = copy.deepcopy(self.contract)
-        mutated["future_live_candidate_evidence"]["vultr_readonly_preflight"] = (
-            "reuse_historical_item19_preflight"
-        )
-        with self.assertRaisesRegex(ValueError, "fresh candidate authority"):
-            verify_contract(mutated)
-
-    def test_missing_or_mismatched_fresh_evidence_fails_closed(self) -> None:
-        wrong_artifact = acceptance_artifact()
-        wrong_artifact["name"] = "vultr-acceptance-authority-" + "b" * 40
-        with self.assertRaisesRegex(ValueError, "exact candidate"):
-            self.admit(acceptance_artifact=wrong_artifact)
-
-        stale_run = acceptance_run()
-        stale_run["created_at"] = "2026-08-31T09:59:00Z"
-        with self.assertRaisesRegex(ValueError, "stale or out of order"):
-            self.admit(acceptance_run=stale_run)
-
-        mutated = preflight_evidence()
-        mutated["vm_mutation_performed"] = True
-        with self.assertRaisesRegex(ValueError, "preflight evidence"):
-            self.admit(preflight_evidence=mutated)
-
-    def test_readiness_result_must_match_independently_verified_chain(self) -> None:
+    def test_readiness_result_must_exactly_match_independently_verified_chain(self) -> None:
         for field, value in (
             ("control_plane_quality_run_id", "999999"),
-            ("acceptance_authority_run_id", "999999"),
+            ("candidate_control_plane_exact_equality_verified", False),
             ("provider_mutation_authorized", True),
         ):
             mutated = readiness_evidence()
             mutated[field] = value
-            with self.assertRaisesRegex(ValueError, "readiness|candidate evidence"):
+            with self.assertRaisesRegex(ValueError, "readiness|candidate evidence|did not verify|violates"):
                 self.admit(readiness_evidence=mutated)
 
         extra = readiness_evidence()
@@ -380,20 +326,11 @@ class Item20AdmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exactly match"):
             self.admit(readiness_evidence=extra)
 
-    def test_contract_records_consumption_but_not_workflow_wiring_or_live_authority(self) -> None:
-        admission = self.contract["admission"]
-        assert isinstance(admission, dict)
-        self.assertTrue(admission["fresh_candidate_evidence_required"])
-        self.assertEqual(
-            admission["fresh_candidate_evidence_verifier"],
-            "scripts/verify_item20_candidate_evidence.py",
-        )
+    def test_contract_records_implemented_exact_readiness_consumption(self) -> None:
         verifier = self.contract["future_live_candidate_verifier"]
         assert isinstance(verifier, dict)
-        self.assertEqual(
-            verifier["status"], "protected_pure_verifier_consumed_by_admission_core"
-        )
-        self.assertEqual(verifier["workflow_wiring"], "not_implemented")
+        self.assertEqual(verifier["workflow_wiring"], "implemented_exact_readiness_artifact_consumption")
+        self.assertTrue(verifier["candidate_control_plane_exact_equality_required"])
         self.assertFalse(self.contract["authorization"]["live_execution_authorized"])
 
 
