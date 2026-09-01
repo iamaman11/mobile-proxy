@@ -307,7 +307,7 @@ class Item20AdmissionTests(unittest.TestCase):
     def test_fresh_candidate_authority_cannot_reuse_historical_item19_evidence(self) -> None:
         mutated = copy.deepcopy(self.contract)
         mutated["future_live_candidate_evidence"]["acceptance_authority"] = "reuse_historical_item19_authority"
-        with self.assertRaisesRegex(ValueError, "future live candidate evidence"):
+        with self.assertRaisesRegex(ValueError, "fresh candidate authority requirements"):
             verify_contract(mutated)
 
     def test_readiness_result_must_exactly_match_independently_verified_chain(self) -> None:
