@@ -2,10 +2,8 @@
 """Pure artifact selector for Item 20 read-only admission readiness.
 
 The selector performs no GitHub, provider, network, or phone I/O. A caller supplies
-an Actions artifact-list JSON response. Selection is candidate-specific first and
-then requires the artifact's workflow-run binding to match the exact protected
-control-plane SHA. The full protected verifier independently validates the selected
-run and downloaded evidence afterwards.
+an Actions artifact-list JSON response. The active candidate and protected control
+plane must be the same exact SHA; only artifacts bound to that SHA are eligible.
 """
 
 from __future__ import annotations
@@ -18,7 +16,6 @@ import re
 from typing import Mapping
 
 _CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
-_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
 _CONTRACT_STATUS = "protected_read_only_foundation_not_live_authority"
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -70,10 +67,11 @@ def verify_readiness_contract(contract: Mapping[str, object]) -> None:
         "workflow": ".github/workflows/item20-admission-readiness.yml",
         "selector": "scripts/select_item20_candidate_evidence.py",
         "verifier": "scripts/verify_item20_candidate_evidence.py",
-        "candidate_sha": _IMMUTABLE_CANDIDATE,
+        "candidate_sha": "same_exact_current_protected_main_as_control_plane",
+        "candidate_control_plane_exact_equality_required": True,
         "control_plane_sha": "exact_current_protected_main",
-        "artifact_selection": "candidate_specific_artifact_then_exact_control_plane_run",
-        "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
+        "artifact_selection": "exact_same_sha_candidate_artifact_bound_to_exact_current_protected_main_run",
+        "output_artifact_name_template": "item20-admission-readiness-<candidate_sha>",
         "admission_core_wiring": "implemented_exact_result_match",
         "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
     }:
@@ -103,6 +101,8 @@ def verify_readiness_contract(contract: Mapping[str, object]) -> None:
 
     forbidden = contract.get("forbidden")
     if forbidden != [
+        "candidate_control_plane_sha_mismatch",
+        "historical_item19_candidate_as_active_item20_candidate",
         "acceptance_or_preflight_workflow_dispatch_from_readiness",
         "provider_api_call_from_readiness",
         "provider_credentials_in_readiness",
@@ -124,8 +124,8 @@ def select_artifact(
 ) -> dict[str, object]:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
-    if candidate_sha != _IMMUTABLE_CANDIDATE:
-        raise ValueError("candidate SHA does not match the protected Item 19 closeout")
+    if candidate_sha != control_plane_sha:
+        raise ValueError("candidate/control-plane SHA mismatch violates 10/10 single-SHA readiness")
     prefix = _KIND_PREFIX.get(kind)
     if prefix is None:
         raise ValueError("unsupported Item 20 evidence artifact kind")
@@ -156,17 +156,14 @@ def select_artifact(
             _positive_int(workflow_run.get("id"), f"{kind} workflow-run id")
         except ValueError:
             continue
-        if workflow_run.get("head_branch") != "main" or workflow_run.get("head_sha") != control_plane_sha:
+        if workflow_run.get("head_branch") != "main" or workflow_run.get("head_sha") != candidate_sha:
             continue
         eligible.append((created, dict(raw)))
 
     if not eligible:
-        raise ValueError(f"no unexpired {kind} artifact binds exact candidate and control plane")
+        raise ValueError(f"no unexpired {kind} artifact binds exact single-SHA candidate")
 
-    _, selected = max(
-        eligible,
-        key=lambda item: (item[0], int(item[1]["id"])),
-    )
+    _, selected = max(eligible, key=lambda item: (item[0], int(item[1]["id"])))
     return selected
 
 
