@@ -65,6 +65,24 @@ def require(condition: bool, message: str) -> None:
         raise AndroidBuildFailure(message)
 
 
+def safe_subprocess_failure_message(command: Sequence[str]) -> str:
+    """Return only a fixed, non-secret stage label for a failed child process."""
+    if not command:
+        return "canonical Android release build or verification subprocess failed"
+    executable = Path(command[0]).name
+    if executable == "git":
+        return "canonical source proof subprocess failed"
+    if executable == "bash" and len(command) > 1 and command[1] == "./gradlew":
+        return "Android Gradle release build subprocess failed"
+    if executable == "apksigner":
+        return "APK signature verification subprocess failed"
+    if executable == "aapt":
+        return "APK metadata verification subprocess failed"
+    if executable == "cargo":
+        return "typed Android artifact digest subprocess failed"
+    return "canonical Android release build or verification subprocess failed"
+
+
 def run_checked(
     command: Sequence[str],
     *,
@@ -83,7 +101,7 @@ def run_checked(
             timeout=timeout,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        raise AndroidBuildFailure("canonical Android release build or verification failed") from error
+        raise AndroidBuildFailure(safe_subprocess_failure_message(command)) from error
 
 
 def resolve_android_build_tool(name: str) -> str:
