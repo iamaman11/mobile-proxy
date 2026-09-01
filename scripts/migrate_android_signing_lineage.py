@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -88,9 +89,15 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def typed_artifact_digest(tool: Path, path: Path) -> str:
-    require(tool.is_file() and os.access(tool, os.X_OK), "typed Android artifact digest helper is unavailable")
+    require(
+        tool.is_file() and os.access(tool, os.X_OK),
+        "typed Android artifact digest helper is unavailable",
+    )
     result = run_checked([str(tool), str(path)], timeout=120).stdout.strip()
-    require(_CONTENT_DIGEST_PATTERN.fullmatch(result) is not None, "typed Android artifact digest is invalid")
+    require(
+        _CONTENT_DIGEST_PATTERN.fullmatch(result) is not None,
+        "typed Android artifact digest is invalid",
+    )
     return result
 
 
@@ -105,7 +112,8 @@ def parse_package_version(output: str) -> tuple[int, str]:
 def package_version(serial: str) -> tuple[int, str]:
     result = adb(serial, "shell", "dumpsys", "package", _PACKAGE, timeout=60)
     require(
-        f"Package [{_PACKAGE}]" in result.stdout or f"Package {{{_PACKAGE}" in result.stdout,
+        f"Package [{_PACKAGE}]" in result.stdout
+        or f"Package {{{_PACKAGE}" in result.stdout,
         "production package is not installed",
     )
     return parse_package_version(result.stdout)
@@ -131,18 +139,30 @@ def verify_release_evidence(
     expected_version_name: str,
     expected_version_code: int,
 ) -> str:
-    require(evidence.get("format_version") == 1, "Android release evidence version is unsupported")
+    require(
+        evidence.get("format_version") == 1,
+        "Android release evidence version is unsupported",
+    )
     require(
         evidence.get("repository") == "iamaman11/mobile-proxy",
         "Android release evidence repository differs",
     )
-    require(evidence.get("canonical_sha") == canonical_sha, "Android release evidence SHA differs")
-    require(evidence.get("android_baseline_ref") == "v0.1.3", "Android migration baseline differs")
+    require(
+        evidence.get("canonical_sha") == canonical_sha,
+        "Android release evidence SHA differs",
+    )
+    require(
+        evidence.get("android_baseline_ref") == "v0.1.3",
+        "Android migration baseline differs",
+    )
     require(
         evidence.get("android_functional_source_preserved") is True,
         "Android functional-source preservation is unproven",
     )
-    require(evidence.get("application_id") == _PACKAGE, "Android release package differs")
+    require(
+        evidence.get("application_id") == _PACKAGE,
+        "Android release package differs",
+    )
     require(
         evidence.get("version_name") == expected_version_name,
         "Android release versionName differs",
@@ -181,7 +201,10 @@ def verify_release_evidence(
         isinstance(digest, str) and _CONTENT_DIGEST_PATTERN.fullmatch(digest) is not None,
         "Android release artifact digest is invalid",
     )
-    require(apk.is_file() and apk.stat().st_size > 0, "signed Android release APK is unavailable")
+    require(
+        apk.is_file() and apk.stat().st_size > 0,
+        "signed Android release APK is unavailable",
+    )
     require(
         typed_artifact_digest(digest_tool, apk) == digest,
         "signed Android release APK digest differs",
@@ -201,6 +224,20 @@ def capture_installed_apk(serial: str, output: Path, digest_tool: Path) -> str:
     return typed_artifact_digest(digest_tool, output)
 
 
+def verify_installed_apk_digest(
+    serial: str,
+    expected_digest: str,
+    digest_tool: Path,
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="mobile-proxy-installed-apk-proof-") as raw:
+        installed_apk = Path(raw) / "installed-base.apk"
+        observed_digest = capture_installed_apk(serial, installed_apk, digest_tool)
+    require(
+        observed_digest == expected_digest,
+        "installed Android APK digest differs from the exact signed candidate",
+    )
+
+
 def exact_preflight(serial: str) -> None:
     prove_registered_device(serial)
 
@@ -209,7 +246,10 @@ def uninstall(serial: str) -> None:
     exact_preflight(serial)
     result = adb(serial, "uninstall", _PACKAGE, timeout=120)
     require("Success" in result.stdout, "Android package uninstall did not report success")
-    require(not package_present(serial), "Android package remained installed after uninstall")
+    require(
+        not package_present(serial),
+        "Android package remained installed after uninstall",
+    )
 
 
 def install(serial: str, apk: Path) -> None:
@@ -405,6 +445,8 @@ def migrate(args: argparse.Namespace) -> tuple[dict[str, Any], bool]:
         )
         report["new_package_installed"] = True
         report["new_package_version_verified"] = True
+        verify_installed_apk_digest(serial, new_digest, args.digest_tool)
+        report["installed_new_apk_digest_verified"] = True
         restart_runtime_supervisor(serial)
         report["runtime_supervisor_restarted"] = True
         wait_for_local_health(serial)
@@ -446,7 +488,10 @@ def main() -> int:
     try:
         report, accepted = migrate(args)
     except (MigrationFailure, PreflightFailure, OSError, subprocess.TimeoutExpired) as error:
-        print(f"Android signing-lineage migration failed before mutation: {error}", file=sys.stderr)
+        print(
+            f"Android signing-lineage migration failed before mutation: {error}",
+            file=sys.stderr,
+        )
         return 1
     try:
         args.output.write_text(
@@ -454,7 +499,10 @@ def main() -> int:
             encoding="utf-8",
         )
     except OSError as error:
-        print(f"Android signing-lineage migration evidence write failed: {error}", file=sys.stderr)
+        print(
+            f"Android signing-lineage migration evidence write failed: {error}",
+            file=sys.stderr,
+        )
         return 1
     if not accepted:
         print(

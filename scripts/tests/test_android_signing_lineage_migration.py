@@ -1,4 +1,6 @@
+import argparse
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,6 +80,86 @@ class AndroidSigningLineageMigrationTests(unittest.TestCase):
                         "0.1.4",
                         1004,
                     )
+
+    def test_installed_apk_digest_must_match_exact_signed_candidate(self):
+        expected = "b3:" + "b" * 64
+        with mock.patch.object(
+            module,
+            "capture_installed_apk",
+            return_value="b3:" + "c" * 64,
+        ):
+            with self.assertRaises(module.MigrationFailure):
+                module.verify_installed_apk_digest(
+                    "registered-device",
+                    expected,
+                    Path("digest-tool"),
+                )
+
+    def test_installed_apk_digest_accepts_exact_signed_candidate(self):
+        expected = "b3:" + "b" * 64
+        with mock.patch.object(
+            module,
+            "capture_installed_apk",
+            return_value=expected,
+        ) as capture:
+            module.verify_installed_apk_digest(
+                "registered-device",
+                expected,
+                Path("digest-tool"),
+            )
+        capture.assert_called_once()
+
+    def test_post_install_identity_mismatch_triggers_existing_rollback(self):
+        new_digest = "b3:" + "b" * 64
+        old_digest = "b3:" + "c" * 64
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            apk = root / "candidate.apk"
+            apk.write_bytes(b"signed-apk")
+            evidence = root / "release.json"
+            evidence.write_text("{}", encoding="utf-8")
+            digest_tool = root / "android-artifact-digest"
+            digest_tool.write_text("tool", encoding="utf-8")
+            os.chmod(digest_tool, 0o700)
+            args = argparse.Namespace(
+                canonical_sha="a" * 40,
+                authorization=module._AUTHORIZATION,
+                apk=apk,
+                release_evidence=evidence,
+                digest_tool=digest_tool,
+                retained_old_apk=root / "old.apk",
+                expected_old_version_name="1.1.0",
+                expected_old_version_code=2,
+                expected_version_name="0.1.4",
+                expected_version_code=1004,
+            )
+            with (
+                mock.patch.object(module, "require_expected_serial", return_value="registered-device"),
+                mock.patch.object(module.shutil, "which", return_value="/usr/bin/adb"),
+                mock.patch.object(module, "load_json", return_value={}),
+                mock.patch.object(module, "verify_release_evidence", return_value=new_digest),
+                mock.patch.object(module, "exact_preflight"),
+                mock.patch.object(module, "package_version", side_effect=[(2, "1.1.0"), (1004, "0.1.4")]),
+                mock.patch.object(module, "capture_installed_apk", return_value=old_digest),
+                mock.patch.object(module, "uninstall"),
+                mock.patch.object(module, "install"),
+                mock.patch.object(
+                    module,
+                    "verify_installed_apk_digest",
+                    side_effect=module.MigrationFailure("installed candidate differs"),
+                ),
+                mock.patch.object(module, "restart_runtime_supervisor") as restart,
+                mock.patch.object(module, "wait_for_local_health") as health,
+                mock.patch.object(module, "restore_old_generation", return_value=True) as rollback,
+            ):
+                report, accepted = module.migrate(args)
+
+        self.assertFalse(accepted)
+        self.assertTrue(report["rollback_attempted"])
+        self.assertTrue(report["rollback_succeeded"])
+        rollback.assert_called_once()
+        restart.assert_not_called()
+        health.assert_not_called()
 
     def test_each_mutation_calls_registered_device_preflight_first(self):
         serial = "registered-device"
