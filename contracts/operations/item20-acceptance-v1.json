@@ -1,16 +1,20 @@
 {
   "admission": {
-    "candidate_must_match_item19_closeout": true,
+    "candidate_must_equal_control_plane_sha": true,
+    "candidate_must_be_exact_current_protected_main": true,
     "control_plane_must_be_exact_current_protected_main": true,
     "control_plane_quality_must_succeed": true,
     "fresh_candidate_evidence_required": true,
     "fresh_candidate_evidence_verifier": "scripts/verify_item20_candidate_evidence.py",
+    "fresh_exact_candidate_provider_proof_required_before_live_window": true,
+    "historical_item19_closeout_is_prior_evidence_not_current_candidate_authority": true,
     "required_issue_states": {
-      "item19_tracker_124": "closed_completed",
+      "item19_tracker_124": "closed_completed_historical_provider_proof",
       "item20_tracker_135": "open",
       "phone_signing_gate_115": "closed_completed_before_live_window"
     },
     "same_window_private_phone_preflight_required_before_live_window": true,
+    "source_freeze_after_candidate_evidence": true,
     "verifier": "scripts/verify_item20_admission.py"
   },
   "authorization": {
@@ -38,8 +42,11 @@
     "phone_mutation_from_this_admission_core",
     "public_endpoint_or_provider_uuid_evidence",
     "terminal_item19_intent_reuse",
+    "candidate_control_plane_sha_mismatch",
+    "live_window_without_fresh_exact_candidate_software_evidence",
     "live_window_without_fresh_exact_candidate_acceptance_authority",
     "live_window_without_fresh_exact_candidate_vultr_readonly_preflight",
+    "live_window_without_fresh_exact_candidate_provider_proof",
     "production_vultr_authority",
     "final_release_tag_or_production_promotion",
     "gcp_or_manual_provider_control"
@@ -47,19 +54,20 @@
   "future_live_candidate_evidence": {
     "acceptance_authority": "fresh_for_exact_candidate",
     "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
+    "fresh_provider_lifecycle_proof": "required_for_exact_candidate_before_live_item20",
     "same_candidate_required": true,
+    "software_release_candidate": "fresh_for_exact_candidate",
     "vultr_readonly_preflight": "fresh_for_exact_candidate"
   },
   "future_live_candidate_verifier": {
-    "candidate_control_plane_separation_required": true,
-    "candidate_control_plane_value_inequality_required": false,
+    "candidate_control_plane_exact_equality_required": true,
     "candidate_quality_run_attempt": 1,
     "grants_live_authority": false,
     "performs_external_io": false,
-    "selection": "candidate_specific_artifact_then_exact_control_plane_run",
+    "selection": "exact_current_protected_main_single_sha_then_fresh_candidate_evidence",
     "status": "protected_pure_verifier_consumed_by_admission_core",
     "verifier": "scripts/verify_item20_candidate_evidence.py",
-    "workflow_wiring": "not_implemented"
+    "workflow_wiring": "implemented_exact_readiness_artifact_consumption"
   },
   "handoff": {
     "private_phone_runner_vultr_credentials": "forbidden",
@@ -67,22 +75,24 @@
     "public_transport_endpoint_recording": "forbidden",
     "status": "not_implemented"
   },
-  "identity_separation": {
-    "candidate_sha": "immutable_item19_proven_software_identity",
-    "control_plane_may_advance_without_redefining_candidate": true,
-    "control_plane_sha": "exact_current_protected_main_revision",
-    "must_be_verified_independently": true
-  },
-  "immutable_candidate": {
+  "historical_item19_proof": {
     "acceptance_authority_run_id": 33341737260,
     "candidate_sha": "d151dbdd156279e32a5361d304c90f996bd2d565",
     "closeout_record": "docs/operations/item19-provider-proof-closeout.md",
     "item19_lifecycle_run_id": 33342000338,
     "item19_quality_run_id": 33341602485,
+    "role": "historical_provider_lifecycle_proof_only_not_item20_final_candidate",
     "vultr_readonly_preflight_run_id": 33341760002
   },
+  "identity": {
+    "candidate_sha": "exact_current_protected_main_revision_selected_for_10_of_10_window",
+    "control_plane_sha": "same_exact_current_protected_main_revision",
+    "exact_equality_required": true,
+    "final_release_tag_target": "candidate_sha",
+    "source_freeze_after_selection": true
+  },
   "orchestration": {
-    "candidate_source": "exact_immutable_item19_proven_sha",
+    "candidate_source": "same_exact_current_protected_main_as_control_plane",
     "control_plane_source": "exact_current_protected_main",
     "endpoint_handoff": "not_implemented",
     "executor": "github-hosted",
