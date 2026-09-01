@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -54,6 +55,39 @@ class AndroidReleaseBuildDiagnosticTests(unittest.TestCase):
                 module.safe_apksigner_version("/sdk/apksigner"),
                 "unavailable",
             )
+
+    def test_subprocess_stage_labels_are_fixed_and_bounded(self) -> None:
+        cases = [
+            (["git", "status", "secret-ref"], "canonical source proof subprocess failed"),
+            (["bash", "./gradlew", "--secret=value"], "Android Gradle release build subprocess failed"),
+            (["/sdk/build-tools/37.0.0/apksigner", "verify", FINGERPRINT], "APK signature verification subprocess failed"),
+            (["/sdk/build-tools/37.0.0/aapt", "dump", "private.apk"], "APK metadata verification subprocess failed"),
+            (["cargo", "run", "--", "private.apk"], "typed Android artifact digest subprocess failed"),
+            (["unexpected-tool", "private-value"], "canonical Android release build or verification subprocess failed"),
+        ]
+        for command, expected in cases:
+            with self.subTest(command=command[0]):
+                message = module.safe_subprocess_failure_message(command)
+                self.assertEqual(message, expected)
+                self.assertNotIn(FINGERPRINT, message)
+                self.assertNotIn("secret", message)
+                self.assertNotIn("private", message)
+
+    def test_run_checked_does_not_echo_child_output_or_command_arguments(self) -> None:
+        child_error = subprocess.CalledProcessError(
+            1,
+            ["bash", "./gradlew", "--password=private-label"],
+            output=f"fingerprint={FINGERPRINT}",
+            stderr="certificate DN: CN=private-label",
+        )
+        with mock.patch.object(module.subprocess, "run", side_effect=child_error):
+            with self.assertRaises(module.AndroidBuildFailure) as captured:
+                module.run_checked(["bash", "./gradlew", "--password=private-label"])
+        message = str(captured.exception)
+        self.assertEqual(message, "Android Gradle release build subprocess failed")
+        self.assertNotIn(FINGERPRINT, message)
+        self.assertNotIn("private-label", message)
+        self.assertNotIn("password", message)
 
 
 if __name__ == "__main__":
