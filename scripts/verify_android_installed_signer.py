@@ -61,6 +61,13 @@ _APKSIGNER_V31_RANGE_FINGERPRINT_PATTERN = re.compile(
     r"certificate SHA-256 digest: ([0-9A-Fa-f]{64})$",
     re.MULTILINE,
 )
+_APKSIGNER_VERSIONED_FINGERPRINT_PATTERN = re.compile(
+    r"^V(?:1|2|3\.0|3\.1|3\.2) Signer"
+    r"(?: #\d+)?"
+    r"(?: \(minSdkVersion=\d+(?: \(dev release=true\))?, maxSdkVersion=\d+\))?"
+    r": certificate SHA-256 digest: ([0-9A-Fa-f]{64})$",
+    re.MULTILINE,
+)
 _KEYTOOL_FINGERPRINT_PATTERN = re.compile(
     r"^\s*SHA256:\s*((?:[0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2})\s*$",
     re.MULTILINE,
@@ -153,17 +160,24 @@ def select_installed_apk_path(pm_output: str) -> str:
 def parse_single_apksigner_fingerprint(output: str) -> str:
     numbered_matches = _APKSIGNER_NUMBERED_FINGERPRINT_PATTERN.findall(output)
     range_matches = _APKSIGNER_V31_RANGE_FINGERPRINT_PATTERN.findall(output)
+    versioned_matches = _APKSIGNER_VERSIONED_FINGERPRINT_PATTERN.findall(output)
     signer_digest_lines = [
         line
         for line in output.splitlines()
-        if line.startswith("Signer ") and " certificate SHA-256 digest:" in line
+        if (
+            line.startswith("Signer ")
+            or re.match(r"^V[0-9]", line) is not None
+        )
+        and "certificate SHA-256 digest:" in line
     ]
     require(
-        len(signer_digest_lines) == len(numbered_matches) + len(range_matches),
+        len(signer_digest_lines)
+        == len(numbered_matches) + len(range_matches) + len(versioned_matches),
         "APK signer inventory contains an unrecognized certificate digest record",
     )
+    format_count = sum(bool(matches) for matches in (numbered_matches, range_matches, versioned_matches))
     require(
-        bool(numbered_matches) != bool(range_matches),
+        format_count == 1,
         "APK signer inventory format is unavailable or ambiguous",
     )
 
@@ -174,12 +188,13 @@ def parse_single_apksigner_fingerprint(output: str) -> str:
         )
         return numbered_matches[0].lower()
 
-    unique_range_fingerprints = {fingerprint.lower() for fingerprint in range_matches}
+    active_matches = range_matches if range_matches else versioned_matches
+    unique_fingerprints = {fingerprint.lower() for fingerprint in active_matches}
     require(
-        len(unique_range_fingerprints) == 1,
-        "APK v3.1 signer ranges do not resolve to exactly one signing identity",
+        len(unique_fingerprints) == 1,
+        "APK signer records do not resolve to exactly one signing identity",
     )
-    return next(iter(unique_range_fingerprints))
+    return next(iter(unique_fingerprints))
 
 
 def parse_single_keytool_fingerprint(output: str) -> str:
