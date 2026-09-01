@@ -36,7 +36,7 @@ class AndroidInstalledSignerTests(unittest.TestCase):
             with self.assertRaises(module.SigningIdentityFailure):
                 module.select_installed_apk_path(output)
 
-    def test_parses_exact_single_tool_reported_fingerprints(self) -> None:
+    def test_parses_supported_single_tool_reported_fingerprints(self) -> None:
         apksigner_output = (
             "Signer #1 certificate DN: CN=redacted\n"
             "Signer #1 certificate SHA-256 digest: "
@@ -45,21 +45,62 @@ class AndroidInstalledSignerTests(unittest.TestCase):
         self.assertEqual(
             module.parse_single_apksigner_fingerprint(apksigner_output), CERTIFICATE_FINGERPRINT
         )
+
+        v31_output = (
+            "Signer (minSdkVersion=28, maxSdkVersion=32) certificate DN: CN=redacted\n"
+            "Signer (minSdkVersion=28, maxSdkVersion=32) certificate SHA-256 digest: "
+            f"{CERTIFICATE_FINGERPRINT}\n"
+            "Signer (minSdkVersion=33 (dev release=true), maxSdkVersion=2147483647) "
+            "certificate DN: CN=redacted\n"
+            "Signer (minSdkVersion=33 (dev release=true), maxSdkVersion=2147483647) "
+            "certificate SHA-256 digest: "
+            f"{CERTIFICATE_FINGERPRINT}\n"
+        )
+        self.assertEqual(
+            module.parse_single_apksigner_fingerprint(v31_output), CERTIFICATE_FINGERPRINT
+        )
+
         self.assertEqual(
             module.parse_single_keytool_fingerprint(
                 f"Certificate fingerprints:\n\t SHA256: {KEYTOOL_FINGERPRINT}\n"
             ),
             CERTIFICATE_FINGERPRINT,
         )
-        with self.assertRaises(module.SigningIdentityFailure):
-            module.parse_single_apksigner_fingerprint("")
-        with self.assertRaises(module.SigningIdentityFailure):
-            module.parse_single_apksigner_fingerprint(
-                apksigner_output
-                + "Signer #2 certificate SHA-256 digest: "
-                + CERTIFICATE_FINGERPRINT
-                + "\n"
-            )
+
+    def test_apksigner_inventory_variants_fail_closed(self) -> None:
+        numbered = (
+            "Signer #1 certificate SHA-256 digest: " + CERTIFICATE_FINGERPRINT + "\n"
+        )
+        ranged = (
+            "Signer (minSdkVersion=28, maxSdkVersion=32) certificate SHA-256 digest: "
+            + CERTIFICATE_FINGERPRINT
+            + "\n"
+        )
+        different_range = (
+            "Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-256 digest: "
+            + ("34" * 32)
+            + "\n"
+        )
+        malformed_range = (
+            "Signer (minSdkVersion=28, maxSdkVersion=32, extra=true) "
+            "certificate SHA-256 digest: "
+            + CERTIFICATE_FINGERPRINT
+            + "\n"
+        )
+        for output in (
+            "",
+            numbered
+            + "Signer #2 certificate SHA-256 digest: "
+            + CERTIFICATE_FINGERPRINT
+            + "\n",
+            numbered + ranged,
+            ranged + different_range,
+            malformed_range,
+        ):
+            with self.subTest(output=output):
+                with self.assertRaises(module.SigningIdentityFailure):
+                    module.parse_single_apksigner_fingerprint(output)
+
         with self.assertRaises(module.SigningIdentityFailure):
             module.parse_single_keytool_fingerprint(
                 f"SHA256: {KEYTOOL_FINGERPRINT}\nSHA256: {KEYTOOL_FINGERPRINT}\n"
