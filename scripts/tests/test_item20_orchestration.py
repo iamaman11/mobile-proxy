@@ -14,14 +14,14 @@ if str(SCRIPTS) not in sys.path:
 from verify_item20_orchestration import select_quality_run, verify_orchestration
 
 
-CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
-CONTROL_PLANE = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ACTIVE_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
 CONTRACT = ROOT / "contracts/operations/item20-acceptance-v1.json"
 WORKFLOW = ROOT / ".github/workflows/item20-session-orchestration.yml"
 
 
 def branch() -> dict[str, object]:
-    return {"name": "main", "protected": True, "commit": {"sha": CONTROL_PLANE}}
+    return {"name": "main", "protected": True, "commit": {"sha": ACTIVE_SHA}}
 
 
 def quality() -> dict[str, object]:
@@ -32,7 +32,7 @@ def quality() -> dict[str, object]:
         "path": ".github/workflows/quality.yml",
         "event": "push",
         "head_branch": "main",
-        "head_sha": CONTROL_PLANE,
+        "head_sha": ACTIVE_SHA,
         "status": "completed",
         "conclusion": "success",
         "repository": {"full_name": "iamaman11/mobile-proxy"},
@@ -51,8 +51,8 @@ class Item20NonLiveOrchestrationTests(unittest.TestCase):
 
     def verify(self, signing: dict[str, object] | None = None, **overrides: object) -> dict[str, object]:
         values: dict[str, object] = {
-            "candidate_sha": CANDIDATE,
-            "control_plane_sha": CONTROL_PLANE,
+            "candidate_sha": ACTIVE_SHA,
+            "control_plane_sha": ACTIVE_SHA,
             "contract": self.contract,
             "branch": branch(),
             "quality_run": quality(),
@@ -63,8 +63,11 @@ class Item20NonLiveOrchestrationTests(unittest.TestCase):
         values.update(overrides)
         return verify_orchestration(**values)  # type: ignore[arg-type]
 
-    def test_open_signing_gate_allows_build_only_but_never_live_authority(self) -> None:
+    def test_same_sha_open_signing_gate_allows_build_only_but_never_live_authority(self) -> None:
         evidence = self.verify()
+        self.assertEqual(evidence["candidate_sha"], ACTIVE_SHA)
+        self.assertEqual(evidence["control_plane_sha"], ACTIVE_SHA)
+        self.assertTrue(evidence["candidate_control_plane_exact_equality_verified"])
         self.assertTrue(evidence["non_live_candidate_artifact_build_authorized"])
         self.assertFalse(evidence["phone_signing_gate_completed"])
         for field in (
@@ -89,9 +92,19 @@ class Item20NonLiveOrchestrationTests(unittest.TestCase):
         self.assertFalse(evidence["fresh_vultr_readonly_preflight_verified"])
         self.assertFalse(evidence["live_execution_authorized"])
 
-    def test_candidate_must_remain_item19_proven_identity(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Item 19 closeout"):
+    def test_distinct_candidate_and_control_plane_fail_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "candidate/control-plane SHA mismatch"):
             self.verify(candidate_sha="b" * 40)
+
+    def test_historical_item19_sha_cannot_silently_become_active_item20_candidate(self) -> None:
+        with self.assertRaisesRegex(ValueError, "candidate/control-plane SHA mismatch"):
+            self.verify(candidate_sha=HISTORICAL_ITEM19_SHA)
+
+    def test_protected_main_advance_invalidates_candidate(self) -> None:
+        advanced = branch()
+        advanced["commit"] = {"sha": "b" * 40}
+        with self.assertRaisesRegex(ValueError, "exact current protected main"):
+            self.verify(branch=advanced)
 
     def test_item_trackers_fail_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "Item 19"):
@@ -104,20 +117,20 @@ class Item20NonLiveOrchestrationTests(unittest.TestCase):
             self.verify(signing=issue(115, "closed", "not_planned"))
 
     def test_quality_selection_is_exact_and_unambiguous(self) -> None:
-        selected = select_quality_run(CONTROL_PLANE, {"workflow_runs": [quality()]})
+        selected = select_quality_run(ACTIVE_SHA, {"workflow_runs": [quality()]})
         self.assertEqual(selected["id"], 456789)
 
         wrong = quality()
         wrong["head_sha"] = "b" * 40
         with self.assertRaisesRegex(ValueError, "exactly one eligible"):
-            select_quality_run(CONTROL_PLANE, {"workflow_runs": [wrong]})
+            select_quality_run(ACTIVE_SHA, {"workflow_runs": [wrong]})
 
         duplicate = quality().copy()
         duplicate["id"] = 456790
         with self.assertRaisesRegex(ValueError, "exactly one eligible"):
-            select_quality_run(CONTROL_PLANE, {"workflow_runs": [quality(), duplicate]})
+            select_quality_run(ACTIVE_SHA, {"workflow_runs": [quality(), duplicate]})
 
-    def test_workflow_is_hosted_build_only_and_identity_separated(self) -> None:
+    def test_workflow_is_hosted_build_only_and_same_sha_bound(self) -> None:
         body = WORKFLOW.read_text(encoding="utf-8")
         for required in (
             "name: Item 20 non-live session orchestration",
@@ -157,23 +170,23 @@ class Item20NonLiveOrchestrationTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, body)
 
-    def test_contract_describes_only_non_live_orchestration(self) -> None:
+    def test_contract_describes_only_same_sha_non_live_orchestration(self) -> None:
         self.assertEqual(
             self.contract["orchestration"],
             {
-                "status": "protected_validation_and_candidate_build_only",
-                "workflow": ".github/workflows/item20-session-orchestration.yml",
-                "verifier": "scripts/verify_item20_orchestration.py",
-                "trigger": "workflow_dispatch",
-                "executor": "github-hosted",
+                "candidate_source": "same_exact_current_protected_main_as_control_plane",
                 "control_plane_source": "exact_current_protected_main",
-                "candidate_source": "exact_immutable_item19_proven_sha",
-                "server_artifact_name_template": "item20-server-candidate-<candidate_sha>",
-                "provider_environment": "none",
-                "provider_credentials": "forbidden",
-                "provider_mutation": False,
-                "phone_execution": False,
                 "endpoint_handoff": "not_implemented",
+                "executor": "github-hosted",
+                "phone_execution": False,
+                "provider_credentials": "forbidden",
+                "provider_environment": "none",
+                "provider_mutation": False,
+                "server_artifact_name_template": "item20-server-candidate-<candidate_sha>",
+                "status": "protected_validation_and_candidate_build_only",
+                "trigger": "workflow_dispatch",
+                "verifier": "scripts/verify_item20_orchestration.py",
+                "workflow": ".github/workflows/item20-session-orchestration.yml",
             },
         )
 
