@@ -11,9 +11,9 @@ SCRIPT = ROOT / "scripts" / "select_item20_candidate_evidence.py"
 CONTRACT = ROOT / "contracts" / "operations" / "item20-admission-readiness-v1.json"
 WORKFLOW = ROOT / ".github" / "workflows" / "item20-admission-readiness.yml"
 SESSION_WORKFLOW = ROOT / ".github" / "workflows" / "item20-session-orchestration.yml"
-CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
-CONTROL = "a" * 40
-OLD_CONTROL = "b" * 40
+ACTIVE_SHA = "a" * 40
+OTHER_SHA = "b" * 40
+HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
 
 spec = importlib.util.spec_from_file_location("item20_readiness_selector", SCRIPT)
 assert spec is not None and spec.loader is not None
@@ -22,68 +22,92 @@ sys.modules[spec.name] = selector
 spec.loader.exec_module(selector)
 
 
-def artifact(kind: str, artifact_id: int, control: str, created_at: str) -> dict[str, object]:
+def artifact(kind: str, artifact_id: int, sha: str, created_at: str) -> dict[str, object]:
     prefix = {
         "acceptance": "vultr-acceptance-authority",
         "preflight": "vultr-readonly-preflight",
     }[kind]
     return {
         "id": artifact_id,
-        "name": f"{prefix}-{CANDIDATE}",
+        "name": f"{prefix}-{sha}",
         "size_in_bytes": 512,
         "expired": False,
         "digest": "sha256:" + "c" * 64,
         "created_at": created_at,
-        "workflow_run": {"id": artifact_id + 1000, "head_branch": "main", "head_sha": control},
+        "workflow_run": {"id": artifact_id + 1000, "head_branch": "main", "head_sha": sha},
     }
 
 
 class Item20AdmissionReadinessTests(unittest.TestCase):
-    def test_contract_is_exact_validation_only(self) -> None:
+    def test_contract_is_exact_single_sha_validation_only(self) -> None:
         contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
         selector.verify_readiness_contract(contract)
         workflow = contract["candidate_evidence_workflow"]
+        self.assertEqual(workflow["candidate_sha"], "same_exact_current_protected_main_as_control_plane")
+        self.assertTrue(workflow["candidate_control_plane_exact_equality_required"])
+        self.assertEqual(workflow["control_plane_sha"], "exact_current_protected_main")
         self.assertEqual(workflow["admission_core_wiring"], "implemented_exact_result_match")
-        self.assertEqual(
-            workflow["session_workflow_wiring"],
-            "implemented_exact_readiness_artifact_consumption",
-        )
+        self.assertEqual(workflow["session_workflow_wiring"], "implemented_exact_readiness_artifact_consumption")
         self.assertFalse(contract["authorization"]["provider_mutation_authorized"])
         self.assertFalse(contract["authorization"]["phone_mutation_authorized"])
         self.assertFalse(contract["authorization"]["live_execution_authorized"])
 
-    def test_selector_uses_exact_candidate_then_control_plane(self) -> None:
+    def test_selector_uses_same_sha_candidate_and_run(self) -> None:
         payload = {
             "artifacts": [
-                artifact("acceptance", 10, OLD_CONTROL, "2026-08-31T10:00:00Z"),
-                artifact("acceptance", 11, CONTROL, "2026-08-31T10:01:00Z"),
-                artifact("acceptance", 12, CONTROL, "2026-08-31T10:02:00Z"),
+                artifact("acceptance", 10, OTHER_SHA, "2026-08-31T10:00:00Z"),
+                artifact("acceptance", 11, ACTIVE_SHA, "2026-08-31T10:01:00Z"),
+                artifact("acceptance", 12, ACTIVE_SHA, "2026-08-31T10:02:00Z"),
             ]
         }
-        selected = selector.select_artifact("acceptance", CANDIDATE, CONTROL, payload)
+        selected = selector.select_artifact("acceptance", ACTIVE_SHA, ACTIVE_SHA, payload)
         self.assertEqual(selected["id"], 12)
-        self.assertEqual(selected["workflow_run"]["head_sha"], CONTROL)
+        self.assertEqual(selected["workflow_run"]["head_sha"], ACTIVE_SHA)
 
-    def test_selector_rejects_old_or_invalid_artifacts(self) -> None:
-        wrong_name = artifact("preflight", 20, CONTROL, "2026-08-31T10:03:00Z")
-        wrong_name["name"] = "vultr-readonly-preflight-" + "0" * 40
-        expired = artifact("preflight", 21, CONTROL, "2026-08-31T10:04:00Z")
+    def test_selector_rejects_candidate_control_plane_mismatch(self) -> None:
+        with self.assertRaisesRegex(ValueError, "candidate/control-plane SHA mismatch"):
+            selector.select_artifact(
+                "acceptance",
+                ACTIVE_SHA,
+                OTHER_SHA,
+                {"artifacts": [artifact("acceptance", 10, ACTIVE_SHA, "2026-08-31T10:00:00Z")]},
+            )
+
+    def test_historical_item19_candidate_is_not_privileged(self) -> None:
+        with self.assertRaisesRegex(ValueError, "candidate/control-plane SHA mismatch"):
+            selector.select_artifact(
+                "preflight",
+                HISTORICAL_ITEM19_SHA,
+                ACTIVE_SHA,
+                {"artifacts": [artifact("preflight", 20, HISTORICAL_ITEM19_SHA, "2026-08-31T10:00:00Z")]},
+            )
+
+    def test_selector_rejects_expired_wrong_or_malformed_artifacts(self) -> None:
+        wrong = artifact("preflight", 20, OTHER_SHA, "2026-08-31T10:03:00Z")
+        expired = artifact("preflight", 21, ACTIVE_SHA, "2026-08-31T10:04:00Z")
         expired["expired"] = True
-        old = artifact("preflight", 22, OLD_CONTROL, "2026-08-31T10:05:00Z")
+        malformed = artifact("preflight", 22, ACTIVE_SHA, "2026-08-31T10:05:00Z")
+        malformed["digest"] = "bad"
         with self.assertRaises(ValueError):
-            selector.select_artifact("preflight", CANDIDATE, CONTROL, {"artifacts": [wrong_name, expired, old]})
+            selector.select_artifact(
+                "preflight", ACTIVE_SHA, ACTIVE_SHA, {"artifacts": [wrong, expired, malformed]}
+            )
 
-    def test_workflow_is_read_only_and_consumes_protected_verifier(self) -> None:
+    def test_workflow_derives_candidate_from_exact_protected_main_and_is_read_only(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         for required in (
             "name: Item 20 read-only admission readiness",
             "actions: read",
             "contents: read",
+            "CANDIDATE_SHA: ${{ github.sha }}",
+            "CONTROL_PLANE_SHA: ${{ github.sha }}",
+            'test "$CANDIDATE_SHA" = "$CONTROL_PLANE_SHA"',
+            "workflow SHA is not exact current protected main",
             "scripts/select_item20_candidate_evidence.py select-artifact",
             "scripts/verify_item20_candidate_evidence.py",
-            "vultr-acceptance-authority-$CANDIDATE_SHA",
-            "vultr-readonly-preflight-$CANDIDATE_SHA",
+            "--control-plane-sha \"$CANDIDATE_SHA\"",
             "item20-admission-readiness-${{ github.sha }}",
+            "Candidate/control-plane exact equality verified: true",
             "Provider mutation authorized: false",
             "Phone mutation authorized: false",
             "Live execution authorized: false",
@@ -91,6 +115,8 @@ class Item20AdmissionReadinessTests(unittest.TestCase):
             self.assertIn(required, workflow)
 
         for forbidden in (
+            "d151dbdd156279e32a5361d304c90f996bd2d565",
+            "Exact immutable Item 19-proven software candidate SHA",
             "environment: acceptance-vultr",
             "VULTR_API_KEY",
             "VULTR_SSH_PRIVATE_KEY",
