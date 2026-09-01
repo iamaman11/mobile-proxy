@@ -133,7 +133,6 @@ def check_repository(root: Path) -> list[str]:
     for token in required_workflow_tokens:
         if token not in workflow:
             errors.append(f"release-tag workflow is missing protected ordering token {token!r}")
-
     for forbidden in (
         "github.event.issue.number == 162",
         "final_release_control_plane_sha",
@@ -144,11 +143,12 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"release-tag workflow contains retired/divergent authority token {forbidden!r}")
 
     required_release_tokens = (
-        "on:",
-        "tags:",
-        "- 'v*'",
-        "ref: ${{ github.sha }}",
-        "git rev-parse HEAD",
+        "github.event.workflow_run.head_sha",
+        "inputs.release_tag",
+        'tag_sha=$(git rev-list -n 1 "$VERIFIED_TAG")',
+        'test "$tag_sha" = "$VERIFIED_SHA"',
+        '"git_sha": sha',
+        "RELEASE_SHA: ${{ steps.tag.outputs.sha }}",
     )
     for token in required_release_tokens:
         if token not in release_workflow:
@@ -174,7 +174,6 @@ def check_repository(root: Path) -> list[str]:
     ):
         if token not in baseline:
             errors.append(f"production baseline release ordering drifted: missing {token!r}")
-
     for token in (
         "Final release authority ordering",
         "No final `v0.1.4` tag or GitHub Release is an input to the signing-generation migration.",
