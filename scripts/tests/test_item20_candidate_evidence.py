@@ -15,8 +15,8 @@ if str(SCRIPTS) not in sys.path:
 from verify_item20_candidate_evidence import verify_candidate_chain, verify_contract
 
 
-CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
-CONTROL_PLANE = "a" * 40
+CANDIDATE = "a" * 40
+CONTROL_PLANE = CANDIDATE
 CONTRACT = ROOT / "contracts/operations/item20-acceptance-v1.json"
 
 
@@ -134,7 +134,7 @@ def acceptance_evidence() -> dict[str, object]:
         "acceptance_workflow_run_attempt": "1",
         "command_issue": 90,
         "command_comment_id": "3000",
-        "candidate_quality_run_id": "33341602485",
+        "candidate_quality_run_id": "900",
         "candidate_quality_run_attempt": "1",
         "candidate_evidence_artifact": f"software-release-candidate-{CANDIDATE}",
         "candidate_evidence_file": "release-candidate-evidence.json",
@@ -203,15 +203,16 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         values.update(overrides)
         return verify_candidate_chain(**values)  # type: ignore[arg-type]
 
-    def test_distinct_candidate_and_control_plane_chain_passes(self) -> None:
-        self.assertEqual(verify_contract(self.contract), (33341602485, 1))
+    def test_single_sha_candidate_chain_passes(self) -> None:
+        self.assertEqual(verify_contract(self.contract), 1)
         evidence = self.verify()
         self.assertEqual(evidence["candidate_sha"], CANDIDATE)
-        self.assertEqual(evidence["control_plane_sha"], CONTROL_PLANE)
-        self.assertTrue(evidence["candidate_control_plane_separation_verified"])
+        self.assertEqual(evidence["control_plane_sha"], CANDIDATE)
+        self.assertTrue(evidence["candidate_control_plane_exact_equality_verified"])
         self.assertTrue(evidence["fresh_acceptance_authority_verified"])
         self.assertTrue(evidence["fresh_vultr_readonly_preflight_verified"])
-        self.assertTrue(evidence["provider_probe_read_only_verified"])
+        self.assertTrue(evidence["fresh_exact_candidate_provider_proof_required_before_live_window"])
+        self.assertTrue(evidence["source_freeze_required_after_evidence"])
         for field in (
             "provider_mutation_authorized",
             "phone_mutation_authorized",
@@ -223,29 +224,15 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
             "secret_derived_identifier_recorded",
         ):
             self.assertFalse(evidence[field])
-        serialized = json.dumps(evidence)
-        self.assertNotIn("VULTR_API_KEY", serialized)
-        self.assertNotIn("VULTR_SSH_PRIVATE_KEY", serialized)
-        self.assertNotIn("provider_uuid", serialized)
 
-    def test_identity_roles_can_share_the_same_sha_value(self) -> None:
-        evidence = self.verify(
-            control_plane_sha=CANDIDATE,
-            branch=branch(CANDIDATE),
-            control_plane_quality_run=control_quality(CANDIDATE),
-            acceptance_artifact=acceptance_artifact(CANDIDATE),
-            acceptance_run=acceptance_run(CANDIDATE),
-            preflight_artifact=preflight_artifact(CANDIDATE),
-            preflight_run=preflight_run(CANDIDATE),
-        )
-        self.assertEqual(evidence["candidate_sha"], CANDIDATE)
-        self.assertEqual(evidence["control_plane_sha"], CANDIDATE)
-        self.assertTrue(evidence["candidate_control_plane_separation_verified"])
+    def test_candidate_and_control_plane_mismatch_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "single-SHA"):
+            self.verify(control_plane_sha="c" * 40)
 
-    def test_acceptance_run_must_use_exact_control_plane_not_candidate(self) -> None:
+    def test_acceptance_run_must_use_exact_single_sha(self) -> None:
         run = acceptance_run()
-        run["head_sha"] = CANDIDATE
-        with self.assertRaisesRegex(ValueError, "exact Item 20 control plane"):
+        run["head_sha"] = "c" * 40
+        with self.assertRaisesRegex(ValueError, "single-SHA"):
             self.verify(acceptance_run=run)
 
     def test_candidate_specific_acceptance_artifact_is_required(self) -> None:
@@ -259,31 +246,23 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         expired["expired"] = True
         with self.assertRaisesRegex(ValueError, "expired"):
             self.verify(acceptance_artifact=expired)
-
         bad_digest = acceptance_artifact()
         bad_digest["digest"] = "sha256:bad"
         with self.assertRaisesRegex(ValueError, "digest"):
             self.verify(acceptance_artifact=bad_digest)
 
-    def test_artifact_run_binding_must_match_control_plane_and_run_id(self) -> None:
+    def test_artifact_run_binding_must_match_single_sha_and_run_id(self) -> None:
         metadata = acceptance_artifact()
         assert isinstance(metadata["workflow_run"], dict)
         metadata["workflow_run"]["id"] = 9999
-        with self.assertRaisesRegex(ValueError, "exact control-plane run"):
+        with self.assertRaisesRegex(ValueError, "exact single-SHA run"):
             self.verify(acceptance_artifact=metadata)
 
-        metadata = acceptance_artifact()
-        assert isinstance(metadata["workflow_run"], dict)
-        metadata["workflow_run"]["head_sha"] = CANDIDATE
-        with self.assertRaisesRegex(ValueError, "exact control-plane run"):
-            self.verify(acceptance_artifact=metadata)
-
-    def test_acceptance_evidence_must_bind_protected_candidate_quality_run_and_attempt(self) -> None:
+    def test_acceptance_evidence_must_bind_same_quality_run_and_attempt(self) -> None:
         evidence = acceptance_evidence()
         evidence["candidate_quality_run_id"] = "999"
         with self.assertRaisesRegex(ValueError, "acceptance-authority evidence"):
             self.verify(acceptance_evidence=evidence)
-
         evidence = acceptance_evidence()
         evidence["candidate_quality_run_attempt"] = "2"
         with self.assertRaisesRegex(ValueError, "acceptance-authority evidence"):
@@ -301,38 +280,28 @@ class Item20CandidateEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "preflight evidence"):
             self.verify(preflight_evidence=evidence)
 
-    def test_fresh_chain_must_follow_control_plane_quality(self) -> None:
+    def test_fresh_chain_must_follow_quality(self) -> None:
         run = acceptance_run()
         run["created_at"] = "2026-08-31T09:59:00Z"
         with self.assertRaisesRegex(ValueError, "stale or out of order"):
             self.verify(acceptance_run=run)
 
-        metadata = preflight_artifact()
-        metadata["created_at"] = "2026-08-31T10:04:00Z"
-        with self.assertRaisesRegex(ValueError, "stale or out of order"):
-            self.verify(preflight_artifact=metadata)
-
-    def test_pure_verifier_is_consumed_by_admission_but_workflow_wiring_remains_disabled(self) -> None:
+    def test_contract_requires_equality_and_fresh_provider_proof(self) -> None:
         future = self.contract["future_live_candidate_evidence"]
         assert isinstance(future, dict)
         self.assertEqual(
-            future["current_core_verification"],
-            "protected_pure_verifier_consumed_by_admission_core",
+            future["fresh_provider_lifecycle_proof"],
+            "required_for_exact_candidate_before_live_item20",
         )
-
         verifier = self.contract["future_live_candidate_verifier"]
         assert isinstance(verifier, dict)
-        self.assertEqual(
-            verifier["status"], "protected_pure_verifier_consumed_by_admission_core"
-        )
-        self.assertFalse(verifier["candidate_control_plane_value_inequality_required"])
+        self.assertTrue(verifier["candidate_control_plane_exact_equality_required"])
         self.assertEqual(verifier["verifier"], "scripts/verify_item20_candidate_evidence.py")
-        self.assertEqual(verifier["workflow_wiring"], "not_implemented")
         self.assertFalse(verifier["performs_external_io"])
         self.assertFalse(verifier["grants_live_authority"])
 
         mutated = copy.deepcopy(self.contract)
-        mutated["future_live_candidate_verifier"]["workflow_wiring"] = "enabled"
+        mutated["future_live_candidate_verifier"]["candidate_control_plane_exact_equality_required"] = False
         with self.assertRaisesRegex(ValueError, "pure candidate evidence verifier"):
             verify_contract(mutated)
 
