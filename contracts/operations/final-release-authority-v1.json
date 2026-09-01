@@ -19,7 +19,7 @@
     "accepted_candidate_sha": "exact_full_40_char_sha_from_item20_final_marker",
     "protected_main_sha": "must_equal_exact_accepted_candidate_sha",
     "target_sha": "exact_full_40_char_sha_matching_item20_accepted_candidate_and_protected_main",
-    "target_main_quality": "completed_successful_push_on_main_for_exact_accepted_candidate",
+    "target_main_quality": "at_least_one_completed_successful_push_on_main_for_exact_accepted_candidate",
     "source_sha_of_published_artifacts": "must_equal_final_tag_target_sha",
     "canonical_release_contract_verified": true
   },
@@ -33,7 +33,7 @@
   },
   "tag": {
     "kind": "annotated",
-    "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+    "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
     "deletion_forbidden": true,
     "non_fast_forward_forbidden": true
   },
