@@ -20,6 +20,7 @@ from check_item20_admission_readiness import check_repository as check_item20_ad
 from check_item20_topology_wiring import check_repository as check_item20_topology_wiring
 from check_module_boundaries import validate_repository as check_module_boundaries
 from check_native_runtime_policy import check_repository as check_native_runtime_policy
+from check_release_authority_order import check_repository as check_release_authority_order
 from check_state_ownership import validate_repository as check_state_ownership
 from check_vm_ownership_contract import check_repository as check_vm_ownership_contract
 
@@ -111,6 +112,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_item19_consistency(root))
     errors.extend(check_item20_admission_readiness(root))
     errors.extend(check_item20_topology_wiring(root))
+    errors.extend(check_release_authority_order(root))
     return errors
 
 
