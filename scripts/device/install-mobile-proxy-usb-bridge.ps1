@@ -27,7 +27,7 @@ $target = Join-Path $InstallRoot 'mobile-proxy-usb-bridge.ps1'
 Copy-Item -LiteralPath $source -Destination $target -Force
 
 $owner = "$env:USERDOMAIN\$env:USERNAME"
-$arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$target`" -BusId $busId -HardwareId $HardwareId -Distro $Distro"
+$arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$target`" -BusId $busId -HardwareId $HardwareId -Distro $Distro"
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $owner
 $principal = New-ScheduledTaskPrincipal -UserId $owner -LogonType Interactive -RunLevel Highest
