@@ -46,13 +46,13 @@
     }
   },
   "execution": {
-    "vultr_acceptance": "GitHub-hosted runner under immutable pre-release acceptance authority; acceptance-vultr is a credential boundary and concrete workflow contracts determine read-only versus bounded item-19 lifecycle capability; production-vultr remains forbidden before final release",
+    "vultr_acceptance": "GitHub-hosted runner under immutable pre-release acceptance authority; acceptance-vultr is a credential boundary and concrete workflow contracts determine read-only versus bounded lifecycle capability; production-vultr remains forbidden before final release",
     "vultr_production": "GitHub-hosted runner in production-vultr from protected final v* release only",
     "phone": "private-repository caller context with android-production self-hosted runner",
-    "phone_logic": "canonical public logic pinned to immutable SHA or verified canonical release artifact",
+    "phone_logic": "canonical public logic pinned to the exact immutable accepted public SHA or verified canonical release artifact",
     "cross_boundary_secret_rule": "private phone runner never receives Vultr credentials and public Vultr jobs never receive raw phone identifiers or phone-control secrets",
-    "item20_non_live": "GitHub-hosted exact-current protected-main validation plus exact immutable candidate build only; no acceptance-vultr environment, provider credentials, provider mutation, phone execution or endpoint handoff",
-    "item20_admission_readiness": "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence against exact current protected control-plane; bounded result is matched exactly by the pure admission core and consumed as an exact verified readiness artifact by the non-live session workflow before candidate build; actions:read plus contents:read only; no provider credentials/API execution, provider mutation, phone execution or endpoint handoff"
+    "item20_non_live": "GitHub-hosted exact-current protected-main validation and exact same-SHA candidate build only; candidate_sha equals control_plane_sha; no acceptance-vultr environment, provider credentials, provider mutation, phone execution or endpoint handoff",
+    "item20_admission_readiness": "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence for the same exact current protected-main SHA; bounded result is matched exactly by the pure admission core and consumed as an exact verified readiness artifact by the non-live session workflow before candidate build; actions:read plus contents:read only; no provider credentials/API execution, provider mutation, phone execution or endpoint handoff"
   },
   "release_link": {
     "source_repository": "iamaman11/mobile-proxy",
@@ -64,7 +64,8 @@
       "provenance_identity"
     ],
     "deployment_id_rule": "mobile-proxy-<tag>-<first12sha>",
-    "latest_or_mutable_branch": "forbidden"
+    "latest_or_mutable_branch": "forbidden",
+    "accepted_candidate_equals_protected_main_equals_final_tag_target_equals_published_source_sha": true
   },
   "state_boundaries": {
     "canonical_version_control": "desired configuration, contracts, architecture, roadmap, workflow logic, release identity and non-secret evidence schema/index",
@@ -89,13 +90,13 @@
     "vultr_adapter": "implemented_typed_provider_neutral_ownership_and_generation_policy",
     "vultr_durable_acceptance_state": "item_19_complete_crash_safe_dispatch_fencing_and_terminal_cleanup_proven_live",
     "vultr_typed_http_client": "item_19_complete_acceptance_only_bounded_full_instance_enumeration_and_live_execution_proven",
-    "vultr_live_preflight": "exact_candidate_d151dbdd156279e32a5361d304c90f996bd2d565_read_only_preflight_run_33341760002_passed_before_item_19_mutation",
-    "vultr_live_lifecycle": "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed",
-    "item_20_non_live_orchestration": "protected_non_live_validation_and_exact_candidate_build_only_no_provider_or_phone_authority",
-    "item_20_admission_readiness": "protected_read_only_candidate_evidence_validation_admission_core_exact_result_match_and_session_exact_readiness_artifact_consumption_implemented_no_provider_or_phone_authority",
+    "vultr_live_preflight": "historical_item_19_exact_candidate_d151dbdd156279e32a5361d304c90f996bd2d565_read_only_preflight_run_33341760002_passed_before_item_19_mutation_not_active_item20_candidate_authority",
+    "vultr_live_lifecycle": "historical_item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed_not_active_item20_candidate_authority",
+    "item_20_non_live_orchestration": "protected_non_live_validation_and_exact_same_sha_candidate_build_only_no_provider_or_phone_authority",
+    "item_20_admission_readiness": "protected_read_only_same_sha_candidate_evidence_validation_admission_core_exact_result_match_and_session_exact_readiness_artifact_consumption_implemented_no_provider_or_phone_authority",
     "item_20_typed_session_entrypoint": "protected_typed_cli_compile_only_not_live_invoked_no_provider_or_phone_authority",
     "item_20_sealed_handoff_primitive": "protected_libsodium_sealed_box_primitive_implemented_not_wired_recipient_key_not_configured_no_live_authority",
-    "next_acceptance_lifecycle": "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent",
+    "next_acceptance_lifecycle": "item_20_must_select_exact_current_protected_main_as_candidate_and_control_plane_then_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent",
     "phone_workflows": "read_only_preflight_implemented",
     "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
     "phone_mutation": "item_20_blocked_by_signing_continuity_gate_issue_115",
