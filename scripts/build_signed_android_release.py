@@ -76,7 +76,7 @@ def safe_subprocess_failure_message(command: Sequence[str]) -> str:
         return "Android Gradle release build subprocess failed"
     if executable == "apksigner":
         return "APK signature verification subprocess failed"
-    if executable == "aapt":
+    if executable in {"aapt", "aapt2"}:
         return "APK metadata verification subprocess failed"
     if executable == "cargo":
         return "typed Android artifact digest subprocess failed"
@@ -193,6 +193,25 @@ def parse_apk_identity(aapt_output: str) -> tuple[str, int, str]:
     return match.group(1), int(match.group(2)), match.group(3)
 
 
+def read_apk_identity(apk: Path) -> tuple[str, int, str]:
+    """Read exact package/version identity using current AAPT2 with legacy AAPT fallback."""
+    resolved_any = False
+    for tool_name in ("aapt2", "aapt"):
+        try:
+            tool = resolve_android_build_tool(tool_name)
+        except AndroidBuildFailure:
+            continue
+        resolved_any = True
+        try:
+            result = run_checked([tool, "dump", "badging", str(apk)], timeout=120)
+            return parse_apk_identity(result.stdout)
+        except AndroidBuildFailure:
+            continue
+    if resolved_any:
+        raise AndroidBuildFailure("APK metadata verification subprocess failed")
+    raise AndroidBuildFailure("required Android build tool is unavailable: aapt2/aapt")
+
+
 def typed_artifact_digest(root: Path, path: Path) -> str:
     result = run_checked(
         [
@@ -242,7 +261,6 @@ def build_signed_release(
     )
 
     apksigner = resolve_android_build_tool("apksigner")
-    aapt = resolve_android_build_tool("aapt")
     gradle_root = root / "apps/android-app"
     built_apk = gradle_root / "app/build/outputs/apk/release/app-release.apk"
 
@@ -302,8 +320,7 @@ def build_signed_release(
             "signed APK signer differs from configured production key",
         )
 
-        identity = run_checked([aapt, "dump", "badging", str(built_apk)], timeout=120)
-        package, actual_code, actual_name = parse_apk_identity(identity.stdout)
+        package, actual_code, actual_name = read_apk_identity(built_apk)
         require(package == _PACKAGE, "signed APK applicationId differs from production package")
         require(actual_code == version_code, "signed APK versionCode differs from canonical metadata")
         require(actual_name == version, "signed APK versionName differs from canonical metadata")
