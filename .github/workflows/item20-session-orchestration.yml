@@ -2,12 +2,6 @@ name: Item 20 non-live session orchestration
 
 on:
   workflow_dispatch:
-    inputs:
-      candidate_sha:
-        description: Exact immutable Item 19-proven software candidate SHA
-        required: true
-        type: string
-        default: d151dbdd156279e32a5361d304c90f996bd2d565
 
 permissions:
   actions: read
@@ -20,7 +14,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate protected non-live orchestration identity
+    name: Validate protected non-live single-SHA orchestration identity
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -37,7 +31,7 @@ jobs:
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
           [[ "$REF_PROTECTED" == "true" ]]
 
-      - name: Check out exact control-plane policy
+      - name: Check out exact single-SHA candidate and control plane
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
@@ -63,7 +57,7 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/issues/135" > item20-issue.json
           gh api "repos/$GITHUB_REPOSITORY/issues/115" > signing-issue.json
 
-      - name: Select exact successful control-plane Quality push
+      - name: Select exact successful single-SHA Quality push
         id: quality
         shell: bash
         env:
@@ -76,14 +70,15 @@ jobs:
             --output selected-quality-run.json)
           printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
 
-      - name: Verify build-only Item 20 orchestration boundary
+      - name: Verify build-only Item 20 single-SHA orchestration boundary
         id: identity
         shell: bash
         env:
-          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
           CONTROL_PLANE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          test "$CANDIDATE_SHA" = "$CONTROL_PLANE_SHA"
           python3 scripts/verify_item20_orchestration.py verify \
             --candidate-sha "$CANDIDATE_SHA" \
             --control-plane-sha "$CONTROL_PLANE_SHA" \
@@ -109,7 +104,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
           CONTROL_PLANE_SHA: ${{ github.sha }}
           QUALITY_RUN_ID: ${{ steps.quality.outputs.run_id }}
         run: |
@@ -161,16 +156,19 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## Item 20 non-live session orchestration'
+            echo '## Item 20 non-live single-SHA session orchestration'
             echo "- Candidate SHA: ${{ steps.identity.outputs.candidate_sha }}"
             echo "- Control-plane SHA: ${{ steps.identity.outputs.control_plane_sha }}"
             echo "- Control-plane Quality run: ${{ steps.quality.outputs.run_id }}"
+            echo '- Candidate/control-plane exact equality required: true'
+            echo '- Source freeze after candidate evidence required: true'
             echo '- Readiness artifact consumed: true'
             echo '- Candidate artifact build authorized: true'
             echo '- Typed Item 20 lifecycle entrypoint compiled: true'
             echo '- Typed Item 20 lifecycle entrypoint invoked: false'
             echo '- Fresh acceptance authority verified: true'
             echo '- Fresh Vultr read-only preflight verified: true'
+            echo '- Fresh exact-candidate provider proof required before live window: true'
             echo '- Provider credentials consumed: false'
             echo '- Provider mutation authorized: false'
             echo '- Phone mutation authorized: false'
@@ -180,7 +178,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   build-candidate:
-    name: Build exact immutable candidate server artifact
+    name: Build exact immutable single-SHA candidate server artifact
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -197,6 +195,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$CANDIDATE_SHA" = "${{ needs.validate.outputs.control_plane_sha }}"
           test -z "$(git status --porcelain)"
 
       - name: Build exact candidate server and artifact verifier
@@ -240,9 +239,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## Item 20 exact candidate artifact'
+            echo '## Item 20 exact single-SHA candidate artifact'
             echo "- Candidate SHA: $CANDIDATE_SHA"
             echo "- Control-plane SHA: ${{ needs.validate.outputs.control_plane_sha }}"
+            echo '- Candidate/control-plane exact equality: true'
             echo '- Source checkout: exact immutable candidate'
             echo '- Provider lifecycle invoked: false'
             echo '- Phone execution invoked: false'
