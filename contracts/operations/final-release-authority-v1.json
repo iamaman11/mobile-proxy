@@ -15,17 +15,20 @@
     "phone_signing_gate_issue": 115,
     "phone_signing_required_state": "closed",
     "phone_signing_required_state_reason": "completed",
-    "item20_release_sha_marker": "final_release_control_plane_sha",
-    "target_sha": "exact_full_40_char_sha_matching_item20_release_sha_marker",
+    "item20_release_candidate_sha_marker": "final_release_candidate_sha",
+    "item20_release_control_plane_sha_marker": "final_release_control_plane_sha",
+    "item20_candidate_control_plane_relationship": "exact_equality_required_for_10_of_10_baseline",
+    "target_sha": "exact_full_40_char_sha_matching_item20_release_candidate_sha_marker",
     "target_main_quality": "completed_successful_push_on_main",
     "target_must_be_ancestor_of_current_main": true,
     "canonical_release_contract_verified": true
   },
   "ordering": {
     "android_signing_generation_migration": "pre_item20_exact_sha_signed_candidate_without_final_v_tag_or_release",
-    "item20_physical_acceptance": "must_complete_before_final_v_tag",
-    "final_v_tag": "item21_only_after_item20_closed_completed",
-    "release_publication": "only_after_exact_tag_quality_success",
+    "item20_candidate_selection": "exact_current_protected_main_sha_then_source_freeze",
+    "item20_physical_acceptance": "same_candidate_and_control_plane_sha_must_complete_before_final_v_tag",
+    "final_v_tag": "item21_only_after_item20_closed_completed_and_targets_exact_accepted_candidate",
+    "release_publication": "only_after_exact_tag_quality_success_from_accepted_candidate_sha",
     "production_promotion": "only_after_final_release"
   },
   "tag": {
@@ -37,10 +40,14 @@
   "forbidden": [
     "release_tag_command_from_issue_162",
     "final_v_tag_while_item20_open",
-    "final_v_tag_without_item20_exact_release_sha_marker",
+    "final_v_tag_without_item20_exact_candidate_sha_marker",
+    "final_v_tag_without_item20_exact_control_plane_sha_marker",
+    "final_v_tag_when_candidate_and_control_plane_markers_differ",
+    "final_v_tag_targeting_control_plane_instead_of_accepted_candidate",
     "final_v_tag_while_phone_signing_gate_open",
     "android_signing_generation_migration_requiring_final_v_tag",
     "android_signing_generation_migration_creating_final_release_authority",
+    "release_publication_from_software_tree_other_than_accepted_candidate",
     "production_promotion_before_final_release"
   ]
 }
