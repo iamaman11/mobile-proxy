@@ -29,7 +29,7 @@ EXPECTED_PRECONDITIONS = {
     "accepted_candidate_sha": "exact_full_40_char_sha_from_item20_final_marker",
     "protected_main_sha": "must_equal_exact_accepted_candidate_sha",
     "target_sha": "exact_full_40_char_sha_matching_item20_accepted_candidate_and_protected_main",
-    "target_main_quality": "completed_successful_push_on_main_for_exact_accepted_candidate",
+    "target_main_quality": "at_least_one_completed_successful_push_on_main_for_exact_accepted_candidate",
     "source_sha_of_published_artifacts": "must_equal_final_tag_target_sha",
     "canonical_release_contract_verified": True,
 }
@@ -43,7 +43,7 @@ EXPECTED_ORDERING = {
 }
 EXPECTED_TAG = {
     "kind": "annotated",
-    "pattern": r"^v[0-9]+\.[0-9]+\.[0-9]+$",
+    "pattern": r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$",
     "deletion_forbidden": True,
     "non_fast_forward_forbidden": True,
 }
@@ -124,11 +124,12 @@ def check_repository(root: Path) -> list[str]:
         "final_accepted_candidate_sha",
         "protected main advanced or differs from the accepted candidate; acceptance is stale",
         "target SHA does not match Item 20 final accepted candidate",
-        "exact accepted candidate must have exactly one eligible successful main Quality run",
+        "exact accepted candidate has no eligible successful main Quality run",
         'test "$(git rev-parse origin/main)" = "$TARGET_SHA"',
         "scripts/verify_android_release_contract.py",
         "git tag -a",
         "git cat-file -t",
+        r"/release-tag (v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)) ([0-9a-f]{40})",
     )
     for token in required_workflow_tokens:
         if token not in workflow:
@@ -138,6 +139,7 @@ def check_repository(root: Path) -> list[str]:
         "final_release_control_plane_sha",
         "final_release_candidate_sha",
         "git merge-base --is-ancestor",
+        'if len({run.get("id") for run in eligible}) != 1',
     ):
         if forbidden in workflow:
             errors.append(f"release-tag workflow contains retired/divergent authority token {forbidden!r}")
