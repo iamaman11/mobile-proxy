@@ -23,6 +23,26 @@ The public repository has no self-hosted runner or public ADB workflow. The priv
 
 The canonical read-only preflight proves the required runner labels/tools, exactly one ADB-visible registered target, `adb get-state`, a read-only shell probe and `mutation_performed=false` without recording the raw device identifier.
 
+## Windows USB bridge boundary
+
+Windows owns the physical USB controller while the private runner operates in the owner's Ubuntu
+WSL distribution. A cable connection alone therefore does not restore WSL ADB after a Windows
+restart. `scripts/device/mobile-proxy-usb-bridge.ps1` is the canonical long-running USB bridge;
+`scripts/device/install-mobile-proxy-usb-bridge.ps1` installs its owner-logon Scheduled Task.
+
+The installer accepts exactly one matching device, records one physical USB bus for the task, and
+the bridge subsequently attaches only that bus with the expected hardware ID. It never calls ADB
+shell commands or mutates the phone. If WSL's delayed USB event has standard permissions, its
+local recovery loop reapplies permissions only for that expected VID:PID and resets only the local
+runner ADB server. A missing, replaced or ambiguous device fails closed, after which the existing
+private exact-device ADB preflight blocks all phone work. Other USB buses are not attached or
+modified.
+
+The task deliberately runs only after the WSL owner's logon: a Windows `LocalSystem` service cannot
+access a per-user WSL distribution. Fully unattended recovery while no user has logged in requires
+a separately provisioned headless Windows/Android host; it is outside this workstation runner's
+trust boundary.
+
 ## Android production role
 
 The Android app is **not the primary reverse-tunnel owner**. The normal `first_party_reverse_tunnel` mode is rooted/native and does not require an active Android VPN or APK-owned tunnel.
