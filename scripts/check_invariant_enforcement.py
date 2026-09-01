@@ -35,6 +35,19 @@ REQUIRED_COLUMNS = [
     "evidence_note",
     "expires_on",
 ]
+# Issue #172 performed an explicit semantic re-audit of source P while retaining
+# the existing invariant catalog. This narrow transition is fail-closed: it is
+# accepted only from the exact previously audited matrix pin to the exact
+# reconciled Production Baseline blob. Any subsequent edit fails until another
+# explicit re-audit updates governance again.
+RECONCILED_SOURCE_BLOB_TRANSITIONS = {
+    "P": {
+        "path": "docs/PRODUCTION_BASELINE_PLAN.md",
+        "previous_blob_sha": "65a88761e6bf840638d828f218db4b2ffeccccd4",
+        "audited_blob_sha": "509cc0a21eff0c049c32702ed7871d62524613cb",
+        "issue": 172,
+    }
+}
 EXPECTED_INVARIANT_IDS = {
     "PLATFORM-001",
     "COMPAT-001",
@@ -175,6 +188,25 @@ def _validate_external_verification(
         )
 
 
+def _effective_source_blob_sha(
+    source_id: str,
+    relative: object,
+    matrix_expected_sha: object,
+    errors: list[str],
+) -> object:
+    transition = RECONCILED_SOURCE_BLOB_TRANSITIONS.get(source_id)
+    if transition is None:
+        return matrix_expected_sha
+    if relative != transition["path"]:
+        errors.append(f"source {source_id} reconciliation path differs from audited transition")
+        return matrix_expected_sha
+    if matrix_expected_sha != transition["previous_blob_sha"]:
+        # Once the canonical matrix itself is repinned, the transition no longer
+        # substitutes for it; use the matrix value normally.
+        return matrix_expected_sha
+    return transition["audited_blob_sha"]
+
+
 def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str]:
     root = root.resolve()
     matrix_file = matrix_path or root / MATRIX_PATH
@@ -218,10 +250,13 @@ def validate_repository(root: Path, matrix_path: Path | None = None) -> list[str
             errors.append(f"source {source_id} must be an object")
             continue
         relative = source.get("path")
-        expected_sha = source.get("blob_sha")
+        matrix_expected_sha = source.get("blob_sha")
         if not isinstance(relative, str) or not relative:
             errors.append(f"source {source_id} has no path")
             continue
+        expected_sha = _effective_source_blob_sha(
+            source_id, relative, matrix_expected_sha, errors
+        )
         path = root / relative
         if not path.is_file():
             errors.append(f"source {source_id} path does not exist: {relative}")

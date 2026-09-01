@@ -18,6 +18,7 @@ def copy_surface(root: Path) -> None:
     paths = (
         "contracts/operations/final-release-authority-v1.json",
         ".github/workflows/release-tag.yml",
+        ".github/workflows/release.yml",
         "docs/operations/final-release-authority-order.md",
         "docs/PRODUCTION_BASELINE_PLAN.md",
         "docs/operations/phone-gitops-runtime.md",
@@ -44,6 +45,17 @@ class FinalReleaseAuthorityOrderTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("canonical tracker #90" in error for error in errors))
 
+    def test_release_contract_cannot_restore_separate_control_plane_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / "contracts/operations/final-release-authority-v1.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["preconditions"]["item20_release_sha_marker"] = "final_release_control_plane_sha"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("one-SHA ordering" in error for error in errors))
+
     def test_release_workflow_cannot_be_triggered_from_issue_162(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -55,20 +67,43 @@ class FinalReleaseAuthorityOrderTests(unittest.TestCase):
             )
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("forbidden pre-Item20 authority token" in error for error in errors))
+        self.assertTrue(any("retired/divergent authority token" in error for error in errors))
 
-    def test_release_workflow_must_match_item20_closeout_sha(self):
+    def test_release_workflow_must_match_final_accepted_candidate(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surface(root)
             path = root / ".github/workflows/release-tag.yml"
             body = path.read_text(encoding="utf-8").replace(
-                "target SHA does not match Item 20 final release marker",
+                "target SHA does not match Item 20 final accepted candidate",
                 "target mismatch",
             )
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("missing protected ordering token" in error for error in errors))
+
+    def test_protected_main_advance_guard_is_required(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/release-tag.yml"
+            body = path.read_text(encoding="utf-8").replace(
+                "protected main advanced or differs from the accepted candidate; acceptance is stale",
+                "main mismatch",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("missing protected ordering token" in error for error in errors))
+
+    def test_release_publication_must_bind_artifacts_to_tag_target_sha(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/release.yml"
+            body = path.read_text(encoding="utf-8").replace('"git_sha": sha', '"git_sha": "other"', 1)
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("exact tag-source token" in error for error in errors))
 
     def test_phone_migration_cannot_depend_on_final_v_tag(self):
         with tempfile.TemporaryDirectory() as temporary:

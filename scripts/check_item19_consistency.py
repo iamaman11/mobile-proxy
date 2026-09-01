@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prevent Production Baseline item-19 architecture and documentation drift."""
+"""Prevent historical Item-19 evidence and Item-20 handoff architecture from drifting."""
 
 from __future__ import annotations
 
@@ -19,6 +19,16 @@ VM_CONTRACT = Path("contracts/governance/vm-ownership-v1.json")
 STATE_SOURCE = Path("apps/operator-cli/src/github_vm_binding_store.rs")
 CLIENT_SOURCE = Path("apps/operator-cli/src/vultr_client.rs")
 READONLY_WORKFLOW = Path(".github/workflows/vultr-readonly-preflight.yml")
+
+HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
+EXPECTED_ITEM19_LIFECYCLE = (
+    "historical_item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_"
+    "and_durable_terminal_confirmed_not_active_item20_candidate_authority"
+)
+EXPECTED_ITEM20_NEXT = (
+    "item_20_must_select_exact_current_protected_main_as_candidate_and_control_plane_then_open_fresh_jit_"
+    "acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent"
+)
 
 
 def _read(root: Path, path: Path, errors: list[str]) -> str:
@@ -69,14 +79,14 @@ def check_repository(root: Path) -> list[str]:
         if stale in plan:
             errors.append(f"canonical baseline plan regressed to stale delivery status: {stale!r}")
     for required in (
-        "items 15, 16, 17, 18 and 19 are `COMPLETE`",
+        "Historical Item 19 candidate",
+        "Item 19 historical provider proof is COMPLETE.",
         "Item 20 is the first unfinished delivery item",
         "Item 20 remains blocked by the signing-continuity gate",
-        "provider-only Item 19 proof",
         "distinct ownership intent rather than reuse Item 19's terminal proof intent",
     ):
         if required not in plan:
-            errors.append(f"canonical baseline plan is missing post-item-19 status token {required!r}")
+            errors.append(f"canonical baseline plan is missing reconciled post-item-19 token {required!r}")
 
     for required in (
         "Status: **COMPLETE",
@@ -88,6 +98,7 @@ def check_repository(root: Path) -> list[str]:
         "durable terminal state confirmed",
         "Item 20 ownership intent",
         "signing-continuity gate #115",
+        HISTORICAL_ITEM19_SHA,
     ):
         if required not in closeout:
             errors.append(f"item-19 provider-proof closeout is missing evidence token {required!r}")
@@ -108,13 +119,14 @@ def check_repository(root: Path) -> list[str]:
         errors.append("legacy pre-device readiness audit must remain explicitly historical/non-normative")
 
     for required in (
-        "This is a workflow-level phone-mutation gate, not only an APK-install gate.",
-        "does not gate the public canonical provider-only Item 19 proof",
-        "Before enabling **any mutable phone workflow**",
-        "private runner must never receive\n   Vultr credentials",
+        "The private runner has no Vultr credentials",
+        "Before enabling any mutable phone workflow:",
+        "Item 19 provider proof is COMPLETE.",
+        "that SHA is not active Item 20 release authority.",
+        "private Item 20 phone execution must not call Vultr APIs.",
     ):
         if required not in phone:
-            errors.append(f"phone GitOps runtime is missing fail-closed item-19/20 boundary {required!r}")
+            errors.append(f"phone GitOps runtime is missing fail-closed historical Item19/Item20 boundary {required!r}")
 
     for required in (
         "distinct Item 20 ownership intent",
@@ -190,12 +202,15 @@ def check_repository(root: Path) -> list[str]:
     if not isinstance(migration, dict):
         errors.append("production topology must define migration_status")
     else:
-        if migration.get("vultr_live_lifecycle") != "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed":
-            errors.append("production topology must record the exact completed item-19 live lifecycle proof")
-        if migration.get("next_acceptance_lifecycle") != "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent":
-            errors.append("production topology must require a fresh distinct item-20 acceptance intent")
+        if migration.get("vultr_live_lifecycle") != EXPECTED_ITEM19_LIFECYCLE:
+            errors.append("production topology must preserve Item19 lifecycle as historical-only evidence")
+        if migration.get("next_acceptance_lifecycle") != EXPECTED_ITEM20_NEXT:
+            errors.append("production topology must require exact-current same-SHA Item20 selection plus a fresh distinct intent")
         if migration.get("phone_mutation") != "item_20_blocked_by_signing_continuity_gate_issue_115":
             errors.append("production topology must retain #115 as the item-20 phone-mutation gate")
+        live_preflight = str(migration.get("vultr_live_preflight", ""))
+        if HISTORICAL_ITEM19_SHA not in live_preflight or "not_active_item20_candidate_authority" not in live_preflight:
+            errors.append("production topology must preserve Item19 read-only proof as historical-only evidence")
 
     states = vm_contract.get("lifecycle_states") if vm_contract else None
     if not isinstance(states, list) or "terminal" not in states or "create_dispatched" not in states:

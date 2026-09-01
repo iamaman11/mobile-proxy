@@ -61,6 +61,15 @@ REQUIRED_FORBIDDEN = {
     "item_19_production_authority",
 }
 
+EXPECTED_HISTORICAL_ITEM19_LIFECYCLE = (
+    "historical_item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_"
+    "and_durable_terminal_confirmed_not_active_item20_candidate_authority"
+)
+EXPECTED_ITEM20_NEXT_LIFECYCLE = (
+    "item_20_must_select_exact_current_protected_main_as_candidate_and_control_plane_then_open_fresh_jit_"
+    "acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent"
+)
+
 
 def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
     try:
@@ -247,10 +256,10 @@ def check_repository(root: Path) -> list[str]:
                 errors.append("production topology must bind the completed item-19 durable state boundary")
             if migration.get("vultr_typed_http_client") != "item_19_complete_acceptance_only_bounded_full_instance_enumeration_and_live_execution_proven":
                 errors.append("production topology must bind the completed item-19 typed client boundary")
-            if migration.get("vultr_live_lifecycle") != "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed":
-                errors.append("production topology must bind the terminal item-19 live proof")
-            if migration.get("next_acceptance_lifecycle") != "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent":
-                errors.append("production topology must require a fresh item-20 lifecycle intent")
+            if migration.get("vultr_live_lifecycle") != EXPECTED_HISTORICAL_ITEM19_LIFECYCLE:
+                errors.append("production topology must preserve the terminal Item19 live proof as historical-only evidence")
+            if migration.get("next_acceptance_lifecycle") != EXPECTED_ITEM20_NEXT_LIFECYCLE:
+                errors.append("production topology must require exact-current same-SHA selection plus a fresh Item20 lifecycle intent")
 
     if github:
         adapter = github.get("vultr_lifecycle_adapter")

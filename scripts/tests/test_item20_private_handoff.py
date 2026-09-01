@@ -9,8 +9,9 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "item20_private_handoff.py"
-CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
-CONTROL = "a" * 40
+CANDIDATE = "a" * 40
+CONTROL = CANDIDATE
+OTHER_SHA = "b" * 40
 NONCE = "0123456789abcdef0123456789abcdef"
 ENDPOINT = "198.51.100.10:443"
 PUBLIC_KEY_B64 = base64.b64encode(bytes(range(32))).decode("ascii")
@@ -82,9 +83,9 @@ class Item20PrivateHandoffTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.validate_nonce(invalid)
 
-    def test_rejects_wrong_candidate_and_unsafe_endpoint(self) -> None:
-        with self.assertRaises(ValueError):
-            module.build_envelope("b" * 40, CONTROL, NONCE, ENDPOINT)
+    def test_rejects_candidate_control_mismatch_and_unsafe_endpoint(self) -> None:
+        with self.assertRaisesRegex(ValueError, "single-SHA"):
+            module.build_envelope(CANDIDATE, OTHER_SHA, NONCE, ENDPOINT)
         for invalid in ("", "host name:443", "host:443\nother", "x" * 513):
             with self.assertRaises(ValueError):
                 module.build_envelope(CANDIDATE, CONTROL, NONCE, invalid)
@@ -145,7 +146,7 @@ class Item20PrivateHandoffTests(unittest.TestCase):
         self.assertEqual(backend.sealed_key, bytes(range(32)))
         self.assertEqual(base64.b64decode(sealed), b"sealed:" + module.serialize_envelope(envelope()))
 
-    def test_unseal_exact_matches_candidate_control_and_nonce(self) -> None:
+    def test_unseal_exact_matches_single_sha_and_nonce(self) -> None:
         backend = FakeBackend()
         sealed = module.seal_envelope(envelope(), PUBLIC_KEY_B64, backend)
         opened = module.unseal_envelope(
@@ -158,8 +159,15 @@ class Item20PrivateHandoffTests(unittest.TestCase):
         )
         self.assertEqual(opened["transport_endpoint"], ENDPOINT)
 
-        with self.assertRaises(ValueError):
-            module.unseal_envelope(sealed, PRIVATE_KEY_B64, CANDIDATE, "b" * 40, NONCE, backend)
+        with self.assertRaisesRegex(ValueError, "single-SHA"):
+            module.unseal_envelope(
+                sealed,
+                PRIVATE_KEY_B64,
+                CANDIDATE,
+                OTHER_SHA,
+                NONCE,
+                backend,
+            )
         with self.assertRaises(ValueError):
             module.unseal_envelope(
                 sealed,
@@ -183,7 +191,7 @@ class Item20PrivateHandoffTests(unittest.TestCase):
                 FakeBackend(),
             )
 
-    def test_implementation_is_libsodium_sealed_box_and_non_live(self) -> None:
+    def test_implementation_is_libsodium_sealed_box_single_sha_and_non_live(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("crypto_box_seal", source)
         self.assertIn("crypto_box_seal_open", source)
@@ -191,6 +199,9 @@ class Item20PrivateHandoffTests(unittest.TestCase):
         self.assertIn('find_library("sodium")', source)
         self.assertIn('subparsers.add_parser("verify-recipient-key-pair")', source)
         self.assertIn('_PRIVATE_KEY_ENV = "ITEM20_HANDOFF_PRIVATE_KEY_B64"', source)
+        self.assertIn("candidate_sha != control_plane_sha", source)
+        self.assertNotIn("_IMMUTABLE_CANDIDATE", source)
+        self.assertNotIn("protected Item 19 closeout", source)
         self.assertNotIn("--private-key-env", source)
         self.assertNotIn("verify-recipient-key\")", source)
         self.assertNotIn("subprocess.", source)

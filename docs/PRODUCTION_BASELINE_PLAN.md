@@ -1,411 +1,194 @@
 # Production Baseline Plan
 
-Status: canonical near-term implementation roadmap  
+Status: **active canonical implementation roadmap**  
 Repository: `iamaman11/mobile-proxy`  
-Scope: complete the minimum production baseline without turning the working proxy into a speculative platform
+Acceptance matrix: `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`
+
+This file is the **sole canonical implementation roadmap for current development**. The historical label **Production Baseline (Phase 0)** refers to this active baseline, not to a separate authority. `docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md` is future-only and cannot define current candidate, gate or release state.
 
 ## 1. Decision
 
-The near-term objective is not to complete the former Ultimate Implementation Plan. The application already provides a useful working proxy surface, so development must now be limited to changes that remove concrete reliability, durability, recovery or tunnel-correctness risks.
+The near-term objective is a demonstrably reliable production baseline, not speculative platform expansion. Every change must remove a concrete reliability, durability, recovery, security, execution-boundary or release-integrity risk while preserving the protected proxy surface.
 
-The former long-horizon platform roadmap has been moved to [`future/ULTIMATE_IMPLEMENTATION_PLAN.md`](future/ULTIMATE_IMPLEMENTATION_PLAN.md). It is not normative for current development and must not be used to expand a production slice unless the roadmap is explicitly reactivated by a separate decision.
+The public repository is the sole project/policy/source authority. `iamaman11/mobile-proxy-production` is a private execution satellite for secrets, runner access, thin callers/shims and bounded private evidence only. It must not become a parallel architecture, roadmap, acceptance or release-policy engine.
 
-This document is the sole canonical implementation roadmap for current development. Architecture ADRs and compatibility contracts remain normative for their bounded subjects, but they do not authorize work outside this baseline.
+A green CI result is necessary but not equivalent to global 10/10 acceptance. Architecture/documentation reconciliation is complete when source-controlled contracts/docs/tests are coherent and Quality protects them. Full project 10/10 remains blocked until the same exact immutable candidate also passes the required live provider, Android migration/signing, physical phone, recovery/restart/crash, soak and final-release gates.
 
-Execution is staged as a software-complete immutable candidate, GitHub-only control-plane preflights, a controlled provider-backed acceptance environment, physical-device acceptance, immutable final release publication, and only then production promotion. The retired Google/GCP server path is not an acceptance or production fallback. Physical acceptance that requires a public server peer must use a bounded acceptance VM on the target provider, but that VM is not itself production promotion.
+## 2. Protected compatibility and runtime surface
 
-## 2. Protected compatibility surface
-
-The following behavior must remain available throughout the baseline work:
+The baseline preserves:
 
 - mixed proxy on public port `1080`;
-- SOCKS5 proxy on public port `1081`;
-- HTTP proxy, including CONNECT, on public port `3128`;
+- SOCKS5 on `1081`;
+- HTTP/CONNECT on `3128`;
 - QUIC-first reverse tunnel;
-- certificate-pinned TLS/TCP reserve tunnel;
-- controlled WireGuard compatibility and rollback path;
-- existing operator CLI and operator/admin API behavior unless an explicit compatibility migration is approved.
+- certificate-pinned TLS/TCP reserve;
+- controlled stock-WireGuard compatibility/rollback;
+- existing operator CLI/admin API compatibility unless a versioned migration explicitly changes it.
 
-A baseline change must not silently remove, rename or replace any protected endpoint, protocol, port or rollback path.
+The primary runtime is the rooted/native `first_party_reverse_tunnel`; the Android app is not its primary tunnel owner. The app is a managed production auxiliary component where the selected topology uses `first_party_android_egress` / cellular `Network.bindSocket()` or the app-owned WireGuard compatibility path. A native topology that does not consume an app capability need not install an APK. A topology that does consume it must prove exact package/version/signer-match/install state plus retained signed-artifact digest/provenance for the accepted candidate.
 
-## 3. Scope discipline
+The retired Google/GCP path, manual SSH, raw/manual ADB and ad-hoc provider CLI are not acceptance or production fallbacks.
 
-Current work is governed by these rules:
+## 3. Normative release identity
 
-1. Fix a demonstrated production risk, not a hypothetical future platform requirement.
-2. Prefer the smallest complete vertical slice.
-3. Preserve working behavior unless the change is required for correctness or recovery.
-4. Do not add new governance layers, inventories or policy machinery unless an existing permanent control cannot enforce a required invariant.
-5. Do not introduce multi-consumer lease, credential-broker, gRPC, identity-consensus or first-party Android-runtime scope into this baseline.
-6. Every phase ends with an explicit stop-and-reassess decision before more work begins.
-7. A future-roadmap concept may be referenced only to explain a non-goal or compatibility constraint; it may not become implementation scope implicitly.
-8. When two designs satisfy the same invariant, prefer the one with fewer states, fewer persistence concepts, fewer runtime dependencies and a smaller rollback surface.
-9. Environment unavailability may defer only evidence that intrinsically requires that environment. It must not leave independently testable production code, migration, cutover or recovery work incomplete.
+The final Item 20 -> Item 21 chain has exactly one software identity:
 
-## 4. Baseline phases
+```text
+candidate_sha
+  == control_plane_sha
+  == exact protected public main SHA selected for the acceptance window
+  == final_accepted_candidate_sha
+  == final annotated tag target SHA
+  == source SHA of published artifacts
+```
 
-### Phase A — finish clean application boundaries
+Item 20 selects the exact current protected `main` revision after the reconciliation merge and exact post-merge Quality. It then obtains fresh candidate-specific software evidence, acceptance authority, Vultr read-only preflight, provider proof, Android signing/migration evidence where applicable, physical evidence, recovery evidence and soak evidence.
 
-Goal: complete the already-started separation of transport handlers from application behavior, then stop expanding architecture work.
+A protected-main advance after candidate admission invalidates the acceptance window. An ancestor or previously accepted software tree is not sufficient final release authority.
 
-Required work:
+Historical Item 19 candidate `d151dbdd156279e32a5361d304c90f996bd2d565` remains immutable historical provider-lifecycle proof only. Item 19 is not rewritten as having run on a future SHA, its terminal ownership intent remains terminal, and its candidate-specific evidence is not active Item 20/final-release authority.
 
-1. Extract the remaining heartbeat handler behind a transport-independent application port.
-2. Extract the remaining public-probe handler behind a transport-independent application port.
-3. Keep Axum handlers limited to authentication, input decoding, request context, port invocation and response mapping.
-4. Preserve current request and response compatibility.
-5. Keep existing dependency-boundary validation, but do not create additional governance frameworks.
+## 4. Scope discipline
 
-Completion criteria:
+1. Fix demonstrated production risks, not hypothetical platform requirements.
+2. Prefer the smallest complete vertical slice with a tested rollback path.
+3. Preserve compatible behavior unless correctness or recovery requires a versioned change.
+4. Keep queues, retries, diagnostics, cardinality and side effects explicitly bounded.
+5. Keep state ownership singular and machine-readable.
+6. Keep public/private/provider/phone trust zones explicit and fail closed on ambiguity.
+7. Do not duplicate policy in the private execution satellite when canonical public logic can own it.
+8. Do not advance release or physical-acceptance state merely because a software gate is green.
+9. Exact historical SHAs are valid in immutable evidence; moving operational “current SHA” claims belong to execution-time resolution or generated/machine-readable state.
 
-- registration, command issuance, polling, acknowledgement, heartbeat and public probe all enter through explicit application ports;
-- transport handlers contain no persistence ordering, idempotency classification or canonical state mutation;
-- architecture validation and the existing workspace quality suite pass;
-- no new speculative bounded context is introduced.
+## 5. Completed baseline foundation
 
-Explicitly deferred:
+The baseline already established the protected application boundaries, SQLite durable-state model, reverse-tunnel correctness controls, backup/restore discipline, GitHub-only execution boundary, typed provider ownership lifecycle and historical Item 19 provider proof. Those historical facts remain subject to their dedicated contracts/evidence and are not restated as current release authority here.
 
-- lease domain;
-- consumer policy engine;
-- credential broker;
-- gRPC canonical API;
-- new audit-ledger architecture;
-- broader governance expansion.
+Stable invariants include:
 
-### Phase B — minimum durable state
+- SQLite is the canonical mutable control-plane store after migration; memory is projection/cache and JSON is migration/diagnostic only;
+- no successful acknowledgement precedes durable commit;
+- exact replay is idempotent and conflicting idempotency reuse fails closed;
+- traffic is never routed to an arbitrary available device when exact device/session authority is required;
+- pending work, retries and queues are bounded;
+- QUIC is primary, pinned TLS/TCP is reserve and plaintext downgrade is forbidden;
+- logs/evidence do not contain credentials, unbounded secret-bearing payloads or raw sensitive device/provider identifiers;
+- liveness and serving readiness are separate;
+- provider lifecycle uses exact typed ownership/binding semantics and deterministic cleanup;
+- the public repository is canonical and the private repository is execution-only.
 
-Goal: replace JSON as canonical mutable state with a small, recoverable SQLite store while retaining safe compatibility and rollback.
+## 6. Current Item 20 prerequisites
 
-Required work:
+Item 19 historical provider proof is COMPLETE. Its exact proof record remains in `docs/operations/item19-provider-proof-closeout.md`.
 
-1. Introduce SQLite with WAL, foreign keys, bounded busy timeout and explicit schema migrations.
-2. Persist only the closed baseline inventory required by the working application: device records; authoritative current health/runtime projection fields; pending commands; durable command results; idempotency claims and replay evidence; and minimal schema metadata. Any additional table or durable concept requires a separate demonstrated risk and plan decision.
-3. Define transaction boundaries so a successful mutation cannot publish in memory before its durable commit.
-4. Import existing JSON state, validate parity and preserve a read-only diagnostic export during the compatibility window.
-5. Provide a tested rollback path to the previous release while the schema is still in the expansion-compatible stage.
-6. Add startup integrity checking and fail-closed handling of unsupported or corrupt schema state.
+**Item 20 is the first unfinished delivery item.** Item 20 remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115 and by every other still-open prerequisite defined by the canonical Item 20 and Android migration contracts at execution time.
 
-Completion criteria:
+Architecture reconciliation does not reuse the Item 19 candidate. After #172 is merged and exact post-merge `Quality` succeeds, that exact protected public `main` SHA becomes the new active candidate/control-plane identity. Candidate-specific evidence is then built fresh for it.
 
-- normal writes use SQLite as the only canonical mutable store;
-- crash/restart tests prove no acknowledged operation disappears;
-- replay and idempotency behavior survives restart;
-- migration from representative existing JSON state is deterministic and tested;
-- rollback procedure is documented and exercised;
-- no lease, outbox or event-sourcing tables are added merely because they appeared in the future roadmap.
+Before mutable phone work, the private execution satellite must be repinned to that exact public SHA, the exact signed Android candidate must be built and retained with bounded provenance, and the signing-generation migration may run only through the authorized #162 path after all of its prerequisites are actually satisfied. No final `v0.1.4` tag or GitHub Release is an input to that migration.
 
-### Phase C — critical reverse-tunnel correctness
+The phone path must retain and verify the old installed APK/signing generation before uninstall, re-check the registered device immediately before mutation, install only the exact verified candidate and execute the defined rollback path on post-capture failure. No unrelated reboot/network/provider mutation is authorized by the migration.
 
-Goal: verify and close only the remaining concrete tunnel failure modes that can misroute traffic, leak pending state or make reserve transport unreliable. Accepted controls must be reused and evidenced rather than reimplemented.
+## 7. Item 20 live acceptance
 
-Required work:
+When all prerequisites are satisfied, Item 20 opens a fresh just-in-time acceptance session through the protected typed lifecycle under a **distinct ownership intent rather than reuse Item 19's terminal proof intent**.
 
-1. Audit the existing pending-stream and session-binding implementation against the completion criteria and identify only evidence-backed residual gaps.
-2. Verify that pending TCP stream registrations are removed on success, cancellation and timeout.
-3. Verify explicit global and per-device bounds and bounded expiry for every pending registration.
-4. Verify that no arbitrary “first device” selection is used where a specific device is required.
-5. Verify exact device and tunnel-session binding; add runtime generation only if a demonstrated stale-session gap remains after current session identity and freshness checks.
-6. Fix only residual correctness gaps found by that audit.
-7. Verify QUIC-to-TLS/TCP failover in controlled repository or process infrastructure by blocking the QUIC path and proving reserve operation.
-8. Restore QUIC and prove new connections return to the primary transport in the same controlled acceptance environment.
-9. Preserve an executable physical-device confirmation sequence for the final external gate; do not defer the controlled software evidence until a device is attached.
+The session must use the new exact same-SHA candidate/control-plane identity and fresh candidate-specific authority/evidence. It must prove, as applicable:
 
-Completion criteria:
+- exact deployed identity on phone and server before traffic tests;
+- exact Android package/version/signer-match/install state when the topology uses the managed app component;
+- primary first-party reverse tunnel over QUIC;
+- reboot/restart state rehydration and reconnection;
+- forced QUIC failure with certificate-pinned TLS/TCP reserve;
+- return of new connections to QUIC after recovery;
+- mixed proxy, SOCKS5, HTTP and HTTP CONNECT through the real phone path;
+- stock WireGuard rollback and return to primary native ownership;
+- recovery/repetition/crash cases required by `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`;
+- at least the required 24-hour production-like soak on the same exact candidate;
+- exact deployed identity again after transitions;
+- no unresolved P0/P1 defect.
 
-- capacity exhaustion fails closed without evicting a live unrelated stream;
-- stale, expired or mismatched registrations cannot receive traffic;
-- device/session mismatch is rejected deterministically;
-- mixed, SOCKS5, HTTP and CONNECT succeed over both QUIC and TLS/TCP reserve in controlled software acceptance; the physical run later confirms the same protected surfaces on the real device;
-- WireGuard remains available as the rollback path;
-- no first-party Android tunnel replacement is attempted in this phase.
+A candidate change, protected-main advance or software fix establishes a new software identity and invalidates candidate-specific acceptance evidence as required by the one-SHA rule.
 
-### Phase D — minimum operations and staged acceptance
+## 8. Final release ordering
 
-Goal: prove the resulting system can be operated and restored without device access, produce one immutable software-complete candidate, establish GitHub-only execution and a controlled Vultr acceptance environment, confirm that exact candidate on a real phone, publish the final immutable release only after that physical proof, and then promote the accepted state to Vultr production.
+Only after successful physical acceptance, create the final immutable release evidence and protected annotated `vMAJOR.MINOR.PATCH` tag, attach the required artifacts/digests and provenance evidence, and publish the release using the approved immutable ordering.
 
-Required work:
+The Item 20 tracker must record exactly one:
 
-1. Define separate liveness and readiness semantics that do not conflate process health with phone availability.
-2. Ensure health output identifies durable-store health, tunnel state, active transport and freshness without exposing secrets or unbounded labels.
-3. Implement and document SQLite backup and restore.
-4. Run a restore drill into a clean environment and verify the restored state.
-5. Complete all process-level proxy and tunnel acceptance, rollback and recovery evidence on one immutable Git SHA.
-6. Record a software-complete release-candidate closeout and provide an executable physical-phone acceptance runbook for that SHA.
-7. Complete the GitHub-only execution prerequisites before phone mutation:
-   - keep the public repository free of self-hosted runners and public ADB workflows;
-   - add only the minimum private caller/shim in `iamaman11/mobile-proxy-production`;
-   - prove the `android-production` runner, required tools and exactly the registered phone through read-only private Actions preflight;
-   - prove Vultr account/key access through a GitHub-hosted read-only preflight without exposing secret-derived data;
-   - establish an immutable acceptance execution identity that is distinct from the final release identity, so the final `vMAJOR.MINOR.PATCH` tag is not created before physical acceptance.
-8. Implement provider-neutral lifecycle interfaces and a typed Vultr adapter before creating any VM. Managed lifecycle must use provider UUID, exact ownership tags and generation/CAS semantics, and must reject ambiguous, neighbouring or unbound resources.
-9. Provision one controlled Vultr acceptance VM only for an explicit **provider-proof window**, through the typed adapter and immutable acceptance identity. Deploy and verify the exact candidate server-side artifacts, then deterministically delete that proof VM before item 19 completes. The retired Google/GCP server path must not be used as fallback, and this acceptance VM must not be represented as production. The #115 signing-continuity gate applies to phone mutation, not to this provider-only proof.
-10. After item 19 completes, item 20 opens a fresh one-at-a-time Vultr acceptance session through the already-protected typed lifecycle under a distinct item-20 ownership intent for the same immutable candidate SHA; it must not reuse item 19's terminal intent. Run the physical sequence on that fresh item-20 acceptance VM:
-   - verify exact deployed identity on both phone and server before traffic tests;
-   - prove the primary first-party reverse tunnel over QUIC;
-   - reboot the phone or service and prove state rehydration and reconnection;
-   - force QUIC failure at the server/network boundary while keeping certificate-pinned TLS/TCP available;
-   - prove automatic operation over TLS/TCP reserve;
-   - restore QUIC and prove new connections return to the primary transport;
-   - prove mixed proxy, SOCKS5, HTTP and HTTP CONNECT through the real phone path;
-   - prove stock WireGuard rollback;
-   - return from WireGuard to the primary first-party runtime;
-   - verify exact deployed identity again after all reboot, fallback, rollback and recovery transitions.
-11. Record any unresolved P0/P1 defect and do not advance while one remains.
-12. Only after successful physical acceptance, create the final immutable release evidence and protected annotated `vMAJOR.MINOR.PATCH` tag, attach the required artifacts/digests and provenance/attestation evidence, and publish the release using the approved immutable ordering.
-13. Only after that final release exists, perform Vultr production promotion/deployment through the typed adapter. The promotion may adopt the already-accepted managed VM only if its provider binding, ownership tags, generation and artifact digests exactly match the final release; otherwise it must provision or recreate the production state through the same typed ownership path. Manual SSH/provider CLI is not an acceptable normal promotion path.
+```text
+final_accepted_candidate_sha: <40 lowercase hexadecimal characters>
+```
 
-Completion criteria:
+Final tag creation must independently prove that this SHA still equals exact protected `main`, has exact successful main Quality, satisfies the release version contract and is the tag target. Release publication must derive from that tag target SHA or reuse already accepted immutable artifacts whose digest/provenance proves the same source identity.
 
-- backup and restore are repeatable and documented;
-- liveness remains healthy when the process is healthy even if no phone is available;
-- readiness accurately reflects critical storage and worker dependencies;
-- all source-controlled and process-testable acceptance passes on one unchanged commit, producing a software-complete candidate;
-- the private phone preflight proves the expected runner/tools/device without mutating the phone or publishing its raw identifier;
-- no Vultr VM is created before the typed ownership adapter and its rejection tests pass;
-- the acceptance VM is explicitly bounded evidence infrastructure and is not confused with final production promotion;
-- physical acceptance proves the same immutable candidate on phone and server across primary QUIC, reboot, forced TLS/TCP reserve, QUIC recovery, all protected proxy surfaces, WireGuard rollback and return to primary;
-- the final release tag/evidence is created only after physical acceptance succeeds;
-- Vultr production promotion occurs only from that final immutable release tuple;
-- Google/GCP is not required anywhere in the acceptance or production path;
-- the resulting release is suitable for continued real use without requiring the future platform roadmap.
+Only after the final release exists may production promotion occur through the typed provider path. Manual provider mutation is not a normal promotion or recovery shortcut.
 
-## 5. Explicit non-goals
+## 9. Required delivery order
 
-The production baseline does not include:
+The historical completed foundation remains auditable in its own trackers/evidence. The active sequence is:
 
-- a general multi-consumer lease platform;
-- exclusive network leases, epochs or fencing tokens;
-- short-lived per-lease proxy credentials;
-- Protocol Buffers or gRPC as the canonical API;
-- network-identity consensus across several observers;
-- durable rotation jobs and full rotation orchestration;
-- a new first-party Android VpnService or embedded tunnel runtime;
-- replacement of working WireGuard paths;
-- complete SBOM, provenance and fleet rollout infrastructure beyond existing release-integrity controls;
-- a new governance document for every implementation detail.
-
-These items require a new product or operational justification before activation.
-
-## 6. Delivery order
-
-The required order is:
-
-1. heartbeat application port;
-2. public-probe application port;
-3. Phase A closeout and reassessment;
-4. SQLite schema and transaction boundary;
-5. device and command-state migration;
-6. JSON import, parity and rollback proof;
-7. Phase B closeout and reassessment;
-8. pending-stream lifecycle and bounds;
-9. exact device/session binding;
-10. forced QUIC/TLS fallback and recovery proof;
-11. Phase C closeout and reassessment;
-12. health semantics;
-13. backup/restore drill;
-14. controlled immutable-SHA software acceptance and release-candidate closeout;
-15. private GitHub-only phone caller/shim plus live read-only `android-production` runner/tool/registered-device preflight;
-16. immutable Vultr acceptance execution gate that does not create the final release tag early and does not weaken the final production gate;
-17. GitHub-hosted Vultr read-only account/key preflight through that acceptance gate;
-18. provider-neutral lifecycle interfaces plus typed Vultr ownership adapter and rejection tests;
-19. just-in-time controlled Vultr acceptance provider proof plus exact-candidate server deployment, verification and deterministic cleanup;
+1. complete #172 architecture/documentation reconciliation in a protected public PR;
+2. prove exact PR-head `Quality` success;
+3. squash-merge through protected `main` and prove exact post-merge push `Quality` success;
+4. select that exact merge SHA as the sole active Item 20 candidate/control-plane identity and freeze source identity for the acceptance window;
+5. build fresh exact software release-candidate evidence;
+6. obtain fresh `/accept-candidate <sha>` authority;
+7. obtain fresh `/vultr-readonly-preflight <sha>` evidence;
+8. obtain the fresh exact-candidate provider proof required by the Item 20 contract;
+9. repin the private execution satellite to that exact public SHA and keep its wrapper thin;
+10. build and retain the exact signed Android `0.1.4` / `1004` candidate and bounded provenance;
+11. run the #162 signing-generation migration only when all hard prerequisites pass;
+12. prove installed package/version/signer match/runtime and rollback evidence, then close #115/#162 only if their real acceptance criteria are satisfied;
+13. open the fresh Item 20 JIT acceptance lifecycle on the same SHA with distinct Item 20 ownership intent;
+14. execute physical phone/provider acceptance on that same SHA;
+15. execute the recovery/restart/crash repetition matrix on that same SHA;
+16. execute the required 24-hour soak on that same SHA;
+17. close Item 20 completed and record `final_accepted_candidate_sha` only after all applicable evidence passes;
+18. re-prove protected `main` still equals that accepted SHA;
+19. issue the owner `/release-tag vX.Y.Z <sha>` command on canonical #90;
 20. immutable-SHA physical acceptance on the real phone against a fresh JIT acceptance session created through the protected typed lifecycle;
 21. final immutable release evidence, protected annotated release tag and artifacts;
 22. Vultr production promotion/deployment from the accepted final release tuple;
-23. final baseline closeout.
+23. final baseline closeout only after the documented post-release/production gates pass.
 
-**Current canonical delivery status:** items 15, 16, 17, 18 and 19 are `COMPLETE`. **Item 20 is the first unfinished delivery item.** The completed Item 19 working tracker is #124; its bounded live proof is recorded in `docs/operations/item19-provider-proof-closeout.md`.
+Items 21 and 22 remain forbidden until Item 20 succeeds. No final protected `v*` release/tag or production promotion is authorized by historical Item 19 completion, Android version metadata, a private signed build or architecture reconciliation alone.
 
-The provider-only Item 19 proof completed on immutable candidate `d151dbdd156279e32a5361d304c90f996bd2d565`. Exact-current Quality, immutable acceptance authority and read-only Vultr preflight gates were consumed by lifecycle run `33342000338`; the exact candidate server artifact was deployed and verified on one controlled acceptance VM, and exact-target provider deletion was confirmed before durable terminal state. The proof VM is gone, and the terminal Item 19 ownership intent is not reusable.
+## 10. CI/CD and evidence requirements
 
-Item 20 remains blocked by the signing-continuity gate recorded in `docs/operations/phone-gitops-runtime.md` / #115. Under the current fail-closed policy, a phone step that does not install an APK does not bypass that workflow-level phone-mutation gate. When #115 is resolved and the mutable physical window opens, Item 20 must use a fresh JIT acceptance session with a distinct ownership intent rather than reuse Item 19's terminal proof intent.
+Every public source change goes through pull request review, exact immutable PR-head Quality, protected merge and exact post-merge Quality before that SHA may become an active acceptance candidate.
 
-Items 21 and 22 remain forbidden until item 20 succeeds. No final protected `v*` release/tag or production promotion is authorized by Item 19 completion, and no later item may be pulled forward merely to keep work moving.
+`Quality` must fail closed on:
 
-## 7. System invariants
+- candidate/control-plane inequality;
+- hardcoded historical Item 19 SHA as active Item 20 candidate;
+- final tag target differing from accepted candidate;
+- protected-main advancement after acceptance without reacceptance;
+- release publication from a different source SHA;
+- documentation that makes the Android app globally absent from production;
+- private repository policy/source authority;
+- future roadmap claiming current operational authority;
+- retired two-SHA semantics on active normative surfaces.
 
-These invariants apply to every baseline slice. They are stronger than implementation preference and must remain true across restarts, failures, retries and future maintenance.
+Evidence is bounded and immutable. Public evidence may include non-sensitive public SHA/run/artifact identities and booleans required by contract; it must not include credentials, signing secrets/fingerprints, raw device serials, private endpoints or secret-derived identifiers.
 
-### 7.1 Compatibility invariants
+## 11. Definition of done
 
-1. The protected proxy ports, protocols and rollback transports remain available until an explicit compatibility decision says otherwise.
-2. Existing successful request and response shapes remain compatible unless a versioned migration is approved.
-3. A change may add bounded diagnostics or typed errors, but may not silently reinterpret an existing successful operation.
+### Architecture reconciliation complete
 
-### 7.2 State and durability invariants
+#172 may be closed as architecture/documentation reconciliation only when:
 
-1. There is exactly one canonical mutable source of truth for each piece of control-plane state.
-2. After Phase B, SQLite is canonical; in-memory structures are projections or caches and JSON is migration input or diagnostic export only.
-3. No successful acknowledgement is returned before the corresponding durable transaction commits.
-4. A failed durable write must not publish a newer in-memory state.
-5. Restart, duplicate delivery and exact replay must not duplicate a completed operation.
-6. Reuse of an idempotency key with different effective parameters must fail closed.
-7. Unsupported schema versions, corrupt canonical state and ambiguous migrations fail closed with bounded operator-visible errors.
+- contracts, docs, workflows, code and tests describe one coherent same-SHA model;
+- Android production role is topology-conditional and consistent;
+- public/private trust zones are consistent;
+- Production Baseline is the sole active roadmap and future documentation is non-operational;
+- historical Item 19 evidence remains historical-only;
+- a cross-document consistency fitness gate protects these invariants;
+- exact PR-head and exact post-merge public `Quality` are successful.
 
-### 7.3 Routing and tunnel invariants
+This status must **not** be described as global project 10/10 acceptance.
 
-1. Traffic intended for a specific device or tunnel session is never routed to an arbitrary available device.
-2. A stale, expired, cancelled or mismatched pending stream cannot receive traffic.
-3. Pending registrations, queues, retries and spawned work have explicit bounds.
-4. Capacity exhaustion rejects new work deterministically; it does not evict unrelated live work silently.
-5. QUIC is primary, certificate-pinned TLS/TCP is reserve, and downgrade to plaintext is forbidden.
-6. Transport recovery must not reuse stale session authority.
-7. A reported connected state is insufficient by itself; freshness and exact session identity must be considered wherever routing authority depends on them.
+### Full project 10/10 accepted
 
-### 7.4 Security and observability invariants
-
-1. Credentials, tokens, full proxy URLs, raw secret-bearing payloads and unbounded error text never enter logs, metrics labels or safe API errors.
-2. Authentication is evaluated before protected request metadata is trusted or reflected.
-3. Unknown external enum-like values are rejected or mapped to a bounded fail-closed class; they do not become new domain states or metric labels.
-4. Health and metrics observe authoritative state; they do not create a second mutable source of truth.
-5. Liveness describes process viability. Readiness describes ability to serve correctly. Phone availability alone must not define process liveness.
-
-### 7.5 Architecture invariants
-
-1. Dependency direction remains inward: pure types and business decisions do not depend on HTTP, database, filesystem, Android or process adapters.
-2. Transport handlers decode, authenticate, invoke an application port and map the result; they do not own persistence ordering or canonical mutation rules.
-3. Persistence adapters implement application-defined ports and do not define business semantics.
-4. One behavior has one authoritative owner. A second implementation may exist only as an explicit compatibility adapter, projection or migration path.
-5. New abstraction is justified only when it removes a demonstrated duplication, dependency violation or testability obstacle in current scope.
-
-### 7.6 Operational invariants
-
-1. Backup is not considered complete until restore into a clean environment succeeds.
-2. Rollback is not considered supported until the documented procedure is exercised against representative state.
-3. Software-complete acceptance evidence must identify one immutable Git SHA and must not combine results from different source revisions.
-4. Physical acceptance evidence must use that immutable candidate SHA; if source changes, the relevant software evidence must be rerun before physical acceptance.
-5. Software-complete status is not baseline-complete status and must state that the physical gate remains.
-6. No release is declared baseline-complete with an unresolved P0 or P1 defect.
-7. The retired Google/GCP server path must not be used to satisfy physical acceptance, rollback proof or production deployment.
-8. A provider-backed acceptance VM may exist before the final release only under a distinct immutable acceptance identity, typed ownership and bounded acceptance purpose; it must not be represented as production.
-9. The final release tag and production promotion are forbidden before the required physical acceptance succeeds.
-10. Phone-side and server-side physical evidence must refer to the same immutable candidate SHA and exact deployed artifact identities.
-11. Physical proof of QUIC fallback must force failure at the server/network boundary while TLS/TCP reserve remains available; a client-only mock or declared transport state is not sufficient evidence.
-12. Provider lifecycle authority is the durable exact provider binding plus exact ownership intent/generation; IP, name, label and provider result ordering are transport/discovery data only and never mutation authority.
-13. A dispatched provider create must not be blindly retried after an ambiguous outcome; durable lifecycle state must distinguish an in-progress create from a never-created intent.
-14. A terminal-cleared immutable acceptance intent must never silently reset to generation 1.
-
-## 8. Module responsibility map
-
-The following responsibility map prevents behavior from drifting between layers. Exact crate names may evolve, but ownership may not move implicitly.
-
-| Responsibility | Authoritative layer | Must not be owned by |
-| --- | --- | --- |
-| validated IDs, deadlines and bounded value types | foundation | Axum handlers, SQL rows, Android UI |
-| command/registration/heartbeat/probe orchestration | application ports and implementations | transport handlers |
-| canonical durable state | SQLite adapter after Phase B | in-memory maps, JSON export |
-| request authentication and wire decoding | transport adapter | domain or persistence crates |
-| idempotency classification and replay decision | application behavior with durable evidence | HTTP response mapping |
-| tunnel connection lifecycle and exact session authority | reverse-tunnel runtime | metrics renderer or health projection |
-| provider lifecycle policy and exact mutation authority | provider-neutral lifecycle plus typed provider adapter/state implementation | workflow YAML, shell, IP/name selection |
-| compatibility projection for legacy surfaces | explicit compatibility adapter | canonical domain vocabulary |
-| health and metrics rendering | observability adapters reading authoritative state | independent mutable counters unless the event source is authoritative |
-
-A slice that changes ownership must state the old owner, new owner, migration mechanism and compatibility impact explicitly. Architectural roles do not require one crate per layer: application ports may remain inside the application crate while dependency direction, ownership and testability remain clear. A separate `ports` crate is introduced only for a demonstrated current need.
-
-## 9. Strict development protocol
-
-Every production slice follows this sequence:
-
-1. Identify one named current risk and the invariant it threatens.
-2. Record exact `main` SHA and confirm the branch starts from that state.
-3. State bounded scope, explicit non-goals and protected compatibility impact before implementation.
-4. Implement the smallest complete vertical slice through the correct owner layers.
-5. Add tests for success, exact replay, conflicting replay, restart or failure ordering where applicable.
-6. Run permanent architecture validation, formatting, strict Clippy and the complete applicable workspace suite.
-7. Remove temporary builder inputs, temporary workflows, generated caches and diagnostic artifacts from the production branch.
-8. Verify branch lag, final immutable head SHA, review submissions and unresolved inline threads.
-9. Merge only the exact accepted head.
-10. Update this plan only when phase status or a real scope decision changes; do not rewrite it to describe incidental implementation details.
-
-A slice is rejected even when tests pass if it violates an invariant, expands a non-goal, creates a second source of truth or claims evidence from different SHAs.
-
-## 10. Definition of Done
-
-A baseline slice is complete when:
-
-- it addresses a named current risk and names the protected invariant;
-- compatibility impact and non-goals are explicit;
-- authoritative ownership is clear and dependency direction remains valid;
-- durable publication ordering is tested where state changes;
-- retry, duplicate, conflict, restart and bounded-capacity behavior are tested where applicable;
-- errors are bounded and secrets are not exposed;
-- focused unit, integration and process tests pass;
-- existing permanent architecture and Rust quality gates pass on the final unchanged head;
-- temporary builder inputs and workflows are absent from the production diff;
-- documentation states what was completed, what remains deferred and the exact next bounded slice;
-- merge uses the exact accepted head after branch-lag and review-thread verification.
-
-Not every slice requires a new governance contract, inventory or architectural abstraction. Existing enforcement should be extended only when a required invariant otherwise remains dependent on memory or manual review.
-
-## 11. Context-loss recovery protocol
-
-A new developer or agent must be able to resume correctly without relying on chat history, private notes or remembered intent.
-
-Before changing code, the developer or agent must:
-
-1. Read `IMPLEMENTATION_PLAN.md` and this document.
-2. Treat this document as the active roadmap and `docs/future/` as non-active reference only.
-3. Read the relevant ADRs and protected compatibility contract for the proposed slice.
-4. Inspect current `main`, open PRs, latest permanent workflow runs, review submissions and unresolved inline threads.
-5. Compare repository reality with the latest merged slice; repository state wins over any external checkpoint.
-6. Identify the first unfinished item in Section 6 and verify that no earlier phase closeout is missing.
-7. Restate before implementation:
-   - exact baseline SHA;
-   - current phase and delivery item;
-   - named risk;
-   - threatened invariants;
-   - exact scope;
-   - explicit non-goals;
-   - compatibility surface;
-   - required acceptance evidence.
-8. For items 15 through 22, also verify the current public/private GitOps boundary, whether a live private-phone preflight has actually passed, whether any acceptance VM exists, and whether the final release tag is still correctly absent before physical acceptance.
-9. Stop and request or record a product decision if the proposed work belongs to Section 5 or the future roadmap.
-
-No external checkpoint may authorize skipping these steps.
-
-### Required handoff checkpoint
-
-Every merged production slice must leave a concise checkpoint in its PR body or closeout documentation containing:
-
-- accepted source SHA and merge SHA;
-- completed delivery item;
-- invariant and risk addressed;
-- compatibility result;
-- permanent CI run on the accepted SHA;
-- migration, restart, rollback or physical evidence when applicable;
-- unresolved defects or explicit statement that none remain;
-- exact next delivery item from Section 6;
-- deferred non-goals that remain inactive.
-
-This checkpoint is evidence, not a second roadmap. If it conflicts with this document or current repository state, this document and repository state take precedence.
-
-## 12. Change-control rules for this plan
-
-This plan may be changed only through a dedicated documentation decision that:
-
-1. explains the demonstrated product or operational reason;
-2. identifies which current invariant or non-goal changes;
-3. states added and removed scope explicitly;
-4. estimates compatibility, migration and rollback impact;
-5. does not combine the plan change with unrelated runtime implementation.
-
-Activating any item from `docs/future/` requires a separate decision and must not occur as an incidental follow-up inside a baseline PR.
-
-The item-19 reconciliation that changes only stale delivery status and makes already-accepted provider/phone boundaries explicit is a documentation consistency correction, not activation of new roadmap scope.
-
-## 13. Stop conditions
-
-Development must stop for reassessment when any of the following is true:
-
-- Item 20 remains blocked by #115 or the real phone window is not ready; do not provision an idle acceptance VM merely to keep work moving;
-- the physical sequence in item 20 fails or shows source/artifact identity drift, in which case the failed candidate must not be released or promoted;
-- all current delivery items through final production promotion and baseline closeout are complete;
-- a proposed change belongs only to the future roadmap;
-- implementation cost is no longer proportional to a demonstrated operational risk;
-- compatibility can no longer be preserved without a product decision;
-- physical evidence shows the existing simpler path is already sufficient;
-- a slice cannot identify its authoritative owner or would introduce a second source of truth;
-- acceptance would require combining evidence from different Git SHAs.
-
-Completion of this baseline does not automatically authorize implementation of the future platform plan.
+Global 10/10 is reached only after the same exact accepted public SHA has all applicable software, provider, Android migration/signing, real-phone, recovery/restart/crash and 24-hour soak evidence; Item 20 is completed; protected `main` still equals that SHA; the final annotated tag targets it; and published artifact provenance is bound to that same source SHA.

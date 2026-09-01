@@ -12,8 +12,6 @@ WORKFLOW = Path(".github/workflows/item20-admission-readiness.yml")
 SELECTOR = Path("scripts/select_item20_candidate_evidence.py")
 TESTS = Path("scripts/tests/test_item20_admission_readiness.py")
 
-_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
-
 _EXPECTED_CONTRACT = {
     "authorization": {
         "endpoint_handoff_authorized": False,
@@ -24,10 +22,11 @@ _EXPECTED_CONTRACT = {
     },
     "candidate_evidence_workflow": {
         "admission_core_wiring": "implemented_exact_result_match",
-        "artifact_selection": "candidate_specific_artifact_then_exact_control_plane_run",
-        "candidate_sha": _IMMUTABLE_CANDIDATE,
+        "artifact_selection": "exact_same_sha_candidate_artifact_bound_to_exact_current_protected_main_run",
+        "candidate_sha": "same_exact_current_protected_main_as_control_plane",
+        "candidate_control_plane_exact_equality_required": True,
         "control_plane_sha": "exact_current_protected_main",
-        "output_artifact_name_template": "item20-admission-readiness-<control_plane_sha>",
+        "output_artifact_name_template": "item20-admission-readiness-<candidate_sha>",
         "selector": "scripts/select_item20_candidate_evidence.py",
         "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
         "status": "protected_read_only_candidate_evidence_wiring",
@@ -46,6 +45,8 @@ _EXPECTED_CONTRACT = {
         "trigger": "workflow_dispatch",
     },
     "forbidden": [
+        "candidate_control_plane_sha_mismatch",
+        "historical_item19_candidate_as_active_item20_candidate",
         "acceptance_or_preflight_workflow_dispatch_from_readiness",
         "provider_api_call_from_readiness",
         "provider_credentials_in_readiness",
@@ -90,7 +91,7 @@ def check_repository(root: Path) -> list[str]:
     tests = _read(root, TESTS, errors)
 
     if contract != _EXPECTED_CONTRACT:
-        errors.append("Item 20 read-only admission-readiness contract differs from protected value")
+        errors.append("Item 20 read-only admission-readiness contract differs from protected single-SHA value")
 
     for required in (
         "name: Item 20 read-only admission readiness",
@@ -98,12 +99,17 @@ def check_repository(root: Path) -> list[str]:
         "actions: read",
         "contents: read",
         "runs-on: ubuntu-latest",
+        "CANDIDATE_SHA: ${{ github.sha }}",
+        "CONTROL_PLANE_SHA: ${{ github.sha }}",
+        'test "$CANDIDATE_SHA" = "$CONTROL_PLANE_SHA"',
+        "workflow SHA is not exact current protected main",
         "scripts/select_item20_candidate_evidence.py verify-contract",
         "scripts/select_item20_candidate_evidence.py select-artifact",
         "scripts/verify_item20_candidate_evidence.py",
         "vultr-acceptance-authority-$CANDIDATE_SHA",
         "vultr-readonly-preflight-$CANDIDATE_SHA",
         "item20-admission-readiness-${{ github.sha }}",
+        "Candidate/control-plane exact equality verified: true",
         "Provider credentials consumed by this workflow: false",
         "Provider API called by this workflow: false",
         "Provider mutation authorized: false",
@@ -118,6 +124,7 @@ def check_repository(root: Path) -> list[str]:
 
     lowered_workflow = workflow.lower()
     for forbidden in (
+        "d151dbdd156279e32a5361d304c90f996bd2d565",
         "environment: acceptance-vultr",
         "environment: production-vultr",
         "vultr_api_key",
@@ -136,23 +143,26 @@ def check_repository(root: Path) -> list[str]:
         "curl --request patch",
     ):
         if forbidden in lowered_workflow:
-            errors.append(f"Item 20 readiness workflow contains forbidden live token {forbidden!r}")
+            errors.append(f"Item 20 readiness workflow contains forbidden live/stale token {forbidden!r}")
 
     for required in (
-        '_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"',
         "def verify_readiness_contract(",
         "def select_artifact(",
+        '"candidate_sha": "same_exact_current_protected_main_as_control_plane"',
+        '"candidate_control_plane_exact_equality_required": True',
         '"acceptance": "vultr-acceptance-authority"',
         '"preflight": "vultr-readonly-preflight"',
+        "candidate_sha != control_plane_sha",
         'workflow_run.get("head_branch") != "main"',
-        'workflow_run.get("head_sha") != control_plane_sha',
-        'raise ValueError(f"no unexpired {kind} artifact binds exact candidate and control plane")',
+        'workflow_run.get("head_sha") != candidate_sha',
+        'raise ValueError(f"no unexpired {kind} artifact binds exact single-SHA candidate")',
     ):
         if required not in selector:
-            errors.append(f"Item 20 readiness selector is missing protected token {required!r}")
+            errors.append(f"Item 20 readiness selector is missing protected single-SHA token {required!r}")
 
     lowered_selector = selector.lower()
     for forbidden in (
+        "_immutable_candidate",
         "subprocess.",
         "urllib.request",
         "requests.",
@@ -167,14 +177,16 @@ def check_repository(root: Path) -> list[str]:
         "gh workflow run",
     ):
         if forbidden in lowered_selector:
-            errors.append(f"Item 20 readiness selector contains forbidden I/O/live token {forbidden!r}")
+            errors.append(f"Item 20 readiness selector contains forbidden stale/I/O/live token {forbidden!r}")
 
     for required in (
         "class Item20AdmissionReadinessTests",
-        "test_contract_is_exact_validation_only",
-        "test_selector_uses_exact_candidate_then_control_plane",
-        "test_selector_rejects_old_or_invalid_artifacts",
-        "test_workflow_is_read_only_and_consumes_protected_verifier",
+        "test_contract_is_exact_single_sha_validation_only",
+        "test_selector_uses_same_sha_candidate_and_run",
+        "test_selector_rejects_candidate_control_plane_mismatch",
+        "test_historical_item19_candidate_is_not_privileged",
+        "test_selector_rejects_expired_wrong_or_malformed_artifacts",
+        "test_workflow_derives_candidate_from_exact_protected_main_and_is_read_only",
         "test_session_workflow_consumes_existing_readiness_without_dispatch",
     ):
         if required not in tests:

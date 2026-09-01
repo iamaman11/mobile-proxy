@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Pure selector/verifier for an Item 20 admission-readiness artifact.
 
-This module performs no GitHub, provider, network, or phone I/O. Callers provide
-Actions artifact metadata, the selected workflow-run metadata, and the downloaded
-bounded JSON evidence. It grants no provider, phone, handoff, live, or production
-authority.
+This module performs no GitHub, provider, network, or phone I/O. Candidate and
+control-plane identities must be the same exact protected-main SHA. The bounded
+readiness evidence grants no provider, phone, handoff, live, or production authority.
 """
 
 from __future__ import annotations
@@ -17,10 +16,9 @@ import re
 from typing import Mapping
 
 _CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
-_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
 _READINESS_WORKFLOW = "Item 20 read-only admission readiness"
 _READINESS_WORKFLOW_PATH = ".github/workflows/item20-admission-readiness.yml"
-_READINESS_AUTHORITY = "item20_fresh_candidate_evidence_verification"
+_READINESS_AUTHORITY = "item20_fresh_single_sha_candidate_evidence_verification"
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -30,6 +28,7 @@ _EVIDENCE_KEYS = {
     "repository",
     "candidate_sha",
     "control_plane_sha",
+    "candidate_control_plane_exact_equality_verified",
     "control_plane_quality_run_id",
     "candidate_quality_run_id",
     "candidate_quality_run_attempt",
@@ -39,9 +38,10 @@ _EVIDENCE_KEYS = {
     "vultr_readonly_preflight_run_id",
     "vultr_readonly_preflight_artifact_id",
     "vultr_readonly_preflight_artifact_digest",
-    "candidate_control_plane_separation_verified",
     "fresh_acceptance_authority_verified",
     "fresh_vultr_readonly_preflight_verified",
+    "fresh_exact_candidate_provider_proof_required_before_live_window",
+    "source_freeze_required_after_evidence",
     "provider_probe_read_only_verified",
     "provider_mutation_authorized",
     "phone_mutation_authorized",
@@ -85,8 +85,13 @@ def _parse_time(value: object, field: str) -> datetime:
     return parsed
 
 
-def _artifact_name(control_plane_sha: str) -> str:
-    return f"item20-admission-readiness-{control_plane_sha}"
+def _require_same_sha(candidate_sha: str, control_plane_sha: str) -> None:
+    if candidate_sha != control_plane_sha:
+        raise ValueError("candidate/control-plane SHA mismatch violates 10/10 single-SHA readiness")
+
+
+def _artifact_name(candidate_sha: str) -> str:
+    return f"item20-admission-readiness-{candidate_sha}"
 
 
 def select_readiness_artifact(
@@ -96,8 +101,7 @@ def select_readiness_artifact(
 ) -> dict[str, object]:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
-    if candidate_sha != _IMMUTABLE_CANDIDATE:
-        raise ValueError("candidate SHA does not match the protected Item 19 closeout")
+    _require_same_sha(candidate_sha, control_plane_sha)
 
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, list):
@@ -107,7 +111,7 @@ def select_readiness_artifact(
     for raw in artifacts:
         if not isinstance(raw, dict):
             continue
-        if raw.get("name") != _artifact_name(control_plane_sha) or raw.get("expired") is not False:
+        if raw.get("name") != _artifact_name(candidate_sha) or raw.get("expired") is not False:
             continue
         try:
             _positive_int(raw.get("id"), "readiness artifact id")
@@ -125,23 +129,25 @@ def select_readiness_artifact(
             _positive_int(workflow_run.get("id"), "readiness workflow-run id")
         except ValueError:
             continue
-        if workflow_run.get("head_branch") != "main" or workflow_run.get("head_sha") != control_plane_sha:
+        if workflow_run.get("head_branch") != "main" or workflow_run.get("head_sha") != candidate_sha:
             continue
         eligible.append((created, dict(raw)))
 
     if not eligible:
-        raise ValueError("no unexpired readiness artifact binds exact candidate/control plane")
-
+        raise ValueError("no unexpired readiness artifact binds exact single-SHA candidate")
     _, selected = max(eligible, key=lambda item: (item[0], int(item[1]["id"])))
     return selected
 
 
 def verify_readiness_run(
+    candidate_sha: str,
     control_plane_sha: str,
     artifact: Mapping[str, object],
     run: Mapping[str, object],
 ) -> None:
+    candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
+    _require_same_sha(candidate_sha, control_plane_sha)
     repository = run.get("repository")
     if not isinstance(repository, dict) or repository.get("full_name") != _CANONICAL_REPOSITORY:
         raise ValueError("readiness run is not from the canonical repository")
@@ -151,18 +157,18 @@ def verify_readiness_run(
         "path": _READINESS_WORKFLOW_PATH,
         "event": "workflow_dispatch",
         "head_branch": "main",
-        "head_sha": control_plane_sha,
+        "head_sha": candidate_sha,
         "status": "completed",
         "conclusion": "success",
     }
     if any(run.get(key) != value for key, value in expected.items()):
-        raise ValueError("readiness run does not match exact protected control plane")
+        raise ValueError("readiness run does not match exact same-SHA protected main")
 
     run_id = _positive_int(run.get("id"), "readiness run id")
     _positive_int(run.get("run_attempt"), "readiness run attempt")
     _parse_time(run.get("created_at"), "readiness run created_at")
 
-    if artifact.get("name") != _artifact_name(control_plane_sha) or artifact.get("expired") is not False:
+    if artifact.get("name") != _artifact_name(candidate_sha) or artifact.get("expired") is not False:
         raise ValueError("readiness artifact identity differs")
     _positive_int(artifact.get("id"), "readiness artifact id")
     _positive_int(artifact.get("size_in_bytes"), "readiness artifact size")
@@ -174,9 +180,9 @@ def verify_readiness_run(
     workflow_run = artifact.get("workflow_run")
     if not isinstance(workflow_run, dict) or any(
         workflow_run.get(key) != value
-        for key, value in {"id": run_id, "head_branch": "main", "head_sha": control_plane_sha}.items()
+        for key, value in {"id": run_id, "head_branch": "main", "head_sha": candidate_sha}.items()
     ):
-        raise ValueError("readiness artifact is not bound to the exact readiness run")
+        raise ValueError("readiness artifact is not bound to the exact same-SHA readiness run")
 
 
 def verify_readiness_evidence(
@@ -187,18 +193,14 @@ def verify_readiness_evidence(
 ) -> None:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
-    if candidate_sha != _IMMUTABLE_CANDIDATE:
-        raise ValueError("candidate SHA does not match the protected Item 19 closeout")
+    _require_same_sha(candidate_sha, control_plane_sha)
     quality_id = _positive_int(control_plane_quality_run_id, "control-plane Quality run id")
 
     if set(evidence) != _EVIDENCE_KEYS:
         missing = sorted(_EVIDENCE_KEYS - set(evidence))
         unexpected = sorted(set(evidence) - _EVIDENCE_KEYS)
         raise ValueError(
-            "readiness evidence schema differs; missing="
-            + ",".join(missing)
-            + "; unexpected="
-            + ",".join(unexpected)
+            "readiness evidence schema differs; missing=" + ",".join(missing) + "; unexpected=" + ",".join(unexpected)
         )
 
     expected_identity = {
@@ -207,10 +209,12 @@ def verify_readiness_evidence(
         "repository": _CANONICAL_REPOSITORY,
         "candidate_sha": candidate_sha,
         "control_plane_sha": control_plane_sha,
+        "candidate_control_plane_exact_equality_verified": True,
         "control_plane_quality_run_id": str(quality_id),
+        "candidate_quality_run_id": str(quality_id),
     }
     if any(evidence.get(key) != value for key, value in expected_identity.items()):
-        raise ValueError("readiness evidence does not bind exact candidate/control-plane Quality identity")
+        raise ValueError("readiness evidence does not bind exact same-SHA Quality identity")
 
     for field in (
         "candidate_quality_run_id",
@@ -230,9 +234,11 @@ def verify_readiness_evidence(
             raise ValueError(f"invalid {field}")
 
     for field in (
-        "candidate_control_plane_separation_verified",
+        "candidate_control_plane_exact_equality_verified",
         "fresh_acceptance_authority_verified",
         "fresh_vultr_readonly_preflight_verified",
+        "fresh_exact_candidate_provider_proof_required_before_live_window",
+        "source_freeze_required_after_evidence",
         "provider_probe_read_only_verified",
     ):
         if evidence.get(field) is not True:
@@ -260,7 +266,7 @@ def verify_consumption(
     run: Mapping[str, object],
     evidence: Mapping[str, object],
 ) -> dict[str, object]:
-    verify_readiness_run(control_plane_sha, artifact, run)
+    verify_readiness_run(candidate_sha, control_plane_sha, artifact, run)
     verify_readiness_evidence(candidate_sha, control_plane_sha, control_plane_quality_run_id, evidence)
     return {
         "format_version": 1,
@@ -268,12 +274,15 @@ def verify_consumption(
         "repository": _CANONICAL_REPOSITORY,
         "candidate_sha": candidate_sha,
         "control_plane_sha": control_plane_sha,
+        "candidate_control_plane_exact_equality_verified": True,
         "control_plane_quality_run_id": str(control_plane_quality_run_id),
         "readiness_workflow_run_id": str(run["id"]),
         "readiness_artifact_id": str(artifact["id"]),
         "readiness_artifact_digest": artifact["digest"],
         "fresh_acceptance_authority_verified": True,
         "fresh_vultr_readonly_preflight_verified": True,
+        "fresh_exact_candidate_provider_proof_required_before_live_window": True,
+        "source_freeze_required_after_evidence": True,
         "provider_probe_read_only_verified": True,
         "provider_mutation_authorized": False,
         "phone_mutation_authorized": False,

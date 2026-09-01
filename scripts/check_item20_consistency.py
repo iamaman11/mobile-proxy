@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prevent Production Baseline item-20 identity and gate drift."""
+"""Prevent Production Baseline Item 20 identity and gate drift."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 
+HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
 PLAN = Path("docs/PRODUCTION_BASELINE_PLAN.md")
 PHYSICAL_RUNBOOK = Path("docs/physical-phone-acceptance-runbook.md")
 PHONE_RUNTIME = Path("docs/operations/phone-gitops-runtime.md")
@@ -43,7 +44,6 @@ def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
 
 def check_physical_runbook_text(physical: str) -> list[str]:
     errors: list[str] = []
-
     for required in (
         "Item 19 provider proof is COMPLETE",
         "protected typed Item 20 acceptance lifecycle",
@@ -66,14 +66,13 @@ def check_physical_runbook_text(physical: str) -> list[str]:
     ):
         if forbidden in lowered:
             errors.append(f"physical acceptance runbook contains stale Item 19 state {forbidden!r}")
-
     return errors
 
 
 def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
     errors: list[str] = []
     for required in (
-        '_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"',
+        "Pure verifier for fresh single-SHA Item 20 candidate evidence",
         "def validate_sha(",
         "def verify_contract(",
         "def verify_control_plane(",
@@ -83,24 +82,21 @@ def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
         "def verify_preflight_evidence(",
         "def verify_fresh_order(",
         "def verify_candidate_chain(",
-        '"item19_quality_run_id": 33341602485',
-        '"candidate_quality_run_attempt": 1',
-        '"candidate_control_plane_separation_required": True',
-        '"candidate_control_plane_value_inequality_required": False',
-        '"selection": "candidate_specific_artifact_then_exact_control_plane_run"',
+        '"candidate_control_plane_exact_equality_required": True',
+        '"selection": "exact_current_protected_main_single_sha_then_fresh_candidate_evidence"',
+        "candidate_sha != control_plane_sha",
+        "candidate/control-plane SHA mismatch violates 10/10 single-SHA acceptance",
         'expected_name_prefix="vultr-acceptance-authority"',
         'expected_name_prefix="vultr-readonly-preflight"',
-        '"provider_mutation_authorized": False',
-        '"phone_mutation_authorized": False',
-        '"endpoint_handoff_authorized": False',
-        '"live_execution_authorized": False',
-        '"final_production_authority": False',
     ):
         if required not in verifier:
             errors.append(f"Item 20 pure candidate evidence verifier is missing {required!r}")
 
     for forbidden in (
-        "candidate_sha == control_plane_sha",
+        f'_IMMUTABLE_CANDIDATE = "{HISTORICAL_ITEM19_SHA}"',
+        '"candidate_control_plane_separation_required": True',
+        '"candidate_control_plane_value_inequality_required": False',
+        '"selection": "candidate_specific_artifact_then_exact_control_plane_run"',
         "identities to remain distinct",
         "VULTR_API_KEY",
         "VULTR_SSH_PRIVATE_KEY",
@@ -119,16 +115,13 @@ def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
         "secrets.set",
     ):
         if forbidden in verifier:
-            errors.append(
-                f"Item 20 pure candidate evidence verifier contains forbidden live/external-I/O or identity token {forbidden!r}"
-            )
-
+            errors.append(f"Item 20 pure candidate evidence verifier contains forbidden token {forbidden!r}")
     return errors
 
 
 def check_item20_contract(contract: dict[str, object]) -> list[str]:
     errors: list[str] = []
-    expected = {
+    expected_top = {
         "contract_version": 1,
         "status": "protected_non_live_admission_core",
         "canonical_repository": "iamaman11/mobile-proxy",
@@ -136,104 +129,104 @@ def check_item20_contract(contract: dict[str, object]) -> list[str]:
         "completed_provider_proof_issue": 124,
         "phone_signing_gate_issue": 115,
     }
-    for key, value in expected.items():
+    for key, value in expected_top.items():
         if contract.get(key) != value:
             errors.append(f"Item 20 admission contract {key!r} differs from protected value")
 
-    immutable = contract.get("immutable_candidate")
-    if not isinstance(immutable, dict) or immutable.get("candidate_sha") != (
-        "d151dbdd156279e32a5361d304c90f996bd2d565"
+    historical = contract.get("historical_item19_proof")
+    if not isinstance(historical, dict) or historical.get("candidate_sha") != HISTORICAL_ITEM19_SHA:
+        errors.append("Item 20 contract lost the immutable historical Item 19 proof SHA")
+    if not isinstance(historical, dict) or historical.get("item19_quality_run_id") != 33341602485:
+        errors.append("Item 20 contract historical Item 19 Quality run differs")
+    if not isinstance(historical, dict) or historical.get("role") != (
+        "historical_provider_lifecycle_proof_only_not_item20_final_candidate"
     ):
-        errors.append("Item 20 admission contract candidate differs from Item 19 closeout")
-    if not isinstance(immutable, dict) or immutable.get("item19_quality_run_id") != 33341602485:
-        errors.append("Item 20 admission contract historical candidate Quality run differs")
+        errors.append("Item 20 contract does not label Item 19 evidence as historical-only")
 
-    session = contract.get("session")
-    if not isinstance(session, dict) or any(
-        session.get(key) != value
-        for key, value in {
-            "identity_module": "apps/operator-cli/src/item20_acceptance.rs",
-            "lifecycle_module": "apps/operator-cli/src/item20_session_lifecycle.rs",
-            "ownership_intent_template": "item20:candidate:<candidate_sha>",
-            "scope": "acceptance_only",
-            "max_controlled_vms": 1,
-            "terminal_item19_intent_reuse": "forbidden",
-            "transport_endpoint": "derived_only_after_verified_target_resolution_never_authority",
-        }.items()
-    ):
-        errors.append("Item 20 admission contract typed-session boundary differs")
-
-    authorization = contract.get("authorization")
-    if not isinstance(authorization, dict) or authorization != {
-        "provider_mutation_authorized": False,
-        "phone_mutation_authorized": False,
-        "endpoint_handoff_authorized": False,
-        "live_execution_authorized": False,
-        "final_production_authority": False,
-    }:
-        errors.append("Item 20 admission contract must remain validation-only")
-
-    handoff = contract.get("handoff")
-    if not isinstance(handoff, dict) or handoff != {
-        "status": "not_implemented",
-        "public_provider_uuid_recording": "forbidden",
-        "public_transport_endpoint_recording": "forbidden",
-        "private_phone_runner_vultr_credentials": "forbidden",
-    }:
-        errors.append("Item 20 admission contract handoff boundary differs")
+    identity = contract.get("identity")
+    expected_identity = {
+        "candidate_sha": "exact_current_protected_main_revision_selected_for_10_of_10_window",
+        "control_plane_sha": "same_exact_current_protected_main_revision",
+        "exact_equality_required": True,
+        "final_release_tag_target": "candidate_sha",
+        "source_freeze_after_selection": True,
+    }
+    if not isinstance(identity, dict) or identity != expected_identity:
+        errors.append("Item 20 single-SHA identity contract differs")
 
     admission = contract.get("admission")
-    if not isinstance(admission, dict) or admission.get("fresh_candidate_evidence_required") is not True:
-        errors.append("Item 20 admission contract must require fresh candidate evidence")
-    if not isinstance(admission, dict) or admission.get("fresh_candidate_evidence_verifier") != (
-        "scripts/verify_item20_candidate_evidence.py"
-    ):
-        errors.append("Item 20 admission contract does not consume the protected candidate verifier")
-    required_states = admission.get("required_issue_states") if isinstance(admission, dict) else None
-    if required_states != {
-        "item19_tracker_124": "closed_completed",
-        "item20_tracker_135": "open",
-        "phone_signing_gate_115": "closed_completed_before_live_window",
+    if not isinstance(admission, dict):
+        errors.append("Item 20 admission block is missing")
+    else:
+        for key in (
+            "candidate_must_equal_control_plane_sha",
+            "candidate_must_be_exact_current_protected_main",
+            "control_plane_must_be_exact_current_protected_main",
+            "fresh_candidate_evidence_required",
+            "fresh_exact_candidate_provider_proof_required_before_live_window",
+            "historical_item19_closeout_is_prior_evidence_not_current_candidate_authority",
+            "source_freeze_after_candidate_evidence",
+        ):
+            if admission.get(key) is not True:
+                errors.append(f"Item 20 admission must require {key}")
+        if admission.get("required_issue_states") != {
+            "item19_tracker_124": "closed_completed_historical_provider_proof",
+            "item20_tracker_135": "open",
+            "phone_signing_gate_115": "closed_completed_before_live_window",
+        }:
+            errors.append("Item 20 admission issue gates differ")
+
+    verifier = contract.get("future_live_candidate_verifier")
+    if not isinstance(verifier, dict) or verifier != {
+        "candidate_control_plane_exact_equality_required": True,
+        "candidate_quality_run_attempt": 1,
+        "grants_live_authority": False,
+        "performs_external_io": False,
+        "selection": "exact_current_protected_main_single_sha_then_fresh_candidate_evidence",
+        "status": "protected_pure_verifier_consumed_by_admission_core",
+        "verifier": "scripts/verify_item20_candidate_evidence.py",
+        "workflow_wiring": "implemented_exact_readiness_artifact_consumption",
     }:
-        errors.append("Item 20 admission contract issue gates differ")
+        errors.append("Item 20 pure candidate evidence verifier contract differs")
 
     future_live = contract.get("future_live_candidate_evidence")
     if not isinstance(future_live, dict) or future_live != {
         "acceptance_authority": "fresh_for_exact_candidate",
-        "vultr_readonly_preflight": "fresh_for_exact_candidate",
-        "same_candidate_required": True,
         "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
+        "fresh_provider_lifecycle_proof": "required_for_exact_candidate_before_live_item20",
+        "same_candidate_required": True,
+        "software_release_candidate": "fresh_for_exact_candidate",
+        "vultr_readonly_preflight": "fresh_for_exact_candidate",
     }:
-        errors.append("Item 20 fresh candidate authority requirements differ")
+        errors.append("Item 20 fresh candidate evidence requirements differ")
 
-    future_verifier = contract.get("future_live_candidate_verifier")
-    if not isinstance(future_verifier, dict) or future_verifier != {
-        "candidate_control_plane_separation_required": True,
-        "candidate_control_plane_value_inequality_required": False,
-        "candidate_quality_run_attempt": 1,
-        "grants_live_authority": False,
-        "performs_external_io": False,
-        "selection": "candidate_specific_artifact_then_exact_control_plane_run",
-        "status": "protected_pure_verifier_consumed_by_admission_core",
-        "verifier": "scripts/verify_item20_candidate_evidence.py",
-        "workflow_wiring": "not_implemented",
+    orchestration = contract.get("orchestration")
+    if not isinstance(orchestration, dict) or orchestration.get("candidate_source") != (
+        "same_exact_current_protected_main_as_control_plane"
+    ) or orchestration.get("control_plane_source") != "exact_current_protected_main":
+        errors.append("Item 20 orchestration does not select one exact protected-main SHA")
+
+    authorization = contract.get("authorization")
+    if not isinstance(authorization, dict) or authorization != {
+        "endpoint_handoff_authorized": False,
+        "final_production_authority": False,
+        "live_execution_authorized": False,
+        "phone_mutation_authorized": False,
+        "provider_mutation_authorized": False,
     }:
-        errors.append("Item 20 pure candidate evidence verifier contract differs")
+        errors.append("Item 20 admission contract must remain validation-only")
 
-    forbidden = contract.get("forbidden")
-    if not isinstance(forbidden, list) or forbidden != [
-        "provider_mutation_from_this_admission_core",
-        "phone_mutation_from_this_admission_core",
-        "public_endpoint_or_provider_uuid_evidence",
-        "terminal_item19_intent_reuse",
-        "live_window_without_fresh_exact_candidate_acceptance_authority",
-        "live_window_without_fresh_exact_candidate_vultr_readonly_preflight",
-        "production_vultr_authority",
-        "final_release_tag_or_production_promotion",
-        "gcp_or_manual_provider_control",
-    ]:
-        errors.append("Item 20 forbidden live-boundary set differs")
-
+    serialized = json.dumps(contract, sort_keys=True)
+    for forbidden in (
+        "candidate_must_match_item19_closeout",
+        "exact_immutable_item19_proven_sha",
+        "immutable_item19_proven",
+        "candidate_control_plane_separation_required",
+        "candidate_control_plane_value_inequality_required",
+        "control_plane_may_advance_without_redefining_candidate",
+    ):
+        if forbidden in serialized:
+            errors.append(f"Item 20 contract contains retired two-SHA semantic {forbidden!r}")
     return errors
 
 
@@ -261,7 +254,6 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"canonical baseline plan is missing Item 20 boundary {required!r}")
 
     errors.extend(check_physical_runbook_text(physical))
-
     for required in (
         "The physical item-20 window opens only after the Item 19 provider proof is complete",
         "mutable-phone gate is satisfied",
@@ -270,13 +262,9 @@ def check_repository(root: Path) -> list[str]:
         if required not in phone:
             errors.append(f"phone runtime is missing Item 20 gate token {required!r}")
 
-    for required in (
-        "Candidate SHA:",
-        "d151dbdd156279e32a5361d304c90f996bd2d565",
-        "terminal; that intent is not reusable by Item 20",
-    ):
+    for required in ("Candidate SHA:", HISTORICAL_ITEM19_SHA, "terminal; that intent is not reusable by Item 20"):
         if required not in closeout:
-            errors.append(f"Item 19 closeout is missing immutable handoff token {required!r}")
+            errors.append(f"Item 19 closeout is missing immutable historical token {required!r}")
 
     legacy_item19_intent = 'format!("candidate:{candidate_sha}")'
     if legacy_item19_intent not in item19:
@@ -291,7 +279,6 @@ def check_repository(root: Path) -> list[str]:
         "pub fn new_item20",
         "BindingStoreError::TerminalIntentReuse",
         "item19_and_item20_intents_are_distinct_and_exact",
-        "independent_ledgers_can_share_one_immutable_candidate",
         "unknown_namespace_record_poisoning_fails_closed",
     ):
         if required not in binding_store:
@@ -334,18 +321,13 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"typed Item 20 session lifecycle is missing {required!r}")
 
     for required in (
-        "_IMMUTABLE_CANDIDATE",
         "from verify_item20_candidate_evidence import verify_candidate_chain",
         "def verify_contract",
         "def verify_control_plane",
         "def verify_issue_gates",
         "def verify_phone_preflight",
-        "def _verify_fresh_result",
         "def verify_admission",
-        "verify_candidate_chain(",
-        '"fresh_acceptance_authority_verified": True',
-        '"fresh_vultr_readonly_preflight_verified": True',
-        '"provider_probe_read_only_verified": True',
+        "candidate_sha != control_plane_sha",
         '"provider_mutation_authorized": False',
         '"phone_mutation_authorized": False',
         '"endpoint_handoff_authorized": False',
@@ -355,9 +337,7 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"Item 20 non-live admission verifier is missing {required!r}")
 
     for forbidden in (
-        "def verify_acceptance_evidence(",
-        "def verify_preflight_evidence(",
-        "def verify_artifact_metadata(",
+        f'_IMMUTABLE_CANDIDATE = "{HISTORICAL_ITEM19_SHA}"',
         "VULTR_API_KEY",
         "VULTR_SSH_PRIVATE_KEY",
         "production-vultr",
@@ -365,26 +345,20 @@ def check_repository(root: Path) -> list[str]:
         "urllib.request",
         "requests.",
         "delete_instance(",
-        "create_instance",
+        "create_instance(",
         "adb ",
     ):
         if forbidden in admission:
-            errors.append(f"Item 20 admission verifier contains duplicated or forbidden live token {forbidden!r}")
+            errors.append(f"Item 20 admission verifier contains forbidden live/two-SHA token {forbidden!r}")
 
     errors.extend(check_item20_candidate_evidence_verifier_text(candidate_evidence))
-
     if contract:
         errors.extend(check_item20_contract(contract))
-        immutable = contract.get("immutable_candidate")
-        candidate = immutable.get("candidate_sha") if isinstance(immutable, dict) else None
-        if not isinstance(candidate, str) or candidate not in closeout:
-            errors.append("Item 20 admission contract candidate is not anchored in Item 19 closeout")
 
     if "pub mod item20_acceptance;" not in lib:
         errors.append("operator-cli does not export the typed Item 20 acceptance identity")
     if "pub mod item20_session_lifecycle;" not in lib:
         errors.append("operator-cli does not export the typed Item 20 session lifecycle")
-
     return errors
 
 

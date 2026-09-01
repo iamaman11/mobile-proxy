@@ -355,7 +355,7 @@ def check_repository(root: Path) -> list[str]:
                 errors.append("Vultr production execution boundary differs from protected topology")
             if execution.get("phone") != "private-repository caller context with android-production self-hosted runner":
                 errors.append("phone execution boundary differs from protected topology")
-            if execution.get("phone_logic") != "canonical public logic pinned to immutable SHA or verified canonical release artifact":
+            if execution.get("phone_logic") != "canonical public logic pinned to the exact immutable accepted public SHA or verified canonical release artifact":
                 errors.append("phone execution logic differs from protected topology")
             if execution.get("cross_boundary_secret_rule") != "private phone runner never receives Vultr credentials and public Vultr jobs never receive raw phone identifiers or phone-control secrets":
                 errors.append("cross-control-plane secret separation is not explicit")
@@ -367,8 +367,8 @@ def check_repository(root: Path) -> list[str]:
                 "phone_live_preflight": "passed_private_actions_read_only_preflight_on_registered_device",
                 "acceptance_authority": "implemented_candidate_quality_evidence_gate",
                 "vultr_readonly_preflight_workflow": "implemented_live_proof_passed_and_remains_read_only",
-                "vultr_live_lifecycle": "item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed",
-                "next_acceptance_lifecycle": "item_20_must_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent",
+                "vultr_live_lifecycle": "historical_item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_and_durable_terminal_confirmed_not_active_item20_candidate_authority",
+                "next_acceptance_lifecycle": "item_20_must_select_exact_current_protected_main_as_candidate_and_control_plane_then_open_fresh_jit_acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent",
                 "phone_mutation": "item_20_blocked_by_signing_continuity_gate_issue_115",
             }.items()
         ):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the non-live Production Baseline Item 20 admission boundary."""
+"""Validate the non-live Production Baseline Item 20 single-SHA admission boundary."""
 
 from __future__ import annotations
 
@@ -12,11 +12,10 @@ from typing import Mapping
 from verify_item20_candidate_evidence import verify_candidate_chain
 
 _CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
-_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
 _QUALITY_WORKFLOW = "Quality"
 _QUALITY_WORKFLOW_PATH = ".github/workflows/quality.yml"
 _CANDIDATE_EVIDENCE_VERIFIER = "scripts/verify_item20_candidate_evidence.py"
-_READINESS_AUTHORITY = "item20_fresh_candidate_evidence_verification"
+_READINESS_AUTHORITY = "item20_fresh_single_sha_candidate_evidence_verification"
 _REQUIRED_RUNNER_LABELS = ["self-hosted", "Linux", "X64", "android-production"]
 _REQUIRED_TOOLS = {"adb": True, "python": True, "git": True, "curl": True}
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -41,25 +40,21 @@ def verify_contract(contract: Mapping[str, object]) -> None:
     if mismatched:
         raise ValueError("Item 20 admission contract identity mismatch: " + ", ".join(sorted(mismatched)))
 
-    immutable = contract.get("immutable_candidate")
-    if not isinstance(immutable, dict) or immutable != {
-        "candidate_sha": _IMMUTABLE_CANDIDATE,
-        "closeout_record": "docs/operations/item19-provider-proof-closeout.md",
-        "item19_quality_run_id": 33341602485,
-        "acceptance_authority_run_id": 33341737260,
-        "vultr_readonly_preflight_run_id": 33341760002,
-        "item19_lifecycle_run_id": 33342000338,
+    identity = contract.get("identity")
+    if not isinstance(identity, dict) or identity != {
+        "candidate_sha": "exact_current_protected_main_revision_selected_for_10_of_10_window",
+        "control_plane_sha": "same_exact_current_protected_main_revision",
+        "exact_equality_required": True,
+        "final_release_tag_target": "candidate_sha",
+        "source_freeze_after_selection": True,
     }:
-        raise ValueError("Item 20 immutable candidate handoff differs from protected Item 19 closeout")
+        raise ValueError("Item 20 candidate/control-plane single-SHA identity is not exact")
 
-    separation = contract.get("identity_separation")
-    if not isinstance(separation, dict) or separation != {
-        "candidate_sha": "immutable_item19_proven_software_identity",
-        "control_plane_sha": "exact_current_protected_main_revision",
-        "control_plane_may_advance_without_redefining_candidate": True,
-        "must_be_verified_independently": True,
-    }:
-        raise ValueError("Item 20 candidate/control-plane identity separation is not exact")
+    historical = contract.get("historical_item19_proof")
+    if not isinstance(historical, dict) or historical.get("role") != (
+        "historical_provider_lifecycle_proof_only_not_item20_final_candidate"
+    ):
+        raise ValueError("Item 20 historical Item 19 proof boundary differs")
 
     control = contract.get("control_plane")
     if not isinstance(control, dict) or control != {
@@ -102,41 +97,46 @@ def verify_contract(contract: Mapping[str, object]) -> None:
 
     admission = contract.get("admission")
     if not isinstance(admission, dict) or admission != {
-        "verifier": "scripts/verify_item20_admission.py",
-        "fresh_candidate_evidence_verifier": _CANDIDATE_EVIDENCE_VERIFIER,
+        "candidate_must_equal_control_plane_sha": True,
+        "candidate_must_be_exact_current_protected_main": True,
+        "control_plane_must_be_exact_current_protected_main": True,
+        "control_plane_quality_must_succeed": True,
         "fresh_candidate_evidence_required": True,
+        "fresh_candidate_evidence_verifier": _CANDIDATE_EVIDENCE_VERIFIER,
+        "fresh_exact_candidate_provider_proof_required_before_live_window": True,
+        "historical_item19_closeout_is_prior_evidence_not_current_candidate_authority": True,
         "required_issue_states": {
-            "item19_tracker_124": "closed_completed",
+            "item19_tracker_124": "closed_completed_historical_provider_proof",
             "item20_tracker_135": "open",
             "phone_signing_gate_115": "closed_completed_before_live_window",
         },
-        "candidate_must_match_item19_closeout": True,
-        "control_plane_must_be_exact_current_protected_main": True,
-        "control_plane_quality_must_succeed": True,
         "same_window_private_phone_preflight_required_before_live_window": True,
+        "source_freeze_after_candidate_evidence": True,
+        "verifier": "scripts/verify_item20_admission.py",
     }:
-        raise ValueError("Item 20 admission requirements differ")
+        raise ValueError("Item 20 single-SHA admission requirements differ")
 
     future_live = contract.get("future_live_candidate_evidence")
     if not isinstance(future_live, dict) or future_live != {
         "acceptance_authority": "fresh_for_exact_candidate",
-        "vultr_readonly_preflight": "fresh_for_exact_candidate",
-        "same_candidate_required": True,
         "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
+        "fresh_provider_lifecycle_proof": "required_for_exact_candidate_before_live_item20",
+        "same_candidate_required": True,
+        "software_release_candidate": "fresh_for_exact_candidate",
+        "vultr_readonly_preflight": "fresh_for_exact_candidate",
     }:
         raise ValueError("Item 20 fresh candidate authority requirements differ")
 
     future_verifier = contract.get("future_live_candidate_verifier")
     if not isinstance(future_verifier, dict) or future_verifier != {
-        "candidate_control_plane_separation_required": True,
-        "candidate_control_plane_value_inequality_required": False,
+        "candidate_control_plane_exact_equality_required": True,
         "candidate_quality_run_attempt": 1,
         "grants_live_authority": False,
         "performs_external_io": False,
-        "selection": "candidate_specific_artifact_then_exact_control_plane_run",
+        "selection": "exact_current_protected_main_single_sha_then_fresh_candidate_evidence",
         "status": "protected_pure_verifier_consumed_by_admission_core",
         "verifier": _CANDIDATE_EVIDENCE_VERIFIER,
-        "workflow_wiring": "not_implemented",
+        "workflow_wiring": "implemented_exact_readiness_artifact_consumption",
     }:
         raise ValueError("Item 20 fresh candidate verifier contract differs")
 
@@ -165,8 +165,11 @@ def verify_contract(contract: Mapping[str, object]) -> None:
         "phone_mutation_from_this_admission_core",
         "public_endpoint_or_provider_uuid_evidence",
         "terminal_item19_intent_reuse",
+        "candidate_control_plane_sha_mismatch",
+        "live_window_without_fresh_exact_candidate_software_evidence",
         "live_window_without_fresh_exact_candidate_acceptance_authority",
         "live_window_without_fresh_exact_candidate_vultr_readonly_preflight",
+        "live_window_without_fresh_exact_candidate_provider_proof",
         "production_vultr_authority",
         "final_release_tag_or_production_promotion",
         "gcp_or_manual_provider_control",
@@ -227,7 +230,7 @@ def verify_issue_gates(
     item20_issue: Mapping[str, object],
     signing_issue: Mapping[str, object],
 ) -> None:
-    _verify_issue(item19_issue, 124, "closed", "completed", "Item 19")
+    _verify_issue(item19_issue, 124, "closed", "completed", "Item 19 historical proof")
     _verify_issue(item20_issue, 135, "open", None, "Item 20")
     _verify_issue(signing_issue, 115, "closed", "completed", "phone signing-continuity gate")
 
@@ -251,7 +254,7 @@ def verify_phone_preflight(
             "accepted": True,
         }.items()
     ):
-        raise ValueError("private phone preflight evidence does not match the exact control plane")
+        raise ValueError("private phone preflight evidence does not match the exact single-SHA control plane")
 
     device = report.get("device")
     if not isinstance(device, dict) or device != {
@@ -268,12 +271,16 @@ def _verify_fresh_result(
     control_plane_sha: str,
     evidence: Mapping[str, object],
 ) -> None:
+    if candidate_sha != control_plane_sha:
+        raise ValueError("candidate/control-plane SHA mismatch violates 10/10 single-SHA admission")
     if evidence.get("candidate_sha") != candidate_sha or evidence.get("control_plane_sha") != control_plane_sha:
-        raise ValueError("fresh candidate evidence result does not bind the exact admission identities")
+        raise ValueError("fresh candidate evidence result does not bind the exact admission identity")
     for field in (
-        "candidate_control_plane_separation_verified",
+        "candidate_control_plane_exact_equality_verified",
         "fresh_acceptance_authority_verified",
         "fresh_vultr_readonly_preflight_verified",
+        "fresh_exact_candidate_provider_proof_required_before_live_window",
+        "source_freeze_required_after_evidence",
         "provider_probe_read_only_verified",
     ):
         if evidence.get(field) is not True:
@@ -309,7 +316,7 @@ def verify_readiness_result(
         "control_plane_quality_run_id": str(quality_run["id"]),
     }
     if any(readiness_evidence.get(key) != value for key, value in expected_identity.items()):
-        raise ValueError("admission-readiness result does not bind exact candidate/control-plane Quality identity")
+        raise ValueError("admission-readiness result does not bind exact single-SHA Quality identity")
     if dict(readiness_evidence) != dict(fresh):
         raise ValueError("admission-readiness result does not exactly match independently verified candidate evidence")
 
@@ -334,9 +341,9 @@ def verify_admission(
 ) -> dict[str, object]:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
+    if candidate_sha != control_plane_sha:
+        raise ValueError("candidate/control-plane SHA mismatch violates 10/10 single-SHA admission")
     verify_contract(contract)
-    if candidate_sha != _IMMUTABLE_CANDIDATE:
-        raise ValueError("candidate SHA does not match the protected Item 19 closeout")
     verify_control_plane(control_plane_sha, branch, quality_run)
     verify_issue_gates(item19_issue, item20_issue, signing_issue)
     verify_phone_preflight(control_plane_sha, phone_preflight)
@@ -359,18 +366,21 @@ def verify_admission(
 
     return {
         "format_version": 1,
-        "authority": "item20_non_live_admission_validation",
+        "authority": "item20_non_live_single_sha_admission_validation",
         "repository": _CANONICAL_REPOSITORY,
         "candidate_sha": candidate_sha,
         "control_plane_sha": control_plane_sha,
+        "candidate_control_plane_exact_equality_verified": True,
         "control_plane_quality_run_id": str(quality_run["id"]),
-        "item19_tracker_completed": True,
+        "item19_historical_tracker_completed": True,
         "item20_tracker_open": True,
         "phone_signing_gate_completed": True,
         "private_phone_read_only_preflight_accepted": True,
         "admission_readiness_result_verified": True,
         "fresh_acceptance_authority_verified": True,
         "fresh_vultr_readonly_preflight_verified": True,
+        "fresh_exact_candidate_provider_proof_required_before_live_window": True,
+        "source_freeze_required_after_evidence": True,
         "provider_probe_read_only_verified": True,
         "provider_mutation_authorized": False,
         "phone_mutation_authorized": False,

@@ -473,12 +473,11 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::io;
 
-    const CANDIDATE: &str = "d151dbdd156279e32a5361d304c90f996bd2d565";
-    const CONTROL_PLANE: &str = "a4f014cb4f567b9c525ebd2ea30c66b2d12c18db";
+    const ACCEPTED_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const PROVIDER_ID: &str = "11111111-1111-4111-8111-111111111111";
 
     fn identity() -> Item20SessionIdentity {
-        Item20SessionIdentity::new(CANDIDATE, CONTROL_PLANE).unwrap()
+        Item20SessionIdentity::new(ACCEPTED_SHA, ACCEPTED_SHA).unwrap()
     }
 
     #[derive(Clone)]

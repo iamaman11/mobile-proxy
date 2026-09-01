@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the protected non-live Production Baseline Item 20 orchestration surface."""
+"""Validate the protected non-live Production Baseline Item 20 single-SHA orchestration surface."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _ORCHESTRATION = {
     "trigger": "workflow_dispatch",
     "executor": "github-hosted",
     "control_plane_source": "exact_current_protected_main",
-    "candidate_source": "exact_immutable_item19_proven_sha",
+    "candidate_source": "same_exact_current_protected_main_as_control_plane",
     "server_artifact_name_template": "item20-server-candidate-<candidate_sha>",
     "provider_environment": "none",
     "provider_credentials": "forbidden",
@@ -103,31 +103,37 @@ def verify_orchestration(
 ) -> dict[str, object]:
     candidate_sha = validate_sha(candidate_sha, "candidate")
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
+    if candidate_sha != control_plane_sha:
+        raise ValueError("candidate/control-plane SHA mismatch violates 10/10 single-SHA orchestration")
     verify_contract(contract)
 
-    immutable = contract.get("immutable_candidate")
-    if not isinstance(immutable, dict) or immutable.get("candidate_sha") != candidate_sha:
-        raise ValueError("candidate SHA does not match the protected Item 19 closeout")
     if contract.get("orchestration") != _ORCHESTRATION:
-        raise ValueError("Item 20 non-live orchestration contract differs")
+        raise ValueError("Item 20 non-live single-SHA orchestration contract differs")
+
+    identity = contract.get("identity")
+    if not isinstance(identity, dict) or identity.get("exact_equality_required") is not True:
+        raise ValueError("Item 20 contract does not enforce candidate/control-plane equality")
 
     verify_control_plane(control_plane_sha, branch, quality_run)
-    _verify_issue(item19_issue, 124, "closed", "completed", "Item 19")
+    _verify_issue(item19_issue, 124, "closed", "completed", "Item 19 historical proof")
     _verify_issue(item20_issue, 135, "open", None, "Item 20")
     signing_completed = phone_signing_gate_completed(signing_issue)
 
     return {
         "format_version": 1,
-        "authority": "item20_non_live_orchestration",
+        "authority": "item20_non_live_single_sha_orchestration",
         "repository": _CANONICAL_REPOSITORY,
         "candidate_sha": candidate_sha,
         "control_plane_sha": control_plane_sha,
+        "candidate_control_plane_exact_equality_verified": True,
         "control_plane_quality_run_id": str(quality_run["id"]),
-        "item19_tracker_completed": True,
+        "item19_historical_tracker_completed": True,
         "item20_tracker_open": True,
         "phone_signing_gate_completed": signing_completed,
         "fresh_acceptance_authority_verified": False,
         "fresh_vultr_readonly_preflight_verified": False,
+        "fresh_exact_candidate_provider_proof_required_before_live_window": True,
+        "source_freeze_required_after_evidence": True,
         "non_live_candidate_artifact_build_authorized": True,
         "provider_credential_access_performed": False,
         "provider_mutation_authorized": False,
