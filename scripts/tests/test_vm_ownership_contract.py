@@ -113,7 +113,7 @@ class VmOwnershipContractTests(unittest.TestCase):
                 {"vultr_live_lifecycle": "enabled"}
             ),
         )
-        self.assertTrue(any("terminal item-19 live proof" in error for error in errors))
+        self.assertTrue(any("historical-only evidence" in error for error in errors))
 
     def test_topology_cannot_reuse_terminal_item19_intent_for_item20(self):
         errors = self.validate_json_changed(
@@ -122,7 +122,7 @@ class VmOwnershipContractTests(unittest.TestCase):
                 {"next_acceptance_lifecycle": "reuse_item_19_intent"}
             ),
         )
-        self.assertTrue(any("fresh item-20 lifecycle intent" in error for error in errors))
+        self.assertTrue(any("fresh Item20 lifecycle intent" in error for error in errors))
 
     def test_control_plane_cannot_enable_item19_live_execution_early(self):
         errors = self.validate_json_changed(
