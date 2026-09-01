@@ -192,6 +192,7 @@ its explicit owner-approved destructive authorization and exact migration gates.
 establishes the new Android signing generation; it does not create Item 20 acceptance or final release
 authority. #115 is closed `completed` only when its actual acceptance criteria are satisfied.
 
+The mutable-phone gate is satisfied for Item 20 only when #115 is closed `completed`.
 The physical item-20 window opens only after the Item 19 provider proof is complete **and** #115 is
 closed `completed`. Item 20 then opens a fresh one-at-a-time acceptance server session through the
 protected typed lifecycle under a distinct Item 20 ownership intent; the terminal Item 19 proof intent
