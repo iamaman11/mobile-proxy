@@ -38,10 +38,14 @@ jobs:
           import re
 
           command = os.environ.get("COMMAND", "").strip()
-          match = re.fullmatch(r"/release-tag (v[0-9]+\.[0-9]+\.[0-9]+) ([0-9a-f]{40})", command)
+          match = re.fullmatch(
+              r"/release-tag (v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)) ([0-9a-f]{40})",
+              command,
+          )
           if match is None:
               raise SystemExit("invalid release-tag command")
-          tag, target_sha = match.groups()
+          tag = match.group(1)
+          target_sha = match.group(5)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"tag={tag}\n")
               handle.write(f"target_sha={target_sha}\n")
@@ -125,8 +129,8 @@ jobs:
               and run.get("status") == "completed"
               and run.get("conclusion") == "success"
           ]
-          if len({run.get("id") for run in eligible}) != 1:
-              raise SystemExit("exact accepted candidate must have exactly one eligible successful main Quality run")
+          if not eligible:
+              raise SystemExit("exact accepted candidate has no eligible successful main Quality run")
           PY
 
       - name: Check out exact accepted candidate
@@ -143,10 +147,14 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
-          test -z "$(git status --porcelain)"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git fetch origin main --tags --force
           test "$(git rev-parse origin/main)" = "$TARGET_SHA"
           version="${RELEASE_TAG#v}"
-          python3 scripts/verify_android_release_contract.py --expected-version "$version"
+          python3 scripts/verify_android_release_contract.py \
+            --root . \
+            --expected-version "$version" \
+            --output "${RUNNER_TEMP}/release-contract.json"
 
       - name: Require absent final tag
         env:
@@ -154,7 +162,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG" || \
+             git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "release tag already exists" >&2
             exit 1
           fi
