@@ -97,7 +97,6 @@ class Item20ConsistencyTests(unittest.TestCase):
         mutated = verifier.replace(
             "candidate_sha != control_plane_sha",
             "False",
-            1,
         )
         self.assertNotEqual(check_item20_candidate_evidence_verifier_text(mutated), [])
 
