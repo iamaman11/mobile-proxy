@@ -25,7 +25,9 @@ impl Item20SessionIdentity {
         validate_full_sha(&candidate_sha, "candidate")?;
         validate_full_sha(&control_plane_sha, "control-plane")?;
         if candidate_sha != control_plane_sha {
-            bail!("candidate/control-plane SHA mismatch violates 10/10 single-SHA Item 20 identity");
+            bail!(
+                "candidate/control-plane SHA mismatch violates 10/10 single-SHA Item 20 identity"
+            );
         }
         Ok(Self {
             candidate_sha,
