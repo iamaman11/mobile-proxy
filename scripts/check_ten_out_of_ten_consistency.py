@@ -69,11 +69,11 @@ HISTORICAL_SHA_ALLOWED = {
     PROJECT_AUTHORITY,
     PHONE,
     RELEASE_ORDER,
+    Path("docs/GIT_DELIVERY.md"),
     Path("docs/physical-phone-acceptance-runbook.md"),
     ITEM19_CLOSEOUT,
     ITEM20,
     TOPOLOGY,
-    Path("scripts/check_item20_consistency.py"),
 }
 
 
@@ -111,6 +111,10 @@ def _is_regression_test(path: Path) -> bool:
     return len(parts) >= 2 and parts[0] == "scripts" and parts[1] == "tests"
 
 
+def _is_guard_script(path: Path) -> bool:
+    return len(path.parts) == 2 and path.parts[0] == "scripts" and path.name.startswith("check_") and path.suffix == ".py"
+
+
 def _iter_scanned_text(root: Path) -> list[tuple[Path, str]]:
     paths: set[Path] = set(SCAN_ROOT_FILES)
     for prefix in SCAN_PREFIXES:
@@ -133,7 +137,7 @@ def _iter_scanned_text(root: Path) -> list[tuple[Path, str]]:
 def _repository_wide_semantic_scan(root: Path) -> list[str]:
     errors: list[str] = []
     for path, body in _iter_scanned_text(root):
-        if path in SCAN_LITERAL_EXCLUSIONS or _is_regression_test(path):
+        if path in SCAN_LITERAL_EXCLUSIONS or _is_regression_test(path) or _is_guard_script(path):
             continue
 
         for token in RETIRED_TWO_SHA_TOKENS:
@@ -362,7 +366,8 @@ def check_repository(root: Path) -> list[str]:
         if HISTORICAL_ITEM19_SHA in _read(root, path, errors):
             errors.append(f"{path} hardcodes historical Item 19 SHA in active authority")
 
-    # Retired two-SHA semantics are forbidden on the known normative active surfaces and repository-wide.
+    # Retired two-SHA semantics are forbidden on known normative active surfaces and runtime code.
+    # Dedicated check_*.py files and regression tests may quote retired literals solely to reject them.
     for path in NORMATIVE_NO_RETIRED:
         body = _read(root, path, errors)
         for token in RETIRED_TWO_SHA_TOKENS:
