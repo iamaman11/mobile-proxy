@@ -52,8 +52,13 @@ _KEYSTORE_B64_ENV = "ANDROID_RELEASE_KEYSTORE_B64"
 _KEYSTORE_PASSWORD_ENV = "ANDROID_RELEASE_KEYSTORE_PASSWORD"
 _KEY_ALIAS_ENV = "ANDROID_RELEASE_KEY_ALIAS"
 _REQUIRED_TOOLS = ("adb", "keytool", "apksigner")
-_APKSIGNER_FINGERPRINT_PATTERN = re.compile(
+_APKSIGNER_NUMBERED_FINGERPRINT_PATTERN = re.compile(
     r"^Signer #\d+ certificate SHA-256 digest: ([0-9A-Fa-f]{64})$",
+    re.MULTILINE,
+)
+_APKSIGNER_V31_RANGE_FINGERPRINT_PATTERN = re.compile(
+    r"^Signer \(minSdkVersion=\d+(?: \(dev release=true\))?, maxSdkVersion=\d+\) "
+    r"certificate SHA-256 digest: ([0-9A-Fa-f]{64})$",
     re.MULTILINE,
 )
 _KEYTOOL_FINGERPRINT_PATTERN = re.compile(
@@ -146,12 +151,35 @@ def select_installed_apk_path(pm_output: str) -> str:
 
 
 def parse_single_apksigner_fingerprint(output: str) -> str:
-    matches = _APKSIGNER_FINGERPRINT_PATTERN.findall(output)
+    numbered_matches = _APKSIGNER_NUMBERED_FINGERPRINT_PATTERN.findall(output)
+    range_matches = _APKSIGNER_V31_RANGE_FINGERPRINT_PATTERN.findall(output)
+    signer_digest_lines = [
+        line
+        for line in output.splitlines()
+        if line.startswith("Signer ") and " certificate SHA-256 digest:" in line
+    ]
     require(
-        len(matches) == 1,
-        "installed APK signer inventory is not exactly one current signer",
+        len(signer_digest_lines) == len(numbered_matches) + len(range_matches),
+        "APK signer inventory contains an unrecognized certificate digest record",
     )
-    return matches[0].lower()
+    require(
+        bool(numbered_matches) != bool(range_matches),
+        "APK signer inventory format is unavailable or ambiguous",
+    )
+
+    if numbered_matches:
+        require(
+            len(numbered_matches) == 1,
+            "APK signer inventory is not exactly one current signer",
+        )
+        return numbered_matches[0].lower()
+
+    unique_range_fingerprints = {fingerprint.lower() for fingerprint in range_matches}
+    require(
+        len(unique_range_fingerprints) == 1,
+        "APK v3.1 signer ranges do not resolve to exactly one signing identity",
+    )
+    return next(iter(unique_range_fingerprints))
 
 
 def parse_single_keytool_fingerprint(output: str) -> str:
