@@ -38,6 +38,11 @@ RETIRED_TWO_SHA_TOKENS = (
     "final_release_control_plane_sha",
 )
 
+RETIRED_ACTIVE_PHRASES = (
+    "exact immutable Item-19-proven candidate",
+    "for the same immutable candidate SHA",
+)
+
 NORMATIVE_NO_RETIRED = (
     ITEM20,
     READINESS,
@@ -50,6 +55,26 @@ NORMATIVE_NO_RETIRED = (
     RUNTIME,
     BASELINE,
 )
+
+TEXT_SUFFIXES = {".md", ".json", ".yml", ".yaml", ".py", ".rs", ".toml", ".sh"}
+SCAN_PREFIXES = (Path(".github"), Path("contracts"), Path("docs"), Path("scripts"), Path("apps"))
+SCAN_ROOT_FILES = {README, RUNTIME, TEN_PLAN}
+SCAN_LITERAL_EXCLUSIONS = {
+    Path("scripts/check_ten_out_of_ten_consistency.py"),
+}
+HISTORICAL_SHA_ALLOWED = {
+    TEN_PLAN,
+    RUNTIME,
+    BASELINE,
+    PROJECT_AUTHORITY,
+    PHONE,
+    RELEASE_ORDER,
+    Path("docs/physical-phone-acceptance-runbook.md"),
+    ITEM19_CLOSEOUT,
+    ITEM20,
+    TOPOLOGY,
+    Path("scripts/check_item20_consistency.py"),
+}
 
 
 def _read(root: Path, path: Path, errors: list[str]) -> str:
@@ -79,6 +104,57 @@ def _require(body: str, path: Path, tokens: tuple[str, ...], errors: list[str]) 
     for token in tokens:
         if token not in body:
             errors.append(f"{path} is missing 10/10 invariant {token!r}")
+
+
+def _is_regression_test(path: Path) -> bool:
+    parts = path.parts
+    return len(parts) >= 2 and parts[0] == "scripts" and parts[1] == "tests"
+
+
+def _iter_scanned_text(root: Path) -> list[tuple[Path, str]]:
+    paths: set[Path] = set(SCAN_ROOT_FILES)
+    for prefix in SCAN_PREFIXES:
+        base = root / prefix
+        if not base.exists():
+            continue
+        for absolute in base.rglob("*"):
+            if absolute.is_file() and absolute.suffix.lower() in TEXT_SUFFIXES:
+                paths.add(absolute.relative_to(root))
+
+    values: list[tuple[Path, str]] = []
+    for path in sorted(paths):
+        try:
+            values.append((path, (root / path).read_text(encoding="utf-8")))
+        except UnicodeDecodeError:
+            continue
+    return values
+
+
+def _repository_wide_semantic_scan(root: Path) -> list[str]:
+    errors: list[str] = []
+    for path, body in _iter_scanned_text(root):
+        if path in SCAN_LITERAL_EXCLUSIONS or _is_regression_test(path):
+            continue
+
+        for token in RETIRED_TWO_SHA_TOKENS:
+            if token in body:
+                errors.append(f"repository-wide scan: {path} contains retired two-SHA semantic {token!r}")
+        for phrase in RETIRED_ACTIVE_PHRASES:
+            if phrase in body:
+                errors.append(f"repository-wide scan: {path} contains stale active-candidate wording {phrase!r}")
+
+        if HISTORICAL_ITEM19_SHA in body:
+            allowed = path in HISTORICAL_SHA_ALLOWED or (
+                len(path.parts) >= 3
+                and path.parts[0] == "docs"
+                and path.parts[1] == "operations"
+                and path.name.startswith("item19-")
+            )
+            if not allowed:
+                errors.append(
+                    f"repository-wide scan: {path} contains historical Item 19 SHA outside an approved historical/reconciliation surface"
+                )
+    return errors
 
 
 def check_repository(root: Path) -> list[str]:
@@ -286,12 +362,13 @@ def check_repository(root: Path) -> list[str]:
         if HISTORICAL_ITEM19_SHA in _read(root, path, errors):
             errors.append(f"{path} hardcodes historical Item 19 SHA in active authority")
 
-    # Retired two-SHA semantics are forbidden on normative active surfaces.
+    # Retired two-SHA semantics are forbidden on the known normative active surfaces and repository-wide.
     for path in NORMATIVE_NO_RETIRED:
         body = _read(root, path, errors)
         for token in RETIRED_TWO_SHA_TOKENS:
             if token in body:
                 errors.append(f"{path} contains retired two-SHA semantic {token!r}")
+    errors.extend(_repository_wide_semantic_scan(root))
     return errors
 
 
