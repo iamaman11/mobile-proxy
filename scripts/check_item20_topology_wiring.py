@@ -306,8 +306,8 @@ def check_repository(root: Path) -> list[str]:
         workflow = workflow_path.read_text(encoding="utf-8")
         for required in (
             "runs-on: ubuntu-latest",
-            "Verify build-only Item 20 orchestration boundary",
-            "Build exact immutable candidate server artifact",
+            "Verify build-only Item 20 single-SHA orchestration boundary",
+            "Build exact immutable single-SHA candidate server artifact",
             "scripts/select_item20_candidate_evidence.py verify-contract",
             "scripts/verify_item20_readiness_artifact.py select-artifact",
             "scripts/verify_item20_readiness_artifact.py verify",
