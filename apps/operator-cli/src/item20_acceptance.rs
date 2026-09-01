@@ -24,6 +24,9 @@ impl Item20SessionIdentity {
         let control_plane_sha = control_plane_sha.into();
         validate_full_sha(&candidate_sha, "candidate")?;
         validate_full_sha(&control_plane_sha, "control-plane")?;
+        if candidate_sha != control_plane_sha {
+            bail!("candidate/control-plane SHA mismatch violates 10/10 single-SHA Item 20 identity");
+        }
         Ok(Self {
             candidate_sha,
             control_plane_sha,
@@ -79,51 +82,45 @@ fn validate_full_sha(value: &str, kind: &str) -> Result<()> {
 mod tests {
     use super::*;
 
-    const CANDIDATE: &str = "d151dbdd156279e32a5361d304c90f996bd2d565";
-    const CONTROL_PLANE: &str = "62cd51f2dddcf053d5904ec0a4cfe789293ca04d";
+    const ACCEPTED_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const OTHER_SHA: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     #[test]
     fn item20_intent_is_acceptance_only_and_distinct_from_item19_terminal_intent() {
-        let identity = Item20SessionIdentity::new(CANDIDATE, CONTROL_PLANE).unwrap();
+        let identity = Item20SessionIdentity::new(ACCEPTED_SHA, ACCEPTED_SHA).unwrap();
         let intent = identity.ownership_intent().unwrap();
         assert_eq!(intent.scope(), LifecycleScope::Acceptance);
         assert_eq!(
             intent.id(),
-            "item20:candidate:d151dbdd156279e32a5361d304c90f996bd2d565"
+            "item20:candidate:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
-        assert_ne!(intent.id(), format!("candidate:{CANDIDATE}"));
+        assert_ne!(intent.id(), format!("candidate:{ACCEPTED_SHA}"));
     }
 
     #[test]
-    fn candidate_and_control_plane_identities_remain_separate() {
-        let identity = Item20SessionIdentity::new(CANDIDATE, CONTROL_PLANE).unwrap();
-        assert_eq!(identity.candidate_sha(), CANDIDATE);
-        assert_eq!(identity.control_plane_sha(), CONTROL_PLANE);
-        assert!(
-            !identity
-                .ownership_intent()
-                .unwrap()
-                .id()
-                .contains(CONTROL_PLANE)
-        );
+    fn candidate_and_control_plane_must_be_exactly_equal() {
+        let identity = Item20SessionIdentity::new(ACCEPTED_SHA, ACCEPTED_SHA).unwrap();
+        assert_eq!(identity.candidate_sha(), ACCEPTED_SHA);
+        assert_eq!(identity.control_plane_sha(), ACCEPTED_SHA);
+        assert!(Item20SessionIdentity::new(ACCEPTED_SHA, OTHER_SHA).is_err());
     }
 
     #[test]
     fn mutable_short_or_uppercase_refs_are_rejected() {
         for value in [
             "main",
-            "d151dbd",
-            "D151DBDD156279E32A5361D304C90F996BD2D565",
-            "d151dbdd156279e32a5361d304c90f996bd2d56g",
+            "aaaaaaa",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag",
         ] {
-            assert!(Item20SessionIdentity::new(value, CONTROL_PLANE).is_err());
-            assert!(Item20SessionIdentity::new(CANDIDATE, value).is_err());
+            assert!(Item20SessionIdentity::new(value, ACCEPTED_SHA).is_err());
+            assert!(Item20SessionIdentity::new(ACCEPTED_SHA, value).is_err());
         }
     }
 
     #[test]
     fn desired_vm_uses_the_bounded_acceptance_spec() {
-        let identity = Item20SessionIdentity::new(CANDIDATE, CONTROL_PLANE).unwrap();
+        let identity = Item20SessionIdentity::new(ACCEPTED_SHA, ACCEPTED_SHA).unwrap();
         let desired = identity.desired_vm().unwrap();
         let spec = acceptance_spec();
         assert_eq!(desired.intent, identity.ownership_intent().unwrap());
