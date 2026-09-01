@@ -47,14 +47,15 @@ jobs:
               handle.write(f"target_sha={target_sha}\n")
           PY
 
-      - name: Fetch canonical completion gates
+      - name: Fetch canonical completion gates and protected main
         shell: bash
         run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM20_ISSUE" > item20.json
           gh api "repos/$GITHUB_REPOSITORY/issues/$PHONE_SIGNING_ISSUE" > phone-signing.json
+          gh api "repos/$GITHUB_REPOSITORY/branches/main" > protected-main.json
 
-      - name: Require completed Item 20 and exact single-SHA release markers
+      - name: Require completed Item 20 and exact accepted-candidate release marker
         id: acceptance
         env:
           TARGET_SHA: ${{ steps.command.outputs.target_sha }}
@@ -69,40 +70,37 @@ jobs:
           target_sha = os.environ["TARGET_SHA"]
           item20 = json.load(open("item20.json", encoding="utf-8"))
           signing = json.load(open("phone-signing.json", encoding="utf-8"))
+          protected_main = json.load(open("protected-main.json", encoding="utf-8"))
+
           if item20.get("number") != 135 or item20.get("state") != "closed" or item20.get("state_reason") != "completed":
               raise SystemExit("Item 20 tracker #135 is not closed completed")
           if signing.get("number") != 115 or signing.get("state") != "closed" or signing.get("state_reason") != "completed":
               raise SystemExit("phone signing gate #115 is not closed completed")
 
           body = item20.get("body") or ""
-          candidate_matches = re.findall(
-              r"(?m)^final_release_candidate_sha:\s*([0-9a-f]{40})\s*$",
+          matches = re.findall(
+              r"(?m)^final_accepted_candidate_sha:\s*([0-9a-f]{40})\s*$",
               body,
           )
-          control_matches = re.findall(
-              r"(?m)^final_release_control_plane_sha:\s*([0-9a-f]{40})\s*$",
-              body,
-          )
-          if len(candidate_matches) != 1:
-              raise SystemExit("Item 20 final release candidate marker is missing or ambiguous")
-          if len(control_matches) != 1:
-              raise SystemExit("Item 20 final release control-plane marker is missing or ambiguous")
+          if len(matches) != 1:
+              raise SystemExit("Item 20 final accepted candidate marker is missing or ambiguous")
+          accepted_candidate_sha = matches[0]
+          if target_sha != accepted_candidate_sha:
+              raise SystemExit("target SHA does not match Item 20 final accepted candidate")
 
-          candidate_sha = candidate_matches[0]
-          control_plane_sha = control_matches[0]
-          if candidate_sha != control_plane_sha:
-              raise SystemExit("Item 20 candidate and control-plane SHAs differ; 10/10 single-SHA acceptance is not satisfied")
-          if target_sha != candidate_sha:
-              raise SystemExit("target SHA does not match Item 20 accepted candidate marker")
+          main_commit = protected_main.get("commit")
+          if protected_main.get("name") != "main" or protected_main.get("protected") is not True:
+              raise SystemExit("canonical main is not protected")
+          if not isinstance(main_commit, dict) or main_commit.get("sha") != accepted_candidate_sha:
+              raise SystemExit("protected main advanced or differs from the accepted candidate; acceptance is stale")
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-              handle.write(f"candidate_sha={candidate_sha}\n")
-              handle.write(f"control_plane_sha={control_plane_sha}\n")
+              handle.write(f"accepted_candidate_sha={accepted_candidate_sha}\n")
           PY
 
       - name: Require exact successful main Quality for accepted candidate
         env:
-          TARGET_SHA: ${{ steps.acceptance.outputs.candidate_sha }}
+          TARGET_SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -134,19 +132,19 @@ jobs:
       - name: Check out exact accepted candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ steps.acceptance.outputs.candidate_sha }}
+          ref: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
           fetch-depth: 0
 
       - name: Verify exact source and release-version contract
         env:
-          TARGET_SHA: ${{ steps.acceptance.outputs.candidate_sha }}
+          TARGET_SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test -z "$(git status --porcelain)"
-          git merge-base --is-ancestor "$TARGET_SHA" origin/main
+          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
           version="${RELEASE_TAG#v}"
           python3 scripts/verify_android_release_contract.py --expected-version "$version"
 
@@ -163,8 +161,7 @@ jobs:
 
       - name: Create and push exact annotated tag
         env:
-          TARGET_SHA: ${{ steps.acceptance.outputs.candidate_sha }}
-          CONTROL_PLANE_SHA: ${{ steps.acceptance.outputs.control_plane_sha }}
+          TARGET_SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
         shell: bash
         run: |
@@ -172,7 +169,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$RELEASE_TAG" "$TARGET_SHA" \
-            -m "Release $RELEASE_TAG — physically accepted candidate $TARGET_SHA; control plane $CONTROL_PLANE_SHA"
+            -m "Release $RELEASE_TAG — accepted candidate $TARGET_SHA"
           test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"
           git push origin "refs/tags/$RELEASE_TAG"
@@ -183,13 +180,12 @@ jobs:
           {
             echo '## Final release tag authority'
             echo "- Release tag: ${{ steps.command.outputs.tag }}"
-            echo "- Accepted candidate SHA: ${{ steps.acceptance.outputs.candidate_sha }}"
-            echo "- Accepted control-plane SHA: ${{ steps.acceptance.outputs.control_plane_sha }}"
-            echo '- Candidate/control-plane exact equality required: true'
+            echo "- Final accepted candidate SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}"
+            echo '- Accepted candidate equals exact protected main: true'
             echo '- Item 20 tracker closed completed: true'
             echo '- Phone signing gate closed completed: true'
             echo '- Exact main Quality required: true'
             echo '- Annotated tag required: true'
-            echo '- Final tag target is physically accepted candidate: true'
+            echo '- Final tag target is the accepted candidate: true'
             echo '- Production promotion authority created here: false'
           } >> "$GITHUB_STEP_SUMMARY"
