@@ -1,0 +1,46 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "canonical_repository": "iamaman11/mobile-proxy",
+  "workflow": ".github/workflows/release-tag.yml",
+  "command": {
+    "issue": 90,
+    "syntax": "/release-tag vMAJOR.MINOR.PATCH <full_sha>",
+    "authorized_actor": "repository_owner"
+  },
+  "preconditions": {
+    "item20_tracker_issue": 135,
+    "item20_required_state": "closed",
+    "item20_required_state_reason": "completed",
+    "phone_signing_gate_issue": 115,
+    "phone_signing_required_state": "closed",
+    "phone_signing_required_state_reason": "completed",
+    "item20_release_sha_marker": "final_release_control_plane_sha",
+    "target_sha": "exact_full_40_char_sha_matching_item20_release_sha_marker",
+    "target_main_quality": "completed_successful_push_on_main",
+    "target_must_be_ancestor_of_current_main": true,
+    "canonical_release_contract_verified": true
+  },
+  "ordering": {
+    "android_signing_generation_migration": "pre_item20_exact_sha_signed_candidate_without_final_v_tag_or_release",
+    "item20_physical_acceptance": "must_complete_before_final_v_tag",
+    "final_v_tag": "item21_only_after_item20_closed_completed",
+    "release_publication": "only_after_exact_tag_quality_success",
+    "production_promotion": "only_after_final_release"
+  },
+  "tag": {
+    "kind": "annotated",
+    "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+    "deletion_forbidden": true,
+    "non_fast_forward_forbidden": true
+  },
+  "forbidden": [
+    "release_tag_command_from_issue_162",
+    "final_v_tag_while_item20_open",
+    "final_v_tag_without_item20_exact_release_sha_marker",
+    "final_v_tag_while_phone_signing_gate_open",
+    "android_signing_generation_migration_requiring_final_v_tag",
+    "android_signing_generation_migration_creating_final_release_authority",
+    "production_promotion_before_final_release"
+  ]
+}
