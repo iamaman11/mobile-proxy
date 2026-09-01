@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   actions: read
+  issues: read
 
 concurrency:
   group: create-annotated-release-tag
@@ -16,16 +17,19 @@ jobs:
   create-tag:
     name: Create verified annotated semantic-version tag
     if: >-
-      github.event.issue.number == 162 &&
+      github.event.issue.number == 90 &&
       github.event.comment.user.login == github.repository_owner &&
       startsWith(github.event.comment.body, '/release-tag ')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ITEM20_ISSUE: 135
+      PHONE_SIGNING_ISSUE: 115
     outputs:
       release_tag: ${{ steps.command.outputs.release_tag }}
       target_sha: ${{ steps.command.outputs.target_sha }}
     steps:
-      - name: Validate exact owner command and reviewed target
+      - name: Validate exact owner command and final-release authority
         id: command
         env:
           COMMAND: ${{ github.event.comment.body }}
@@ -53,15 +57,41 @@ jobs:
           headers = {
               "Accept": "application/vnd.github+json",
               "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-              "User-Agent": "mobile-proxy-release-tag-gate",
+              "User-Agent": "mobile-proxy-final-release-authority-gate",
               "X-GitHub-Api-Version": "2022-11-28",
           }
+
+          def get_json(url: str):
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  return json.load(response)
+
+          item20 = get_json(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['ITEM20_ISSUE']}"
+          )
+          if item20.get("state") != "closed" or item20.get("state_reason") != "completed":
+              raise SystemExit("Item 20 is not closed completed; final release authority is absent")
+
+          signing = get_json(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PHONE_SIGNING_ISSUE']}"
+          )
+          if signing.get("state") != "closed" or signing.get("state_reason") != "completed":
+              raise SystemExit("phone signing gate is not closed completed")
+
+          marker_matches = re.findall(
+              r"(?m)^final_release_control_plane_sha:\s*`?([0-9a-f]{40})`?\s*$",
+              item20.get("body") or "",
+          )
+          if len(marker_matches) != 1:
+              raise SystemExit("Item 20 final release SHA marker is missing or ambiguous")
+          if marker_matches[0] != target_sha:
+              raise SystemExit("target SHA does not match Item 20 final release marker")
+
           url = (
-              "https://api.github.com/repos/iamaman11/mobile-proxy/actions/runs"
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs"
               f"?head_sha={target_sha}&event=push&per_page=100"
           )
-          with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15) as response:
-              runs = json.load(response).get("workflow_runs", [])
+          runs = get_json(url).get("workflow_runs", [])
           accepted = [
               run for run in runs
               if run.get("name") == "Quality"
@@ -79,7 +109,7 @@ jobs:
               handle.write(f"target_sha={target_sha}\n")
           PY
 
-      - name: Check out exact reviewed target with release history
+      - name: Check out exact Item 20 accepted release target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ steps.command.outputs.target_sha }}
@@ -120,16 +150,19 @@ jobs:
           test "$(git rev-list -n 1 "${RELEASE_TAG}")" = "${TARGET_SHA}"
           git push origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
-      - name: Record safe release-tag checkpoint
+      - name: Record safe final release-tag checkpoint
         env:
           RELEASE_TAG: ${{ steps.command.outputs.release_tag }}
           TARGET_SHA: ${{ steps.command.outputs.target_sha }}
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ## Annotated release tag
+          ## Annotated final release tag
           - Release tag: ${RELEASE_TAG}
           - Target SHA: ${TARGET_SHA}
+          - Item 20 closed completed: true
+          - Phone signing gate closed completed: true
+          - Item 20 final release SHA marker matched: true
           - Exact main Quality success required: true
           - Canonical Git/Cargo/Android version contract verified: true
           - Annotated tag object required: true
