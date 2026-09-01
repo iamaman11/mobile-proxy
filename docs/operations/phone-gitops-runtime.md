@@ -5,6 +5,10 @@ summary, not a source of credentials, device identifiers, workstation paths or r
 The public repository remains the sole source of project architecture and policy; the private
 `iamaman11/mobile-proxy-production` repository is an execution satellite only.
 
+Final release authority ordering is defined normatively in
+`docs/operations/final-release-authority-order.md` and
+`contracts/operations/final-release-authority-v1.json`.
+
 ## Verified production execution boundary
 
 The production phone path is:
@@ -59,24 +63,31 @@ A private offline proof has already demonstrated that the keystore opens, the al
 private-key password is valid, and a temporary signature can be created and verified. Secret values,
 certificate fingerprints and secret-derived values are not canonical evidence.
 
-### Version identity
+### Version identity versus final release authority
 
-Repository release version and Android application version now use one stable semantic version.
-For release `X.Y.Z`:
+Repository release metadata and Android application metadata use one stable semantic version. For
+release `X.Y.Z`:
 
-- Git tag: `vX.Y.Z`;
+- final Git tag, when later authorized: `vX.Y.Z`;
 - workspace package version: `X.Y.Z`;
 - Android `versionName`: `X.Y.Z`;
 - Android `versionCode`: `X * 1_000_000 + Y * 1_000 + Z`.
 
-The first release of the new signing generation is `v0.1.4`, therefore Android identity is
-`versionName=0.1.4` and `versionCode=1004`. The historical `versionName=1.1.0` / `versionCode=2`
-numbering is not reused.
+The first candidate of the new signing generation uses Android identity `versionName=0.1.4` and
+`versionCode=1004`; the historical `versionName=1.1.0` / `versionCode=2` numbering is not reused.
+The workspace/Android `0.1.4` metadata may exist on a protected pre-release SHA so an exact signed
+migration candidate can be built and verified. That metadata does **not** itself create final release
+authority.
+
+No final `v0.1.4` tag or GitHub Release is an input to the signing-generation migration. The migration
+is bound instead to an exact canonical SHA plus retained signed-candidate evidence from that same SHA.
+The protected annotated `v0.1.4` tag is an Item 21 output and remains forbidden until Item 20 physical
+acceptance has completed and the exact final release control-plane SHA is recorded in #135.
 
 ### Exact-app build proof
 
 The signing migration must not silently replace the application with different functional code.
-For the `v0.1.4` migration build, canonical automation compares `apps/android-app` against
+For the `0.1.4` migration candidate, canonical automation compares `apps/android-app` against
 `v0.1.3` and allows exactly one Android source-tree difference:
 `apps/android-app/app/build.gradle.kts`. That file may differ only because the release identity and
 production signing contract are being established. A Kotlin, manifest, resource, embedded library or
@@ -107,20 +118,20 @@ Every uninstall, install and runtime-supervisor restart is separately preceded b
 registered-device proof. The mutation sequence is serialized per production phone:
 
 ```text
-verified v0.1.4 signed APK
+verified 0.1.4 signed APK from exact canonical SHA
   -> same-run registered-device proof
   -> retain exact installed old signed APK
   -> registered-device proof
   -> uninstall old com.example.mobileproxy
   -> registered-device proof
-  -> install exact verified v0.1.4 APK
+  -> install exact verified 0.1.4 APK
   -> verify package/version
   -> registered-device proof
   -> terminate only the exact current runtime-supervisor process
   -> existing watchdog restarts runtime-supervisor
   -> runtime-supervisor reprovisions the new Android UID
   -> verify CellularEgressService + local egress/proxy ports
-  -> retain accepted v0.1.4 signed APK for future rollback
+  -> retain accepted 0.1.4 signed APK for future rollback
 ```
 
 `deploy/device-runtime/module/service.sh` already owns runtime-supervisor through a watchdog. The
@@ -135,21 +146,22 @@ exact retained old signed APK, restart only runtime-supervisor through the same 
 and verify the restored local egress path. A rollback result never converts a failed migration into a
 successful migration result.
 
-After `v0.1.4` is accepted, normal update/rollback lifecycle is inside the new signing generation.
-Future rollback uses a retained previously accepted APK signed by the new production key. The old
-signing generation is not an update-compatible rollback target; using its retained APK again would
-require another explicit destructive uninstall/install operation.
+After the 0.1.4 candidate is accepted as the new signing generation, normal update/rollback lifecycle
+is inside the new signing generation. Future routine rollback uses a retained previously accepted APK
+signed by the new production key. The old signing generation is not an update-compatible rollback
+target; using its retained APK again would require another explicit destructive uninstall/install
+action and separate authority.
 
 ## Mutable phone gate
 
 This is a workflow-level phone-mutation gate, not only an APK-install gate. The explicit signing-lineage
-reset narrows the old signer-continuity blocker only for the exact canonical migration workflow; it
-does not gate the public canonical provider-only Item 19 proof or grant unrelated mutable-phone
+reset narrows the old signer-continuity blocker only for the exact canonical #162 migration workflow;
+it does not gate the public canonical provider-only Item 19 proof or grant unrelated mutable-phone
 authority.
 
 Before enabling **any mutable phone workflow**, the workflow must satisfy all of these conditions:
 
-1. Bind the action to one exact immutable canonical source/release tuple.
+1. Bind the action to one exact immutable canonical source/release tuple appropriate to that stage.
 2. Verify the exact signed APK typed digest, package/version metadata and signing evidence before ADB
    mutation.
 3. Run the registered-device preflight immediately before every mutable operation.
@@ -161,6 +173,11 @@ Before enabling **any mutable phone workflow**, the workflow must satisfy all of
 8. Keep provider lifecycle completely outside the phone runner; the private runner must never receive
    Vultr credentials or become provider-state authority.
 
+For the one-time #162 signing-generation migration specifically, the immutable authority is the exact
+canonical SHA plus retained signed-candidate evidence; a final `v*` tag is explicitly absent and must
+not be required. For later normal post-release update/rollback, the immutable authority is the final
+accepted tagged release tuple defined by the normal lifecycle.
+
 If any condition is missing, ambiguous or mismatched, the workflow must stop before mutation.
 
 ## Item 19 / item 20 handoff
@@ -170,11 +187,22 @@ canonical GitHub-hosted control plane. Its live proof is provider-only and ephem
 one controlled VM, deploy and verify the exact candidate, then deterministically delete it and commit
 the durable terminal state. Item 19 performs no phone mutation and does not consume #115.
 
-The physical item-20 window opens only after the Item 19 provider proof is complete **and** this
-mutable-phone gate is satisfied. Item 20 then opens a fresh one-at-a-time acceptance server session
-through the protected typed lifecycle under a distinct Item 20 ownership intent; the terminal Item 19
-proof intent is never reused. The fact that an item-20 stage may activate existing native files rather
-than install `apps/android-app` does not bypass the phone gate above.
+The narrow #162 signing-generation migration is a pre-Item20 prerequisite that may execute only under
+its explicit owner-approved destructive authorization and exact migration gates. Successful migration
+establishes the new Android signing generation; it does not create Item 20 acceptance or final release
+authority. #115 is closed `completed` only when its actual acceptance criteria are satisfied.
+
+The mutable-phone gate is satisfied for Item 20 only when #115 is closed `completed`.
+The physical item-20 window opens only after the Item 19 provider proof is complete **and** #115 is
+closed `completed`. Item 20 then opens a fresh one-at-a-time acceptance server session through the
+protected typed lifecycle under a distinct Item 20 ownership intent; the terminal Item 19 proof intent
+is never reused. The fact that an item-20 stage may activate existing native files rather than install
+`apps/android-app` does not bypass the phone gate above.
+
+After successful Item 20 physical acceptance, #135 records the exact
+`final_release_control_plane_sha` and closes `completed`. Only then may the owner issue the final
+`/release-tag vX.Y.Z <sha>` command on canonical tracker #90. The tag workflow independently rechecks
+#115, #135, the exact marker and exact main Quality before creating an annotated tag.
 
 The private execution satellite consumes canonical immutable identity/evidence; it does not define
 roadmap, architecture, release policy, provider desired state or acceptance policy.
