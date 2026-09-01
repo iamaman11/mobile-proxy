@@ -149,12 +149,15 @@ def check_repository(root: Path) -> list[str]:
         "inputs.release_tag",
         'tag_sha=$(git rev-list -n 1 "$VERIFIED_TAG")',
         'test "$tag_sha" = "$VERIFIED_SHA"',
-        '"git_sha": sha',
         "RELEASE_SHA: ${{ steps.tag.outputs.sha }}",
     )
     for token in required_release_tokens:
         if token not in release_workflow:
             errors.append(f"release publication workflow is missing exact tag-source token {token!r}")
+    if release_workflow.count('"git_sha": sha') != 2:
+        errors.append(
+            "release publication workflow is missing exact tag-source token binding in both manifest and provenance"
+        )
 
     required_order_doc_tokens = (
         "Version metadata is not release authority.",
