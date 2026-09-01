@@ -29,8 +29,7 @@ fn ensure_android_egress_files_dir(uid: u32) -> Result<()> {
         Ok(()) => {}
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to create {}", directory.display()));
+            return Err(error).with_context(|| format!("failed to create {}", directory.display()));
         }
     }
     if !directory.is_dir() {
