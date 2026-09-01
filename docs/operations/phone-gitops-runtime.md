@@ -1,257 +1,132 @@
 # Phone GitOps runtime checkpoint
 
-This document records the verified production-phone execution boundary. It is a safe canonical
-summary, not a source of credentials, device identifiers, workstation paths or raw device logs.
-The public repository remains the sole source of project architecture and policy; the private
-`iamaman11/mobile-proxy-production` repository is an execution satellite only.
+Status: **normative production-phone execution boundary**  
+Canonical repository: `iamaman11/mobile-proxy`  
+Private execution satellite: `iamaman11/mobile-proxy-production`
 
-Final release authority ordering is defined normatively in
-`docs/operations/final-release-authority-order.md` and
-`contracts/operations/final-release-authority-v1.json`.
+This document records safe canonical policy and bounded execution facts. It does not contain credentials, signer fingerprints, device identifiers, workstation paths, provider identifiers or raw device logs. The public repository remains the sole source of project architecture, workflow policy, release identity and acceptance policy; the private repository is execution-only.
+
+Final release authority ordering is defined by `docs/operations/final-release-authority-order.md` and `contracts/operations/final-release-authority-v1.json`.
 
 ## Verified production execution boundary
 
-The production phone path is:
-
 ```text
-immutable canonical source SHA
-  -> private mobile-proxy-production caller
+exact immutable canonical public SHA
+  -> thin private execution caller
   -> [self-hosted, Linux, X64, android-production] runner
-  -> dedicated unprivileged service identity
-  -> ADB transport to the registered physical phone
+  -> registered physical phone
   -> bounded private evidence
   -> safe canonical result
 ```
 
-The public repository has no self-hosted runner or ADB workflow. The runner belongs only to the
-private execution repository and has no Vultr credentials, unrelated GitHub PAT or normal-job
-administrative privilege. Its ADB access is bounded to the registered phone; it is not a discovery
-or "first attached device" mechanism.
+The public repository has no self-hosted runner or public ADB workflow. The private runner has no Vultr credentials or unrelated GitHub token authority. A registered-device proof is required immediately before every mutable phone operation; first-attached-device discovery is forbidden.
 
-The canonical read-only preflight proves all of the following without recording a raw serial:
+The canonical read-only preflight proves the required runner labels/tools, exactly one ADB-visible registered target, `adb get-state`, a read-only shell probe and `mutation_performed=false` without recording the raw device identifier.
 
-- the exact required runner labels;
-- required `adb`, `python`, `git` and `curl` tools;
-- exactly one ADB-visible device and exact match to the private registered-device secret;
-- successful `adb get-state` and a read-only shell probe;
-- bounded evidence with `mutation_performed=false`.
+## Android production role
 
-The registered-device proof is not a one-time bootstrap assertion. A mutable workflow must run it
-again immediately before each mutable phone operation.
+The Android app is **not the primary reverse-tunnel owner**. The normal `first_party_reverse_tunnel` mode is rooted/native and does not require an active Android VPN or APK-owned tunnel.
+
+The app is nevertheless a **managed production auxiliary component** for topologies that use `first_party_android_egress` / cellular `Network.bindSocket()` egress and for the app-owned WireGuard compatibility path. Therefore the statement “the production stack never installs the APK” is not valid globally.
+
+For a native topology that does not use an app function, APK installation is not a prerequisite. For a production topology that does use the Android auxiliary path, acceptance evidence must bind the exact canonical source SHA to the installed package, versionName/versionCode, signer-match boolean, retained signed artifact digest/provenance and resulting bounded runtime health. Signing continuity and managed update/migration are production lifecycle requirements for that topology.
 
 ## Android signing generation reset
 
-The original Android application uses package identity `com.example.mobileproxy`. The Android Git
-subtree at public tag `v0.1.3` and the subtree immediately before this migration work are identical,
-so `v0.1.3` is the immutable functional-source baseline for the signing-generation reset.
+The production package identity is `com.example.mobileproxy`. The historical installed application was built under an unrecoverable signing identity, so #162 defines the only authorized destructive signing-generation migration path. It retains the exact installed APK, proves the installed signer without publishing the fingerprint, installs a candidate signed by the private production identity, verifies the new generation, and retains rollback evidence. This narrow migration does not authorize unrelated phone/network/provider mutation.
 
-The historical installed application was built under an unrecoverable signing identity. Repository
-owner approval therefore explicitly authorizes a destructive signing-lineage reset: retain the exact
-installed signed APK, uninstall the old package, install a verified APK signed by the new private
-production identity, reprovision the new app UID, and establish a new durable signing generation.
-This authorization is narrow: it does not authorize unrelated phone, network, provider or runtime
-mutation.
-
-The new signing identity is stored only in private repository Actions secrets under these names:
-
-- `ANDROID_RELEASE_KEYSTORE_B64`
-- `ANDROID_RELEASE_KEYSTORE_PASSWORD`
-- `ANDROID_RELEASE_KEY_ALIAS`
-- `ANDROID_RELEASE_KEY_PASSWORD`
-
-A private offline proof has already demonstrated that the keystore opens, the alias is present, the
-private-key password is valid, and a temporary signature can be created and verified. Secret values,
-certificate fingerprints and secret-derived values are not canonical evidence.
+Signing secrets live only in the private repository Actions secret boundary. Public or canonical evidence records no keystore material, password, alias, signer fingerprint or secret-derived identifier.
 
 ### Version identity versus final release authority
 
-Repository release metadata and Android application metadata use one stable semantic version. For
-release `X.Y.Z`:
+For release `X.Y.Z`:
 
 - final Git tag, when later authorized: `vX.Y.Z`;
 - workspace package version: `X.Y.Z`;
 - Android `versionName`: `X.Y.Z`;
 - Android `versionCode`: `X * 1_000_000 + Y * 1_000 + Z`.
 
-The first candidate of the new signing generation uses Android identity `versionName=0.1.4` and
-`versionCode=1004`; the historical `versionName=1.1.0` / `versionCode=2` numbering is not reused.
-The workspace/Android `0.1.4` metadata may exist on a protected pre-release SHA so an exact signed
-migration candidate can be built and verified. That metadata does **not** itself create final release
-authority.
+The first candidate of the new signing generation is `versionName=0.1.4`, `versionCode=1004`. Version metadata may exist on the protected pre-release candidate so the exact signed migration candidate can be built and verified. Version metadata is not release authority.
 
-No final `v0.1.4` tag or GitHub Release is an input to the signing-generation migration. The migration
-is bound instead to an exact canonical SHA plus retained signed-candidate evidence from that same SHA.
-The protected annotated `v0.1.4` tag is an Item 21 output and remains forbidden until Item 20 physical
-acceptance has completed and the exact final release control-plane SHA is recorded in #135.
+No final `v0.1.4` tag or GitHub Release is an input to the signing-generation migration. The migration is bound to an exact canonical SHA plus retained signed-candidate evidence from that same SHA. The final tag remains forbidden until Item 20 accepts that same exact SHA and #135 records `final_accepted_candidate_sha`.
 
 ### Exact-app build proof
 
-The signing migration must not silently replace the application with different functional code.
-For the `0.1.4` migration candidate, canonical automation compares `apps/android-app` against
-`v0.1.3` and allows exactly one Android source-tree difference:
-`apps/android-app/app/build.gradle.kts`. That file may differ only because the release identity and
-production signing contract are being established. A Kotlin, manifest, resource, embedded library or
-other Android functional-source change causes the migration build to fail before phone mutation.
+The signed APK must be built off the phone runner from the exact immutable canonical SHA. Before any phone mutation it must prove:
 
-The signed APK must be built from the exact immutable canonical SHA off the phone runner. The build
-must verify:
-
-1. exact clean Git source and the `v0.1.3` Android functional baseline;
+1. exact clean canonical source;
 2. canonical package/version contract;
-3. private signing identity usability;
-4. signed release APK creation;
-5. APK signature validity and signer equality to the configured private key;
-6. APK package `com.example.mobileproxy`, `versionName=0.1.4`, `versionCode=1004`;
-7. exact typed BLAKE3 APK digest and bounded release evidence.
+3. private signing identity usability without exposing secret values;
+4. signed release APK creation and signature validity;
+5. candidate signer equals the configured private signer as a bounded boolean;
+6. package `com.example.mobileproxy`, `versionName=0.1.4`, `versionCode=1004`;
+7. exact typed artifact digest/provenance and retained candidate identity.
 
-Signing secrets belong only to this off-phone build/sign job. The self-hosted phone mutation job
-must receive the exact signed APK plus bounded typed-digest evidence, but no signing secrets.
+The phone mutation job receives the exact verified APK and bounded evidence, never signing secrets.
 
 ### Destructive migration and emergency rollback
 
-Before uninstalling the old package, the phone job must pull and retain the exact currently installed
-`base.apk`, record only its typed digest/version metadata, and verify the expected old package
-identity. This retained signed APK is the emergency migration rollback artifact. No old source is
-rebuilt.
+Before uninstalling the old package, the canonical migration must:
 
-Every uninstall, install and runtime-supervisor restart is separately preceded by the same-run
-registered-device proof. The mutation sequence is serialized per production phone:
+1. prove the registered device;
+2. pull and retain the exact installed `base.apk` privately;
+3. verify old package/version and prove its installed signer without publishing the fingerprint;
+4. re-run registered-device proof;
+5. only then uninstall/install the exact verified candidate;
+6. verify package/version/signer match and bounded local/runtime health;
+7. roll back automatically to the retained old APK on post-capture failure where the defined rollback path applies.
 
-```text
-verified 0.1.4 signed APK from exact canonical SHA
-  -> same-run registered-device proof
-  -> retain exact installed old signed APK
-  -> registered-device proof
-  -> uninstall old com.example.mobileproxy
-  -> registered-device proof
-  -> install exact verified 0.1.4 APK
-  -> verify package/version
-  -> registered-device proof
-  -> terminate only the exact current runtime-supervisor process
-  -> existing watchdog restarts runtime-supervisor
-  -> runtime-supervisor reprovisions the new Android UID
-  -> verify CellularEgressService + local egress/proxy ports
-  -> retain accepted 0.1.4 signed APK for future rollback
-```
+The migration does not reboot the phone, bounce mobile data or perform unrelated network mutation merely to establish the new signing generation. A rollback result never converts a failed migration into success.
 
-`deploy/device-runtime/module/service.sh` already owns runtime-supervisor through a watchdog. The
-migration therefore does not reboot the phone, bounce mobile data, alter routes or restart the whole
-runtime module. It terminates only the exact current `runtime-supervisor`; the watchdog restarts it,
-which resets its in-memory provisioning state and causes credentials to be provisioned for the new
-Android UID.
-
-If the new package cannot be installed or cannot reach the bounded local-health gate, the migration
-must attempt a fail-closed destructive rollback: remove any newly installed package, reinstall the
-exact retained old signed APK, restart only runtime-supervisor through the same watchdog mechanism,
-and verify the restored local egress path. A rollback result never converts a failed migration into a
-successful migration result.
-
-After the 0.1.4 candidate is accepted as the new signing generation, normal update/rollback lifecycle
-is inside the new signing generation. Future routine rollback uses a retained previously accepted APK
-signed by the new production key. The old signing generation is not an update-compatible rollback
-target; using its retained APK again would require another explicit destructive uninstall/install
-action and separate authority.
+After the new signing generation is accepted, routine update/rollback stays inside that generation using retained previously accepted signed artifacts. Re-entering the old signing generation is another destructive lineage transition and requires separate authority.
 
 ## Mutable phone gate
 
-This is a workflow-level phone-mutation gate, not only an APK-install gate. The explicit signing-lineage
-reset narrows the old signer-continuity blocker only for the exact canonical #162 migration workflow;
-it does not gate the public canonical provider-only Item 19 proof or grant unrelated mutable-phone
-authority.
+Before enabling any mutable phone workflow:
 
-Before enabling **any mutable phone workflow**, the workflow must satisfy all of these conditions:
+1. bind the action to one exact immutable canonical SHA/release tuple appropriate to that stage;
+2. verify the exact signed APK digest/package/version/signing evidence before ADB mutation when the topology uses the APK;
+3. run the registered-device preflight immediately before each mutable operation;
+4. serialize mutable commands per production phone;
+5. retain the exact rollback artifact instead of rebuilding an old revision;
+6. verify resulting installed/runtime state before acceptance;
+7. write only bounded non-secret evidence;
+8. keep provider lifecycle completely outside the phone runner.
 
-1. Bind the action to one exact immutable canonical source/release tuple appropriate to that stage.
-2. Verify the exact signed APK typed digest, package/version metadata and signing evidence before ADB
-   mutation.
-3. Run the registered-device preflight immediately before every mutable operation.
-4. Serialize mutable commands per production phone.
-5. Retain the exact previously accepted signed rollback APK; never rebuild an old revision during an
-   incident.
-6. Verify resulting installed state and bounded health before acceptance.
-7. Write only bounded non-secret evidence.
-8. Keep provider lifecycle completely outside the phone runner; the private runner must never receive
-   Vultr credentials or become provider-state authority.
+For #162 specifically, authority is the exact canonical SHA plus retained signed-candidate evidence; a final `v*` tag is absent and must not be required. For normal post-release update/rollback, authority is the accepted tagged release tuple.
 
-For the one-time #162 signing-generation migration specifically, the immutable authority is the exact
-canonical SHA plus retained signed-candidate evidence; a final `v*` tag is explicitly absent and must
-not be required. For later normal post-release update/rollback, the immutable authority is the final
-accepted tagged release tuple defined by the normal lifecycle.
+If any condition is missing, ambiguous or mismatched, the workflow stops before mutation.
 
-If any condition is missing, ambiguous or mismatched, the workflow must stop before mutation.
+## Item 19 / Item 20 handoff
 
-## Item 19 / item 20 handoff
+Item 19 provider proof is COMPLETE. It is historical provider-only evidence for candidate `d151dbdd156279e32a5361d304c90f996bd2d565`; that SHA is not active Item 20 release authority. The proof VM was deterministically cleaned up and its terminal ownership intent is never reused.
 
-Production Baseline item 19 proves the JIT Vultr **acceptance** lifecycle only from the public
-canonical GitHub-hosted control plane. Its live proof is provider-only and ephemeral: create at most
-one controlled VM, deploy and verify the exact candidate, then deterministically delete it and commit
-the durable terminal state. Item 19 performs no phone mutation and does not consume #115.
+The physical item-20 window opens only after the Item 19 provider proof is complete and the mutable-phone gate is satisfied. Item 20 then selects the exact current protected public `main` SHA as both `candidate_sha` and `control_plane_sha`, obtains fresh candidate-specific software/authority/preflight/provider evidence, freezes source identity, and opens the protected typed Item 20 acceptance lifecycle under a distinct Item 20 ownership intent.
 
-The narrow #162 signing-generation migration is a pre-Item20 prerequisite that may execute only under
-its explicit owner-approved destructive authorization and exact migration gates. Successful migration
-establishes the new Android signing generation; it does not create Item 20 acceptance or final release
-authority. #115 is closed `completed` only when its actual acceptance criteria are satisfied.
+A protected-main advance after admission invalidates the acceptance window. Item 20 does not inherit candidate-specific authority from historical Item 19 merely because the historical proof is valid.
 
-The mutable-phone gate is satisfied for Item 20 only when #115 is closed `completed`.
-The physical item-20 window opens only after the Item 19 provider proof is complete **and** #115 is
-closed `completed`. Item 20 then opens a fresh one-at-a-time acceptance server session through the
-protected typed lifecycle under a distinct Item 20 ownership intent; the terminal Item 19 proof intent
-is never reused. The fact that an item-20 stage may activate existing native files rather than install
-`apps/android-app` does not bypass the phone gate above.
+Fresh immutable `/accept-candidate <sha>` authority and Fresh `/vultr-readonly-preflight <sha>` evidence are required for the exact Item 20 candidate. private Item 20 phone execution must not call Vultr APIs.
 
-After successful Item 20 physical acceptance, #135 records the exact
-`final_release_control_plane_sha` and closes `completed`. Only then may the owner issue the final
-`/release-tag vX.Y.Z <sha>` command on canonical tracker #90. The tag workflow independently rechecks
-#115, #135, the exact marker and exact main Quality before creating an annotated tag.
-
-The private execution satellite consumes canonical immutable identity/evidence; it does not define
-roadmap, architecture, release policy, provider desired state or acceptance policy.
-
-### Protected Item 20 endpoint handoff design
-
-`contracts/operations/item20-private-handoff-v1.json` defines the future public-provider to
-private-phone transport handoff. The plaintext transport endpoint may cross the repository boundary
-only after the public typed lifecycle has resolved and verified the exact Item 20 provider target.
-The endpoint is transport data, never provider identity or mutation authority.
-
-The required handoff is:
+After successful physical acceptance, recovery repetitions and soak, #135 records exactly one `final_accepted_candidate_sha` and closes `completed`. Final release authority then requires:
 
 ```text
-verified Item 20 target
-  -> derived transport endpoint
-  -> seal candidate_sha + control_plane_sha + fresh session_nonce + endpoint
-     to a dedicated private-execution recipient public key
-  -> private workflow_dispatch carrying candidate_sha + control_plane_sha + session_nonce + ciphertext
-  -> private runner decrypts with ITEM20_HANDOFF_PRIVATE_KEY_B64
-  -> exact tuple verification on the private execution boundary
-  -> same-window registered-device preflight
-  -> bounded private Item 20 execution
+final_accepted_candidate_sha == exact protected main SHA == final tag target SHA == published artifact source SHA
 ```
 
-The plaintext envelope before sealing contains only `candidate_sha`, `control_plane_sha`, a fresh
-opaque session nonce and the derived transport endpoint. It must not contain provider UUID, Vultr
-credentials, phone credentials or another authority selector. The plaintext endpoint must never be a
-workflow input. Only sealed ciphertext may accompany the non-secret tuple in the private dispatch.
+Only then may the owner issue `/release-tag vX.Y.Z <sha>` on #90. The tag workflow independently rechecks #115, #135, the marker, exact protected-main equality and exact main Quality.
 
-A public handoff job may use the reserved `ITEM20_PHONE_HANDOFF_TOKEN` only as a narrowly scoped
-credential for `iamaman11/mobile-proxy-production`. Its required private-repository permission is
-exactly `Actions: write`. **`Secrets: write` and `Contents: write` are forbidden.** This prevents the
-public provider job from replacing private device/signing secrets or private repository content. The
-token must never be passed to the self-hosted phone runner.
+The private execution satellite consumes canonical immutable identity/evidence; it does not define roadmap, architecture, release policy, provider desired state or acceptance policy.
 
-The private handoff decryption key is a distinct private repository Actions secret named
-`ITEM20_HANDOFF_PRIVATE_KEY_B64`. The public job never receives that private key and never writes,
-updates or deletes any private repository secret. The implementation uses fail-closed tuple and nonce
-matching and deterministic provider cleanup even when private execution fails.
+## Protected Item 20 endpoint handoff design
 
-The plaintext endpoint, token, private decryption key and provider UUID must never be written to a
-public Issue, artifact, workflow output, step summary or log merely to bridge the two control planes.
-Private evidence also does not retain the plaintext endpoint after execution. Public terminal evidence
-may record only bounded non-secret identities/results such as exact candidate/control-plane identity,
-private workflow run identity/conclusion and provider terminal-cleanup confirmation.
+`contracts/operations/item20-private-handoff-v1.json` defines the future provider-to-phone transport handoff. `candidate_sha` and `control_plane_sha` remain explicit envelope fields for boundary verification, but their values must be exactly equal for the 10/10 window.
+
+The plaintext transport endpoint may cross the trust boundary only after the public typed lifecycle resolves and verifies the exact provider target. It is transport data, never provider identity or mutation authority.
+
+The sealed envelope contains only the same exact candidate/control-plane SHA, a fresh opaque session nonce and the derived endpoint. Provider UUID, provider credentials, phone credentials and other authority selectors are forbidden. The plaintext endpoint is never a workflow input or public evidence.
+
+The public handoff credential is narrowly scoped to dispatch into the private repository; private secret write and content write are forbidden. The private handoff decryption key remains private and is never available to the public job. Public terminal evidence is bounded to non-secret run/result identities and verified cleanup state.
 
 ## Private target-binding contract
 
-`ANDROID_PRODUCTION_SERIAL` is a separate private repository secret used only to bind ADB execution
-to the registered production phone. It must never be replaced by first-device discovery and must not
-be written to logs, artifacts or Issues.
+`ANDROID_PRODUCTION_SERIAL` is a private execution binding used only to select the registered production phone. It must never be replaced by first-device discovery and must not be written to logs, artifacts or Issues.
