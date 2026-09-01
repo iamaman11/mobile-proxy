@@ -13,6 +13,7 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(module)
 
 FINGERPRINT = "12" * 32
+BADGING = "package: name='com.example.mobileproxy' versionCode='1004' versionName='0.1.4'\n"
 
 
 class AndroidReleaseBuildDiagnosticTests(unittest.TestCase):
@@ -62,6 +63,7 @@ class AndroidReleaseBuildDiagnosticTests(unittest.TestCase):
             (["bash", "./gradlew", "--secret=value"], "Android Gradle release build subprocess failed"),
             (["/sdk/build-tools/37.0.0/apksigner", "verify", FINGERPRINT], "APK signature verification subprocess failed"),
             (["/sdk/build-tools/37.0.0/aapt", "dump", "private.apk"], "APK metadata verification subprocess failed"),
+            (["/sdk/build-tools/37.0.0/aapt2", "dump", "private.apk"], "APK metadata verification subprocess failed"),
             (["cargo", "run", "--", "private.apk"], "typed Android artifact digest subprocess failed"),
             (["unexpected-tool", "private-value"], "canonical Android release build or verification subprocess failed"),
         ]
@@ -88,6 +90,48 @@ class AndroidReleaseBuildDiagnosticTests(unittest.TestCase):
         self.assertNotIn(FINGERPRINT, message)
         self.assertNotIn("private-label", message)
         self.assertNotIn("password", message)
+
+    def test_apk_identity_prefers_aapt2(self) -> None:
+        with (
+            mock.patch.object(module, "resolve_android_build_tool", return_value="/sdk/aapt2") as resolve,
+            mock.patch.object(module, "run_checked", return_value=mock.Mock(stdout=BADGING)) as run,
+        ):
+            identity = module.read_apk_identity(Path("release.apk"))
+        self.assertEqual(identity, ("com.example.mobileproxy", 1004, "0.1.4"))
+        resolve.assert_called_once_with("aapt2")
+        self.assertEqual(run.call_args.args[0][0], "/sdk/aapt2")
+
+    def test_apk_identity_falls_back_to_legacy_aapt(self) -> None:
+        def resolve(name: str) -> str:
+            return f"/sdk/{name}"
+
+        with (
+            mock.patch.object(module, "resolve_android_build_tool", side_effect=resolve),
+            mock.patch.object(
+                module,
+                "run_checked",
+                side_effect=[
+                    module.AndroidBuildFailure("APK metadata verification subprocess failed"),
+                    mock.Mock(stdout=BADGING),
+                ],
+            ) as run,
+        ):
+            identity = module.read_apk_identity(Path("release.apk"))
+        self.assertEqual(identity, ("com.example.mobileproxy", 1004, "0.1.4"))
+        self.assertEqual(run.call_args_list[0].args[0][0], "/sdk/aapt2")
+        self.assertEqual(run.call_args_list[1].args[0][0], "/sdk/aapt")
+
+    def test_apk_identity_fails_closed_when_all_readers_fail(self) -> None:
+        with (
+            mock.patch.object(module, "resolve_android_build_tool", side_effect=lambda name: f"/sdk/{name}"),
+            mock.patch.object(
+                module,
+                "run_checked",
+                side_effect=module.AndroidBuildFailure("APK metadata verification subprocess failed"),
+            ),
+        ):
+            with self.assertRaisesRegex(module.AndroidBuildFailure, "APK metadata verification subprocess failed"):
+                module.read_apk_identity(Path("release.apk"))
 
 
 if __name__ == "__main__":
