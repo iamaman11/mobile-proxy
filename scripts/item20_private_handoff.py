@@ -28,7 +28,6 @@ from typing import Mapping, Protocol
 
 _CANONICAL_REPOSITORY = "iamaman11/mobile-proxy"
 _PRIVATE_REPOSITORY = "iamaman11/mobile-proxy-production"
-_IMMUTABLE_CANDIDATE = "d151dbdd156279e32a5361d304c90f996bd2d565"
 _PRIVATE_KEY_ENV = "ITEM20_HANDOFF_PRIVATE_KEY_B64"
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _NONCE_PATTERN = re.compile(r"^[0-9a-f]{32}$")
@@ -197,8 +196,8 @@ def build_envelope(
     control_plane_sha = validate_sha(control_plane_sha, "control-plane")
     session_nonce = validate_nonce(session_nonce)
     transport_endpoint = validate_endpoint(transport_endpoint)
-    if candidate_sha != _IMMUTABLE_CANDIDATE:
-        raise ValueError("candidate SHA does not match the protected Item 19 closeout")
+    if candidate_sha != control_plane_sha:
+        raise ValueError("candidate/control-plane SHA mismatch violates 10/10 single-SHA handoff identity")
     return {
         "format_version": 1,
         "candidate_sha": candidate_sha,
@@ -228,6 +227,10 @@ def parse_envelope(
     expected_control_plane_sha: str,
     expected_session_nonce: str,
 ) -> dict[str, object]:
+    expected_candidate_sha = validate_sha(expected_candidate_sha, "expected candidate")
+    expected_control_plane_sha = validate_sha(expected_control_plane_sha, "expected control-plane")
+    if expected_candidate_sha != expected_control_plane_sha:
+        raise ValueError("expected candidate/control-plane SHA mismatch violates 10/10 single-SHA handoff identity")
     try:
         decoded = json.loads(plaintext.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -237,9 +240,9 @@ def parse_envelope(
     canonical = serialize_envelope(decoded)
     if canonical != plaintext:
         raise ValueError("decrypted handoff envelope is not canonical JSON")
-    if decoded["candidate_sha"] != validate_sha(expected_candidate_sha, "expected candidate"):
+    if decoded["candidate_sha"] != expected_candidate_sha:
         raise ValueError("handoff candidate SHA does not match the expected tuple")
-    if decoded["control_plane_sha"] != validate_sha(expected_control_plane_sha, "expected control-plane"):
+    if decoded["control_plane_sha"] != expected_control_plane_sha:
         raise ValueError("handoff control-plane SHA does not match the expected tuple")
     if decoded["session_nonce"] != validate_nonce(expected_session_nonce):
         raise ValueError("handoff session nonce does not match the expected tuple")
