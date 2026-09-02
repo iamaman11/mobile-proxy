@@ -106,7 +106,7 @@ Related bounded normative artifacts:
 - [Evidence-Derived Control State Machine v1](docs/control-state-machine-v1.md)
 - [Transactional Operation State Machine v1](docs/operation-state-machine-v1.md)
 - [ADR-001: Bounded Contexts and Clean Dependency Rules](docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md)
-- [ADR-002: Cryptographic Hashing, Password Hashing and KDF Policy](docs/architecture/ADR-002-cryptographic-hashing-kdf-policy.md)
+- [ADR-002: Cryptographic Hashing, Password Hashing and KDF Policy](docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md)
 - [Architecture Quality Standard](docs/architecture/ARCHITECTURE_STANDARD.md)
 - [Digest Inventory and Migration Matrix](docs/architecture/digest-inventory-and-migration.md)
 - [Engineering Guardrails](docs/architecture/engineering-guardrails.md)
