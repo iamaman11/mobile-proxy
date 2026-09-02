@@ -4,6 +4,7 @@ from typing import Any, Iterable, NamedTuple
 
 
 CURRENT = "CURRENT"
+STALE = "STALE"
 UNKNOWN = object()
 
 
@@ -19,14 +20,26 @@ class FactConflict(RuntimeError):
     pass
 
 
-def _current_value(facts: Iterable[Fact], subject: str, predicate: str) -> Any:
-    values = [
-        fact.value
+def _facts_for(
+    facts: Iterable[Fact],
+    subject: str,
+    predicate: str,
+    lifecycle: str = CURRENT,
+) -> list[Fact]:
+    return [
+        fact
         for fact in facts
-        if fact.subject == subject and fact.predicate == predicate and fact.lifecycle == CURRENT
+        if fact.subject == subject
+        and fact.predicate == predicate
+        and fact.lifecycle == lifecycle
     ]
-    if not values:
+
+
+def _current_value(facts: Iterable[Fact], subject: str, predicate: str) -> Any:
+    matches = _facts_for(facts, subject, predicate)
+    if not matches:
         return UNKNOWN
+    values = [fact.value for fact in matches]
     first = values[0]
     if any(value != first for value in values[1:]):
         raise FactConflict(f"conflicting current facts for {subject}.{predicate}")
@@ -132,62 +145,143 @@ def derive_source_fetch_state(facts: Iterable[Fact]) -> str:
     return mapping.get(result, "SOURCE_FETCH_UNOBSERVED")
 
 
-def derive_phone_access_state(facts: Iterable[Fact]) -> str:
-    predicates = {
-        "adb_tool_available",
-        "adb_inventory_valid",
-        "adb_device_count",
-        "registered_device_match",
-        "registered_device_inventory_state",
-        "adb_get_state",
-        "adb_shell_probe",
-    }
-    if _has_conflict(facts, "phone", predicates):
-        return "PHONE_ACCESS_CONFLICT"
+_PHONE_ACCESS_PREDICATES = (
+    "adb_tool_available",
+    "adb_inventory_valid",
+    "adb_device_count",
+    "registered_device_match",
+    "registered_device_inventory_state",
+    "adb_get_state",
+    "adb_shell_probe",
+)
 
-    adb_tool = _current_value(facts, "phone", "adb_tool_available")
-    if adb_tool is UNKNOWN:
-        return "PHONE_ACCESS_UNOBSERVED"
-    if adb_tool is False:
+
+def _phone_probe_values(
+    facts: Iterable[Fact], lifecycle: str
+) -> tuple[dict[str, Any], str] | None:
+    selected: dict[str, Fact] = {}
+    source_ref: str | None = None
+
+    for predicate in _PHONE_ACCESS_PREDICATES:
+        matches = _facts_for(facts, "phone", predicate, lifecycle)
+        if not matches:
+            return None
+        values = {fact.value for fact in matches}
+        if len(values) != 1:
+            if lifecycle == CURRENT:
+                raise FactConflict(f"conflicting current facts for phone.{predicate}")
+            return None
+        refs = {fact.source_ref for fact in matches}
+        if len(refs) != 1 or "" in refs:
+            return None
+        this_ref = next(iter(refs))
+        if source_ref is None:
+            source_ref = this_ref
+        elif this_ref != source_ref:
+            return None
+        selected[predicate] = matches[0]
+
+    assert source_ref is not None
+    return ({predicate: fact.value for predicate, fact in selected.items()}, source_ref)
+
+
+def _classify_phone_probe(values: dict[str, Any]) -> str:
+    if values["adb_tool_available"] is not True:
         return "ADB_TOOL_UNAVAILABLE"
-
-    inventory_valid = _current_value(facts, "phone", "adb_inventory_valid")
-    if inventory_valid is UNKNOWN:
-        return "PHONE_ACCESS_UNOBSERVED"
-    if inventory_valid is False:
+    if values["adb_inventory_valid"] is not True:
         return "ADB_INVENTORY_INVALID"
 
-    count = _current_value(facts, "phone", "adb_device_count")
-    if count is UNKNOWN:
-        return "PHONE_ACCESS_UNOBSERVED"
+    count = values["adb_device_count"]
     if count == 0:
         return "ADB_ZERO_DEVICES"
     if count != 1:
         return "ADB_MULTIPLE_DEVICES"
-
-    registered_match = _current_value(facts, "phone", "registered_device_match")
-    if registered_match is UNKNOWN:
-        return "PHONE_ACCESS_UNOBSERVED"
-    if registered_match is False:
+    if values["registered_device_match"] is not True:
         return "ADB_WRONG_DEVICE"
-
-    inventory_state = _current_value(facts, "phone", "registered_device_inventory_state")
-    if inventory_state is UNKNOWN:
-        return "PHONE_ACCESS_UNOBSERVED"
-    if inventory_state != "device":
+    if values["registered_device_inventory_state"] != "device":
         return "ADB_REGISTERED_DEVICE_OFFLINE"
-
-    get_state = _current_value(facts, "phone", "adb_get_state")
-    if get_state is UNKNOWN:
-        return "PHONE_ACCESS_UNOBSERVED"
-    if get_state != "device":
+    if values["adb_get_state"] != "device":
         return "ADB_GET_STATE_FAILED"
-
-    shell_probe = _current_value(facts, "phone", "adb_shell_probe")
-    if shell_probe is UNKNOWN:
-        return "PHONE_ACCESS_UNOBSERVED"
-    if shell_probe is not True:
+    if values["adb_shell_probe"] is not True:
         return "ADB_SHELL_FAILED"
+    return "PHONE_ACCESS_PROVEN"
+
+
+def derive_phone_access_state(facts: Iterable[Fact]) -> str:
+    try:
+        current_probe = _phone_probe_values(facts, CURRENT)
+    except FactConflict:
+        return "PHONE_ACCESS_CONFLICT"
+
+    if current_probe is not None:
+        values, _ = current_probe
+        return _classify_phone_probe(values)
+
+    stale_probe = _phone_probe_values(facts, STALE)
+    if stale_probe is not None:
+        values, _ = stale_probe
+        if _classify_phone_probe(values) == "PHONE_ACCESS_PROVEN":
+            return "PHONE_ACCESS_STALE"
+
+    # Partial observations can still prove a specific fail-closed condition, but
+    # only if all facts used for that conclusion come from one bounded probe.
+    current_phone_facts = [
+        fact
+        for fact in facts
+        if fact.subject == "phone"
+        and fact.lifecycle == CURRENT
+        and fact.predicate in _PHONE_ACCESS_PREDICATES
+    ]
+    refs = {fact.source_ref for fact in current_phone_facts}
+    if not current_phone_facts or len(refs) != 1 or "" in refs:
+        return "PHONE_ACCESS_UNOBSERVED"
+
+    try:
+        adb_tool = _current_value(facts, "phone", "adb_tool_available")
+        if adb_tool is False:
+            return "ADB_TOOL_UNAVAILABLE"
+        if adb_tool is UNKNOWN:
+            return "PHONE_ACCESS_UNOBSERVED"
+
+        inventory_valid = _current_value(facts, "phone", "adb_inventory_valid")
+        if inventory_valid is False:
+            return "ADB_INVENTORY_INVALID"
+        if inventory_valid is UNKNOWN:
+            return "PHONE_ACCESS_UNOBSERVED"
+
+        count = _current_value(facts, "phone", "adb_device_count")
+        if count is UNKNOWN:
+            return "PHONE_ACCESS_UNOBSERVED"
+        if count == 0:
+            return "ADB_ZERO_DEVICES"
+        if count != 1:
+            return "ADB_MULTIPLE_DEVICES"
+
+        registered_match = _current_value(facts, "phone", "registered_device_match")
+        if registered_match is False:
+            return "ADB_WRONG_DEVICE"
+        if registered_match is UNKNOWN:
+            return "PHONE_ACCESS_UNOBSERVED"
+
+        inventory_state = _current_value(facts, "phone", "registered_device_inventory_state")
+        if inventory_state is UNKNOWN:
+            return "PHONE_ACCESS_UNOBSERVED"
+        if inventory_state != "device":
+            return "ADB_REGISTERED_DEVICE_OFFLINE"
+
+        get_state = _current_value(facts, "phone", "adb_get_state")
+        if get_state is UNKNOWN:
+            return "PHONE_ACCESS_UNOBSERVED"
+        if get_state != "device":
+            return "ADB_GET_STATE_FAILED"
+
+        shell_probe = _current_value(facts, "phone", "adb_shell_probe")
+        if shell_probe is UNKNOWN:
+            return "PHONE_ACCESS_UNOBSERVED"
+        if shell_probe is not True:
+            return "ADB_SHELL_FAILED"
+    except FactConflict:
+        return "PHONE_ACCESS_CONFLICT"
 
     return "PHONE_ACCESS_PROVEN"
 
@@ -221,6 +315,21 @@ def derive_failure_stage(facts: Iterable[Fact]) -> str | None:
     return None
 
 
+def derive_blocking_predicates(facts: Iterable[Fact]) -> list[str]:
+    facts = tuple(facts)
+    blockers: list[str] = []
+
+    failure_stage = derive_failure_stage(facts)
+    if failure_stage == "SOURCE_FETCH":
+        return ["source_fetch=SOURCE_FETCH_SUCCEEDED"]
+
+    phone_access = derive_phone_access_state(facts)
+    if phone_access != "PHONE_ACCESS_PROVEN":
+        blockers.append(f"phone_access={phone_access}")
+
+    return blockers
+
+
 def derive_snapshot(facts: Iterable[Fact]) -> dict[str, Any]:
     facts = tuple(facts)
     mutation_performed = _current_value(facts, "run", "mutation_performed")
@@ -234,5 +343,6 @@ def derive_snapshot(facts: Iterable[Fact]) -> dict[str, Any]:
         "source_fetch": derive_source_fetch_state(facts),
         "phone_access": derive_phone_access_state(facts),
         "failure_stage": derive_failure_stage(facts),
+        "blocking_predicates": derive_blocking_predicates(facts),
         "mutation_performed": mutation_performed,
     }
