@@ -22,9 +22,9 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "The sole canonical roadmap for current development is:",
         "There is one sequential development direction",
         "blocking prerequisite for further application growth",
-        "UNKNOWN_EXECUTION_OUTCOME",
+        "explicit ambiguous execution outcome",
         "re-observation",
-        "Protect boundaries, not the current instance",
+        "protect boundaries, not the current instance",
         "do not add a checker only to verify another checker/test exists or ran",
     ),
     BASELINE: (
@@ -34,13 +34,13 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "Operation execution result, independent postcondition verification and evidence persistence are separate dimensions.",
         "UNKNOWN_EXECUTION_OUTCOME",
         "Do not verify verification.",
-        "Protect boundaries, not bootstrap state",
+        "protect boundaries, not bootstrap state",
     ),
     ARCHITECTURE: (
         "one primary developer",
         "No code for code",
         "Do not verify verification",
-        "physical-device-control foundation",
+        "Physical-device-control foundation",
         "Protect boundaries, not bootstrap state",
     ),
     OPERATION: (
