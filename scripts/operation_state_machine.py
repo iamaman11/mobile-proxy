@@ -73,6 +73,39 @@ ANDROID_CAPABILITY_CERTIFICATION = OperationContract(
 )
 
 
+ANDROID_FILESYSTEM_CERTIFICATION = OperationContract(
+    operation_id="android.filesystem-certification.v1",
+    target="android-production",
+    steps=(
+        StepContract("source_quality", "VERIFY", "SOURCE_AUTHORITY"),
+        StepContract("runner_assignment", "OBSERVE", "RUNNER_ASSIGNMENT"),
+        StepContract("source_delivery", "VERIFY", "SOURCE_FETCH"),
+        StepContract("phone_access_initial", "VERIFY", "ADB_SHELL"),
+        StepContract("capability_inventory", "VERIFY", "CAPABILITY"),
+        StepContract("mutation_lock", "VERIFY", "MUTATION_LOCK"),
+        StepContract(
+            "phone_access_boundary",
+            "VERIFY",
+            "MUTATION_BOUNDARY",
+            mutation_boundary=True,
+        ),
+        StepContract("scratch_roundtrip", "MUTATE", "MUTATION_EXECUTION", destructive=True),
+        StepContract("scratch_atomic_replace", "MUTATE", "MUTATION_EXECUTION", destructive=True),
+        StepContract("managed_root_write", "MUTATE", "MUTATION_EXECUTION", destructive=True),
+        StepContract("managed_atomic_replace", "MUTATE", "MUTATION_EXECUTION", destructive=True),
+        StepContract("cleanup_verify", "VERIFY", "POSTCONDITION"),
+        StepContract("accept", "ACCEPT", "POSTCONDITION", acceptance=True),
+    ),
+    recovery_steps=(
+        StepContract("recovery_cleanup_scratch", "RECOVER", "RECOVERY", destructive=True),
+        StepContract("recovery_cleanup_managed", "RECOVER", "RECOVERY", destructive=True),
+        StepContract("recovery_verify_absent", "VERIFY", "RECOVERY", acceptance=True),
+    ),
+    retryable=False,
+    rollback_to_legacy_allowed=False,
+)
+
+
 ANDROID_CURRENT_SOURCE_CLEAN_INSTALL = OperationContract(
     operation_id="android.current-source-clean-install.v1",
     target="android-production",
@@ -119,6 +152,7 @@ _OPERATION_CONTRACTS = {
     for contract in (
         ANDROID_PHONE_ACCESS_CERTIFICATION,
         ANDROID_CAPABILITY_CERTIFICATION,
+        ANDROID_FILESYSTEM_CERTIFICATION,
         ANDROID_CURRENT_SOURCE_CLEAN_INSTALL,
     )
 }
