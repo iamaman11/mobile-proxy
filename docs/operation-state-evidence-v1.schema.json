@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iamaman11/mobile-proxy/docs/operation-state-evidence-v1.schema.json",
+  "title": "mobile-proxy operation state evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "operation_id",
+    "target",
+    "transaction_id",
+    "generated_at",
+    "phase_evidence",
+    "derived"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "operation_id": {
+      "type": "string",
+      "enum": [
+        "android.phone-access-certification.v1",
+        "android.capability-certification.v1",
+        "android.current-source-clean-install.v1"
+      ]
+    },
+    "target": { "const": "android-production" },
+    "transaction_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "phase_evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/phaseEvidence" }
+    },
+    "derived": { "$ref": "#/$defs/derived" }
+  },
+  "$defs": {
+    "phaseEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id",
+        "status",
+        "transaction_id",
+        "source_ref",
+        "authority",
+        "lifecycle"
+      ],
+      "properties": {
+        "step_id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["PASSED", "FAILED", "SKIPPED"] },
+        "transaction_id": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "authority": { "type": "string", "enum": ["CONTROL", "DIAGNOSTIC", "AUDIT"] },
+        "lifecycle": { "type": "string", "enum": ["CURRENT", "STALE", "SUPERSEDED", "CONFLICT", "INVALID"] }
+      }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "transaction_id",
+        "state",
+        "current_step",
+        "next_step",
+        "failure_stage",
+        "destructive_started",
+        "recovery_required",
+        "blocking_predicates"
+      ],
+      "properties": {
+        "operation_id": { "type": "string", "minLength": 1 },
+        "transaction_id": { "type": "string", "minLength": 1 },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PREPARING",
+            "READY_FOR_BOUNDARY_REPROOF",
+            "READY_TO_MUTATE",
+            "TRANSACTION_ACTIVE",
+            "ACCEPTED",
+            "REFUSED",
+            "RECOVERY_REQUIRED",
+            "RECOVERING",
+            "RECOVERED",
+            "QUARANTINED",
+            "CONFLICT",
+            "INVALID_TRACE"
+          ]
+        },
+        "current_step": { "type": ["string", "null"] },
+        "next_step": { "type": ["string", "null"] },
+        "failure_stage": {
+          "type": ["string", "null"],
+          "enum": [
+            null,
+            "SOURCE_AUTHORITY",
+            "RUNNER_ASSIGNMENT",
+            "SOURCE_FETCH",
+            "ADB_SHELL",
+            "CAPABILITY",
+            "ARTIFACT",
+            "MUTATION_LOCK",
+            "MUTATION_BOUNDARY",
+            "MUTATION_EXECUTION",
+            "POSTCONDITION",
+            "STRUCTURAL_ACCEPTANCE",
+            "FUNCTIONAL_ACCEPTANCE",
+            "RECOVERY"
+          ]
+        },
+        "destructive_started": { "type": ["boolean", "null"] },
+        "recovery_required": { "type": "boolean" },
+        "blocking_predicates": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
