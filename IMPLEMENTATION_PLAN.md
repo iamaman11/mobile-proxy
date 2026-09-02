@@ -10,17 +10,42 @@ All work must begin by reading that document. It defines the active delivery ord
 
 Status: **temporary execution focus**  
 Activated: **2026-08-30**  
+Updated: **2026-09-03 — fact-first execution doctrine promoted**  
 Authority: subordinate to `docs/PRODUCTION_BASELINE_PLAN.md` and current repository state  
 Removal condition: delete this entire section after software-complete release-candidate acceptance is recorded on one immutable Git SHA, or when an explicit product decision supersedes this focus.
 
 The state-ownership governance slice is complete. The current priority is now to produce, exercise and accept a functional production-baseline candidate before undertaking further architecture or governance expansion.
 
-Current execution order:
+### Fact-first execution spine
+
+The existing evidence-derived state machines are the execution spine for all further production work:
+
+- [`docs/control-state-machine-v1.md`](docs/control-state-machine-v1.md) answers **what is independently proven right now?**;
+- [`docs/operation-state-machine-v1.md`](docs/operation-state-machine-v1.md) answers **what exact phase may execute next in this transaction?**.
+
+Development MUST advance from the current `CONTROL` projection and exact blocking predicates, not from remembered state, issue narrative, workflow names, a green job, or an assumption that the phone/runtime/provider is globally ready.
+
+The active working rules are:
+
+1. Current production state is derived from current, scoped `CONTROL` evidence. Where the operation contract requires durable evidence, state promotion also requires successful durable persistence of that exact bounded evidence.
+2. **Operation execution result**, **independent postcondition verification**, and **evidence persistence** are three separate dimensions. Success in one does not imply success in either of the others.
+3. `UNKNOWN`, `STALE`, `CONFLICT`, invalid scope, other-transaction evidence and required-but-unpersisted evidence fail closed and cannot advance production state.
+4. No phone, runtime, VM or provider is globally `READY`. Authority is operation-specific, exact-SHA, exact-transaction and, for mutation, exact-boundary scoped.
+5. Every mutation follows `OBSERVE -> VERIFY -> MUTATE -> INDEPENDENTLY VERIFY -> ACCEPT`. Any unresolved post-boundary state enters explicit recovery or quarantine; recovery never silently becomes acceptance.
+6. Phone access is re-proved immediately before a destructive boundary in the exact mutating job. A canonical source SHA advance invalidates prior SHA-bound phone admission for subsequent production execution.
+7. The private execution repository transports commands, secrets and bounded evidence; it does not manufacture project truth or reinterpret the public state machine.
+8. Android is the first adapter to be proven end to end. VM/provider generalization comes only after the phone baseline demonstrates which operation primitives are actually reusable.
+
+This doctrine is not a new parallel architecture. It promotes the already implemented `control_state_machine.py` and `operation_state_machine.py` contracts as the normal way the project reasons about reality.
+
+### Current execution order
 
 1. Treat non-essential architecture/governance framework expansion as temporarily closed.
-2. Resume the first unfinished delivery item in Section 6 of the Production Baseline Plan and close only evidence-backed production gaps that block a software-complete candidate.
-3. Complete all source-controlled and process-testable integrity, recovery, health, tunnel, proxy and rollback evidence required by the baseline on one unchanged candidate SHA.
-4. Exercise the complete product path end to end:
+2. Close evidence-reliability blockers first so a valid observation or mutation cannot be promoted merely because its workflow completed; bounded persistence failure must remain explicit and fail closed.
+3. Complete the Android adapter as evidence-backed vertical slices: current-SHA phone access -> capability inventory -> bounded filesystem certification and recovery.
+4. Move APK/signing work through the same transaction model: exact signed candidate -> pre-mutation observation -> boundary reproof -> controlled package mutation -> independent signer/version/digest verification -> explicit recovery/quarantine on uncertainty.
+5. Move native runtime deployment through the same model: materialize exact generation -> verify integrity/current binding -> start -> structural health -> bounded functional probe -> restart/rehydration -> recovery proof.
+6. Exercise the complete product data path on one unchanged candidate SHA:
 
    ```text
    startup
@@ -35,11 +60,13 @@ Current execution order:
      -> restore / rollback
    ```
 
-5. Record software-complete acceptance on that immutable SHA.
-6. Run the documented physical-phone acceptance on the same candidate when the physical execution boundary is available.
-7. Only after the functional baseline is accepted, perform a fresh architecture re-audit and authorize further refactoring only for demonstrated problems or measured change cost.
+7. Execute the required failure/restart/recovery matrix and soak only while exact candidate identity and current authority remain valid; re-derive blockers after every transition instead of carrying narrative readiness forward.
+8. Record software-complete and physical acceptance only from the same immutable candidate with all required durable evidence, then follow the protected release ordering in the Production Baseline Plan.
+9. Only after the functional phone baseline is accepted, generalize the proven operation primitives to VM/provider adapters and perform a fresh architecture re-audit. Do not create a speculative generic execution framework before the Android evidence shows what is actually common.
 
-At activation time, known incomplete evidence includes the remaining explicit SQLite startup/integrity-corruption check represented by `PERSIST-002`, the health-surface split represented by `OPS-003`, and any later Production Baseline acceptance items that remain incomplete. Backup plus clean restore/process recovery already have permanent test coverage; this sentence is orientation only, not a second backlog. The Production Baseline Plan, invariant matrix and current repository state always win.
+The ordering above is an execution discipline inside the active Production Baseline. It does not waive or reorder mandatory Item 20 provider, signing, acceptance or release-authority gates defined by `docs/PRODUCTION_BASELINE_PLAN.md`; the stricter prerequisite always wins.
+
+At activation time, known incomplete evidence includes the remaining explicit SQLite startup/integrity-corruption check represented by `PERSIST-002`, the health-surface split represented by `OPS-003`, and any later Production Baseline acceptance items that remain incomplete. Backup plus clean restore/process recovery already have permanent test coverage; this sentence is orientation only, not a second backlog. The Production Baseline Plan, invariant matrix, current `CONTROL` projection and repository state always win.
 
 ### Temporary architecture freeze
 
@@ -66,6 +93,8 @@ The future document is not an active backlog and does not authorize implementati
 
 Related bounded normative artifacts:
 
+- [Evidence-Derived Control State Machine v1](docs/control-state-machine-v1.md)
+- [Transactional Operation State Machine v1](docs/operation-state-machine-v1.md)
 - [ADR-001: Bounded Contexts and Clean Dependency Rules](docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md)
 - [ADR-002: Cryptographic Hashing, Password Hashing and KDF Policy](docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md)
 - [Architecture Quality Standard](docs/architecture/ARCHITECTURE_STANDARD.md)
@@ -78,4 +107,4 @@ Related bounded normative artifacts:
 - [Machine-readable State Ownership](contracts/governance/state-ownership-v1.json)
 - [Protected Proxy Compatibility Contract](contracts/compatibility/proxy-surface-v1.json)
 
-Repository state and the canonical baseline plan take precedence over external checkpoints, chat history, private execution-satellite content or remembered intent.
+Repository state, the canonical baseline plan and current machine-derived evidence take precedence over external checkpoints, chat history, private execution-satellite content or remembered intent.
