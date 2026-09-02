@@ -201,7 +201,7 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
     ) -> None:
         inventory.return_value = self._inventory()
 
-        report = MODULE.certify("g" * 40, "tx-quarantine-fallback")
+        report = MODULE.certify("1" * 40, "tx-quarantine-fallback")
 
         self.assertFalse(report["accepted"])
         self.assertEqual(report["state"], "QUARANTINED")
