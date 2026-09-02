@@ -48,11 +48,12 @@ trust boundary.
 The private Linux runner is a .NET process. If the WSL network advertises IPv6 but cannot complete
 TLS to GitHub Actions endpoints over IPv6, the runner can remain locally active while GitHub marks
 it offline. `mobile-proxy-phone-runner-ipv4-only.conf` scopes
-`DOTNET_SYSTEM_NET_DISABLEIPV6=1` and `DOTNET_SYSTEM_NET_SECURITY_DISABLETLSRESUME=1` to that one
-systemd unit. The latter avoids a TLS-terminating network path aborting a resumed .NET `SslStream`
-session. Neither setting disables IPv6 globally or changes any phone network setting. The matching
-installer verifies the expected unprivileged runner identity, installs the drop-in and restarts only
-the runner listener.
+`DOTNET_SYSTEM_NET_DISABLEIPV6=1`, `DOTNET_SYSTEM_NET_SECURITY_DISABLETLSRESUME=1` and
+`DOTNET_SYSTEM_NET_HTTP_SOCKETSHTTPHANDLER_HTTP2SUPPORT=0` to that one systemd unit. The latter two
+avoid a TLS-terminating network path aborting a resumed .NET `SslStream` session or an HTTP/2 Actions
+broker channel; HTTPS over HTTP/1.1 remains available. Neither setting disables IPv6 globally or
+changes any phone network setting. The matching installer verifies the expected unprivileged runner
+identity, installs the drop-in and restarts only the runner listener.
 
 The override is appropriate only after confirming the failure mode: GitHub Actions TLS works over
 IPv4 and fails over IPv6 for the same runner identity. Its rollback is removal of the exact systemd
