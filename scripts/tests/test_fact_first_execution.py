@@ -74,9 +74,9 @@ class FactFirstExecutionTests(unittest.TestCase):
             copy_surfaces(root)
             path = root / "docs/PRODUCTION_BASELINE_PLAN.md"
             body = path.read_text(encoding="utf-8")
-            evidence = body.index("**Evidence reliability**")
-            filesystem = body.index("**Android filesystem**")
-            body = body[:evidence] + body[filesystem:evidence] + body[evidence:filesystem] + body[filesystem:]
+            body = body.replace("**Evidence reliability**", "__FACT_FIRST_EVIDENCE__", 1)
+            body = body.replace("**Android filesystem**", "**Evidence reliability**", 1)
+            body = body.replace("__FACT_FIRST_EVIDENCE__", "**Android filesystem**", 1)
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("delivery sequence is out of order" in error for error in errors))
