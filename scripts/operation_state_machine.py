@@ -185,7 +185,12 @@ def _first_failed(
 def _destructive_started(
     steps: tuple[StepContract, ...], statuses: dict[str, str]
 ) -> bool:
-    return any(step.destructive and statuses.get(step.step_id) == PASSED for step in steps)
+    # A failed destructive command can have partially mutated the target. Treat both
+    # PASSED and FAILED destructive execution as crossing the recovery boundary.
+    return any(
+        step.destructive and statuses.get(step.step_id) in {PASSED, FAILED}
+        for step in steps
+    )
 
 
 def _passed_later_step_before_required_predecessor(
@@ -311,7 +316,7 @@ def derive_operation_state(
             "operation_id": contract.operation_id,
             "transaction_id": transaction_id,
             "state": "ACCEPTED",
-            "current_step": "accept",
+            "current_step": contract.steps[-1].step_id if contract.steps else None,
             "next_step": None,
             "failure_stage": None,
             "destructive_started": destructive_started,
