@@ -12,20 +12,27 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORTED = "SUPPORTED"
-UNSUPPORTED = "UNSUPPORTED"
-UNKNOWN = "UNKNOWN"
 _OPERATION_ID = "android.filesystem-tooling-compatibility.v1"
-_PROBE_STATES = frozenset({SUPPORTED, UNSUPPORTED, UNKNOWN})
-
 _SCRIPT_DIR = Path(__file__).resolve().parent
-_PREFLIGHT_PATH = _SCRIPT_DIR / "run_private_phone_preflight.py"
-_SPEC = importlib.util.spec_from_file_location("run_private_phone_preflight", _PREFLIGHT_PATH)
-if _SPEC is None or _SPEC.loader is None:
-    raise RuntimeError("unable to load canonical phone preflight")
-_PREFLIGHT = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_PREFLIGHT)
 
+
+def _load_module(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, _SCRIPT_DIR / filename)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load canonical module: {filename}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_PREFLIGHT = _load_module("run_private_phone_preflight", "run_private_phone_preflight.py")
+_COMPARATOR = _load_module("android_filesystem_comparator", "android_filesystem_comparator.py")
+
+SUPPORTED = _COMPARATOR.SUPPORTED
+UNSUPPORTED = _COMPARATOR.UNSUPPORTED
+UNKNOWN = _COMPARATOR.UNKNOWN
+_COMPARATOR_PROBES = _COMPARATOR.COMPARATOR_PROBES
 
 _TOOL_PRESENCE = (
     "cp",
@@ -35,21 +42,6 @@ _TOOL_PRESENCE = (
     "rm",
     "mkdir",
     "test",
-)
-
-_COMPARATOR_PROBES = {
-    "cmp_present": "command -v cmp >/dev/null 2>&1",
-    "cmp_exact_invocation": "cmp -s -- /dev/null /dev/null >/dev/null 2>&1",
-    "toybox_present": "command -v toybox >/dev/null 2>&1",
-    "toybox_cmp_exact_invocation": "toybox cmp -s /dev/null /dev/null >/dev/null 2>&1",
-    "busybox_present": "command -v busybox >/dev/null 2>&1",
-    "busybox_cmp_exact_invocation": "busybox cmp -s /dev/null /dev/null >/dev/null 2>&1",
-}
-
-_COMPARATOR_CANDIDATES = (
-    ("cmp", "cmp_present", "cmp_exact_invocation"),
-    ("toybox_cmp", "toybox_present", "toybox_cmp_exact_invocation"),
-    ("busybox_cmp", "busybox_present", "busybox_cmp_exact_invocation"),
 )
 
 
@@ -77,38 +69,10 @@ def _probe(serial: str, command: str, *, root: bool, timeout: int = 10) -> str:
 
 
 def _select_comparator(probes: dict[str, str]) -> tuple[str, str]:
-    """Select the first comparator whose exact canonical invocation is proven.
-
-    Presence probes are supporting evidence, not success criteria. A present comparator
-    whose exact invocation is unsupported must not block a later compatible fallback.
-    UNKNOWN is returned only when no compatible comparator is proven and at least one
-    candidate still has an unresolved exact invocation that is not already proven absent.
-    """
-
-    unresolved_candidate = False
-    for selected, present_key, invocation_key in _COMPARATOR_CANDIDATES:
-        presence = probes[present_key]
-        invocation = probes[invocation_key]
-        if presence not in _PROBE_STATES or invocation not in _PROBE_STATES:
-            raise ToolingDiagnosticFailure(
-                f"invalid comparator probe state for {selected}: "
-                f"presence={presence!r}, invocation={invocation!r}"
-            )
-
-        # Exact invocation success is the strongest compatibility evidence and is
-        # sufficient even if a separate presence probe was inconclusive.
-        if invocation == SUPPORTED:
-            return selected, SUPPORTED
-
-        # If presence is conclusively absent, an UNKNOWN invocation cannot keep this
-        # candidate unresolved. Likewise, an explicit invocation failure is conclusive
-        # incompatibility for the canonical comparator path.
-        if invocation == UNKNOWN and presence != UNSUPPORTED:
-            unresolved_candidate = True
-
-    if unresolved_candidate:
-        return "UNKNOWN", UNKNOWN
-    return "NONE", UNSUPPORTED
+    try:
+        return _COMPARATOR.select_comparator(probes)
+    except _COMPARATOR.ComparatorContractFailure as error:
+        raise ToolingDiagnosticFailure(str(error)) from error
 
 
 def _scope_probe(serial: str, *, root: bool) -> dict[str, Any]:
