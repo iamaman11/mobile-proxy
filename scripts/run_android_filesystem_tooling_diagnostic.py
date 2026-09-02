@@ -16,6 +16,7 @@ SUPPORTED = "SUPPORTED"
 UNSUPPORTED = "UNSUPPORTED"
 UNKNOWN = "UNKNOWN"
 _OPERATION_ID = "android.filesystem-tooling-compatibility.v1"
+_PROBE_STATES = frozenset({SUPPORTED, UNSUPPORTED, UNKNOWN})
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PREFLIGHT_PATH = _SCRIPT_DIR / "run_private_phone_preflight.py"
@@ -45,6 +46,12 @@ _COMPARATOR_PROBES = {
     "busybox_cmp_exact_invocation": "busybox cmp -s /dev/null /dev/null >/dev/null 2>&1",
 }
 
+_COMPARATOR_CANDIDATES = (
+    ("cmp", "cmp_present", "cmp_exact_invocation"),
+    ("toybox_cmp", "toybox_present", "toybox_cmp_exact_invocation"),
+    ("busybox_cmp", "busybox_present", "busybox_cmp_exact_invocation"),
+)
+
 
 class ToolingDiagnosticFailure(RuntimeError):
     pass
@@ -70,16 +77,37 @@ def _probe(serial: str, command: str, *, root: bool, timeout: int = 10) -> str:
 
 
 def _select_comparator(probes: dict[str, str]) -> tuple[str, str]:
-    for selected, present_key, invocation_key in (
-        ("cmp", "cmp_present", "cmp_exact_invocation"),
-        ("toybox_cmp", "toybox_present", "toybox_cmp_exact_invocation"),
-        ("busybox_cmp", "busybox_present", "busybox_cmp_exact_invocation"),
-    ):
+    """Select the first comparator whose exact canonical invocation is proven.
+
+    Presence probes are supporting evidence, not success criteria. A present comparator
+    whose exact invocation is unsupported must not block a later compatible fallback.
+    UNKNOWN is returned only when no compatible comparator is proven and at least one
+    candidate still has an unresolved exact invocation that is not already proven absent.
+    """
+
+    unresolved_candidate = False
+    for selected, present_key, invocation_key in _COMPARATOR_CANDIDATES:
         presence = probes[present_key]
-        if presence == UNKNOWN:
-            return "UNKNOWN", UNKNOWN
-        if presence == SUPPORTED:
-            return selected, probes[invocation_key]
+        invocation = probes[invocation_key]
+        if presence not in _PROBE_STATES or invocation not in _PROBE_STATES:
+            raise ToolingDiagnosticFailure(
+                f"invalid comparator probe state for {selected}: "
+                f"presence={presence!r}, invocation={invocation!r}"
+            )
+
+        # Exact invocation success is the strongest compatibility evidence and is
+        # sufficient even if a separate presence probe was inconclusive.
+        if invocation == SUPPORTED:
+            return selected, SUPPORTED
+
+        # If presence is conclusively absent, an UNKNOWN invocation cannot keep this
+        # candidate unresolved. Likewise, an explicit invocation failure is conclusive
+        # incompatibility for the canonical comparator path.
+        if invocation == UNKNOWN and presence != UNSUPPORTED:
+            unresolved_candidate = True
+
+    if unresolved_candidate:
+        return "UNKNOWN", UNKNOWN
     return "NONE", UNSUPPORTED
 
 

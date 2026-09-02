@@ -38,6 +38,118 @@ class AndroidFilesystemToolingDiagnosticTests(unittest.TestCase):
 
         return fake_run
 
+    def _selector_probes(self, **overrides: str) -> dict[str, str]:
+        probes = {
+            "cmp_present": MODULE.UNSUPPORTED,
+            "cmp_exact_invocation": MODULE.UNSUPPORTED,
+            "toybox_present": MODULE.UNSUPPORTED,
+            "toybox_cmp_exact_invocation": MODULE.UNSUPPORTED,
+            "busybox_present": MODULE.UNSUPPORTED,
+            "busybox_cmp_exact_invocation": MODULE.UNSUPPORTED,
+        }
+        probes.update(overrides)
+        return probes
+
+    def test_comparator_selection_truth_table(self) -> None:
+        cases = (
+            (
+                "compatible primary",
+                self._selector_probes(
+                    cmp_present=MODULE.SUPPORTED,
+                    cmp_exact_invocation=MODULE.SUPPORTED,
+                ),
+                ("cmp", MODULE.SUPPORTED),
+            ),
+            (
+                "incompatible primary compatible fallback",
+                self._selector_probes(
+                    cmp_present=MODULE.SUPPORTED,
+                    cmp_exact_invocation=MODULE.UNSUPPORTED,
+                    toybox_present=MODULE.SUPPORTED,
+                    toybox_cmp_exact_invocation=MODULE.SUPPORTED,
+                ),
+                ("toybox_cmp", MODULE.SUPPORTED),
+            ),
+            (
+                "two incompatible candidates compatible final fallback",
+                self._selector_probes(
+                    cmp_present=MODULE.SUPPORTED,
+                    cmp_exact_invocation=MODULE.UNSUPPORTED,
+                    toybox_present=MODULE.SUPPORTED,
+                    toybox_cmp_exact_invocation=MODULE.UNSUPPORTED,
+                    busybox_present=MODULE.SUPPORTED,
+                    busybox_cmp_exact_invocation=MODULE.SUPPORTED,
+                ),
+                ("busybox_cmp", MODULE.SUPPORTED),
+            ),
+            (
+                "all candidate invocations conclusively incompatible",
+                self._selector_probes(
+                    cmp_present=MODULE.SUPPORTED,
+                    toybox_present=MODULE.SUPPORTED,
+                    busybox_present=MODULE.SUPPORTED,
+                ),
+                ("NONE", MODULE.UNSUPPORTED),
+            ),
+            (
+                "unknown primary does not block compatible fallback",
+                self._selector_probes(
+                    cmp_present=MODULE.SUPPORTED,
+                    cmp_exact_invocation=MODULE.UNKNOWN,
+                    toybox_present=MODULE.SUPPORTED,
+                    toybox_cmp_exact_invocation=MODULE.SUPPORTED,
+                ),
+                ("toybox_cmp", MODULE.SUPPORTED),
+            ),
+            (
+                "unresolved candidate without compatible fallback",
+                self._selector_probes(
+                    cmp_present=MODULE.SUPPORTED,
+                    cmp_exact_invocation=MODULE.UNKNOWN,
+                ),
+                ("UNKNOWN", MODULE.UNKNOWN),
+            ),
+            (
+                "absent candidate makes unknown invocation irrelevant",
+                self._selector_probes(
+                    cmp_present=MODULE.UNSUPPORTED,
+                    cmp_exact_invocation=MODULE.UNKNOWN,
+                ),
+                ("NONE", MODULE.UNSUPPORTED),
+            ),
+            (
+                "exact invocation success outranks inconclusive presence",
+                self._selector_probes(
+                    cmp_present=MODULE.UNKNOWN,
+                    cmp_exact_invocation=MODULE.SUPPORTED,
+                ),
+                ("cmp", MODULE.SUPPORTED),
+            ),
+        )
+
+        for name, probes, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(MODULE._select_comparator(probes), expected)
+
+    def test_present_but_incompatible_primary_cannot_block_compatible_fallback(self) -> None:
+        probes = self._selector_probes(
+            cmp_present=MODULE.SUPPORTED,
+            cmp_exact_invocation=MODULE.UNSUPPORTED,
+            toybox_present=MODULE.SUPPORTED,
+            toybox_cmp_exact_invocation=MODULE.SUPPORTED,
+        )
+
+        self.assertEqual(
+            MODULE._select_comparator(probes),
+            ("toybox_cmp", MODULE.SUPPORTED),
+        )
+
+    def test_invalid_comparator_probe_state_is_rejected(self) -> None:
+        probes = self._selector_probes(cmp_present="BROKEN")
+
+        with self.assertRaisesRegex(MODULE.ToolingDiagnosticFailure, "invalid comparator probe state"):
+            MODULE._select_comparator(probes)
+
     @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
     @mock.patch.object(
         MODULE._PREFLIGHT,
@@ -71,7 +183,7 @@ class AndroidFilesystemToolingDiagnosticTests(unittest.TestCase):
     @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
     @mock.patch.object(MODULE._PREFLIGHT, "prove_registered_device", return_value={})
     @mock.patch.object(MODULE.subprocess, "run")
-    def test_cmp_presence_prevents_fallback_when_exact_cmp_form_is_unsupported(
+    def test_cmp_exact_incompatibility_falls_back_to_toybox(
         self, run, _device, _tools
     ) -> None:
         def resolver(text: str) -> bool:
@@ -90,17 +202,17 @@ class AndroidFilesystemToolingDiagnosticTests(unittest.TestCase):
             scratch["probes"]["toybox_cmp_exact_invocation"],
             MODULE.SUPPORTED,
         )
-        self.assertEqual(scratch["selected_comparator"], "cmp")
+        self.assertEqual(scratch["selected_comparator"], "toybox_cmp")
         self.assertEqual(
             scratch["canonical_comparator_path_state"],
-            MODULE.UNSUPPORTED,
+            MODULE.SUPPORTED,
         )
-        self.assertFalse(report["comparator_compatibility_proven"])
+        self.assertTrue(report["comparator_compatibility_proven"])
 
     @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
     @mock.patch.object(MODULE._PREFLIGHT, "prove_registered_device", return_value={})
     @mock.patch.object(MODULE.subprocess, "run")
-    def test_toybox_is_selected_only_when_cmp_is_absent(self, run, _device, _tools) -> None:
+    def test_toybox_is_selected_when_cmp_is_absent(self, run, _device, _tools) -> None:
         def resolver(text: str) -> bool:
             if "command -v cmp " in text:
                 return False
