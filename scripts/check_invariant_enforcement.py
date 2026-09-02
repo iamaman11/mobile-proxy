@@ -35,17 +35,19 @@ REQUIRED_COLUMNS = [
     "evidence_note",
     "expires_on",
 ]
-# Issue #172 performed an explicit semantic re-audit of source P while retaining
-# the existing invariant catalog. This narrow transition is fail-closed: it is
-# accepted only from the exact previously audited matrix pin to the exact
-# reconciled Production Baseline blob. Any subsequent edit fails until another
-# explicit re-audit updates governance again.
+# Issue #179 performed an explicit semantic re-audit of source P after the
+# Issue #172 reconciliation while retaining the existing invariant catalog.
+# This narrow transition is fail-closed: it is accepted only from the exact
+# matrix pin to the exact re-audited Production Baseline blob. Any subsequent
+# edit fails until another explicit re-audit updates governance again. Git
+# history retains the superseded #172 audited blob for the full audit chain.
 RECONCILED_SOURCE_BLOB_TRANSITIONS = {
     "P": {
         "path": "docs/PRODUCTION_BASELINE_PLAN.md",
         "previous_blob_sha": "65a88761e6bf840638d828f218db4b2ffeccccd4",
-        "audited_blob_sha": "509cc0a21eff0c049c32702ed7871d62524613cb",
-        "issue": 172,
+        "supersedes_audited_blob_sha": "509cc0a21eff0c049c32702ed7871d62524613cb",
+        "audited_blob_sha": "10f3dc18946c44e862035ae1c0fd48c2958a523d",
+        "issue": 179,
     }
 }
 EXPECTED_INVARIANT_IDS = {
