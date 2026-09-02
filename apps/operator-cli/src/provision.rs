@@ -663,7 +663,10 @@ fn repo_root() -> Result<PathBuf> {
     Ok(root)
 }
 
-fn repo_root_candidate(runtime_override: Option<&str>, compiled_manifest_dir: &Path) -> Result<PathBuf> {
+fn repo_root_candidate(
+    runtime_override: Option<&str>,
+    compiled_manifest_dir: &Path,
+) -> Result<PathBuf> {
     if let Some(raw) = runtime_override {
         validate_bounded_text(REPOSITORY_ROOT_ENV, raw, MAX_REPOSITORY_ROOT_LEN)?;
         let path = Path::new(raw);
