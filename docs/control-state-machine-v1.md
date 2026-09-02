@@ -77,6 +77,14 @@ A fact without required provenance or scope MUST NOT participate in a permission
 
 A reducer may project each authority class independently. A `DIAGNOSTIC` projection can say `PHONE_ACCESS_PROVEN` for diagnosis while the `CONTROL` projection remains `PHONE_ACCESS_UNOBSERVED`. Mutation permission always consumes the `CONTROL` projection.
 
+### Android device-reality authority
+
+The real registered production phone is the authoritative observation oracle for Android device reality. `CONTROL` describes the authority of a fact; it does not permit hosted or synthetic evidence to invent a physical Android fact that is directly observable on the target device.
+
+If an Android predicate or postcondition can be observed on the real production phone, a dependent production transition MUST consume bounded device-backed `CONTROL` evidence from an authorized real-phone operation. That evidence must carry the exact source/transaction scope, freshness and durability required by the operation contract.
+
+Hosted `Quality`, unit/integration tests and private orchestration can prove source identity, observer/reducer behavior, workflow policy and transport. They cannot by themselves prove the current Android filesystem, installed package/signer, runtime generation, process/service state, network state or functional data path. If device observation is blocked, the Android predicate remains `UNKNOWN`/unproven; the blocker may authorize the smallest infrastructure repair, but completing that repair does not promote the blocked Android predicate.
+
 ### Evidence rules
 
 1. Two current authoritative values for the same scoped subject/predicate that disagree are `CONFLICT`.
@@ -87,6 +95,7 @@ A reducer may project each authority class independently. A `DIAGNOSTIC` project
 6. Facts from different authority classes MUST NOT be combined to satisfy one control predicate.
 7. If an operation contract requires a durable bounded artifact, a validated observation with failed artifact persistence remains unpersisted for dependent guards. Logs or narrative MUST NOT be used to reconstruct the missing durable authority.
 8. Operation execution outcome, independent postcondition observation and evidence persistence are separate facts. No one dimension may silently stand in for another.
+9. Hosted/offline evidence MUST NOT replace device-backed evidence for an Android fact or postcondition that is verifiable on the real registered production phone.
 
 ## State regions
 
@@ -237,7 +246,7 @@ Initial set:
 
 ### 8. Observed target state
 
-Desired state and observed state are separate.
+Desired state and observed state are separate. For Android subjects, any state below that is directly observable on the real production phone must be derived from bounded device-backed `CONTROL` evidence rather than hosted/offline inference.
 
 Package:
 
@@ -425,6 +434,8 @@ MUTATE -> assume success -> advance state
 
 A successful command is an operation result, not proof of its postcondition.
 
+For Android, `OBSERVE` and `INDEPENDENTLY OBSERVE` mean real-phone device-backed observation whenever the relevant predicate is technically observable on the registered production phone. Hosted success does not satisfy that physical observation.
+
 ## Real production examples that motivate and validate the model
 
 Private read-only preflight run `33647329233` passed its hosted command gate and was assigned to exact production runner `mobile-proxy-phone-linux-production`. It then failed while fetching immutable canonical preflight logic with an SSL-connect transport error. All ADB/preflight steps were skipped.
@@ -479,18 +490,21 @@ Raw serial, device IP, secrets, signing material and provider credentials are fo
 2. command/job/runner/transport/source-fetch regions;
 3. regression from exact real run `33647329233`;
 4. bounded durable-evidence persistence semantics, including explicit unpersisted state after safe retry exhaustion;
-5. Android `probe_access()` evidence with one-probe scope enforcement;
-6. real access failure-mode certification;
-7. capability inventory;
-8. bounded scratch filesystem mutation certification;
-9. privileged owned-root certification where proven safe;
-10. package lifecycle;
-11. runtime lifecycle;
-12. process lifecycle;
-13. structural + functional acceptance;
-14. failure injection and recovery classification;
-15. derive generic contracts from proven Android behavior;
-16. VM adapter against the same contracts.
+5. immediately return to Android `probe_access()` on the exact current canonical SHA with one-probe scope enforcement;
+6. perform the authorized read-only real-phone quarantine observation for the exact quarantined transaction set;
+7. perform cleanup only if durable device-backed facts require it; proven absence skips mutation;
+8. certify capability inventory and bounded scratch/managed-root filesystem mutation with verify/delete/post-absence and recovery/quarantine semantics;
+9. package query and clean-install lifecycle;
+10. runtime lifecycle;
+11. process/service lifecycle;
+12. structural + real functional acceptance;
+13. failure injection and recovery classification;
+14. restart/rehydration and transport fallback/return proof;
+15. same-SHA soak and physical acceptance;
+16. derive generic contracts from proven Android behavior;
+17. VM adapter against the same proven contracts.
+
+Infrastructure/control-plane work may interrupt this sequence only to close a concrete blocker to the next safe real-phone observation or mutation. When the blocker is closed, certification resumes at that device-backed step; the infrastructure fix is not counted as completion of the Android state it unblocks.
 
 ## Quality invariants
 
@@ -511,6 +525,7 @@ Offline Quality MUST permanently test at least:
 - command success never implies postcondition success;
 - workflow success never implies operation acceptance;
 - required-but-unpersisted evidence cannot authorize a dependent transition;
+- hosted/unit/integration evidence cannot substitute for device-backed CONTROL evidence for an Android predicate verifiable on the real production phone;
 - mutation cannot enter `TRANSACTION_ACTIVE` without same-job access reproof and lock;
 - post-boundary unknown state cannot return to READY/ACCEPTED;
 - source-bound current authority does not silently survive a canonical SHA advance;
@@ -528,4 +543,4 @@ EXACT BLOCKING PREDICATES
 NEXT SAFE OBSERVATION OR OPERATION
 ```
 
-It MUST identify the authority class of observations, distinguish required evidence persistence from target observation, and MUST NOT collapse an upstream failure into assumptions about downstream layers.
+It MUST identify the authority class of observations, distinguish required evidence persistence from target observation, distinguish hosted software/policy proof from real-phone Android physical-state proof, and MUST NOT collapse an upstream failure into assumptions about downstream layers.
