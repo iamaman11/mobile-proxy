@@ -73,6 +73,19 @@ class ControlStateMachineTests(unittest.TestCase):
         self.assertEqual(state["runner"], "RUNNER_ONLINE_IDLE")
         self.assertEqual(state["transport"], "TRANSPORT_DEGRADED")
 
+    def test_same_predicate_on_another_subject_cannot_corrupt_runner_state(self) -> None:
+        facts = [
+            F("runner", "runner_registered", True),
+            F("runner", "runner_labels_match", True),
+            F("runner", "runner_online", True),
+            F("runner", "runner_busy", False),
+            F("unrelated", "runner_online", False),
+        ]
+
+        state = MODULE.derive_snapshot(facts)
+
+        self.assertEqual(state["runner"], "RUNNER_ONLINE_IDLE")
+
     def test_phone_access_requires_every_identity_and_shell_fact(self) -> None:
         facts = [
             F("phone", "adb_tool_available", True),
@@ -140,6 +153,10 @@ class ControlStateMachineTests(unittest.TestCase):
         state = MODULE.derive_snapshot(facts)
 
         self.assertEqual(state["phone_access"], "PHONE_ACCESS_UNOBSERVED")
+
+    def test_missing_mutation_fact_stays_unknown(self) -> None:
+        state = MODULE.derive_snapshot([])
+        self.assertIsNone(state["mutation_performed"])
 
 
 if __name__ == "__main__":
