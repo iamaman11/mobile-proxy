@@ -4,117 +4,224 @@ The sole canonical roadmap for current development is:
 
 - [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md)
 
-All work must begin by reading that document. It defines the active delivery order, protected compatibility surface, system invariants, module responsibilities, strict development protocol, Definition of Done and context-loss recovery procedure.
+All work must follow that one roadmap. This file is its concise execution entry point; it does not create a second backlog or a parallel development axis.
 
-## Current execution checkpoint
+## Current milestone: physical-device control foundation
 
-Status: **temporary execution focus**  
-Activated: **2026-08-30**  
-Updated: **2026-09-03 — Android physical-reality authority promoted**  
-Authority: subordinate to `docs/PRODUCTION_BASELINE_PLAN.md` and current repository state  
-Removal condition: delete this entire section after software-complete release-candidate acceptance is recorded on one immutable Git SHA, or when an explicit product decision supersedes this focus.
+Status: **blocking prerequisite for further application growth**  
+Authority: subordinate to `docs/PRODUCTION_BASELINE_PLAN.md`, `docs/operation-state-machine-v1.md` and current repository state
 
-The state-ownership governance slice is complete. The current priority is now to produce, exercise and accept a functional production-baseline candidate before undertaking further architecture or governance expansion.
+The next product milestone is **not** “finish filesystem, then add more application code”. The next milestone is to finish, prove and accept one production-grade State Machine that can reproducibly control the real physical Android device.
 
-### Fact-first execution spine
+Until that milestone is accepted, feature growth, VM generalization, new orchestration frameworks and new governance machinery are frozen except for the smallest change strictly required to prove the next State Machine invariant.
 
-The existing evidence-derived state machines are the execution spine for all further production work:
+There is one sequential development direction:
 
-- [`docs/control-state-machine-v1.md`](docs/control-state-machine-v1.md) answers **what is independently proven right now?**;
-- [`docs/operation-state-machine-v1.md`](docs/operation-state-machine-v1.md) answers **what exact phase may execute next in this transaction?**.
+```text
+FORMAL DEVICE STATE MODEL
+  -> OPERATION GUARDS
+  -> BOUNDED MUTATION
+  -> INDEPENDENT POSTCONDITION OBSERVATION
+  -> AMBIGUOUS-OUTCOME HANDLING
+  -> RECOVERY / QUARANTINE
+  -> CONTROLLER RESTART + DEVICE REBOOT
+  -> REPRODUCIBLE CLEAN DEVICE STATE
+  -> REAL-PHONE FOUNDATION ACCEPTANCE
+  -> APPLICATION FEATURE GROWTH
+  -> VM / PROVIDER GENERALIZATION
+```
 
-Development MUST advance from the current `CONTROL` projection and exact blocking predicates, not from remembered state, issue narrative, workflow names, a green job, or an assumption that the phone/runtime/provider is globally ready.
+No later item is an independent workstream. A blocked foundational transition is solved before moving forward.
 
-The active working rules are:
+## Foundation acceptance contract
 
-1. Current production state is derived from current, scoped `CONTROL` evidence. Where the operation contract requires durable evidence, state promotion also requires successful durable persistence of that exact bounded evidence.
-2. **Operation execution result**, **independent postcondition verification**, and **evidence persistence** are three separate dimensions. Success in one does not imply success in either of the others.
-3. `UNKNOWN`, `STALE`, `CONFLICT`, invalid scope, other-transaction evidence and required-but-unpersisted evidence fail closed and cannot advance production state.
-4. No phone, runtime, VM or provider is globally `READY`. Authority is operation-specific, exact-SHA, exact-transaction and, for mutation, exact-boundary scoped.
-5. Every mutation follows `OBSERVE -> VERIFY -> MUTATE -> INDEPENDENTLY VERIFY -> ACCEPT`. Any unresolved post-boundary state enters explicit recovery or quarantine; recovery never silently becomes acceptance.
-6. Phone access is re-proved immediately before a destructive boundary in the exact mutating job. A canonical source SHA advance invalidates prior SHA-bound phone admission for subsequent production execution.
-7. The private execution repository transports commands, secrets and bounded evidence; it does not manufacture project truth or reinterpret the public state machine.
-8. Android is the first adapter to be proven end to end. VM/provider generalization comes only after the phone baseline demonstrates which operation primitives are actually reusable.
+The State Machine foundation is accepted only when one coherent implementation can demonstrate all of the following on the real registered production phone.
 
-### Android physical-reality authority
+### 1. Current reality is observed, not remembered
 
-The real registered production phone is the authoritative observation oracle for Android device reality. Hosted `Quality`, unit/integration tests, workflow state and private orchestration can prove software/policy coherence, reducer behavior and execution transport, but they cannot by themselves prove the current filesystem, package, signer, runtime, process, service, network or functional data-path state of the real Android target.
+`control_state_machine.py` answers **what is independently proven right now?**  
+`operation_state_machine.py` answers **what exact transition may execute next in this transaction?**
 
-If an Android predicate or postcondition can be verified on the real production phone, the dependent production state MUST NOT be completed or promoted solely from hosted/offline evidence. It requires bounded device-backed `CONTROL` evidence from an authorized real-phone operation, with the exact source/transaction scope, freshness and durable persistence required by that operation contract. Offline tests may prove that the observer/reducer is correct; they do not substitute for observing the device.
+The real phone is the authoritative observation oracle for device-verifiable Android reality. Workflow state, issue text, remembered progress and a green job are not device state.
 
-Infrastructure or control-plane hardening may run ahead of the phone only to remove a demonstrated blocker to the next safe device-backed operation. Closing that blocker is not Android state progress by itself. Once the blocker is closed, execution returns immediately to the real-phone certification loop instead of expanding orchestration, governance or framework work without a new demonstrated device blocker.
+No phone, runtime, package, VM or provider is globally `READY`. Permission is operation-specific and derived from exact current facts.
 
-This doctrine is not a new parallel architecture. It promotes the already implemented `control_state_machine.py` and `operation_state_machine.py` contracts as the normal way the project reasons about reality, with the real phone as the source of Android physical-state observations.
+### 2. One transaction model owns mutation semantics
 
-### Current execution order
+Every destructive operation follows:
 
-1. Treat non-essential architecture/governance framework expansion as temporarily closed.
-2. Close the demonstrated evidence-persistence blocker with the smallest safe bounded fix; do not retry or replay the phone operation merely to persist its evidence.
-3. Return immediately to the real phone: prove current-SHA phone admission, then perform one fresh read-only quarantine observation of the exact quarantined transaction set.
-4. Let durable device facts decide the next transition. If the quarantined paths are durably proven absent, skip cleanup; otherwise perform only the separately authorized bounded cleanup and independently verify its postcondition.
-5. Repeat bounded Android filesystem certification so create/write/read/compare/delete/post-absence and recovery/quarantine behavior are proven from real-phone evidence.
-6. Move APK/signing work through the same transaction model: exact signed candidate -> pre-mutation device observation -> boundary reproof -> controlled package mutation -> independent real-phone signer/version/digest verification -> explicit recovery/quarantine on uncertainty.
-7. Move native runtime deployment through the same model: materialize exact generation -> verify integrity/current binding on the phone -> start -> structural health -> bounded functional probe -> restart/rehydration -> recovery proof.
-8. Exercise the complete product data path on one unchanged candidate SHA:
+```text
+OBSERVE
+  -> VERIFY GUARD
+  -> ACQUIRE MUTATION AUTHORITY
+  -> MUTATE
+  -> INDEPENDENTLY OBSERVE POSTCONDITION
+  -> ACCEPT
+```
 
-   ```text
-   startup
-     -> state recovery
-     -> control plane
-     -> phone
-     -> QUIC
-     -> proxy 1080 / 1081 / 3128
-     -> forced TLS/TCP fallback
-     -> return to QUIC
-     -> restart
-     -> restore / rollback
-   ```
+On unresolved post-boundary state:
 
-9. Execute the required failure/restart/recovery matrix and soak only while exact candidate identity and current authority remain valid; re-derive blockers after every transition instead of carrying narrative readiness forward.
-10. Record software-complete and physical acceptance only from the same immutable candidate with all required durable device-backed evidence, then follow the protected release ordering in the Production Baseline Plan.
-11. Only after the functional phone baseline is accepted, generalize the proven operation primitives to VM/provider adapters and perform a fresh architecture re-audit. Do not create a speculative generic execution framework before the Android evidence shows what is actually common.
+```text
+UNKNOWN / FAILED
+  -> RE-OBSERVE
+  -> RECOVER | QUARANTINE | ACCEPT ONLY FROM PROVEN POSTCONDITION
+```
 
-The ordering above is an execution discipline inside the active Production Baseline. It does not waive or reorder mandatory Item 20 provider, signing, acceptance or release-authority gates defined by `docs/PRODUCTION_BASELINE_PLAN.md`; the stricter prerequisite always wins.
+A command returning success is not a postcondition. A workflow returning success is not acceptance.
 
-At activation time, known incomplete evidence includes the remaining explicit SQLite startup/integrity-corruption check represented by `PERSIST-002`, the health-surface split represented by `OPS-003`, and any later Production Baseline acceptance items that remain incomplete. Backup plus clean restore/process recovery already have permanent test coverage; this sentence is orientation only, not a second backlog. The Production Baseline Plan, invariant matrix, current `CONTROL` projection and repository state always win.
+### 3. Three dimensions never collapse into one
 
-### Temporary architecture freeze
+The implementation must keep separate:
 
-Until this checkpoint is removed, do not introduce architecture or governance refactoring merely to improve theoretical purity. In particular, do not bulk-migrate governance JSON contracts to Protocol Buffers, introduce gRPC, add generic plugin/extension frameworks or perform broad structural rewrites unless a concrete active-baseline blocker demonstrates that the current design cannot satisfy a required invariant.
+```text
+operation_execution_result
+verified_target_state
+evidence_persistence_result
+```
 
-This freeze does **not** block architecture work required by a demonstrated correctness, security, durability, compatibility, recovery or operational defect. The smallest complete fix remains preferred.
+Any of these may succeed while another fails. State promotion consumes the exact dimensions required by the operation contract; no narrative shortcut may merge them.
 
-When the removal condition is reached, delete this section rather than moving it to `docs/history/`. Git history is the archive for this temporary sequencing decision.
+### 4. Ambiguous controller/runner loss is a first-class state
 
-Project-level authority is defined separately by:
+If the runner, controller, transport or evidence channel disappears after a destructive command may have reached the phone, the system MUST NOT classify the target operation as simply failed or retry it blindly.
 
-- [Project Authority and Execution Satellites](docs/operations/project-authority.md)
-- [Machine-readable Project Authority Contract](contracts/operations/project-authority-v1.json)
+The State Machine must represent an explicit ambiguous execution outcome and require fresh read-only observation of the real phone before deciding whether the operation:
 
-`iamaman11/mobile-proxy` is the only canonical repository for project information. The private
-`iamaman11/mobile-proxy-production` repository is an execution satellite only and cannot expand,
-replace or reinterpret this roadmap.
+- did not happen;
+- completed;
+- partially completed and needs recovery;
+- cannot be classified safely and must remain quarantined.
 
-The previous broad platform roadmap is retained only as distant-future product direction:
+Non-idempotent mutation is never retried merely because the controller did not receive the result.
 
-- [Distant-Future Ultimate Implementation Plan](docs/future/ULTIMATE_IMPLEMENTATION_PLAN.md)
+### 5. Recovery is part of the primary design
 
-The future document is not an active backlog and does not authorize implementation work. Activating any part of it requires a separate product decision and an explicit update to the Production Baseline Plan.
+Recovery is not an exception-handler afterthought. Every destructive boundary must have a tested path to a known state:
 
-Related bounded normative artifacts:
+```text
+REFUSED
+RECOVERY_REQUIRED
+RECOVERED
+QUARANTINED
+ACCEPTED
+```
 
+A recovered transaction is not an accepted transaction. A fresh transaction is required after recovery when the original goal still needs to be performed.
+
+### 6. Restart and reboot cannot depend on narrative memory
+
+The controller may restart. The self-hosted runner may restart. The phone may reboot.
+
+After restart/reboot, the next decision must be reconstructible from durable bounded transaction identity plus fresh observation. The system must not require a human to remember which command probably ran.
+
+### 7. Reproducibility is the foundation Definition of Done
+
+The foundation is not complete because one mutation succeeded. It is complete when the project can repeatedly establish an allowed clean project-owned device state from current observations, perform an operation, independently verify it, survive injected interruption and recover or quarantine deterministically.
+
+The acceptance matrix must cover at least the device-control dimensions needed by the product:
+
+- phone identity/access;
+- capability inventory;
+- project-owned filesystem/materialization;
+- package query/install/uninstall/verification;
+- runtime generation/integrity/current binding;
+- process/service start/stop and structural health;
+- bounded functional probe;
+- connectivity loss/recovery;
+- runner/controller loss at destructive boundaries;
+- evidence-persistence loss;
+- phone reboot and controller restart;
+- recovery from partial mutation.
+
+These are **State Machine dimensions to prove as one coherent control model**, not separate roadmaps to expand one after another with unrelated orchestration.
+
+## Architecture rule: no complexity growth without uncertainty reduction
+
+The application must remain understandable, modular, layered, extensible and independently verifiable by one developer.
+
+The dependency direction remains:
+
+```text
+foundation <- domain/contracts <- application <- infrastructure/adapters <- composition/delivery
+```
+
+For the current milestone:
+
+- prefer deletion and simplification before adding code;
+- one concept has one authoritative owner;
+- GitHub Actions, ADB, shell and provider APIs are adapters, not alternate state machines;
+- do not create generic frameworks for hypothetical future targets;
+- do not add wrappers around wrappers;
+- do not add a checker only to verify another checker/test exists or ran;
+- do not add tests whose primary subject is other tests rather than product/state-machine behavior;
+- add a new abstraction only after a real current requirement cannot be expressed clearly in the existing model;
+- every new module or mechanism must identify the concrete uncertainty it removes and its deletion path.
+
+See [Architecture Quality Standard](docs/architecture/ARCHITECTURE_STANDARD.md).
+
+## Bootstrap-state policy: protect boundaries, not the current instance
+
+Until reproducible device control is accepted, the current installed APK, runtime generation, project-owned files and project-owned configuration on the phone are **disposable bootstrap state**.
+
+We do not optimize the architecture around preserving that incidental current state. If the safest reproducible State Machine operation needs to remove and rebuild project-owned state, that is acceptable when the operation is explicitly authorized, bounded to project ownership and independently verified afterward.
+
+This means:
+
+- do not spend foundation-stage engineering effort preserving an unreproducible current installation;
+- do not make correctness depend on the current package, runtime files or device-local project secrets surviving;
+- prefer revocable/test credentials for foundation experiments where practical;
+- defer elaborate secret-continuity, migration and preservation mechanisms unless they are required to prove the control model itself.
+
+It does **not** mean “ignore security”. Real credentials must never be logged, committed or deliberately disclosed. Non-project-owned phone state must not be touched. Provider/account mutations remain separately bounded and authorized. The rule is **reproducibility before preservation**, not confidentiality reduction.
+
+## Single sequential execution order
+
+1. **Freeze non-essential feature/framework growth.** Remove or simplify unnecessary scaffolding when it obstructs local reasoning.
+2. **Specify the complete State Machine.** Enumerate state dimensions, operation contracts, destructive boundaries, ambiguous outcomes, recovery states and invariants before adding more domain-specific orchestration.
+3. **Prove deterministic reducer behavior offline.** Core state/guard/recovery logic must be deterministic and side-effect free where possible.
+4. **Prove real-phone observation.** Device identity and every device-verifiable pre/postcondition must come from bounded real-phone observation.
+5. **Prove mutation semantics.** For each representative destructive boundary, prove guard -> mutation -> independent observation without inferring post-state from command success.
+6. **Prove interruption semantics.** Inject controller/runner disconnect and evidence-persistence failure before, during and after destructive boundaries. Ambiguous outcome must force re-observation rather than blind retry.
+7. **Prove recovery/quarantine.** Every injected partial state must converge to `RECOVERED`, `QUARANTINED` or independently proven `ACCEPTED`; nothing remains narratively “probably okay”.
+8. **Prove restart/reboot.** Restart controller/runner and reboot the phone; reconstruct authority from durable transaction identity plus fresh observation.
+9. **Prove reproducible clean state.** Re-establish the defined project-owned baseline more than once without depending on hand-maintained device state.
+10. **Accept the physical-device control foundation.** Record bounded evidence for the unchanged exact candidate and no unresolved transition ambiguity.
+11. **Only then resume application growth.** APK/runtime/data-path/release work must use the accepted State Machine rather than extend workflow-specific control logic.
+12. **Only after the phone implementation proves reusable primitives, generalize to VM/provider targets.** Reuse demonstrated invariants; do not pre-build a generic multi-target framework.
+
+The current public Issue #179 remains the live execution cursor inside this sequence and may authorize only the exact next safe production transition. It does not authorize skipping the foundation gate.
+
+## Quality and evidence discipline
+
+Use the smallest verification that directly proves the independent invariant under change.
+
+For docs and policy-only work:
+
+```text
+scripts/quality-gate.sh fast
+```
+
+For code or release changes:
+
+```text
+scripts/quality-gate.sh
+```
+
+Do not increase check count as a proxy for confidence. Prefer transition tables, deterministic reducer tests, property/invariant tests where they add unique value, and bounded real-phone fault-injection acceptance over meta-tests that verify test/check presence.
+
+Production evidence remains bounded and must not expose credentials, raw device identifiers or secret-derived values.
+
+## Related normative artifacts
+
+- [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md) — the sole canonical development/release roadmap
 - [Evidence-Derived Control State Machine v1](docs/control-state-machine-v1.md)
 - [Transactional Operation State Machine v1](docs/operation-state-machine-v1.md)
-- [ADR-001: Bounded Contexts and Clean Dependency Rules](docs/architecture/ADR-001-bounded-contexts-and-clean-dependencies.md)
-- [ADR-002: Cryptographic Hashing, Password Hashing and KDF Policy](docs/architecture/ADR-002-cryptographic-hashing-and-kdf-policy.md)
 - [Architecture Quality Standard](docs/architecture/ARCHITECTURE_STANDARD.md)
-- [Digest Inventory and Migration Matrix](docs/architecture/digest-inventory-and-migration.md)
-- [Engineering Guardrails](docs/architecture/engineering-guardrails.md)
-- [Foundation Identifiers, Request Lineage and Deadlines](docs/architecture/foundation-primitives.md)
-- [Invariant Enforcement Audit](docs/architecture/invariant-enforcement.md)
-- [Machine-readable Invariant Enforcement Matrix](contracts/governance/invariant-enforcement.json)
+- [Project Authority and Execution Satellites](docs/operations/project-authority.md)
+- [Machine-readable Project Authority Contract](contracts/operations/project-authority-v1.json)
 - [Machine-readable Module Boundaries](contracts/governance/module-boundaries-v1.json)
 - [Machine-readable State Ownership](contracts/governance/state-ownership-v1.json)
-- [Protected Proxy Compatibility Contract](contracts/compatibility/proxy-surface-v1.json)
 
-Repository state, the canonical baseline plan and current machine-derived evidence take precedence over external checkpoints, chat history, private execution-satellite content or remembered intent.
+`iamaman11/mobile-proxy` remains the only canonical project repository. `iamaman11/mobile-proxy-production` remains an execution satellite only and cannot expand, replace or reinterpret this roadmap.
+
+Repository state, the canonical Production Baseline and machine-derived evidence take precedence over chat history, remembered progress and private execution-satellite narrative.
