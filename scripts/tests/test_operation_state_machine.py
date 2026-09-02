@@ -120,6 +120,17 @@ class OperationStateMachineTests(unittest.TestCase):
         self.assertEqual(state["failure_stage"], "ARTIFACT")
         self.assertFalse(state["recovery_required"])
 
+    def test_failed_first_destructive_command_enters_recovery(self) -> None:
+        stop_index = self.steps.index("stop_owned_runtime")
+        evidence = [passed(step) for step in self.steps[:stop_index]]
+        evidence.append(failed("stop_owned_runtime"))
+        state = MODULE.derive_operation_state(self.contract, evidence, transaction_id=TX)
+        self.assertEqual(state["state"], "RECOVERY_REQUIRED")
+        self.assertEqual(state["next_step"], "recovery_classify")
+        self.assertEqual(state["failure_stage"], "MUTATION_EXECUTION")
+        self.assertTrue(state["destructive_started"])
+        self.assertTrue(state["recovery_required"])
+
     def test_post_boundary_failure_requires_recovery(self) -> None:
         install_index = self.steps.index("install_new_apk")
         evidence = [passed(step) for step in self.steps[:install_index]]
