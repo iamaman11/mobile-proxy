@@ -79,7 +79,10 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
         self.assertTrue(report["accepted"])
         self.assertEqual(report["state"], "ACCEPTED")
         self.assertTrue(report["filesystem_mutation_capabilities_proven"])
+        self.assertTrue(report["cleanup_attempted"])
         self.assertTrue(report["cleanup_verified"])
+        self.assertIsNone(report["failure_substep"])
+        self.assertIsNone(report["cleanup_failure_substep"])
         self.assertTrue(report["phone_mutation_performed"])
         self.assertFalse(report["raw_device_identifier_recorded"])
         self.assertEqual(prove_device.call_count, 2)
@@ -115,11 +118,73 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
         self.assertFalse(report["accepted"])
         self.assertEqual(report["state"], "RECOVERED")
         self.assertEqual(report["failure_stage"], "scratch_roundtrip")
+        self.assertEqual(report["failure_substep"], "scratch.enter")
         self.assertTrue(report["phone_mutation_performed"])
+        self.assertTrue(report["cleanup_attempted"])
         self.assertTrue(report["cleanup_verified"])
+        self.assertIsNone(report["cleanup_failure_substep"])
         self.assertFalse(report["filesystem_mutation_capabilities_proven"])
         self.assertEqual(prove_device.call_count, 2)
         cleanup.assert_called_once()
+
+    @mock.patch.object(MODULE, "cleanup_paths", return_value=True)
+    @mock.patch.object(MODULE, "run_scratch_certification")
+    @mock.patch.object(MODULE, "verify_prestate")
+    @mock.patch.object(MODULE._CAPABILITIES, "inventory")
+    @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
+    @mock.patch.object(MODULE._PREFLIGHT, "prove_registered_device")
+    def test_failure_report_identifies_exact_bounded_scratch_substep(
+        self, _prove_device, _tools, inventory, _prestate, scratch, _cleanup
+    ) -> None:
+        inventory.return_value = self._inventory()
+
+        def fail_scratch(_serial, _paths, _payloads, _local_root, *, mark_step=None):
+            self.assertIsNotNone(mark_step)
+            mark_step("scratch.compare_original_remote")
+            raise MODULE.CertificationFailure("device command returned nonzero status")
+
+        scratch.side_effect = fail_scratch
+
+        report = MODULE.certify("f" * 40, "tx-diagnostic")
+
+        self.assertEqual(report["state"], "RECOVERED")
+        self.assertEqual(report["failure_stage"], "scratch_roundtrip")
+        self.assertEqual(report["failure_substep"], "scratch.compare_original_remote")
+        self.assertEqual(report["failure"], "device command returned nonzero status")
+        self.assertNotIn("registered-device", str(report))
+
+    @mock.patch.object(MODULE, "cleanup_paths")
+    @mock.patch.object(MODULE, "run_scratch_certification")
+    @mock.patch.object(MODULE, "verify_prestate")
+    @mock.patch.object(MODULE._CAPABILITIES, "inventory")
+    @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
+    @mock.patch.object(MODULE._PREFLIGHT, "prove_registered_device")
+    def test_cleanup_failure_preserves_original_failure_and_reports_cleanup_substep(
+        self, _prove_device, _tools, inventory, _prestate, scratch, cleanup
+    ) -> None:
+        inventory.return_value = self._inventory()
+
+        def fail_scratch(_serial, _paths, _payloads, _local_root, *, mark_step=None):
+            self.assertIsNotNone(mark_step)
+            mark_step("scratch.atomic_replace")
+            raise MODULE.CertificationFailure("device command returned nonzero status")
+
+        def fail_cleanup(_serial, _paths, *, mark_step=None):
+            self.assertIsNotNone(mark_step)
+            mark_step("cleanup.scratch_verify_absent")
+            return False
+
+        scratch.side_effect = fail_scratch
+        cleanup.side_effect = fail_cleanup
+
+        report = MODULE.certify("c" * 40, "tx-quarantine")
+
+        self.assertFalse(report["accepted"])
+        self.assertEqual(report["state"], "QUARANTINED")
+        self.assertEqual(report["failure_substep"], "scratch.atomic_replace")
+        self.assertTrue(report["cleanup_attempted"])
+        self.assertFalse(report["cleanup_verified"])
+        self.assertEqual(report["cleanup_failure_substep"], "cleanup.scratch_verify_absent")
 
     @mock.patch.object(MODULE, "cleanup_paths", return_value=False)
     @mock.patch.object(
@@ -136,11 +201,13 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
     ) -> None:
         inventory.return_value = self._inventory()
 
-        report = MODULE.certify("c" * 40, "tx-quarantine")
+        report = MODULE.certify("g" * 40, "tx-quarantine-fallback")
 
         self.assertFalse(report["accepted"])
         self.assertEqual(report["state"], "QUARANTINED")
+        self.assertTrue(report["cleanup_attempted"])
         self.assertFalse(report["cleanup_verified"])
+        self.assertEqual(report["cleanup_failure_substep"], "cleanup.enter")
 
     @mock.patch.object(MODULE, "cleanup_paths")
     @mock.patch.object(MODULE, "verify_prestate")
@@ -159,7 +226,10 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
         self.assertFalse(report["accepted"])
         self.assertEqual(report["state"], "REFUSED")
         self.assertFalse(report["phone_mutation_performed"])
+        self.assertFalse(report["cleanup_attempted"])
         self.assertTrue(report["cleanup_verified"])
+        self.assertIsNone(report["failure_substep"])
+        self.assertIsNone(report["cleanup_failure_substep"])
         self.assertEqual(prove_device.call_count, 1)
         cleanup.assert_not_called()
 
