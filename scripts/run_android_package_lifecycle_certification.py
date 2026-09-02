@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 
 _OPERATION_ID = "android.package-lifecycle-certification.v1"
+_TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 _SCRIPT_DIR = Path(__file__).resolve().parent
 
 
@@ -37,6 +39,11 @@ class PackageCertificationFailure(RuntimeError):
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise PackageCertificationFailure(message)
+
+
+def require_transaction_id(value: str) -> str:
+    require(_TRANSACTION_ID.fullmatch(value) is not None, "transaction ID is invalid")
+    return value
 
 
 def _uninstall_and_verify_absent(serial: str) -> None:
@@ -141,6 +148,7 @@ def _recover_to_candidate_or_absent(
 def certify(
     *,
     canonical_sha: str,
+    transaction_id: str,
     apk: Path,
     release_evidence: Path,
     digest_tool: Path,
@@ -148,6 +156,7 @@ def certify(
     expected_version_code: int,
 ) -> dict[str, Any]:
     canonical_sha = _CLEAN.require_canonical_sha(canonical_sha)
+    transaction_id = require_transaction_id(transaction_id)
     serial = _CLEAN.require_expected_serial()
 
     mutation_started = False
@@ -175,13 +184,15 @@ def certify(
         old_package_observed = _CLEAN.package_present(serial)
 
         failure_stage = "prepare_absent_baseline"
-        _CLEAN.prove_registered_device(serial)
-        mutation_started = True
-        _uninstall_and_verify_absent(serial)
+        if old_package_observed:
+            _CLEAN.prove_registered_device(serial)
+            mutation_started = True
+            _uninstall_and_verify_absent(serial)
         require(not _CLEAN.package_present(serial), "initial package absence is not proven")
 
         failure_stage = "install_candidate_first"
         _CLEAN.prove_registered_device(serial)
+        mutation_started = True
         _install_and_verify_candidate(
             serial,
             apk=apk,
@@ -212,6 +223,7 @@ def certify(
             "repository": "iamaman11/mobile-proxy",
             "canonical_sha": canonical_sha,
             "operation_id": _OPERATION_ID,
+            "transaction_id": transaction_id,
             "application_id": _PACKAGE,
             "expected_version_name": expected_version_name,
             "expected_version_code": expected_version_code,
@@ -255,6 +267,7 @@ def certify(
             "repository": "iamaman11/mobile-proxy",
             "canonical_sha": canonical_sha,
             "operation_id": _OPERATION_ID,
+            "transaction_id": transaction_id,
             "application_id": _PACKAGE,
             "expected_version_name": expected_version_name,
             "expected_version_code": expected_version_code,
@@ -276,6 +289,7 @@ def certify(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--canonical-sha", required=True)
+    parser.add_argument("--transaction-id", required=True)
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--release-evidence", type=Path, required=True)
     parser.add_argument("--digest-tool", type=Path, required=True)
@@ -290,6 +304,7 @@ def main() -> int:
     try:
         report = certify(
             canonical_sha=args.canonical_sha,
+            transaction_id=args.transaction_id,
             apk=args.apk,
             release_evidence=args.release_evidence,
             digest_tool=args.digest_tool,
