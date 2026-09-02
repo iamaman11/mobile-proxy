@@ -5,6 +5,9 @@ from typing import Any, Iterable, NamedTuple
 
 CURRENT = "CURRENT"
 STALE = "STALE"
+CONTROL = "CONTROL"
+DIAGNOSTIC = "DIAGNOSTIC"
+AUDIT = "AUDIT"
 UNKNOWN = object()
 
 
@@ -14,6 +17,7 @@ class Fact(NamedTuple):
     value: Any
     lifecycle: str = CURRENT
     source_ref: str = ""
+    authority: str = CONTROL
 
 
 class FactConflict(RuntimeError):
@@ -25,6 +29,7 @@ def _facts_for(
     subject: str,
     predicate: str,
     lifecycle: str = CURRENT,
+    authority: str = CONTROL,
 ) -> list[Fact]:
     return [
         fact
@@ -32,33 +37,49 @@ def _facts_for(
         if fact.subject == subject
         and fact.predicate == predicate
         and fact.lifecycle == lifecycle
+        and fact.authority == authority
     ]
 
 
-def _current_value(facts: Iterable[Fact], subject: str, predicate: str) -> Any:
-    matches = _facts_for(facts, subject, predicate)
+def _value(
+    facts: Iterable[Fact],
+    subject: str,
+    predicate: str,
+    *,
+    lifecycle: str = CURRENT,
+    authority: str = CONTROL,
+) -> Any:
+    matches = _facts_for(facts, subject, predicate, lifecycle, authority)
     if not matches:
         return UNKNOWN
     values = [fact.value for fact in matches]
     first = values[0]
     if any(value != first for value in values[1:]):
-        raise FactConflict(f"conflicting current facts for {subject}.{predicate}")
+        raise FactConflict(
+            f"conflicting {authority} {lifecycle} facts for {subject}.{predicate}"
+        )
     return first
 
 
-def _has_conflict(facts: Iterable[Fact], subject: str, predicates: set[str]) -> bool:
+def _has_conflict(
+    facts: Iterable[Fact],
+    subject: str,
+    predicates: set[str],
+    *,
+    authority: str,
+) -> bool:
     for predicate in predicates:
         try:
-            _current_value(facts, subject, predicate)
+            _value(facts, subject, predicate, authority=authority)
         except FactConflict:
             return True
     return False
 
 
-def derive_job_state(facts: Iterable[Fact]) -> str:
-    status = _current_value(facts, "run", "job_status")
-    conclusion = _current_value(facts, "run", "job_conclusion")
-    runner_assigned = _current_value(facts, "run", "runner_assigned")
+def derive_job_state(facts: Iterable[Fact], *, authority: str = CONTROL) -> str:
+    status = _value(facts, "run", "job_status", authority=authority)
+    conclusion = _value(facts, "run", "job_conclusion", authority=authority)
+    runner_assigned = _value(facts, "run", "runner_assigned", authority=authority)
 
     if status is UNKNOWN:
         return "COMMAND_UNOBSERVED"
@@ -83,20 +104,20 @@ def derive_job_state(facts: Iterable[Fact]) -> str:
     return "COMMAND_UNOBSERVED"
 
 
-def derive_runner_state(facts: Iterable[Fact]) -> str:
+def derive_runner_state(facts: Iterable[Fact], *, authority: str = CONTROL) -> str:
     predicates = {
         "runner_registered",
         "runner_labels_match",
         "runner_online",
         "runner_busy",
     }
-    if _has_conflict(facts, "runner", predicates):
+    if _has_conflict(facts, "runner", predicates, authority=authority):
         return "RUNNER_CONFLICT"
 
-    registered = _current_value(facts, "runner", "runner_registered")
-    labels_match = _current_value(facts, "runner", "runner_labels_match")
-    online = _current_value(facts, "runner", "runner_online")
-    busy = _current_value(facts, "runner", "runner_busy")
+    registered = _value(facts, "runner", "runner_registered", authority=authority)
+    labels_match = _value(facts, "runner", "runner_labels_match", authority=authority)
+    online = _value(facts, "runner", "runner_online", authority=authority)
+    busy = _value(facts, "runner", "runner_busy", authority=authority)
 
     if registered is False:
         return "RUNNER_UNREGISTERED"
@@ -113,14 +134,14 @@ def derive_runner_state(facts: Iterable[Fact]) -> str:
     return "RUNNER_ONLINE_BUSY" if busy else "RUNNER_ONLINE_IDLE"
 
 
-def derive_transport_state(facts: Iterable[Fact]) -> str:
+def derive_transport_state(facts: Iterable[Fact], *, authority: str = CONTROL) -> str:
     predicates = {"transport_failed", "transport_tls_failure_recent", "transport_recent_success"}
-    if _has_conflict(facts, "runner", predicates):
+    if _has_conflict(facts, "runner", predicates, authority=authority):
         return "TRANSPORT_UNKNOWN"
 
-    failed = _current_value(facts, "runner", "transport_failed")
-    tls_failure = _current_value(facts, "runner", "transport_tls_failure_recent")
-    recent_success = _current_value(facts, "runner", "transport_recent_success")
+    failed = _value(facts, "runner", "transport_failed", authority=authority)
+    tls_failure = _value(facts, "runner", "transport_tls_failure_recent", authority=authority)
+    recent_success = _value(facts, "runner", "transport_recent_success", authority=authority)
 
     if failed is True:
         return "TRANSPORT_FAILED"
@@ -131,8 +152,8 @@ def derive_transport_state(facts: Iterable[Fact]) -> str:
     return "TRANSPORT_UNKNOWN"
 
 
-def derive_source_fetch_state(facts: Iterable[Fact]) -> str:
-    result = _current_value(facts, "run", "source_fetch_result")
+def derive_source_fetch_state(facts: Iterable[Fact], *, authority: str = CONTROL) -> str:
+    result = _value(facts, "run", "source_fetch_result", authority=authority)
     mapping = {
         "success": "SOURCE_FETCH_SUCCEEDED",
         "transport_failure": "SOURCE_FETCH_FAILED_TRANSPORT",
@@ -157,19 +178,24 @@ _PHONE_ACCESS_PREDICATES = (
 
 
 def _phone_probe_values(
-    facts: Iterable[Fact], lifecycle: str
+    facts: Iterable[Fact],
+    lifecycle: str,
+    *,
+    authority: str,
 ) -> tuple[dict[str, Any], str] | None:
     selected: dict[str, Fact] = {}
     source_ref: str | None = None
 
     for predicate in _PHONE_ACCESS_PREDICATES:
-        matches = _facts_for(facts, "phone", predicate, lifecycle)
+        matches = _facts_for(facts, "phone", predicate, lifecycle, authority)
         if not matches:
             return None
         values = {fact.value for fact in matches}
         if len(values) != 1:
             if lifecycle == CURRENT:
-                raise FactConflict(f"conflicting current facts for phone.{predicate}")
+                raise FactConflict(
+                    f"conflicting {authority} current facts for phone.{predicate}"
+                )
             return None
         refs = {fact.source_ref for fact in matches}
         if len(refs) != 1 or "" in refs:
@@ -207,9 +233,9 @@ def _classify_phone_probe(values: dict[str, Any]) -> str:
     return "PHONE_ACCESS_PROVEN"
 
 
-def derive_phone_access_state(facts: Iterable[Fact]) -> str:
+def derive_phone_access_state(facts: Iterable[Fact], *, authority: str = CONTROL) -> str:
     try:
-        current_probe = _phone_probe_values(facts, CURRENT)
+        current_probe = _phone_probe_values(facts, CURRENT, authority=authority)
     except FactConflict:
         return "PHONE_ACCESS_CONFLICT"
 
@@ -217,19 +243,18 @@ def derive_phone_access_state(facts: Iterable[Fact]) -> str:
         values, _ = current_probe
         return _classify_phone_probe(values)
 
-    stale_probe = _phone_probe_values(facts, STALE)
+    stale_probe = _phone_probe_values(facts, STALE, authority=authority)
     if stale_probe is not None:
         values, _ = stale_probe
         if _classify_phone_probe(values) == "PHONE_ACCESS_PROVEN":
             return "PHONE_ACCESS_STALE"
 
-    # Partial observations can still prove a specific fail-closed condition, but
-    # only if all facts used for that conclusion come from one bounded probe.
     current_phone_facts = [
         fact
         for fact in facts
         if fact.subject == "phone"
         and fact.lifecycle == CURRENT
+        and fact.authority == authority
         and fact.predicate in _PHONE_ACCESS_PREDICATES
     ]
     refs = {fact.source_ref for fact in current_phone_facts}
@@ -237,19 +262,19 @@ def derive_phone_access_state(facts: Iterable[Fact]) -> str:
         return "PHONE_ACCESS_UNOBSERVED"
 
     try:
-        adb_tool = _current_value(facts, "phone", "adb_tool_available")
+        adb_tool = _value(facts, "phone", "adb_tool_available", authority=authority)
         if adb_tool is False:
             return "ADB_TOOL_UNAVAILABLE"
         if adb_tool is UNKNOWN:
             return "PHONE_ACCESS_UNOBSERVED"
 
-        inventory_valid = _current_value(facts, "phone", "adb_inventory_valid")
+        inventory_valid = _value(facts, "phone", "adb_inventory_valid", authority=authority)
         if inventory_valid is False:
             return "ADB_INVENTORY_INVALID"
         if inventory_valid is UNKNOWN:
             return "PHONE_ACCESS_UNOBSERVED"
 
-        count = _current_value(facts, "phone", "adb_device_count")
+        count = _value(facts, "phone", "adb_device_count", authority=authority)
         if count is UNKNOWN:
             return "PHONE_ACCESS_UNOBSERVED"
         if count == 0:
@@ -257,25 +282,27 @@ def derive_phone_access_state(facts: Iterable[Fact]) -> str:
         if count != 1:
             return "ADB_MULTIPLE_DEVICES"
 
-        registered_match = _current_value(facts, "phone", "registered_device_match")
+        registered_match = _value(facts, "phone", "registered_device_match", authority=authority)
         if registered_match is False:
             return "ADB_WRONG_DEVICE"
         if registered_match is UNKNOWN:
             return "PHONE_ACCESS_UNOBSERVED"
 
-        inventory_state = _current_value(facts, "phone", "registered_device_inventory_state")
+        inventory_state = _value(
+            facts, "phone", "registered_device_inventory_state", authority=authority
+        )
         if inventory_state is UNKNOWN:
             return "PHONE_ACCESS_UNOBSERVED"
         if inventory_state != "device":
             return "ADB_REGISTERED_DEVICE_OFFLINE"
 
-        get_state = _current_value(facts, "phone", "adb_get_state")
+        get_state = _value(facts, "phone", "adb_get_state", authority=authority)
         if get_state is UNKNOWN:
             return "PHONE_ACCESS_UNOBSERVED"
         if get_state != "device":
             return "ADB_GET_STATE_FAILED"
 
-        shell_probe = _current_value(facts, "phone", "adb_shell_probe")
+        shell_probe = _value(facts, "phone", "adb_shell_probe", authority=authority)
         if shell_probe is UNKNOWN:
             return "PHONE_ACCESS_UNOBSERVED"
         if shell_probe is not True:
@@ -286,7 +313,7 @@ def derive_phone_access_state(facts: Iterable[Fact]) -> str:
     return "PHONE_ACCESS_PROVEN"
 
 
-def derive_failure_stage(facts: Iterable[Fact]) -> str | None:
+def derive_failure_stage(facts: Iterable[Fact], *, authority: str = CONTROL) -> str | None:
     ordered = (
         ("command_gate_failed", "COMMAND_GATE"),
         ("source_authority_failed", "SOURCE_AUTHORITY"),
@@ -310,39 +337,45 @@ def derive_failure_stage(facts: Iterable[Fact]) -> str | None:
         ("recovery_failed", "RECOVERY"),
     )
     for predicate, stage in ordered:
-        if _current_value(facts, "run", predicate) is True:
+        if _value(facts, "run", predicate, authority=authority) is True:
             return stage
     return None
 
 
-def derive_blocking_predicates(facts: Iterable[Fact]) -> list[str]:
+def derive_blocking_predicates(
+    facts: Iterable[Fact], *, authority: str = CONTROL
+) -> list[str]:
     facts = tuple(facts)
-    blockers: list[str] = []
 
-    failure_stage = derive_failure_stage(facts)
+    failure_stage = derive_failure_stage(facts, authority=authority)
     if failure_stage == "SOURCE_FETCH":
         return ["source_fetch=SOURCE_FETCH_SUCCEEDED"]
 
-    phone_access = derive_phone_access_state(facts)
+    phone_access = derive_phone_access_state(facts, authority=authority)
     if phone_access != "PHONE_ACCESS_PROVEN":
-        blockers.append(f"phone_access={phone_access}")
+        return [f"phone_access={phone_access}"]
 
-    return blockers
+    return []
 
 
-def derive_snapshot(facts: Iterable[Fact]) -> dict[str, Any]:
+def derive_snapshot(
+    facts: Iterable[Fact], *, authority: str = CONTROL
+) -> dict[str, Any]:
     facts = tuple(facts)
-    mutation_performed = _current_value(facts, "run", "mutation_performed")
+    mutation_performed = _value(
+        facts, "run", "mutation_performed", authority=authority
+    )
     if mutation_performed is UNKNOWN:
         mutation_performed = None
 
     return {
-        "command_job": derive_job_state(facts),
-        "runner": derive_runner_state(facts),
-        "transport": derive_transport_state(facts),
-        "source_fetch": derive_source_fetch_state(facts),
-        "phone_access": derive_phone_access_state(facts),
-        "failure_stage": derive_failure_stage(facts),
-        "blocking_predicates": derive_blocking_predicates(facts),
+        "authority": authority,
+        "command_job": derive_job_state(facts, authority=authority),
+        "runner": derive_runner_state(facts, authority=authority),
+        "transport": derive_transport_state(facts, authority=authority),
+        "source_fetch": derive_source_fetch_state(facts, authority=authority),
+        "phone_access": derive_phone_access_state(facts, authority=authority),
+        "failure_stage": derive_failure_stage(facts, authority=authority),
+        "blocking_predicates": derive_blocking_predicates(facts, authority=authority),
         "mutation_performed": mutation_performed,
     }
