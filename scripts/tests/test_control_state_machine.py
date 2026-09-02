@@ -15,8 +15,22 @@ SPEC.loader.exec_module(MODULE)
 F = MODULE.Fact
 
 
-def phone_fact(predicate, value, *, lifecycle="CURRENT", source_ref="phone-probe-1"):
-    return F("phone", predicate, value, lifecycle=lifecycle, source_ref=source_ref)
+def phone_fact(
+    predicate,
+    value,
+    *,
+    lifecycle="CURRENT",
+    source_ref="phone-probe-1",
+    authority="CONTROL",
+):
+    return F(
+        "phone",
+        predicate,
+        value,
+        lifecycle=lifecycle,
+        source_ref=source_ref,
+        authority=authority,
+    )
 
 
 class ControlStateMachineTests(unittest.TestCase):
@@ -33,6 +47,7 @@ class ControlStateMachineTests(unittest.TestCase):
 
         state = MODULE.derive_snapshot(facts)
 
+        self.assertEqual(state["authority"], "CONTROL")
         self.assertEqual(state["command_job"], "JOB_FAILED")
         self.assertEqual(state["transport"], "TRANSPORT_DEGRADED")
         self.assertEqual(state["source_fetch"], "SOURCE_FETCH_FAILED_TRANSPORT")
@@ -185,6 +200,24 @@ class ControlStateMachineTests(unittest.TestCase):
         state = MODULE.derive_snapshot(facts)
 
         self.assertEqual(state["phone_access"], "PHONE_ACCESS_UNOBSERVED")
+
+    def test_diagnostic_access_does_not_authorize_control_access(self) -> None:
+        facts = [
+            phone_fact("adb_tool_available", True, authority="DIAGNOSTIC"),
+            phone_fact("adb_inventory_valid", True, authority="DIAGNOSTIC"),
+            phone_fact("adb_device_count", 1, authority="DIAGNOSTIC"),
+            phone_fact("registered_device_match", True, authority="DIAGNOSTIC"),
+            phone_fact("registered_device_inventory_state", "device", authority="DIAGNOSTIC"),
+            phone_fact("adb_get_state", "device", authority="DIAGNOSTIC"),
+            phone_fact("adb_shell_probe", True, authority="DIAGNOSTIC"),
+        ]
+
+        control = MODULE.derive_snapshot(facts)
+        diagnostic = MODULE.derive_snapshot(facts, authority="DIAGNOSTIC")
+
+        self.assertEqual(control["phone_access"], "PHONE_ACCESS_UNOBSERVED")
+        self.assertEqual(diagnostic["phone_access"], "PHONE_ACCESS_PROVEN")
+        self.assertEqual(diagnostic["authority"], "DIAGNOSTIC")
 
     def test_missing_mutation_fact_stays_unknown(self) -> None:
         state = MODULE.derive_snapshot([])
