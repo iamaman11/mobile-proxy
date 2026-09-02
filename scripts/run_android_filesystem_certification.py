@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -106,29 +105,38 @@ def _q(path: str) -> str:
     return shlex.quote(path)
 
 
-def _remote_digest(serial: str, path: str, *, root: bool) -> str:
-    quoted = _q(path)
-    command = f"""set -eu
-p={quoted}
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$p" | awk '{{print $1}}'
+def _verify_remote_exact(serial: str, actual: str, expected: str, *, root: bool) -> None:
+    actual_q = _q(actual)
+    expected_q = _q(expected)
+    shell(
+        serial,
+        f"""set -eu
+actual={actual_q}
+expected={expected_q}
+if command -v cmp >/dev/null 2>&1; then
+  cmp -s -- "$actual" "$expected"
 elif command -v toybox >/dev/null 2>&1; then
-  toybox sha256sum "$p" | awk '{{print $1}}'
+  toybox cmp -s "$actual" "$expected"
 elif command -v busybox >/dev/null 2>&1; then
-  busybox sha256sum "$p" | awk '{{print $1}}'
+  busybox cmp -s "$actual" "$expected"
 else
   exit 73
 fi
-"""
-    digest = shell(serial, command, root=root).splitlines()
-    require(len(digest) == 1, "remote digest output is ambiguous")
-    value = digest[0].strip().lower()
-    require(re.fullmatch(r"[0-9a-f]{64}", value) is not None, "remote digest is invalid")
-    return value
+""",
+        root=root,
+    )
 
 
-def _verify_remote_digest(serial: str, path: str, expected: str, *, root: bool) -> None:
-    require(_remote_digest(serial, path, root=root) == expected, "remote digest differs")
+def _pull_and_verify_exact(
+    serial: str,
+    remote_path: str,
+    expected: bytes,
+    local_root: Path,
+    label: str,
+) -> None:
+    pulled = local_root / f"pulled-{label}.bin"
+    adb(serial, "pull", remote_path, str(pulled))
+    require(pulled.read_bytes() == expected, f"ADB pull exact-byte comparison differs: {label}")
 
 
 def _verify_absent(serial: str, path: str, *, root: bool) -> None:
@@ -136,8 +144,12 @@ def _verify_absent(serial: str, path: str, *, root: bool) -> None:
 
 
 def _prepare_payloads(root: Path, canonical_sha: str, transaction_id: str) -> dict[str, Any]:
-    original = (f"mobile-proxy-filesystem-certification\n{canonical_sha}\n{transaction_id}\noriginal\n").encode()
-    replacement = (f"mobile-proxy-filesystem-certification\n{canonical_sha}\n{transaction_id}\nreplacement\n").encode()
+    original = (
+        f"mobile-proxy-filesystem-certification\n{canonical_sha}\n{transaction_id}\noriginal\n"
+    ).encode()
+    replacement = (
+        f"mobile-proxy-filesystem-certification\n{canonical_sha}\n{transaction_id}\nreplacement\n"
+    ).encode()
     original_path = root / "original.bin"
     replacement_path = root / "replacement.bin"
     original_path.write_bytes(original)
@@ -145,8 +157,8 @@ def _prepare_payloads(root: Path, canonical_sha: str, transaction_id: str) -> di
     return {
         "original_path": original_path,
         "replacement_path": replacement_path,
-        "original_sha256": hashlib.sha256(original).hexdigest(),
-        "replacement_sha256": hashlib.sha256(replacement).hexdigest(),
+        "original_bytes": original,
+        "replacement_bytes": replacement,
     }
 
 
@@ -182,25 +194,48 @@ def run_scratch_certification(
 
     adb(serial, "push", str(payloads["original_path"]), remote_original)
     adb(serial, "push", str(payloads["replacement_path"]), remote_replacement)
-    _verify_remote_digest(serial, remote_original, payloads["original_sha256"], root=False)
-    _verify_remote_digest(serial, remote_replacement, payloads["replacement_sha256"], root=False)
-
-    pulled = local_root / "pulled-original.bin"
-    adb(serial, "pull", remote_original, str(pulled))
-    require(
-        hashlib.sha256(pulled.read_bytes()).hexdigest() == payloads["original_sha256"],
-        "ADB pull roundtrip digest differs",
+    _pull_and_verify_exact(
+        serial,
+        remote_original,
+        payloads["original_bytes"],
+        local_root,
+        "original",
+    )
+    _pull_and_verify_exact(
+        serial,
+        remote_replacement,
+        payloads["replacement_bytes"],
+        local_root,
+        "replacement",
     )
 
     shell(serial, f"cp {_q(remote_original)} {_q(remote_active)}")
-    _verify_remote_digest(serial, remote_active, payloads["original_sha256"], root=False)
-    shell(serial, f"cp {_q(remote_replacement)} {_q(remote_next)} && mv -f {_q(remote_next)} {_q(remote_active)}")
-    _verify_remote_digest(serial, remote_active, payloads["replacement_sha256"], root=False)
+    _verify_remote_exact(serial, remote_active, remote_original, root=False)
+    _pull_and_verify_exact(
+        serial,
+        remote_active,
+        payloads["original_bytes"],
+        local_root,
+        "active-original",
+    )
+
+    shell(
+        serial,
+        f"cp {_q(remote_replacement)} {_q(remote_next)} && mv -f {_q(remote_next)} {_q(remote_active)}",
+    )
+    _verify_remote_exact(serial, remote_active, remote_replacement, root=False)
+    _pull_and_verify_exact(
+        serial,
+        remote_active,
+        payloads["replacement_bytes"],
+        local_root,
+        "active-replacement",
+    )
 
     shell(serial, f"ln -s active.bin {_q(remote_link)}")
     link_target = shell(serial, f"readlink {_q(remote_link)}")
     require(link_target == "active.bin", "scratch symlink target differs")
-    _verify_remote_digest(serial, remote_link, payloads["replacement_sha256"], root=False)
+    _verify_remote_exact(serial, remote_link, remote_replacement, root=False)
 
     shell(serial, f"rm -f {_q(remote_link)} {_q(remote_active)}")
     _verify_absent(serial, remote_link, root=False)
@@ -222,19 +257,35 @@ def run_managed_certification(
 
     shell(
         serial,
-        f"mkdir -p {_q(paths['managed_base'])} && chmod 700 {_q(paths['managed_base'])} && mkdir {_q(managed)} && chmod 700 {_q(managed)}",
+        (
+            f"mkdir -p {_q(paths['managed_base'])} && "
+            f"chmod 700 {_q(paths['managed_base'])} && "
+            f"mkdir {_q(managed)} && chmod 700 {_q(managed)}"
+        ),
         root=True,
     )
-    shell(serial, f"cp {_q(remote_original)} {_q(managed_active)} && chmod 600 {_q(managed_active)}", root=True)
-    _verify_remote_digest(serial, managed_active, payloads["original_sha256"], root=True)
+    shell(
+        serial,
+        f"cp {_q(remote_original)} {_q(managed_active)} && chmod 600 {_q(managed_active)}",
+        root=True,
+    )
+    _verify_remote_exact(serial, managed_active, remote_original, root=True)
 
-    shell(serial, f"cp {_q(remote_replacement)} {_q(managed_next)} && chmod 600 {_q(managed_next)} && mv -f {_q(managed_next)} {_q(managed_active)}", root=True)
-    _verify_remote_digest(serial, managed_active, payloads["replacement_sha256"], root=True)
+    shell(
+        serial,
+        (
+            f"cp {_q(remote_replacement)} {_q(managed_next)} && "
+            f"chmod 600 {_q(managed_next)} && "
+            f"mv -f {_q(managed_next)} {_q(managed_active)}"
+        ),
+        root=True,
+    )
+    _verify_remote_exact(serial, managed_active, remote_replacement, root=True)
 
     shell(serial, f"ln -s active.bin {_q(managed_link)}", root=True)
     link_target = shell(serial, f"readlink {_q(managed_link)}", root=True)
     require(link_target == "active.bin", "managed symlink target differs")
-    _verify_remote_digest(serial, managed_link, payloads["replacement_sha256"], root=True)
+    _verify_remote_exact(serial, managed_link, remote_replacement, root=True)
 
     shell(serial, f"rm -f {_q(managed_link)} {_q(managed_active)}", root=True)
     _verify_absent(serial, managed_link, root=True)
@@ -316,6 +367,7 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "transaction_id": transaction_id,
             "state": "ACCEPTED",
             "failure_stage": None,
+            "comparison_contract": "exact-bytes",
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": True,
             "cleanup_verified": True,
@@ -351,6 +403,7 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "state": state,
             "failure_stage": failure_stage or "precondition",
             "failure": failure_message,
+            "comparison_contract": "exact-bytes",
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": False,
             "cleanup_verified": cleanup_verified,
