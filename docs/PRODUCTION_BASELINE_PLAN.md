@@ -18,6 +18,30 @@ Production execution is **fact-first**. The canonical [`control-state-machine-v1
 
 For Android physical state, the real registered production phone is the authoritative observation oracle. Hosted `Quality`, unit/integration tests and execution workflows are necessary to prove software/policy coherence and safe observers, but they do not by themselves prove the phone's current filesystem, package, signer, runtime, process, network or functional data-path state.
 
+### 1.1 Blocking foundation gate: reproducible physical-device control first
+
+There is **one sequential development direction**. The current blocking milestone is to complete, prove and accept a production-grade State Machine for reproducible control of the real physical Android device **before further application feature growth**.
+
+The project MUST NOT continue growing APK/runtime features, orchestration frameworks, VM generalization, migration frameworks or governance machinery merely because an earlier domain-specific check is green. Until the foundation gate is accepted, only the smallest change required to prove the next State Machine invariant is in scope.
+
+The required order is:
+
+```text
+FORMAL DEVICE STATE MODEL
+  -> OPERATION-SPECIFIC GUARDS
+  -> BOUNDED MUTATION
+  -> INDEPENDENT POSTCONDITION OBSERVATION
+  -> AMBIGUOUS-OUTCOME HANDLING
+  -> RECOVERY / QUARANTINE
+  -> CONTROLLER RESTART + DEVICE REBOOT
+  -> REPRODUCIBLE CLEAN PROJECT-OWNED DEVICE STATE
+  -> REAL-PHONE FOUNDATION ACCEPTANCE
+  -> APPLICATION FEATURE GROWTH
+  -> VM / PROVIDER GENERALIZATION
+```
+
+This is not a second roadmap. It is the current blocking gate inside this sole Production Baseline roadmap. Public Issue `#179` remains the live cursor for the exact next production transition and cannot authorize skipping this foundation prerequisite.
+
 ## 2. Protected compatibility and runtime surface
 
 The baseline preserves:
@@ -73,6 +97,12 @@ Historical Item 19 candidate `d151dbdd156279e32a5361d304c90f996bd2d565` remains 
 16. The real registered production phone is the authoritative observation oracle for Android device reality. Hosted/offline systems may authorize, transport and validate observations but must not manufacture current Android physical state.
 17. If an Android predicate or postcondition can be verified on the real production phone, the dependent production state requires bounded device-backed `CONTROL` evidence from that phone with the scope, freshness and durability required by the operation contract. Unit/integration/hosted-Actions evidence alone cannot complete that Android state.
 18. Infrastructure/control-plane hardening may precede a device operation only to remove a demonstrated blocker to the next safe device-backed transition. Once that blocker is closed, execution returns to the real-phone certification path rather than expanding orchestration or framework work without a new demonstrated blocker.
+19. One developer follows one sequential roadmap. A blocked foundational State Machine property is not permission to start a second architecture lane.
+20. No code is added for code's sake. New framework, orchestration, policy or abstraction code must remove a concrete current uncertainty and be simpler than the problem it solves.
+21. Do not verify verification. A checker/test must protect an independent behavior, invariant or trust boundary; it must not exist merely to confirm that another checker/test exists or ran.
+22. Prefer deletion, simplification and reuse before adding a new module, workflow, registry, abstraction or contract.
+23. The current installed APK/runtime/project-owned files are disposable bootstrap state until reproducible device control is accepted. Reproducibility takes priority over preserving an incidental installation.
+24. Bootstrap-state disposability does not weaken confidentiality or containment: real credentials are never logged/committed/disclosed, non-project-owned phone state remains outside the mutation boundary, and provider/account mutations remain separately bounded and authorized.
 
 ### 4.1 Fact-first state/control contract
 
@@ -104,6 +134,21 @@ For Android device reality, the observation step above means a bounded authorize
 
 The public Issue `#179` remains the live execution cursor and authorizes exactly one next transition at a time. The cursor may point to machine evidence, but it does not itself turn narrative into machine truth.
 
+### 4.2 Ambiguous execution outcome is explicit
+
+If the runner/controller/transport disappears after a destructive command may have reached the phone, controller failure MUST NOT be collapsed into target-operation failure. The transaction enters an explicit ambiguous outcome requiring fresh real-phone observation before any non-idempotent retry.
+
+The next classification must come from observation:
+
+```text
+NOT_APPLIED
+APPLIED_AND_VERIFIED
+PARTIAL_RECOVERY_REQUIRED
+QUARANTINED
+```
+
+No “probably failed, retry” path exists for a non-idempotent destructive operation.
+
 ## 5. Completed baseline foundation
 
 The baseline already established the protected application boundaries, SQLite durable-state model, reverse-tunnel correctness controls, backup/restore discipline, GitHub-only execution boundary, typed provider ownership lifecycle and historical Item 19 provider proof. Those historical facts remain subject to their dedicated contracts/evidence and are not restated as current release authority here.
@@ -125,6 +170,8 @@ Stable invariants include:
 - stale, diagnostic, audit, conflicting or cross-transaction evidence cannot satisfy current mutation guards;
 - Android physical-state transitions consume device-backed CONTROL evidence from the real registered production phone whenever the predicate is observable there; hosted evidence proves software/policy, not physical device truth.
 
+These completed foundations do not waive the new physical-device State Machine foundation gate. Existing pieces are inputs to that gate, not proof that the complete control engine is accepted.
+
 ## 6. Current Item 20 prerequisites
 
 Item 19 historical provider proof is COMPLETE. Its exact proof record remains in `docs/operations/item19-provider-proof-closeout.md`.
@@ -135,28 +182,42 @@ Architecture reconciliation does not reuse the Item 19 candidate. After #172 is 
 
 Before mutable phone work, the private execution satellite must be repinned to that exact public SHA, the exact signed Android candidate must be built and retained with bounded provenance, and the signing-generation migration may run only through the authorized #162 path after all of its prerequisites are actually satisfied. No final `v0.1.4` tag or GitHub Release is an input to that migration.
 
-The phone path must retain and verify the old installed APK/signing generation before uninstall, re-check the registered device immediately before mutation, install only the exact verified candidate and execute the defined rollback path on post-capture failure. No unrelated reboot/network/provider mutation is authorized by the migration.
+The physical-device State Machine foundation gate is an additional blocking prerequisite for further application growth. Existing signing/release authority rules remain in force, but they must not cause the project to spend architecture effort preserving an incidental unreproducible phone installation.
 
-### 6.1 Current fact-first execution sub-sequence
+Where current Item 20 migration wording requires retaining an old installed artifact for rollback evidence, that requirement is acceptance evidence only; it does not make the old installation an architectural source of truth. Once the authorized operation boundary is crossed, project-owned device state may be rebuilt from the accepted source/artifact contract rather than preserved indefinitely.
 
-The immediate product hardening sequence uses Android as the first fully evidenced adapter and closes one verified layer at a time:
+### 6.1 Current sequential State Machine foundation sub-sequence
 
-1. **Evidence reliability** — close only the demonstrated bounded evidence-persistence blocker; retry persistence transport only when explicitly safe and never replay the phone observation/mutation merely to obtain an artifact.
-2. **Current-SHA phone admission** — immediately return to the real registered production phone and prove fresh `PHONE_ACCESS_PROVEN` for the exact current canonical SHA before any dependent Android observation or mutation.
-3. **Quarantine reconciliation** — perform one fresh read-only real-phone observation of the exact quarantined transaction IDs named by the current #179 cursor. Durable device facts decide whether cleanup is needed; if the paths are durably proven absent, cleanup is skipped entirely.
-4. **Android filesystem certification** — prove current capabilities plus bounded owned scratch and managed-root create/write/read/compare/delete/post-absence behavior and explicit recovery/quarantine semantics from device-backed evidence.
-5. **APK/signing lifecycle** — prove exact signed artifact identity, installed baseline, mutation-boundary reproof, uninstall/install separation, independent real-phone signer/version/digest verification and recovery behavior.
-6. **Native runtime lifecycle** — prove exact generation materialization, integrity/current binding, start, structural health, functional health, restart/rehydration and recovery on the real phone.
-7. **Real data path** — prove control plane -> phone -> QUIC -> protected proxy ports, forced pinned TLS/TCP reserve, and return of new connections to QUIC after recovery.
-8. **Restart/recovery/failure matrix** — inject bounded failures at defined boundaries and prove `REFUSED`, `RECOVERY_REQUIRED`, `RECOVERED` or `QUARANTINED` without narrative state promotion.
-9. **Soak and release acceptance** — only on one unchanged exact candidate with all required durable device-backed evidence and no unresolved P0/P1 defect.
-10. **VM/provider generalization** — only after the phone baseline demonstrates which primitives are genuinely common; reuse proven `observe/guard/lock/mutate/verify/recover/evidence` semantics instead of inventing a speculative second framework.
+The immediate product hardening sequence is now the physical-device control foundation itself:
 
-This is an execution sub-sequence, not permission to skip or reorder stricter Item 20 provider, signing, candidate-acceptance or final-release gates. At every point the exact current `#179` cursor and derived blocking predicates decide the single next safe transition. Infrastructure work inside this sub-sequence exists to unblock the next device-backed step; completion of that infrastructure work is not itself completion of the Android step it enables.
+1. **Freeze non-essential growth** — no new product features, generic execution frameworks, VM generalization or policy scaffolding unless strictly required by the next foundation invariant.
+2. **Complete the formal state model** — enumerate device state dimensions, operation guards, destructive boundaries, ambiguous outcomes, recovery states and terminal classifications. Invalid/unknown combinations fail closed.
+3. **Prove deterministic reducer semantics** — core state/guard/recovery decisions are deterministic and side-effect free where possible; workflow/job conclusion is not an input substitute for evidence.
+4. **Prove real-phone observation** — current-SHA phone admission and all device-verifiable preconditions/postconditions come from bounded observation of the real registered phone.
+5. **Prove bounded mutation semantics** — representative filesystem, package, runtime/process and connectivity mutations use the same transaction engine: guard -> authority -> mutation -> independent observation. These domains are State Machine dimensions, not separate architecture roadmaps.
+6. **Prove ambiguous-outcome handling** — inject runner/controller disconnect at destructive boundaries and evidence-persistence loss after observation; re-observe the phone before any non-idempotent retry.
+7. **Prove recovery/quarantine** — every injected partial state converges only to independently evidenced `RECOVERED`, `QUARANTINED` or `ACCEPTED`; recovery never silently becomes acceptance.
+8. **Prove restart/reboot reconstruction** — restart controller/runner and reboot the phone; reconstruct the next safe decision from durable transaction identity plus fresh observation, not narrative memory.
+9. **Prove reproducible clean project-owned state** — establish the allowed phone baseline repeatedly without depending on the current incidental APK/runtime/files surviving.
+10. **Accept the physical-device foundation** — no unresolved transition ambiguity, no blind non-idempotent retry path, and bounded real-phone evidence for all required fault classes on one exact source identity.
+11. **Resume application completion through the accepted engine** — only after foundation acceptance, complete APK/signing, native runtime, real data path, fallback/return, soak and release work without adding workflow-specific state truth.
+12. **Generalize only demonstrated primitives** — only after the phone path is accepted may proven `observe/guard/lock/mutate/verify/recover/evidence` semantics be adapted to VM/provider targets.
+
+At every point the exact current `#179` cursor and derived blocking predicates decide the one next safe production transition. Infrastructure work exists only to unblock that exact transition and must not expand into an independent workstream.
+
+### 6.2 Bootstrap-state policy
+
+During steps 1-10, use the rule **protect boundaries, not bootstrap state**.
+
+The current installed APK, runtime generation, project-owned files and project-owned configuration are disposable. An authorized bounded operation may remove and rebuild them when this improves reproducibility and the post-state is independently verified.
+
+Do not create elaborate secret-continuity or in-place migration architecture merely to preserve unreproducible device-local project state. Prefer revocable/test credentials for foundation experiments where practical, and ensure correctness does not depend on any device-local project secret surviving.
+
+Real credentials remain confidential. They must not be logged, committed or deliberately disclosed. Non-project-owned phone state is never part of cleanup/rebuild authority.
 
 ## 7. Item 20 live acceptance
 
-When all prerequisites are satisfied, Item 20 opens a fresh just-in-time acceptance session through the protected typed lifecycle under a **distinct ownership intent rather than reuse Item 19's terminal proof intent**.
+When the physical-device State Machine foundation and all other prerequisites are satisfied, Item 20 opens a fresh just-in-time acceptance session through the protected typed lifecycle under a **distinct ownership intent rather than reuse Item 19's terminal proof intent**.
 
 The session must use the new exact same-SHA candidate/control-plane identity and fresh candidate-specific authority/evidence. It must prove, as applicable:
 
@@ -191,7 +252,9 @@ Only after the final release exists may production promotion occur through the t
 
 ## 9. Required delivery order
 
-The historical completed foundation remains auditable in its own trackers/evidence. The active sequence is:
+The single active development direction is Section 6.1. The numbered chain below is the later release-authority ordering that becomes executable only when the foundation gate and the corresponding prerequisites are satisfied; it is not a second development roadmap.
+
+The historical completed foundation remains auditable in its own trackers/evidence. The release chain is:
 
 1. complete #172 architecture/documentation reconciliation in a protected public PR;
 2. prove exact PR-head `Quality` success;
@@ -219,7 +282,7 @@ The historical completed foundation remains auditable in its own trackers/eviden
 
 Items 21 and 22 remain forbidden until Item 20 succeeds. No final protected `v*` release/tag or production promotion is authorized by historical Item 19 completion, Android version metadata, a private signed build or architecture reconciliation alone.
 
-The numbered release chain above is preserved as the authority ordering. Section 6.1 controls how unresolved phone/runtime work is proven within that chain: every completed step must be a machine-derived fact before the next dependent transition can execute.
+The numbered release chain above preserves authority ordering only. It cannot be used to bypass or dilute the physical-device State Machine foundation gate.
 
 ## 10. CI/CD and evidence requirements
 
@@ -241,13 +304,30 @@ Every public source change goes through pull request review, exact immutable PR-
 - active roadmap wording that introduces a global phone/VM/provider `READY` flag instead of operation-scoped permission predicates;
 - active roadmap wording that removes the real registered production phone as the authoritative observation oracle for Android device reality;
 - active roadmap wording that allows hosted/unit/integration evidence alone to complete an Android predicate or postcondition that is verifiable on the real production phone;
-- active roadmap sequencing that allows infrastructure/orchestration hardening to continue after its demonstrated device blocker is closed instead of returning to the next real-phone certification step.
+- architecture that lets non-essential feature/framework growth bypass the physical-device State Machine foundation gate;
+- mutation semantics that equate controller/runner loss with target-operation failure instead of requiring re-observation after an ambiguous destructive outcome.
+
+Quality must remain proportionate. Do not add a check merely to confirm that another check/test exists or ran. A separate check requires a separate independent invariant or trust boundary; otherwise simplify or delete the redundant verification layer.
 
 Evidence is bounded and immutable. Public evidence may include non-sensitive public SHA/run/artifact identities and booleans required by contract; it must not include credentials, signing secrets/fingerprints, raw device serials, private endpoints or secret-derived identifiers.
 
 When a state transition requires a durable artifact, artifact persistence is part of the admission predicate, not an afterthought. Transport failure during evidence persistence must remain separately classified from the device operation itself and cannot be repaired by inferring durable state from logs.
 
 ## 11. Definition of done
+
+### Physical-device State Machine foundation accepted
+
+The foundation gate is accepted only when the same coherent control model has real-phone evidence for current observation, bounded mutation, independent postcondition verification, ambiguous controller/runner-loss handling, recovery/quarantine at destructive boundaries, controller restart, phone reboot and reproducible clean project-owned state.
+
+Acceptance additionally requires:
+
+- no known non-idempotent blind-retry path;
+- no workflow-specific parallel source of transition truth;
+- no correctness dependency on preserving incidental current phone installation/project-owned state;
+- no unresolved state that can only be explained by narrative rather than bounded evidence;
+- no unnecessary architecture/framework growth required merely to keep policy machinery synchronized.
+
+Only after this status is achieved may ordinary application feature growth resume.
 
 ### Architecture reconciliation complete
 
@@ -265,6 +345,6 @@ This status must **not** be described as global project 10/10 acceptance.
 
 ### Full project 10/10 accepted
 
-Global 10/10 is reached only after the same exact accepted public SHA has all applicable software, provider, Android migration/signing, real-phone, recovery/restart/crash and 24-hour soak evidence; Item 20 is completed; protected `main` still equals that SHA; the final annotated tag targets it; and published artifact provenance is bound to that same source SHA.
+Global 10/10 is reached only after the physical-device State Machine foundation is accepted and the same exact accepted public SHA has all applicable software, provider, Android migration/signing, real-phone, recovery/restart/crash and 24-hour soak evidence; Item 20 is completed; protected `main` still equals that SHA; the final annotated tag targets it; and published artifact provenance is bound to that same source SHA.
 
 Acceptance additionally requires that every production transition used the evidence-derived CONTROL/operation state model: no required state may be promoted solely from workflow conclusion, historical narrative or unpersisted proof. Any Android state or postcondition that is verifiable on the real production phone must be backed by bounded device-backed CONTROL evidence from that phone rather than hosted/offline evidence alone.
