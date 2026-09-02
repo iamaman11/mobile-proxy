@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 
 SUPPORTED = "SUPPORTED"
@@ -25,6 +25,7 @@ _MANAGED_ROOT = PurePosixPath("/data/adb/mobile-proxy-node")
 _MANAGED_BASE = _MANAGED_ROOT / ".adapter-test"
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
+StepMarker = Callable[[str], None]
 
 
 def _load_module(name: str, filename: str):
@@ -48,6 +49,11 @@ class CertificationFailure(RuntimeError):
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise CertificationFailure(message)
+
+
+def _mark(mark_step: StepMarker | None, substep: str) -> None:
+    if mark_step is not None:
+        mark_step(substep)
 
 
 def require_transaction_id(value: str) -> str:
@@ -182,8 +188,11 @@ def run_scratch_certification(
     paths: dict[str, str],
     payloads: dict[str, Any],
     local_root: Path,
+    *,
+    mark_step: StepMarker | None = None,
 ) -> None:
     scratch = paths["scratch"]
+    _mark(mark_step, "scratch.mkdir")
     shell(serial, f"mkdir -p {_q(paths['scratch_base'])} && mkdir {_q(scratch)}")
 
     remote_original = f"{scratch}/original.bin"
@@ -192,8 +201,11 @@ def run_scratch_certification(
     remote_next = f"{scratch}/active.next"
     remote_link = f"{scratch}/active.link"
 
+    _mark(mark_step, "scratch.push_original")
     adb(serial, "push", str(payloads["original_path"]), remote_original)
+    _mark(mark_step, "scratch.push_replacement")
     adb(serial, "push", str(payloads["replacement_path"]), remote_replacement)
+    _mark(mark_step, "scratch.pull_original")
     _pull_and_verify_exact(
         serial,
         remote_original,
@@ -201,6 +213,7 @@ def run_scratch_certification(
         local_root,
         "original",
     )
+    _mark(mark_step, "scratch.pull_replacement")
     _pull_and_verify_exact(
         serial,
         remote_replacement,
@@ -209,8 +222,11 @@ def run_scratch_certification(
         "replacement",
     )
 
+    _mark(mark_step, "scratch.copy_original")
     shell(serial, f"cp {_q(remote_original)} {_q(remote_active)}")
+    _mark(mark_step, "scratch.compare_original_remote")
     _verify_remote_exact(serial, remote_active, remote_original, root=False)
+    _mark(mark_step, "scratch.pull_active_original")
     _pull_and_verify_exact(
         serial,
         remote_active,
@@ -219,11 +235,14 @@ def run_scratch_certification(
         "active-original",
     )
 
+    _mark(mark_step, "scratch.atomic_replace")
     shell(
         serial,
         f"cp {_q(remote_replacement)} {_q(remote_next)} && mv -f {_q(remote_next)} {_q(remote_active)}",
     )
+    _mark(mark_step, "scratch.compare_replacement_remote")
     _verify_remote_exact(serial, remote_active, remote_replacement, root=False)
+    _mark(mark_step, "scratch.pull_active_replacement")
     _pull_and_verify_exact(
         serial,
         remote_active,
@@ -232,13 +251,20 @@ def run_scratch_certification(
         "active-replacement",
     )
 
+    _mark(mark_step, "scratch.symlink_create")
     shell(serial, f"ln -s active.bin {_q(remote_link)}")
+    _mark(mark_step, "scratch.symlink_read")
     link_target = shell(serial, f"readlink {_q(remote_link)}")
+    _mark(mark_step, "scratch.symlink_target")
     require(link_target == "active.bin", "scratch symlink target differs")
+    _mark(mark_step, "scratch.symlink_compare")
     _verify_remote_exact(serial, remote_link, remote_replacement, root=False)
 
+    _mark(mark_step, "scratch.remove_active")
     shell(serial, f"rm -f {_q(remote_link)} {_q(remote_active)}")
+    _mark(mark_step, "scratch.verify_link_absent")
     _verify_absent(serial, remote_link, root=False)
+    _mark(mark_step, "scratch.verify_active_absent")
     _verify_absent(serial, remote_active, root=False)
 
 
@@ -246,6 +272,8 @@ def run_managed_certification(
     serial: str,
     paths: dict[str, str],
     payloads: dict[str, Any],
+    *,
+    mark_step: StepMarker | None = None,
 ) -> None:
     scratch = paths["scratch"]
     managed = paths["managed"]
@@ -255,6 +283,7 @@ def run_managed_certification(
     managed_next = f"{managed}/active.next"
     managed_link = f"{managed}/active.link"
 
+    _mark(mark_step, "managed.mkdir")
     shell(
         serial,
         (
@@ -264,13 +293,16 @@ def run_managed_certification(
         ),
         root=True,
     )
+    _mark(mark_step, "managed.copy_original")
     shell(
         serial,
         f"cp {_q(remote_original)} {_q(managed_active)} && chmod 600 {_q(managed_active)}",
         root=True,
     )
+    _mark(mark_step, "managed.compare_original_remote")
     _verify_remote_exact(serial, managed_active, remote_original, root=True)
 
+    _mark(mark_step, "managed.atomic_replace")
     shell(
         serial,
         (
@@ -280,30 +312,47 @@ def run_managed_certification(
         ),
         root=True,
     )
+    _mark(mark_step, "managed.compare_replacement_remote")
     _verify_remote_exact(serial, managed_active, remote_replacement, root=True)
 
+    _mark(mark_step, "managed.symlink_create")
     shell(serial, f"ln -s active.bin {_q(managed_link)}", root=True)
+    _mark(mark_step, "managed.symlink_read")
     link_target = shell(serial, f"readlink {_q(managed_link)}", root=True)
+    _mark(mark_step, "managed.symlink_target")
     require(link_target == "active.bin", "managed symlink target differs")
+    _mark(mark_step, "managed.symlink_compare")
     _verify_remote_exact(serial, managed_link, remote_replacement, root=True)
 
+    _mark(mark_step, "managed.remove_active")
     shell(serial, f"rm -f {_q(managed_link)} {_q(managed_active)}", root=True)
+    _mark(mark_step, "managed.verify_link_absent")
     _verify_absent(serial, managed_link, root=True)
+    _mark(mark_step, "managed.verify_active_absent")
     _verify_absent(serial, managed_active, root=True)
 
 
-def cleanup_paths(serial: str, paths: dict[str, str]) -> bool:
+def cleanup_paths(
+    serial: str,
+    paths: dict[str, str],
+    *,
+    mark_step: StepMarker | None = None,
+) -> bool:
     try:
+        _mark(mark_step, "cleanup.managed_remove")
         shell(
             serial,
             f"rm -rf {_q(paths['managed'])}; rmdir {_q(paths['managed_base'])} 2>/dev/null || true",
             root=True,
         )
+        _mark(mark_step, "cleanup.scratch_remove")
         shell(
             serial,
             f"rm -rf {_q(paths['scratch'])}; rmdir {_q(paths['scratch_base'])} 2>/dev/null || true",
         )
+        _mark(mark_step, "cleanup.managed_verify_absent")
         _verify_absent(serial, paths["managed"], root=True)
+        _mark(mark_step, "cleanup.scratch_verify_absent")
         _verify_absent(serial, paths["scratch"], root=False)
         return True
     except CertificationFailure:
@@ -319,9 +368,20 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
 
     capabilities: dict[str, str] = {}
     mutation_started = False
+    cleanup_attempted = False
     cleanup_verified = False
     failure_stage: str | None = None
     failure_message: str | None = None
+    current_substep: str | None = None
+    current_cleanup_substep: str | None = None
+
+    def mark_substep(substep: str) -> None:
+        nonlocal current_substep
+        current_substep = substep
+
+    def mark_cleanup_substep(substep: str) -> None:
+        nonlocal current_cleanup_substep
+        current_cleanup_substep = substep
 
     try:
         _PREFLIGHT.prove_registered_device(serial)
@@ -342,14 +402,34 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             payloads = _prepare_payloads(local_root, canonical_sha, transaction_id)
 
             failure_stage = "scratch_roundtrip"
+            current_substep = "scratch.enter"
             mutation_started = True
-            run_scratch_certification(serial, paths, payloads, local_root)
+            run_scratch_certification(
+                serial,
+                paths,
+                payloads,
+                local_root,
+                mark_step=mark_substep,
+            )
 
             failure_stage = "managed_root_write"
-            run_managed_certification(serial, paths, payloads)
+            current_substep = "managed.enter"
+            run_managed_certification(
+                serial,
+                paths,
+                payloads,
+                mark_step=mark_substep,
+            )
 
             failure_stage = "cleanup_verify"
-            cleanup_verified = cleanup_paths(serial, paths)
+            current_substep = "cleanup.verify"
+            current_cleanup_substep = "cleanup.enter"
+            cleanup_attempted = True
+            cleanup_verified = cleanup_paths(
+                serial,
+                paths,
+                mark_step=mark_cleanup_substep,
+            )
             require(cleanup_verified, "certification namespace cleanup could not be proven")
 
         for name in (
@@ -367,10 +447,13 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "transaction_id": transaction_id,
             "state": "ACCEPTED",
             "failure_stage": None,
+            "failure_substep": None,
             "comparison_contract": "exact-bytes",
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": True,
+            "cleanup_attempted": True,
             "cleanup_verified": True,
+            "cleanup_failure_substep": None,
             "mutation_scope": {
                 "scratch_base": str(_SCRATCH_BASE),
                 "managed_base": str(_MANAGED_BASE),
@@ -382,8 +465,18 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
         }
     except (_PREFLIGHT.PreflightFailure, CertificationFailure) as error:
         failure_message = str(error)
+        failure_substep = current_substep if mutation_started else None
+        cleanup_failure_substep: str | None = None
         if mutation_started:
-            cleanup_verified = cleanup_paths(serial, paths)
+            cleanup_attempted = True
+            current_cleanup_substep = "cleanup.enter"
+            cleanup_verified = cleanup_paths(
+                serial,
+                paths,
+                mark_step=mark_cleanup_substep,
+            )
+            if not cleanup_verified:
+                cleanup_failure_substep = current_cleanup_substep
             state = "RECOVERED" if cleanup_verified else "QUARANTINED"
         else:
             state = "REFUSED"
@@ -402,11 +495,14 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "transaction_id": transaction_id,
             "state": state,
             "failure_stage": failure_stage or "precondition",
+            "failure_substep": failure_substep,
             "failure": failure_message,
             "comparison_contract": "exact-bytes",
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": False,
+            "cleanup_attempted": cleanup_attempted,
             "cleanup_verified": cleanup_verified,
+            "cleanup_failure_substep": cleanup_failure_substep,
             "mutation_scope": {
                 "scratch_base": str(_SCRATCH_BASE),
                 "managed_base": str(_MANAGED_BASE),
@@ -439,7 +535,10 @@ def main() -> int:
         return 2
     if not report.get("accepted"):
         print(
-            f"android filesystem certification not accepted: state={report.get('state')} stage={report.get('failure_stage')}",
+            "android filesystem certification not accepted: "
+            f"state={report.get('state')} "
+            f"stage={report.get('failure_stage')} "
+            f"substep={report.get('failure_substep')}",
             file=sys.stderr,
         )
         return 1
