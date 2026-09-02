@@ -26,6 +26,14 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
+        self.comparator_probe = mock.patch.object(
+            MODULE,
+            "_probe_comparator",
+            return_value=MODULE.SUPPORTED,
+        )
+        self.comparator_probe_mock = self.comparator_probe.start()
+        self.addCleanup(self.comparator_probe.stop)
+
     def _inventory(self):
         return {
             "read_only_capabilities_proven": True,
@@ -86,8 +94,17 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
         self.assertTrue(report["phone_mutation_performed"])
         self.assertFalse(report["raw_device_identifier_recorded"])
         self.assertEqual(prove_device.call_count, 2)
-        scratch.assert_called_once()
-        managed.assert_called_once()
+        self.assertTrue(report["comparator_admission"]["selection_before_mutation"])
+        self.assertEqual(
+            report["comparator_admission"]["scratch"]["selected_comparator"],
+            "cmp",
+        )
+        self.assertEqual(
+            report["comparator_admission"]["managed_root"]["selected_comparator"],
+            "cmp",
+        )
+        self.assertEqual(scratch.call_args.kwargs["comparator"], "cmp")
+        self.assertEqual(managed.call_args.kwargs["comparator"], "cmp")
         cleanup.assert_called_once()
         for name in (
             "adb_push_pull_roundtrip",
@@ -97,6 +114,163 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
             self.assertEqual(report["capabilities"][name], "SUPPORTED")
         self.assertEqual(report["capabilities"]["package_install_uninstall"], "UNKNOWN")
         self.assertEqual(report["capabilities"]["runtime_start_stop"], "UNKNOWN")
+
+    @mock.patch.object(MODULE, "cleanup_paths", return_value=True)
+    @mock.patch.object(MODULE, "run_managed_certification")
+    @mock.patch.object(MODULE, "run_scratch_certification")
+    @mock.patch.object(MODULE, "verify_prestate")
+    @mock.patch.object(MODULE._CAPABILITIES, "inventory")
+    @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
+    @mock.patch.object(MODULE._PREFLIGHT, "prove_registered_device")
+    def test_incompatible_scratch_cmp_selects_compatible_toybox_before_mutation(
+        self,
+        prove_device,
+        _tools,
+        inventory,
+        _prestate,
+        scratch,
+        managed,
+        cleanup,
+    ) -> None:
+        inventory.return_value = self._inventory()
+
+        def resolver(_serial, command, *, root, timeout=10):
+            del timeout
+            if root:
+                if command == MODULE._COMPARATOR.COMPARATOR_PROBES["cmp_present"]:
+                    return MODULE.SUPPORTED
+                if command == MODULE._COMPARATOR.COMPARATOR_PROBES["cmp_exact_invocation"]:
+                    return MODULE.SUPPORTED
+                return MODULE.UNSUPPORTED
+            if command == MODULE._COMPARATOR.COMPARATOR_PROBES["cmp_present"]:
+                return MODULE.SUPPORTED
+            if command == MODULE._COMPARATOR.COMPARATOR_PROBES["cmp_exact_invocation"]:
+                return MODULE.UNSUPPORTED
+            if command == MODULE._COMPARATOR.COMPARATOR_PROBES["toybox_present"]:
+                return MODULE.SUPPORTED
+            if command == MODULE._COMPARATOR.COMPARATOR_PROBES["toybox_cmp_exact_invocation"]:
+                return MODULE.SUPPORTED
+            return MODULE.UNSUPPORTED
+
+        self.comparator_probe_mock.side_effect = resolver
+
+        report = MODULE.certify("2" * 40, "tx-fallback")
+
+        self.assertTrue(report["accepted"])
+        self.assertEqual(prove_device.call_count, 2)
+        self.assertEqual(
+            report["comparator_admission"]["scratch"],
+            {
+                "selected_comparator": "toybox_cmp",
+                "canonical_comparator_path_state": MODULE.SUPPORTED,
+            },
+        )
+        self.assertEqual(
+            report["comparator_admission"]["managed_root"],
+            {
+                "selected_comparator": "cmp",
+                "canonical_comparator_path_state": MODULE.SUPPORTED,
+            },
+        )
+        self.assertEqual(scratch.call_args.kwargs["comparator"], "toybox_cmp")
+        self.assertEqual(managed.call_args.kwargs["comparator"], "cmp")
+        cleanup.assert_called_once()
+
+    @mock.patch.object(MODULE, "cleanup_paths")
+    @mock.patch.object(MODULE, "run_managed_certification")
+    @mock.patch.object(MODULE, "run_scratch_certification")
+    @mock.patch.object(MODULE, "verify_prestate")
+    @mock.patch.object(MODULE._CAPABILITIES, "inventory")
+    @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
+    @mock.patch.object(MODULE._PREFLIGHT, "prove_registered_device")
+    def test_no_compatible_comparator_refuses_before_mutation(
+        self,
+        prove_device,
+        _tools,
+        inventory,
+        _prestate,
+        scratch,
+        managed,
+        cleanup,
+    ) -> None:
+        inventory.return_value = self._inventory()
+        self.comparator_probe_mock.return_value = MODULE.UNSUPPORTED
+
+        report = MODULE.certify("3" * 40, "tx-no-comparator")
+
+        self.assertFalse(report["accepted"])
+        self.assertEqual(report["state"], "REFUSED")
+        self.assertEqual(report["failure_stage"], "comparator_admission")
+        self.assertIn("UNSUPPORTED", report["failure"])
+        self.assertFalse(report["phone_mutation_performed"])
+        self.assertFalse(report["cleanup_attempted"])
+        self.assertTrue(report["cleanup_verified"])
+        self.assertEqual(prove_device.call_count, 1)
+        scratch.assert_not_called()
+        managed.assert_not_called()
+        cleanup.assert_not_called()
+
+    @mock.patch.object(MODULE, "cleanup_paths")
+    @mock.patch.object(MODULE, "run_managed_certification")
+    @mock.patch.object(MODULE, "run_scratch_certification")
+    @mock.patch.object(MODULE, "verify_prestate")
+    @mock.patch.object(MODULE._CAPABILITIES, "inventory")
+    @mock.patch.object(MODULE._PREFLIGHT, "require_tools", return_value={"adb": True})
+    @mock.patch.object(MODULE._PREFLIGHT, "prove_registered_device")
+    def test_unknown_comparator_remains_distinct_and_refuses_before_mutation(
+        self,
+        prove_device,
+        _tools,
+        inventory,
+        _prestate,
+        scratch,
+        managed,
+        cleanup,
+    ) -> None:
+        inventory.return_value = self._inventory()
+
+        def resolver(_serial, command, *, root, timeout=10):
+            del root, timeout
+            if command == MODULE._COMPARATOR.COMPARATOR_PROBES["cmp_present"]:
+                return MODULE.SUPPORTED
+            if command == MODULE._COMPARATOR.COMPARATOR_PROBES["cmp_exact_invocation"]:
+                return MODULE.UNKNOWN
+            return MODULE.UNSUPPORTED
+
+        self.comparator_probe_mock.side_effect = resolver
+
+        report = MODULE.certify("4" * 40, "tx-unknown-comparator")
+
+        self.assertFalse(report["accepted"])
+        self.assertEqual(report["state"], "REFUSED")
+        self.assertEqual(report["failure_stage"], "comparator_admission")
+        self.assertIn("UNKNOWN", report["failure"])
+        self.assertEqual(
+            report["comparator_admission"]["scratch"]["canonical_comparator_path_state"],
+            MODULE.UNKNOWN,
+        )
+        self.assertFalse(report["phone_mutation_performed"])
+        self.assertEqual(prove_device.call_count, 1)
+        scratch.assert_not_called()
+        managed.assert_not_called()
+        cleanup.assert_not_called()
+
+    def test_exact_remote_compare_uses_only_admitted_comparator(self) -> None:
+        with mock.patch.object(MODULE, "shell") as shell:
+            MODULE._verify_remote_exact(
+                "registered-device",
+                "/data/local/tmp/actual.bin",
+                "/data/local/tmp/expected.bin",
+                comparator="toybox_cmp",
+                root=False,
+            )
+
+        shell.assert_called_once_with(
+            "registered-device",
+            "toybox cmp -s /data/local/tmp/actual.bin /data/local/tmp/expected.bin",
+            root=False,
+        )
+        self.assertNotIn("command -v", shell.call_args.args[1])
 
     @mock.patch.object(MODULE, "cleanup_paths", return_value=True)
     @mock.patch.object(
@@ -138,7 +312,16 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
     ) -> None:
         inventory.return_value = self._inventory()
 
-        def fail_scratch(_serial, _paths, _payloads, _local_root, *, mark_step=None):
+        def fail_scratch(
+            _serial,
+            _paths,
+            _payloads,
+            _local_root,
+            *,
+            comparator,
+            mark_step=None,
+        ):
+            self.assertEqual(comparator, "cmp")
             self.assertIsNotNone(mark_step)
             mark_step("scratch.compare_original_remote")
             raise MODULE.CertificationFailure("device command returned nonzero status")
@@ -164,7 +347,16 @@ class AndroidFilesystemCertificationTests(unittest.TestCase):
     ) -> None:
         inventory.return_value = self._inventory()
 
-        def fail_scratch(_serial, _paths, _payloads, _local_root, *, mark_step=None):
+        def fail_scratch(
+            _serial,
+            _paths,
+            _payloads,
+            _local_root,
+            *,
+            comparator,
+            mark_step=None,
+        ):
+            self.assertEqual(comparator, "cmp")
             self.assertIsNotNone(mark_step)
             mark_step("scratch.atomic_replace")
             raise MODULE.CertificationFailure("device command returned nonzero status")
