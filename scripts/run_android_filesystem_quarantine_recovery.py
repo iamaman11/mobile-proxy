@@ -175,17 +175,35 @@ def _observation_complete(report: dict[str, Any]) -> bool:
     return True
 
 
+def _scope_cleanup_admissible(
+    base: dict[str, str],
+    transaction_states: Iterable[str],
+) -> bool:
+    states = tuple(transaction_states)
+    if any(state not in {ABSENT, DIRECTORY} for state in states):
+        return False
+    if base["node_state"] == ABSENT:
+        return all(state == ABSENT for state in states)
+    if base["node_state"] != DIRECTORY:
+        return False
+    if any(state == DIRECTORY for state in states):
+        return base["writable"] == SUPPORTED and base["executable"] == SUPPORTED
+    return True
+
+
 def _cleanup_admissible(report: dict[str, Any]) -> bool:
     if not _observation_complete(report):
         return False
-    for base in (report["scratch_base"], report["managed_base"]):
-        if base["node_state"] not in {ABSENT, DIRECTORY}:
-            return False
-    for transaction in report["transactions"]:
-        for scope in ("scratch", "managed_root"):
-            if transaction[scope]["node_state"] not in {ABSENT, DIRECTORY}:
-                return False
-    return True
+    return _scope_cleanup_admissible(
+        report["scratch_base"],
+        (transaction["scratch"]["node_state"] for transaction in report["transactions"]),
+    ) and _scope_cleanup_admissible(
+        report["managed_base"],
+        (
+            transaction["managed_root"]["node_state"]
+            for transaction in report["transactions"]
+        ),
+    )
 
 
 def observe(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any]:
