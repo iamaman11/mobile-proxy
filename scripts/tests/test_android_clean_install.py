@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -95,6 +96,27 @@ class AndroidCleanInstallTests(unittest.TestCase):
                     expected_version_name="0.1.4",
                     expected_version_code=1004,
                 )
+
+    def test_package_probe_transport_failure_is_not_absence(self) -> None:
+        with mock.patch.object(MODULE.subprocess, "run", side_effect=subprocess.TimeoutExpired(["adb"], 30)):
+            with self.assertRaisesRegex(MODULE.CleanInstallFailure, "presence probe failed"):
+                MODULE.package_present("registered-device")
+
+    def test_package_probe_nonzero_exit_is_not_absence(self) -> None:
+        result = mock.Mock(returncode=1, stdout="", stderr="transport error")
+        with mock.patch.object(MODULE.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(MODULE.CleanInstallFailure, "presence probe failed"):
+                MODULE.package_present("registered-device")
+
+    def test_package_probe_rejects_ambiguous_multiple_paths(self) -> None:
+        result = mock.Mock(
+            returncode=0,
+            stdout="package:/data/app/base.apk\npackage:/data/app/split.apk\n",
+            stderr="",
+        )
+        with mock.patch.object(MODULE.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(MODULE.CleanInstallFailure, "probe is ambiguous"):
+                MODULE.package_present("registered-device")
 
 
 if __name__ == "__main__":
