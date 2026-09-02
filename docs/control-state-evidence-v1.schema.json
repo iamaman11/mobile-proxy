@@ -45,6 +45,7 @@
         "scope",
         "source_ref",
         "sensitivity",
+        "authority",
         "lifecycle"
       ],
       "properties": {
@@ -79,6 +80,10 @@
         "sensitivity": {
           "type": "string",
           "enum": ["PUBLIC", "BOUNDED_PRIVATE"]
+        },
+        "authority": {
+          "type": "string",
+          "enum": ["CONTROL", "DIAGNOSTIC", "AUDIT"]
         },
         "lifecycle": {
           "type": "string",
