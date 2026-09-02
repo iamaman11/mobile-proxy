@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iamaman11/mobile-proxy/docs/control-state-evidence-v1.schema.json",
+  "title": "mobile-proxy control-state evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "target",
+    "generated_at",
+    "facts",
+    "derived",
+    "blocking_predicates",
+    "mutation_performed"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "target": { "type": "string", "enum": ["android-production"] },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "facts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fact" }
+    },
+    "derived": { "$ref": "#/$defs/derived" },
+    "blocking_predicates": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "mutation_performed": { "type": "boolean" }
+  },
+  "$defs": {
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fact_id",
+        "subject",
+        "predicate",
+        "value",
+        "observer",
+        "method",
+        "observed_at",
+        "valid_until",
+        "scope",
+        "source_ref",
+        "sensitivity",
+        "lifecycle"
+      ],
+      "properties": {
+        "fact_id": { "type": "string", "minLength": 1 },
+        "subject": { "type": "string", "minLength": 1 },
+        "predicate": { "type": "string", "minLength": 1 },
+        "value": {
+          "type": ["string", "number", "integer", "boolean", "null"]
+        },
+        "observer": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "valid_until": {
+          "oneOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "canonical_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "private_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "workflow_run_id": { "type": "integer", "minimum": 1 },
+            "job_id": { "type": "integer", "minimum": 1 },
+            "transaction_id": { "type": "string", "minLength": 1 },
+            "target": { "type": "string", "enum": ["android-production"] }
+          }
+        },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "sensitivity": {
+          "type": "string",
+          "enum": ["PUBLIC", "BOUNDED_PRIVATE"]
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["CURRENT", "STALE", "SUPERSEDED", "CONFLICT", "INVALID"]
+        }
+      }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "quality",
+        "command_job",
+        "runner",
+        "transport",
+        "source_fetch",
+        "phone_access",
+        "mutation",
+        "acceptance"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["SOURCE_UNKNOWN", "SOURCE_RESOLVED"]
+        },
+        "quality": {
+          "type": "string",
+          "enum": ["QUALITY_UNKNOWN", "QUALITY_FAILED", "QUALITY_PROVEN"]
+        },
+        "command_job": {
+          "type": "string",
+          "enum": [
+            "COMMAND_UNOBSERVED",
+            "COMMAND_REJECTED",
+            "COMMAND_QUALIFIED",
+            "JOB_NOT_CREATED",
+            "JOB_SKIPPED",
+            "JOB_QUEUED_UNASSIGNED",
+            "JOB_ASSIGNED",
+            "JOB_RUNNING",
+            "JOB_SUCCEEDED",
+            "JOB_FAILED",
+            "JOB_CANCELLED",
+            "JOB_TIMED_OUT"
+          ]
+        },
+        "runner": {
+          "type": "string",
+          "enum": [
+            "RUNNER_UNKNOWN",
+            "RUNNER_UNREGISTERED",
+            "RUNNER_LABEL_MISMATCH",
+            "RUNNER_OFFLINE",
+            "RUNNER_ONLINE_IDLE",
+            "RUNNER_ONLINE_BUSY",
+            "RUNNER_CONFLICT"
+          ]
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "TRANSPORT_UNKNOWN",
+            "TRANSPORT_RECENTLY_HEALTHY",
+            "TRANSPORT_DEGRADED",
+            "TRANSPORT_FAILED"
+          ]
+        },
+        "source_fetch": {
+          "type": "string",
+          "enum": [
+            "SOURCE_FETCH_UNOBSERVED",
+            "SOURCE_FETCH_SUCCEEDED",
+            "SOURCE_FETCH_FAILED_TRANSIENT",
+            "SOURCE_FETCH_FAILED_PERMANENT",
+            "SOURCE_FETCH_DIGEST_MISMATCH"
+          ]
+        },
+        "phone_access": {
+          "type": "string",
+          "enum": [
+            "PHONE_ACCESS_UNOBSERVED",
+            "ADB_TOOL_UNAVAILABLE",
+            "ADB_INVENTORY_INVALID",
+            "ADB_ZERO_DEVICES",
+            "ADB_MULTIPLE_DEVICES",
+            "ADB_WRONG_DEVICE",
+            "ADB_REGISTERED_DEVICE_OFFLINE",
+            "ADB_GET_STATE_FAILED",
+            "ADB_SHELL_FAILED",
+            "PHONE_ACCESS_PROVEN",
+            "PHONE_ACCESS_STALE",
+            "PHONE_ACCESS_CONFLICT"
+          ]
+        },
+        "mutation": {
+          "type": "string",
+          "enum": [
+            "MUTATION_DISARMED",
+            "MUTATION_INELIGIBLE",
+            "MUTATION_ELIGIBLE",
+            "MUTATION_LOCK_HELD",
+            "MUTATION_BOUNDARY_REPROVED",
+            "TRANSACTION_ACTIVE",
+            "POSTCONDITION_VERIFYING",
+            "TRANSACTION_COMMITTED",
+            "REFUSED",
+            "RECOVERY_REQUIRED",
+            "QUARANTINED"
+          ]
+        },
+        "acceptance": {
+          "type": "string",
+          "enum": [
+            "ACCEPTANCE_UNOBSERVED",
+            "STRUCTURE_FAILED",
+            "STRUCTURE_PROVEN",
+            "FUNCTION_FAILED",
+            "FUNCTION_PROVEN",
+            "ACCEPTED"
+          ]
+        },
+        "failure_stage": {
+          "type": ["string", "null"],
+          "enum": [
+            null,
+            "COMMAND_GATE",
+            "SOURCE_AUTHORITY",
+            "RUNNER_ASSIGNMENT",
+            "RUNNER_TRANSPORT",
+            "SOURCE_FETCH",
+            "ADB_TOOL",
+            "ADB_INVENTORY",
+            "DEVICE_IDENTITY",
+            "ADB_STATE",
+            "ADB_SHELL",
+            "CAPABILITY",
+            "ARTIFACT",
+            "MUTATION_AUTHORITY",
+            "MUTATION_LOCK",
+            "MUTATION_BOUNDARY",
+            "MUTATION_EXECUTION",
+            "POSTCONDITION",
+            "STRUCTURAL_ACCEPTANCE",
+            "FUNCTIONAL_ACCEPTANCE",
+            "RECOVERY"
+          ]
+        }
+      }
+    }
+  }
+}
