@@ -14,6 +14,8 @@ The public repository is the sole project/policy/source authority. `iamaman11/mo
 
 A green CI result is necessary but not equivalent to global 10/10 acceptance. Architecture/documentation reconciliation is complete when source-controlled contracts/docs/tests are coherent and Quality protects them. Full project 10/10 remains blocked until the same exact immutable candidate also passes the required live provider, Android migration/signing, physical phone, recovery/restart/crash, soak and final-release gates.
 
+Production execution is **fact-first**. The canonical [`control-state-machine-v1.md`](control-state-machine-v1.md) determines what is proven from bounded current evidence; [`operation-state-machine-v1.md`](operation-state-machine-v1.md) determines what exact phase may execute next in one transaction. Workflow conclusion, issue narrative, remembered progress and historical success are not substitutes for those derived states.
+
 ## 2. Protected compatibility and runtime surface
 
 The baseline preserves:
@@ -60,6 +62,40 @@ Historical Item 19 candidate `d151dbdd156279e32a5361d304c90f996bd2d565` remains 
 7. Do not duplicate policy in the private execution satellite when canonical public logic can own it.
 8. Do not advance release or physical-acceptance state merely because a software gate is green.
 9. Exact historical SHAs are valid in immutable evidence; moving operational “current SHA” claims belong to execution-time resolution or generated/machine-readable state.
+10. Current production state is derived only from current scoped `CONTROL` evidence; required durable evidence must be durably persisted before the corresponding state may be promoted.
+11. Operation execution result, independent postcondition verification and evidence persistence are separate dimensions. A successful command or workflow does not imply either verified target state or durable proof.
+12. `UNKNOWN`, `STALE`, `CONFLICT`, invalid scope, another transaction's evidence and required-but-unpersisted evidence fail closed.
+13. No phone, runtime, VM or provider has a stored global `READY` truth. Permission is an operation-specific predicate over exact current facts.
+14. Mutation authority is exact-SHA, exact-transaction and exact-boundary scoped. Required phone/device authority is re-proved immediately before destructive work, and a canonical SHA advance invalidates earlier SHA-bound admission for subsequent execution.
+15. Recovery, cleanup and quarantine are explicit state paths. A successful recovery does not become acceptance, and already-proven absence must not trigger unnecessary cleanup mutation.
+
+### 4.1 Fact-first state/control contract
+
+The normal production reasoning loop is:
+
+```text
+OBSERVE CURRENT FACTS
+  -> REDUCE CONTROL STATE
+  -> EMIT EXACT BLOCKING PREDICATES
+  -> AUTHORIZE ONE NEXT OPERATION
+  -> VERIFY PRECONDITIONS
+  -> MUTATE ONLY IF AUTHORIZED
+  -> INDEPENDENTLY VERIFY POSTCONDITIONS
+  -> PERSIST BOUNDED EVIDENCE
+  -> REDUCE NEW STATE
+```
+
+For a mutating transaction the required lifecycle is:
+
+```text
+OBSERVE -> VERIFY -> MUTATE -> INDEPENDENTLY VERIFY -> ACCEPT
+                                      |
+                                      +-> RECOVER -> RECOVERED | QUARANTINED
+```
+
+The reducer, not the workflow conclusion, decides the state. If the device action succeeds but bounded evidence cannot be durably persisted, the resulting state remains explicitly unpersisted/unknown for any guard that requires durable proof. No later operation may reconstruct that missing authority from logs or narrative.
+
+The public Issue `#179` remains the live execution cursor and authorizes exactly one next transition at a time. The cursor may point to machine evidence, but it does not itself turn narrative into machine truth.
 
 ## 5. Completed baseline foundation
 
@@ -76,7 +112,10 @@ Stable invariants include:
 - logs/evidence do not contain credentials, unbounded secret-bearing payloads or raw sensitive device/provider identifiers;
 - liveness and serving readiness are separate;
 - provider lifecycle uses exact typed ownership/binding semantics and deterministic cleanup;
-- the public repository is canonical and the private repository is execution-only.
+- the public repository is canonical and the private repository is execution-only;
+- control state is a deterministic projection of bounded evidence rather than a manually asserted readiness flag;
+- transaction progress cannot be inferred from workflow `success`; execution, postcondition proof and evidence persistence remain independent;
+- stale, diagnostic, audit, conflicting or cross-transaction evidence cannot satisfy current mutation guards.
 
 ## 6. Current Item 20 prerequisites
 
@@ -89,6 +128,21 @@ Architecture reconciliation does not reuse the Item 19 candidate. After #172 is 
 Before mutable phone work, the private execution satellite must be repinned to that exact public SHA, the exact signed Android candidate must be built and retained with bounded provenance, and the signing-generation migration may run only through the authorized #162 path after all of its prerequisites are actually satisfied. No final `v0.1.4` tag or GitHub Release is an input to that migration.
 
 The phone path must retain and verify the old installed APK/signing generation before uninstall, re-check the registered device immediately before mutation, install only the exact verified candidate and execute the defined rollback path on post-capture failure. No unrelated reboot/network/provider mutation is authorized by the migration.
+
+### 6.1 Current fact-first execution sub-sequence
+
+The immediate product hardening sequence uses Android as the first fully evidenced adapter and closes one verified layer at a time:
+
+1. **Evidence reliability** — operation state, independent postcondition verification and bounded evidence persistence remain separate; bounded retry may exist only where explicitly safe, and retry exhaustion must remain unpersisted/quarantined rather than fail open.
+2. **Android filesystem** — prove current-SHA access/capabilities, bounded owned scratch and managed-root create/write/read/compare/delete/post-absence behavior, and explicit recovery/quarantine semantics.
+3. **APK/signing lifecycle** — prove exact signed artifact identity, installed baseline, mutation-boundary reproof, uninstall/install separation, independent signer/version/digest verification and recovery behavior.
+4. **Native runtime lifecycle** — prove exact generation materialization, integrity/current binding, start, structural health, functional health, restart/rehydration and recovery.
+5. **Real data path** — prove control plane -> phone -> QUIC -> protected proxy ports, forced pinned TLS/TCP reserve, and return of new connections to QUIC after recovery.
+6. **Restart/recovery/failure matrix** — inject bounded failures at defined boundaries and prove `REFUSED`, `RECOVERY_REQUIRED`, `RECOVERED` or `QUARANTINED` without narrative state promotion.
+7. **Soak and release acceptance** — only on one unchanged exact candidate with all required durable evidence and no unresolved P0/P1 defect.
+8. **VM/provider generalization** — only after the phone baseline demonstrates which primitives are genuinely common; reuse proven `observe/guard/lock/mutate/verify/recover/evidence` semantics instead of inventing a speculative second framework.
+
+This is an execution sub-sequence, not permission to skip or reorder stricter Item 20 provider, signing, candidate-acceptance or final-release gates. At every point the exact current `#179` cursor and derived blocking predicates decide the single next safe transition.
 
 ## 7. Item 20 live acceptance
 
@@ -155,6 +209,8 @@ The historical completed foundation remains auditable in its own trackers/eviden
 
 Items 21 and 22 remain forbidden until Item 20 succeeds. No final protected `v*` release/tag or production promotion is authorized by historical Item 19 completion, Android version metadata, a private signed build or architecture reconciliation alone.
 
+The numbered release chain above is preserved as the authority ordering. Section 6.1 controls how unresolved phone/runtime work is proven within that chain: every completed step must be a machine-derived fact before the next dependent transition can execute.
+
 ## 10. CI/CD and evidence requirements
 
 Every public source change goes through pull request review, exact immutable PR-head Quality, protected merge and exact post-merge Quality before that SHA may become an active acceptance candidate.
@@ -169,9 +225,14 @@ Every public source change goes through pull request review, exact immutable PR-
 - documentation that makes the Android app globally absent from production;
 - private repository policy/source authority;
 - future roadmap claiming current operational authority;
-- retired two-SHA semantics on active normative surfaces.
+- retired two-SHA semantics on active normative surfaces;
+- active roadmap wording that permits workflow/job success to substitute for derived CONTROL state or independently verified postconditions;
+- active roadmap wording that permits required-but-unpersisted evidence, `UNKNOWN`, stale or cross-transaction evidence to advance production state;
+- active roadmap wording that introduces a global phone/VM/provider `READY` flag instead of operation-scoped permission predicates.
 
 Evidence is bounded and immutable. Public evidence may include non-sensitive public SHA/run/artifact identities and booleans required by contract; it must not include credentials, signing secrets/fingerprints, raw device serials, private endpoints or secret-derived identifiers.
+
+When a state transition requires a durable artifact, artifact persistence is part of the admission predicate, not an afterthought. Transport failure during evidence persistence must remain separately classified from the device operation itself and cannot be repaired by inferring durable state from logs.
 
 ## 11. Definition of done
 
@@ -192,3 +253,5 @@ This status must **not** be described as global project 10/10 acceptance.
 ### Full project 10/10 accepted
 
 Global 10/10 is reached only after the same exact accepted public SHA has all applicable software, provider, Android migration/signing, real-phone, recovery/restart/crash and 24-hour soak evidence; Item 20 is completed; protected `main` still equals that SHA; the final annotated tag targets it; and published artifact provenance is bound to that same source SHA.
+
+Acceptance additionally requires that every production transition used the evidence-derived CONTROL/operation state model: no required state may be promoted solely from workflow conclusion, historical narrative or unpersisted proof.
