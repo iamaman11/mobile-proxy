@@ -16,8 +16,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 
-SUPPORTED = "SUPPORTED"
-UNKNOWN = "UNKNOWN"
 _OPERATION_ID = "android.filesystem-certification.v1"
 _TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 _SCRATCH_BASE = PurePosixPath("/data/local/tmp/mobile-proxy-adapter-test")
@@ -40,6 +38,11 @@ def _load_module(name: str, filename: str):
 
 _PREFLIGHT = _load_module("run_private_phone_preflight", "run_private_phone_preflight.py")
 _CAPABILITIES = _load_module("run_android_capability_inventory", "run_android_capability_inventory.py")
+_COMPARATOR = _load_module("android_filesystem_comparator", "android_filesystem_comparator.py")
+
+SUPPORTED = _COMPARATOR.SUPPORTED
+UNSUPPORTED = _COMPARATOR.UNSUPPORTED
+UNKNOWN = _COMPARATOR.UNKNOWN
 
 
 class CertificationFailure(RuntimeError):
@@ -111,26 +114,59 @@ def _q(path: str) -> str:
     return shlex.quote(path)
 
 
-def _verify_remote_exact(serial: str, actual: str, expected: str, *, root: bool) -> None:
-    actual_q = _q(actual)
-    expected_q = _q(expected)
-    shell(
-        serial,
-        f"""set -eu
-actual={actual_q}
-expected={expected_q}
-if command -v cmp >/dev/null 2>&1; then
-  cmp -s -- "$actual" "$expected"
-elif command -v toybox >/dev/null 2>&1; then
-  toybox cmp -s "$actual" "$expected"
-elif command -v busybox >/dev/null 2>&1; then
-  busybox cmp -s "$actual" "$expected"
-else
-  exit 73
-fi
-""",
-        root=root,
-    )
+def _probe_comparator(
+    serial: str,
+    command: str,
+    *,
+    root: bool,
+    timeout: int = 10,
+) -> str:
+    prefix = ["adb", "-s", serial, "shell"]
+    if root:
+        prefix += ["su", "0", "sh", "-c", command]
+    else:
+        prefix += ["sh", "-c", command]
+    try:
+        result = subprocess.run(
+            prefix,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return UNKNOWN
+    return SUPPORTED if result.returncode == 0 else UNSUPPORTED
+
+
+def select_remote_comparator(serial: str, *, root: bool) -> dict[str, str]:
+    probes = {
+        name: _probe_comparator(serial, command, root=root)
+        for name, command in _COMPARATOR.COMPARATOR_PROBES.items()
+    }
+    try:
+        selected, state = _COMPARATOR.select_comparator(probes)
+    except _COMPARATOR.ComparatorContractFailure as error:
+        raise CertificationFailure(str(error)) from error
+    return {
+        "selected_comparator": selected,
+        "canonical_comparator_path_state": state,
+    }
+
+
+def _verify_remote_exact(
+    serial: str,
+    actual: str,
+    expected: str,
+    *,
+    comparator: str,
+    root: bool,
+) -> None:
+    try:
+        command = shlex.join(_COMPARATOR.comparison_argv(comparator, actual, expected))
+    except _COMPARATOR.ComparatorContractFailure as error:
+        raise CertificationFailure(str(error)) from error
+    shell(serial, command, root=root)
 
 
 def _pull_and_verify_exact(
@@ -189,6 +225,7 @@ def run_scratch_certification(
     payloads: dict[str, Any],
     local_root: Path,
     *,
+    comparator: str,
     mark_step: StepMarker | None = None,
 ) -> None:
     scratch = paths["scratch"]
@@ -225,7 +262,13 @@ def run_scratch_certification(
     _mark(mark_step, "scratch.copy_original")
     shell(serial, f"cp {_q(remote_original)} {_q(remote_active)}")
     _mark(mark_step, "scratch.compare_original_remote")
-    _verify_remote_exact(serial, remote_active, remote_original, root=False)
+    _verify_remote_exact(
+        serial,
+        remote_active,
+        remote_original,
+        comparator=comparator,
+        root=False,
+    )
     _mark(mark_step, "scratch.pull_active_original")
     _pull_and_verify_exact(
         serial,
@@ -241,7 +284,13 @@ def run_scratch_certification(
         f"cp {_q(remote_replacement)} {_q(remote_next)} && mv -f {_q(remote_next)} {_q(remote_active)}",
     )
     _mark(mark_step, "scratch.compare_replacement_remote")
-    _verify_remote_exact(serial, remote_active, remote_replacement, root=False)
+    _verify_remote_exact(
+        serial,
+        remote_active,
+        remote_replacement,
+        comparator=comparator,
+        root=False,
+    )
     _mark(mark_step, "scratch.pull_active_replacement")
     _pull_and_verify_exact(
         serial,
@@ -258,7 +307,13 @@ def run_scratch_certification(
     _mark(mark_step, "scratch.symlink_target")
     require(link_target == "active.bin", "scratch symlink target differs")
     _mark(mark_step, "scratch.symlink_compare")
-    _verify_remote_exact(serial, remote_link, remote_replacement, root=False)
+    _verify_remote_exact(
+        serial,
+        remote_link,
+        remote_replacement,
+        comparator=comparator,
+        root=False,
+    )
 
     _mark(mark_step, "scratch.remove_active")
     shell(serial, f"rm -f {_q(remote_link)} {_q(remote_active)}")
@@ -273,6 +328,7 @@ def run_managed_certification(
     paths: dict[str, str],
     payloads: dict[str, Any],
     *,
+    comparator: str,
     mark_step: StepMarker | None = None,
 ) -> None:
     scratch = paths["scratch"]
@@ -300,7 +356,13 @@ def run_managed_certification(
         root=True,
     )
     _mark(mark_step, "managed.compare_original_remote")
-    _verify_remote_exact(serial, managed_active, remote_original, root=True)
+    _verify_remote_exact(
+        serial,
+        managed_active,
+        remote_original,
+        comparator=comparator,
+        root=True,
+    )
 
     _mark(mark_step, "managed.atomic_replace")
     shell(
@@ -313,7 +375,13 @@ def run_managed_certification(
         root=True,
     )
     _mark(mark_step, "managed.compare_replacement_remote")
-    _verify_remote_exact(serial, managed_active, remote_replacement, root=True)
+    _verify_remote_exact(
+        serial,
+        managed_active,
+        remote_replacement,
+        comparator=comparator,
+        root=True,
+    )
 
     _mark(mark_step, "managed.symlink_create")
     shell(serial, f"ln -s active.bin {_q(managed_link)}", root=True)
@@ -322,7 +390,13 @@ def run_managed_certification(
     _mark(mark_step, "managed.symlink_target")
     require(link_target == "active.bin", "managed symlink target differs")
     _mark(mark_step, "managed.symlink_compare")
-    _verify_remote_exact(serial, managed_link, remote_replacement, root=True)
+    _verify_remote_exact(
+        serial,
+        managed_link,
+        remote_replacement,
+        comparator=comparator,
+        root=True,
+    )
 
     _mark(mark_step, "managed.remove_active")
     shell(serial, f"rm -f {_q(managed_link)} {_q(managed_active)}", root=True)
@@ -367,6 +441,11 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
     _PREFLIGHT.require_tools()
 
     capabilities: dict[str, str] = {}
+    comparator_admission: dict[str, Any] = {
+        "selection_before_mutation": False,
+        "scratch": None,
+        "managed_root": None,
+    }
     mutation_started = False
     cleanup_attempted = False
     cleanup_verified = False
@@ -393,8 +472,27 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
         )
         verify_prestate(serial, paths)
 
-        # Same-job boundary reproof: this is intentionally immediately before the
-        # first write and is independent from the earlier access/capability probes.
+        failure_stage = "comparator_admission"
+        scratch_comparator = select_remote_comparator(serial, root=False)
+        managed_comparator = select_remote_comparator(serial, root=True)
+        comparator_admission = {
+            "selection_before_mutation": True,
+            "scratch": scratch_comparator,
+            "managed_root": managed_comparator,
+        }
+        require(
+            scratch_comparator["canonical_comparator_path_state"] == SUPPORTED,
+            "scratch comparator compatibility is "
+            + scratch_comparator["canonical_comparator_path_state"],
+        )
+        require(
+            managed_comparator["canonical_comparator_path_state"] == SUPPORTED,
+            "managed-root comparator compatibility is "
+            + managed_comparator["canonical_comparator_path_state"],
+        )
+
+        # Same-job boundary reproof is intentionally after all read-only admission
+        # checks and immediately before the first write.
         _PREFLIGHT.prove_registered_device(serial)
 
         with tempfile.TemporaryDirectory(prefix="mobile-proxy-fs-cert-") as temp:
@@ -409,6 +507,7 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
                 paths,
                 payloads,
                 local_root,
+                comparator=scratch_comparator["selected_comparator"],
                 mark_step=mark_substep,
             )
 
@@ -418,6 +517,7 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
                 serial,
                 paths,
                 payloads,
+                comparator=managed_comparator["selected_comparator"],
                 mark_step=mark_substep,
             )
 
@@ -448,7 +548,8 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "state": "ACCEPTED",
             "failure_stage": None,
             "failure_substep": None,
-            "comparison_contract": "exact-bytes",
+            "comparison_contract": "exact-bytes-admitted-comparator",
+            "comparator_admission": comparator_admission,
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": True,
             "cleanup_attempted": True,
@@ -497,7 +598,8 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "failure_stage": failure_stage or "precondition",
             "failure_substep": failure_substep,
             "failure": failure_message,
-            "comparison_contract": "exact-bytes",
+            "comparison_contract": "exact-bytes-admitted-comparator",
+            "comparator_admission": comparator_admission,
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": False,
             "cleanup_attempted": cleanup_attempted,
