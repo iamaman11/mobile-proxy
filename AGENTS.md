@@ -24,9 +24,10 @@ protected-`main` process. See `docs/operations/project-authority.md` and
 All normative sources below live in the canonical repository:
 
 - Product and operator behavior: README.md
-- Current implementation roadmap: IMPLEMENTATION_PLAN.md -> docs/PRODUCTION_BASELINE_PLAN.md
+- **Single current implementation roadmap:** IMPLEMENTATION_PLAN.md -> docs/PRODUCTION_BASELINE_PLAN.md
 - Runtime topology: RUNTIME_LAYOUT.md
 - Architecture quality standard: docs/architecture/ARCHITECTURE_STANDARD.md
+- Physical-device transaction semantics: docs/operation-state-machine-v1.md
 - Exact Rust workspace module graph: contracts/governance/module-boundaries-v1.json
 - Authoritative mutable-state ownership: contracts/governance/state-ownership-v1.json
 - Git delivery and release policy: docs/GIT_DELIVERY.md
@@ -40,6 +41,25 @@ All normative sources below live in the canonical repository:
 
 Documents under docs/history describe completed investigations or superseded plans. They are evidence, not an active backlog.
 
+There is no second development roadmap. Issue #179 is a live execution cursor inside the one canonical roadmap; it is not an alternative architecture plan.
+
+## Current foundational gate
+
+Before further application feature growth, VM generalization, orchestration expansion or new governance machinery, complete and accept the physical-device control State Machine defined by the canonical roadmap and `docs/operation-state-machine-v1.md`.
+
+Until that gate is accepted, normal work is sequential:
+
+1. formalize one deterministic device-control model and its invariants;
+2. prove observation and operation-specific guards on the real registered phone;
+3. prove bounded mutation plus independent postcondition verification;
+4. prove explicit ambiguous-outcome handling after runner/controller loss;
+5. prove recovery/quarantine at every destructive boundary;
+6. prove controller restart and device reboot re-observation/rehydration;
+7. prove reproducible clean project-owned device state from an allowed baseline;
+8. only then resume feature growth and later generalize proven primitives to VM/provider targets.
+
+A blocked foundational property is not permission to start another architecture lane. Make only the smallest change necessary to prove the next unproven property.
+
 ## Change discipline
 
 - Work on a topic branch; do not deploy an uncommitted tree.
@@ -48,6 +68,10 @@ Documents under docs/history describe completed investigations or superseded pla
 - New authoritative or operational mutable state must identify one owning module and be registered in `contracts/governance/state-ownership-v1.json` in the same change; policy/type modules do not become implicit co-owners.
 - Architecture-significant changes must justify complexity, identify ownership and rollback/deletion path, and add/update an ADR when they establish or materially change a long-lived architectural decision.
 - Do not create abstractions, services, runtime components or generic extension mechanisms for hypothetical future use; prefer the smallest design that satisfies the current accepted requirement.
+- **Do not add code for code.** New framework/orchestration/policy/test machinery must close a concrete currently demonstrated uncertainty and be simpler than the problem it solves.
+- **Do not verify verification.** Do not add a checker merely to confirm another checker/test exists or ran, and do not add tests whose primary subject is the presence/invocation of other tests. A separate check is justified only for a separate invariant or trust boundary.
+- Prefer deletion, simplification and reuse before adding a new module, abstraction, workflow or contract.
+- Keep normal control flow understandable by one developer as `state -> guard -> operation -> effect -> independent observation -> resulting state`.
 - Do not commit target directories, APK/build outputs, runtime binaries, credentials, generated GitHub credentials or raw acceptance logs.
 - Secret values never belong in Git. `production-vultr` GitHub Environment secrets are the standard Vultr runtime source; local Secret Vault is bootstrap/recovery only and must not be reintroduced into the normal production path.
 - The public repository has no self-hosted runner. Phone execution belongs only to the private
@@ -59,6 +83,20 @@ Documents under docs/history describe completed investigations or superseded pla
 - Manual SSH, raw ADB and provider CLI are not the standard production control plane.
 - Keep production ports and client protocols compatible unless the user explicitly authorizes a breaking change.
 - A production deployment is identified by an annotated semantic-version tag, immutable commit SHA, verified artifact/provenance and the deployment ID rule in the project-authority contract.
+
+## Protect boundaries, not bootstrap state
+
+During the physical-device-control foundation stage, the currently installed APK, runtime generation, project-owned files and project-owned configuration on the phone are disposable bootstrap state. They are not an asset that must be preserved at the cost of reproducibility.
+
+Accordingly:
+
+- do not build architecture around preserving the current installation in place;
+- an authorized bounded wipe/reinstall/re-materialization of project-owned state is acceptable when followed by independent device verification;
+- prefer revocable/test credentials for foundation experiments where practical;
+- do not build complex secret-continuity or migration machinery solely to preserve incidental current phone state before reproducible control exists;
+- no correctness assumption may depend on a credential, package or project-owned file surviving on the current phone.
+
+This does not authorize secret leakage or uncontrolled mutation. Real credentials remain confidential; they must not be logged or committed. Provider/account actions remain separately authorized and bounded. Non-project-owned phone state is outside the mutation boundary.
 
 ## Proportional verification
 
@@ -74,6 +112,8 @@ GitHub has one aggregate required check named Quality Gate. Markdown-only change
 policy gate; every other path runs policy, Rust, supply-chain and Android jobs. Read the small
 quality-summary artifact before inspecting individual logs. Open detailed logs only for failed
 checks.
+
+Verification must be proportional and behavior-oriented. Prefer one strong transition/fault test per independent invariant over layers of tests that merely re-assert wiring or the existence of other checks.
 
 Live phone or VM mutation is allowed only when the task calls for deployment or live acceptance and
 the canonical GitOps path for that target is implemented. Record the tag, SHA, release/deployment

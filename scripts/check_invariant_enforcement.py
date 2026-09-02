@@ -35,8 +35,10 @@ REQUIRED_COLUMNS = [
     "evidence_note",
     "expires_on",
 ]
-# Issue #179 performed explicit semantic re-audits of source P after the
-# Issue #172 reconciliation while retaining the existing invariant catalog.
+# Source P may be explicitly semantic-re-audited while retaining the existing
+# invariant catalog. PR #204 preserves the protected production/release/security
+# invariants while making reproducible physical-device State Machine control the
+# blocking development foundation and strengthening simplicity constraints.
 # This narrow transition is fail-closed: it is accepted only from the exact
 # matrix pin to the exact current re-audited Production Baseline blob. Any
 # subsequent edit fails until another explicit re-audit updates governance.
@@ -45,9 +47,9 @@ RECONCILED_SOURCE_BLOB_TRANSITIONS = {
     "P": {
         "path": "docs/PRODUCTION_BASELINE_PLAN.md",
         "previous_blob_sha": "65a88761e6bf840638d828f218db4b2ffeccccd4",
-        "supersedes_audited_blob_sha": "10f3dc18946c44e862035ae1c0fd48c2958a523d",
-        "audited_blob_sha": "422e2a6ebbb87d461468e9ca724e86c022ad05ea",
-        "issue": 179,
+        "supersedes_audited_blob_sha": "422e2a6ebbb87d461468e9ca724e86c022ad05ea",
+        "audited_blob_sha": "8ef318680ff15d7954cf1783a9053e93aed68f8f",
+        "issue": 204,
     }
 }
 EXPECTED_INVARIANT_IDS = {
