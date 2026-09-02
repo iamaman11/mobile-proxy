@@ -1,6 +1,6 @@
 # Transactional Operation State Machine v1
 
-Status: canonical design candidate implemented by `scripts/operation_state_machine.py`.
+Status: canonical transaction model implemented by `scripts/operation_state_machine.py`; core fail-closed semantics are Quality-tested and are being production-proven adapter by adapter. This document does not itself authorize a production transition; public Issue #179 remains the execution cursor.
 
 ## Goal
 
@@ -10,6 +10,8 @@ Turn the evidence-derived control model into an executable lifecycle for real op
 2. `operation_state_machine.py` answers **what phase may execute next in this exact transaction?**
 
 A phone is never globally `READY`. An operation progresses only when the exact predecessor phase has current CONTROL evidence in the same transaction.
+
+The same rule is intended for later VM/provider adapters: there is no global infrastructure-ready flag to inherit. Each operation consumes exact current facts and emits exact postconditions/evidence for the next reducer pass.
 
 ## Core rule
 
@@ -26,6 +28,27 @@ command returned success -> assume desired state -> continue
 ```
 
 For destructive operations the first mutation creates a transaction boundary. Any unresolved failure after that boundary enters recovery. Recovery is a separate state path and cannot silently become acceptance.
+
+### Fact-first transition rule
+
+A transition is admissible only from independently proven current state. The orchestrator MUST distinguish three dimensions:
+
+```text
+operation_execution_result
+postcondition_verification_result
+evidence_persistence_result
+```
+
+They are intentionally not aliases:
+
+- an operation command may succeed while the desired postcondition is not proven;
+- the postcondition may be proven on the target while durable bounded evidence persistence fails;
+- a workflow/job may conclude `success` while a reducer still classifies the operation as unaccepted, recovered, quarantined or unpersisted;
+- a failed workflow may still contain valid bounded observations up to the exact failure stage, while all later stages remain unobserved.
+
+Where a guard requires durable evidence, `evidence_persistence_result != success` blocks state promotion even if the target observation itself was valid. Missing durability must not be reconstructed later from narrative, logs or remembered operator state.
+
+A canonical SHA advance also invalidates any prior SHA-bound admission for subsequent device operations. New source identity requires new current-SHA authority before later phone work can proceed.
 
 ## Android current-source clean-install lifecycle
 
@@ -98,6 +121,8 @@ A separate capability certification contract adds `capability_inventory` after a
 
 A previous successful access certification is useful evidence but cannot satisfy the destructive transaction boundary. `phone_access_boundary` must pass again inside the exact mutation job.
 
+A phone-access proof is source-bound where the control contract binds it to canonical SHA. Once canonical `main` advances, that earlier proof remains historical evidence only and cannot silently authorize operations against the new source identity.
+
 ## Capability set for Android clean install
 
 The adapter should classify at least:
@@ -135,7 +160,7 @@ INVALID_TRACE
 
 `TRANSACTION_ACTIVE` means at least one destructive step has independently evidenced PASS.
 
-`ACCEPTED` requires every normal phase including `functional_probe` and `accept`.
+`ACCEPTED` requires every normal phase including `functional_probe` and `accept`, plus any durability/admission requirement imposed by the enclosing production operation contract.
 
 ## Recovery model
 
@@ -166,7 +191,9 @@ Rules:
 - a failed/skipped recovery step is `QUARANTINED`;
 - complete recovery is `RECOVERED`, not `ACCEPTED`;
 - after `RECOVERED`, a new operation transaction is required for another install attempt;
-- rollback to the old application generation is not part of this contract.
+- rollback to the old application generation is not part of this contract;
+- if post-mutation verification becomes unavailable, do not infer the post-state from command success; retain recovery/quarantine semantics until independently classified;
+- if recovery/cleanup observation proves the target is already absent, absence is a postcondition, not a reason to perform an unnecessary mutation.
 
 ## Evidence isolation
 
@@ -189,6 +216,8 @@ For state advancement:
 - source reference must be non-empty;
 - conflicting current evidence fails to `CONFLICT`;
 - evidence from another transaction, DIAGNOSTIC evidence, AUDIT evidence, or STALE evidence cannot advance the transaction.
+
+Durability is evaluated separately from phase truth. If an enclosing operation requires a durable bounded evidence artifact, a phase trace can be internally valid while the production-control classification remains unpersisted and therefore inadmissible for the next dependent transition.
 
 ## Trace validity
 
@@ -224,6 +253,11 @@ SELF-HOSTED MUTATION (global phone lock)
   perform structural + functional acceptance
   emit bounded operation evidence
 
+EVIDENCE PERSISTENCE
+  persist exactly the bounded evidence required by the operation contract
+  classify persistence independently from device execution/postcondition state
+  fail closed if required durability cannot be proven after bounded safe retry
+
 RECOVERY HANDLER (same self-hosted job/context where possible)
   classify partial state
   normalize only project-owned state
@@ -233,22 +267,35 @@ RECOVERY HANDLER (same self-hosted job/context where possible)
 
 Signing secrets remain in the hosted build/sign job unless an existing design explicitly requires otherwise. Provider credentials are not required for the local Android clean-install transaction.
 
+## Production-proven semantics so far
+
+The complete Android adapter is not yet accepted, but several state-machine distinctions have already been exercised by real production-control runs:
+
+- a source-delivery transport failure before ADB correctly left phone access `UNOBSERVED` instead of inventing a phone failure;
+- filesystem certification crossed into a bounded mutation transaction and correctly quarantined when safe completion/post-state could not be proven;
+- a later read-only quarantine observation validated bounded target absence but its evidence-artifact upload failed; control correctly classified the result as observed-but-unpersisted rather than promoting durable absence or cleanup authority.
+
+These are evidence that the fail-closed model is operationally necessary. They are not a claim that the full clean-install/runtime/data-path lifecycle is already accepted.
+
 ## Efficient certification order
 
 The fastest reliable route to a proven adapter is:
 
-1. CONTROL phone-access certification;
-2. read-only capability inventory;
-3. one bounded owned scratch mutation with verify/delete/verify;
-4. package query lifecycle on the exact app;
-5. current-source clean install through uninstall/install/verify;
-6. runtime materialization + integrity proof;
-7. process/service start and structural health;
-8. real bounded functional data-path probe;
-9. failure injection at pre-boundary, post-uninstall, post-install, runtime materialization and health stages;
-10. recovery proof to `RECOVERED` or explicit `QUARANTINED`;
-11. repeat clean transaction from recovered baseline;
-12. only then generalize the same contracts to a VM adapter.
+1. evidence-persistence reliability for bounded CONTROL artifacts, including bounded retry only for explicitly safe persistence transport failures;
+2. CONTROL phone-access certification on the exact current canonical SHA;
+3. read-only capability inventory;
+4. one bounded owned scratch/managed filesystem mutation with verify/delete/verify and explicit recovery/quarantine semantics;
+5. package query lifecycle on the exact app;
+6. current-source clean install through uninstall/install/verify;
+7. runtime materialization + integrity proof;
+8. process/service start and structural health;
+9. real bounded functional data-path probe;
+10. failure injection at pre-boundary, post-uninstall, post-install, runtime materialization and health stages;
+11. recovery proof to `RECOVERED` or explicit `QUARANTINED`;
+12. repeat clean transaction from recovered baseline;
+13. restart/rehydration and protected transport fallback/return proof;
+14. same-SHA soak/acceptance under the Production Baseline release gates;
+15. only then generalize the proven operation primitives to a VM/provider adapter.
 
 ## Quality requirements
 
@@ -258,6 +305,8 @@ CI must permanently prove at least:
 - uninstall/install/verify are distinct states;
 - mutation cannot begin before same-transaction boundary reproof;
 - command success never implies postcondition success;
+- workflow success never substitutes for reducer acceptance;
+- required evidence persistence is independent from operation/postcondition truth and unpersisted evidence cannot authorize the next dependent transition;
 - structural health never substitutes for functional acceptance;
 - pre-boundary failure is non-mutating refusal;
 - post-boundary failure requires recovery;
@@ -265,4 +314,5 @@ CI must permanently prove at least:
 - successful recovery is not acceptance;
 - out-of-order traces are rejected;
 - stale/diagnostic/other-transaction evidence cannot advance CONTROL state;
+- canonical SHA advancement invalidates prior SHA-bound admission for later production execution;
 - legacy rollback cannot silently reappear in the current-source clean-install contract.

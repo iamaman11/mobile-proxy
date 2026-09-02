@@ -1,6 +1,6 @@
 # Evidence-Derived Control State Machine v1
 
-Status: design candidate. This document is architecture only. It does not authorize phone access or mutation. Public Issue #179 remains the execution cursor.
+Status: canonical evidence-derived production control model implemented by `scripts/control_state_machine.py` and protected by Quality invariants. Core fail-closed semantics have been exercised by real production-control runs; individual Android/runtime/VM adapters still require their own evidence-backed certification. This document defines control semantics but does not itself authorize phone access or mutation. Public Issue #179 remains the execution cursor.
 
 ## Purpose
 
@@ -11,6 +11,8 @@ The control state machine MUST be a deterministic projection of bounded evidence
 Core rule:
 
 > No evidence -> `UNKNOWN`. Expired evidence -> `STALE`. Conflicting fresh evidence -> `CONFLICT`. Invalid scope -> no promotion. No fail-open transition is allowed.
+
+The production working model is fact-first: issue/checkpoint narrative may identify the single next authorized operation, but only the current `CONTROL` projection and required durable evidence can prove the state that operation consumes. Workflow conclusion, remembered progress and historical success are not facts about current downstream state.
 
 ## The state machine is multidimensional
 
@@ -83,6 +85,8 @@ A reducer may project each authority class independently. A `DIAGNOSTIC` project
 4. Narrative issue comments are audit/cursor context. They do not become machine truth without bounded evidence references.
 5. Facts from different bounded probes MUST NOT be combined to manufacture a proof that no single probe established.
 6. Facts from different authority classes MUST NOT be combined to satisfy one control predicate.
+7. If an operation contract requires a durable bounded artifact, a validated observation with failed artifact persistence remains unpersisted for dependent guards. Logs or narrative MUST NOT be used to reconstruct the missing durable authority.
+8. Operation execution outcome, independent postcondition observation and evidence persistence are separate facts. No one dimension may silently stand in for another.
 
 ## State regions
 
@@ -97,6 +101,8 @@ QUALITY_PROVEN
 ```
 
 `QUALITY_PROVEN` requires exact equality between the intended canonical SHA and the successful Quality run SHA.
+
+A source-bound current proof is not automatically portable across canonical revisions. When a production guard binds evidence to exact source SHA, advancing canonical `main` makes the older proof historical/stale for operations against the new SHA until current authority is re-established.
 
 ### 2. Command / workflow lifecycle
 
@@ -121,6 +127,7 @@ Rules:
 - `JOB_ASSIGNED` requires concrete runner identity on that exact job.
 - `JOB_SKIPPED` is a workflow-control outcome; it says nothing about runner availability.
 - failure location is independent and recorded as `failure_stage`.
+- `JOB_SUCCEEDED` is a workflow lifecycle fact, not `ACCEPTED`, not a verified target postcondition and not proof that required evidence was durably persisted.
 
 ### 3. Runner registration / availability
 
@@ -299,6 +306,8 @@ ACCEPTED
 
 `ACCEPTED` requires both structural and real functional acceptance for the same target generation/transaction. A running process or open port cannot satisfy `FUNCTION_PROVEN`.
 
+Where the production operation contract additionally requires durable bounded evidence, durable persistence is also an admission requirement before the accepted result may authorize a dependent transition.
+
 ## Failure-stage taxonomy
 
 Every failed operation identifies the earliest verified failure stage:
@@ -398,6 +407,8 @@ compensation
 
 Retries are allowed only when the contract explicitly classifies the failure as retryable and retry cannot widen mutation scope. Mutation commands are never automatically retryable.
 
+Evidence-persistence transport retries are a separate concern from retrying the device operation itself. They may be bounded only when the evidence artifact is immutable/bounded, the retry cannot repeat or widen phone mutation, and exhaustion remains explicitly unpersisted rather than accepted.
+
 ## Desired vs observed
 
 Every mutation follows:
@@ -414,7 +425,7 @@ MUTATE -> assume success -> advance state
 
 A successful command is an operation result, not proof of its postcondition.
 
-## Real production example that motivated the model
+## Real production examples that motivate and validate the model
 
 Private read-only preflight run `33647329233` passed its hosted command gate and was assigned to exact production runner `mobile-proxy-phone-linux-production`. It then failed while fetching immutable canonical preflight logic with an SSL-connect transport error. All ADB/preflight steps were skipped.
 
@@ -429,6 +440,13 @@ PHONE_ACCESS_UNOBSERVED
 ```
 
 This is not `RUNNER_OFFLINE`, not `ADB_FAILED`, and not `PHONE_FAILED`.
+
+Later production filesystem work exercised two additional distinctions:
+
+- a bounded filesystem transaction that could not prove safe completion entered explicit quarantine rather than being inferred successful from partial command progress;
+- read-only quarantine observation run `33682071376` validated its bounded observation on the phone, but the required evidence artifact upload failed. The correct control result remained observed-but-unpersisted, so durable absence and cleanup authority were not inferred from the successful device observation or job narrative.
+
+These examples prove why the state regions must remain independent. They do not claim that the complete Android runtime/data-path adapter is already accepted.
 
 ## Machine-readable snapshot
 
@@ -460,18 +478,19 @@ Raw serial, device IP, secrets, signing material and provider credentials are fo
 1. fact/evidence schema and deterministic reducer;
 2. command/job/runner/transport/source-fetch regions;
 3. regression from exact real run `33647329233`;
-4. Android `probe_access()` evidence with one-probe scope enforcement;
-5. real access failure-mode certification;
-6. capability inventory;
-7. bounded scratch filesystem mutation certification;
-8. privileged owned-root certification where proven safe;
-9. package lifecycle;
-10. runtime lifecycle;
-11. process lifecycle;
-12. structural + functional acceptance;
-13. failure injection and recovery classification;
-14. derive generic contracts from proven Android behavior;
-15. VM adapter against the same contracts.
+4. bounded durable-evidence persistence semantics, including explicit unpersisted state after safe retry exhaustion;
+5. Android `probe_access()` evidence with one-probe scope enforcement;
+6. real access failure-mode certification;
+7. capability inventory;
+8. bounded scratch filesystem mutation certification;
+9. privileged owned-root certification where proven safe;
+10. package lifecycle;
+11. runtime lifecycle;
+12. process lifecycle;
+13. structural + functional acceptance;
+14. failure injection and recovery classification;
+15. derive generic contracts from proven Android behavior;
+16. VM adapter against the same contracts.
 
 ## Quality invariants
 
@@ -490,8 +509,11 @@ Offline Quality MUST permanently test at least:
 - `DIAGNOSTIC` evidence cannot elevate the `CONTROL` projection;
 - missing mutation evidence stays unknown rather than becoming `false`;
 - command success never implies postcondition success;
+- workflow success never implies operation acceptance;
+- required-but-unpersisted evidence cannot authorize a dependent transition;
 - mutation cannot enter `TRANSACTION_ACTIVE` without same-job access reproof and lock;
 - post-boundary unknown state cannot return to READY/ACCEPTED;
+- source-bound current authority does not silently survive a canonical SHA advance;
 - forbidden sensitive values cannot enter bounded evidence.
 
 ## Rule for agents
@@ -506,4 +528,4 @@ EXACT BLOCKING PREDICATES
 NEXT SAFE OBSERVATION OR OPERATION
 ```
 
-It MUST identify the authority class of observations and MUST NOT collapse an upstream failure into assumptions about downstream layers.
+It MUST identify the authority class of observations, distinguish required evidence persistence from target observation, and MUST NOT collapse an upstream failure into assumptions about downstream layers.
