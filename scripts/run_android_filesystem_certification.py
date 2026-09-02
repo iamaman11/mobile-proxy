@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 
 SUPPORTED = "SUPPORTED"
+UNSUPPORTED = "UNSUPPORTED"
 UNKNOWN = "UNKNOWN"
 _OPERATION_ID = "android.filesystem-certification.v1"
 _TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
@@ -40,6 +41,10 @@ def _load_module(name: str, filename: str):
 
 _PREFLIGHT = _load_module("run_private_phone_preflight", "run_private_phone_preflight.py")
 _CAPABILITIES = _load_module("run_android_capability_inventory", "run_android_capability_inventory.py")
+_TOOLING = _load_module(
+    "run_android_filesystem_tooling_diagnostic",
+    "run_android_filesystem_tooling_diagnostic.py",
+)
 
 
 class CertificationFailure(RuntimeError):
@@ -111,26 +116,19 @@ def _q(path: str) -> str:
     return shlex.quote(path)
 
 
-def _verify_remote_exact(serial: str, actual: str, expected: str, *, root: bool) -> None:
-    actual_q = _q(actual)
-    expected_q = _q(expected)
-    shell(
-        serial,
-        f"""set -eu
-actual={actual_q}
-expected={expected_q}
-if command -v cmp >/dev/null 2>&1; then
-  cmp -s -- "$actual" "$expected"
-elif command -v toybox >/dev/null 2>&1; then
-  toybox cmp -s "$actual" "$expected"
-elif command -v busybox >/dev/null 2>&1; then
-  busybox cmp -s "$actual" "$expected"
-else
-  exit 73
-fi
-""",
-        root=root,
-    )
+def _verify_remote_exact(
+    serial: str,
+    actual: str,
+    expected: str,
+    *,
+    root: bool,
+    comparator: str,
+) -> None:
+    try:
+        command = _TOOLING.render_comparator_command(comparator, actual, expected)
+    except _TOOLING.ToolingDiagnosticFailure as error:
+        raise CertificationFailure(str(error)) from error
+    shell(serial, f"set -eu; {command}", root=root)
 
 
 def _pull_and_verify_exact(
@@ -189,6 +187,7 @@ def run_scratch_certification(
     payloads: dict[str, Any],
     local_root: Path,
     *,
+    comparator: str,
     mark_step: StepMarker | None = None,
 ) -> None:
     scratch = paths["scratch"]
@@ -225,7 +224,13 @@ def run_scratch_certification(
     _mark(mark_step, "scratch.copy_original")
     shell(serial, f"cp {_q(remote_original)} {_q(remote_active)}")
     _mark(mark_step, "scratch.compare_original_remote")
-    _verify_remote_exact(serial, remote_active, remote_original, root=False)
+    _verify_remote_exact(
+        serial,
+        remote_active,
+        remote_original,
+        root=False,
+        comparator=comparator,
+    )
     _mark(mark_step, "scratch.pull_active_original")
     _pull_and_verify_exact(
         serial,
@@ -241,7 +246,13 @@ def run_scratch_certification(
         f"cp {_q(remote_replacement)} {_q(remote_next)} && mv -f {_q(remote_next)} {_q(remote_active)}",
     )
     _mark(mark_step, "scratch.compare_replacement_remote")
-    _verify_remote_exact(serial, remote_active, remote_replacement, root=False)
+    _verify_remote_exact(
+        serial,
+        remote_active,
+        remote_replacement,
+        root=False,
+        comparator=comparator,
+    )
     _mark(mark_step, "scratch.pull_active_replacement")
     _pull_and_verify_exact(
         serial,
@@ -258,7 +269,13 @@ def run_scratch_certification(
     _mark(mark_step, "scratch.symlink_target")
     require(link_target == "active.bin", "scratch symlink target differs")
     _mark(mark_step, "scratch.symlink_compare")
-    _verify_remote_exact(serial, remote_link, remote_replacement, root=False)
+    _verify_remote_exact(
+        serial,
+        remote_link,
+        remote_replacement,
+        root=False,
+        comparator=comparator,
+    )
 
     _mark(mark_step, "scratch.remove_active")
     shell(serial, f"rm -f {_q(remote_link)} {_q(remote_active)}")
@@ -273,6 +290,7 @@ def run_managed_certification(
     paths: dict[str, str],
     payloads: dict[str, Any],
     *,
+    comparator: str,
     mark_step: StepMarker | None = None,
 ) -> None:
     scratch = paths["scratch"]
@@ -300,7 +318,13 @@ def run_managed_certification(
         root=True,
     )
     _mark(mark_step, "managed.compare_original_remote")
-    _verify_remote_exact(serial, managed_active, remote_original, root=True)
+    _verify_remote_exact(
+        serial,
+        managed_active,
+        remote_original,
+        root=True,
+        comparator=comparator,
+    )
 
     _mark(mark_step, "managed.atomic_replace")
     shell(
@@ -313,7 +337,13 @@ def run_managed_certification(
         root=True,
     )
     _mark(mark_step, "managed.compare_replacement_remote")
-    _verify_remote_exact(serial, managed_active, remote_replacement, root=True)
+    _verify_remote_exact(
+        serial,
+        managed_active,
+        remote_replacement,
+        root=True,
+        comparator=comparator,
+    )
 
     _mark(mark_step, "managed.symlink_create")
     shell(serial, f"ln -s active.bin {_q(managed_link)}", root=True)
@@ -322,7 +352,13 @@ def run_managed_certification(
     _mark(mark_step, "managed.symlink_target")
     require(link_target == "active.bin", "managed symlink target differs")
     _mark(mark_step, "managed.symlink_compare")
-    _verify_remote_exact(serial, managed_link, remote_replacement, root=True)
+    _verify_remote_exact(
+        serial,
+        managed_link,
+        remote_replacement,
+        root=True,
+        comparator=comparator,
+    )
 
     _mark(mark_step, "managed.remove_active")
     shell(serial, f"rm -f {_q(managed_link)} {_q(managed_active)}", root=True)
@@ -359,6 +395,21 @@ def cleanup_paths(
         return False
 
 
+def _comparator_report(
+    scratch_selected: str,
+    scratch_state: str,
+    managed_selected: str,
+    managed_state: str,
+) -> dict[str, str]:
+    return {
+        "source": "android.filesystem-tooling-compatibility.v1",
+        "scratch_selected_comparator": scratch_selected,
+        "scratch_comparator_path_state": scratch_state,
+        "managed_selected_comparator": managed_selected,
+        "managed_comparator_path_state": managed_state,
+    }
+
+
 def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
     canonical_sha = _PREFLIGHT.require_canonical_sha(canonical_sha)
     transaction_id = require_transaction_id(transaction_id)
@@ -374,6 +425,10 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
     failure_message: str | None = None
     current_substep: str | None = None
     current_cleanup_substep: str | None = None
+    scratch_selected = "UNKNOWN"
+    scratch_state = UNKNOWN
+    managed_selected = "UNKNOWN"
+    managed_state = UNKNOWN
 
     def mark_substep(substep: str) -> None:
         nonlocal current_substep
@@ -384,17 +439,45 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
         current_cleanup_substep = substep
 
     try:
+        failure_stage = "registered_device"
         _PREFLIGHT.prove_registered_device(serial)
+
+        failure_stage = "capability_inventory"
         inventory = _CAPABILITIES.inventory(canonical_sha)
         capabilities = dict(inventory.get("capabilities", {}))
         require(
             inventory.get("read_only_capabilities_proven") is True,
             "read-only capability prerequisite is not proven",
         )
+
+        failure_stage = "comparator_admission"
+        scratch_tooling = _TOOLING.probe_scope(serial, root=False)
+        managed_tooling = _TOOLING.probe_scope(serial, root=True)
+        scratch_selected = str(scratch_tooling.get("selected_comparator", "UNKNOWN"))
+        scratch_state = str(
+            scratch_tooling.get("canonical_comparator_path_state", UNKNOWN)
+        )
+        managed_selected = str(managed_tooling.get("selected_comparator", "UNKNOWN"))
+        managed_state = str(
+            managed_tooling.get("canonical_comparator_path_state", UNKNOWN)
+        )
+        require(
+            scratch_tooling.get("probe_complete") is True
+            and scratch_state == SUPPORTED,
+            f"scratch comparator compatibility is not proven: {scratch_state}",
+        )
+        require(
+            managed_tooling.get("probe_complete") is True
+            and managed_state == SUPPORTED,
+            f"managed comparator compatibility is not proven: {managed_state}",
+        )
+
+        failure_stage = "prestate"
         verify_prestate(serial, paths)
 
         # Same-job boundary reproof: this is intentionally immediately before the
         # first write and is independent from the earlier access/capability probes.
+        failure_stage = "mutation_boundary_reproof"
         _PREFLIGHT.prove_registered_device(serial)
 
         with tempfile.TemporaryDirectory(prefix="mobile-proxy-fs-cert-") as temp:
@@ -409,6 +492,7 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
                 paths,
                 payloads,
                 local_root,
+                comparator=scratch_selected,
                 mark_step=mark_substep,
             )
 
@@ -418,6 +502,7 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
                 serial,
                 paths,
                 payloads,
+                comparator=managed_selected,
                 mark_step=mark_substep,
             )
 
@@ -449,6 +534,12 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "failure_stage": None,
             "failure_substep": None,
             "comparison_contract": "exact-bytes",
+            "comparator_contract": _comparator_report(
+                scratch_selected,
+                scratch_state,
+                managed_selected,
+                managed_state,
+            ),
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": True,
             "cleanup_attempted": True,
@@ -463,7 +554,11 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "phone_mutation_performed": True,
             "accepted": True,
         }
-    except (_PREFLIGHT.PreflightFailure, CertificationFailure) as error:
+    except (
+        _PREFLIGHT.PreflightFailure,
+        _TOOLING.ToolingDiagnosticFailure,
+        CertificationFailure,
+    ) as error:
         failure_message = str(error)
         failure_substep = current_substep if mutation_started else None
         cleanup_failure_substep: str | None = None
@@ -498,6 +593,12 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
             "failure_substep": failure_substep,
             "failure": failure_message,
             "comparison_contract": "exact-bytes",
+            "comparator_contract": _comparator_report(
+                scratch_selected,
+                scratch_state,
+                managed_selected,
+                managed_state,
+            ),
             "capabilities": capabilities,
             "filesystem_mutation_capabilities_proven": False,
             "cleanup_attempted": cleanup_attempted,
