@@ -27,7 +27,7 @@
       "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
     },
-    "mutation_performed": { "type": "boolean" }
+    "mutation_performed": { "type": ["boolean", "null"] }
   },
   "$defs": {
     "fact": {
@@ -52,7 +52,7 @@
         "subject": { "type": "string", "minLength": 1 },
         "predicate": { "type": "string", "minLength": 1 },
         "value": {
-          "type": ["string", "number", "integer", "boolean", "null"]
+          "type": ["string", "number", "boolean", "null"]
         },
         "observer": { "type": "string", "minLength": 1 },
         "method": { "type": "string", "minLength": 1 },
@@ -152,6 +152,7 @@
           "enum": [
             "SOURCE_FETCH_UNOBSERVED",
             "SOURCE_FETCH_SUCCEEDED",
+            "SOURCE_FETCH_FAILED_TRANSPORT",
             "SOURCE_FETCH_FAILED_TRANSIENT",
             "SOURCE_FETCH_FAILED_PERMANENT",
             "SOURCE_FETCH_DIGEST_MISMATCH"
