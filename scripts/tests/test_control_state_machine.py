@@ -15,6 +15,10 @@ SPEC.loader.exec_module(MODULE)
 F = MODULE.Fact
 
 
+def phone_fact(predicate, value, *, lifecycle="CURRENT", source_ref="phone-probe-1"):
+    return F("phone", predicate, value, lifecycle=lifecycle, source_ref=source_ref)
+
+
 class ControlStateMachineTests(unittest.TestCase):
     def test_real_preflight_shape_stops_at_source_fetch_without_inventing_phone_failure(self) -> None:
         facts = [
@@ -34,6 +38,7 @@ class ControlStateMachineTests(unittest.TestCase):
         self.assertEqual(state["source_fetch"], "SOURCE_FETCH_FAILED_TRANSPORT")
         self.assertEqual(state["phone_access"], "PHONE_ACCESS_UNOBSERVED")
         self.assertEqual(state["failure_stage"], "SOURCE_FETCH")
+        self.assertEqual(state["blocking_predicates"], ["source_fetch=SOURCE_FETCH_SUCCEEDED"])
         self.assertFalse(state["mutation_performed"])
 
     def test_skipped_job_never_becomes_runner_failure(self) -> None:
@@ -86,29 +91,45 @@ class ControlStateMachineTests(unittest.TestCase):
 
         self.assertEqual(state["runner"], "RUNNER_ONLINE_IDLE")
 
-    def test_phone_access_requires_every_identity_and_shell_fact(self) -> None:
+    def test_phone_access_requires_every_identity_and_shell_fact_from_one_probe(self) -> None:
         facts = [
-            F("phone", "adb_tool_available", True),
-            F("phone", "adb_inventory_valid", True),
-            F("phone", "adb_device_count", 1),
-            F("phone", "registered_device_match", True),
-            F("phone", "registered_device_inventory_state", "device"),
-            F("phone", "adb_get_state", "device"),
-            F("phone", "adb_shell_probe", True),
+            phone_fact("adb_tool_available", True),
+            phone_fact("adb_inventory_valid", True),
+            phone_fact("adb_device_count", 1),
+            phone_fact("registered_device_match", True),
+            phone_fact("registered_device_inventory_state", "device"),
+            phone_fact("adb_get_state", "device"),
+            phone_fact("adb_shell_probe", True),
         ]
 
         state = MODULE.derive_snapshot(facts)
 
         self.assertEqual(state["phone_access"], "PHONE_ACCESS_PROVEN")
+        self.assertEqual(state["blocking_predicates"], [])
+
+    def test_cross_probe_access_facts_cannot_be_combined(self) -> None:
+        facts = [
+            phone_fact("adb_tool_available", True, source_ref="probe-a"),
+            phone_fact("adb_inventory_valid", True, source_ref="probe-a"),
+            phone_fact("adb_device_count", 1, source_ref="probe-a"),
+            phone_fact("registered_device_match", True, source_ref="probe-a"),
+            phone_fact("registered_device_inventory_state", "device", source_ref="probe-a"),
+            phone_fact("adb_get_state", "device", source_ref="probe-a"),
+            phone_fact("adb_shell_probe", True, source_ref="probe-b"),
+        ]
+
+        state = MODULE.derive_snapshot(facts)
+
+        self.assertEqual(state["phone_access"], "PHONE_ACCESS_UNOBSERVED")
 
     def test_missing_shell_fact_keeps_phone_access_unobserved(self) -> None:
         facts = [
-            F("phone", "adb_tool_available", True),
-            F("phone", "adb_inventory_valid", True),
-            F("phone", "adb_device_count", 1),
-            F("phone", "registered_device_match", True),
-            F("phone", "registered_device_inventory_state", "device"),
-            F("phone", "adb_get_state", "device"),
+            phone_fact("adb_tool_available", True),
+            phone_fact("adb_inventory_valid", True),
+            phone_fact("adb_device_count", 1),
+            phone_fact("registered_device_match", True),
+            phone_fact("registered_device_inventory_state", "device"),
+            phone_fact("adb_get_state", "device"),
         ]
 
         state = MODULE.derive_snapshot(facts)
@@ -117,9 +138,9 @@ class ControlStateMachineTests(unittest.TestCase):
 
     def test_package_health_does_not_participate_in_phone_access(self) -> None:
         facts = [
-            F("phone", "package_present", True),
-            F("phone", "runtime_healthy", True),
-            F("phone", "proxy_ports_ready", True),
+            phone_fact("package_present", True),
+            phone_fact("runtime_healthy", True),
+            phone_fact("proxy_ports_ready", True),
         ]
 
         state = MODULE.derive_snapshot(facts)
@@ -128,26 +149,37 @@ class ControlStateMachineTests(unittest.TestCase):
 
     def test_conflicting_device_identity_fails_closed(self) -> None:
         facts = [
-            F("phone", "adb_tool_available", True),
-            F("phone", "adb_inventory_valid", True),
-            F("phone", "adb_device_count", 1),
-            F("phone", "registered_device_match", True),
-            F("phone", "registered_device_match", False),
+            phone_fact("adb_tool_available", True),
+            phone_fact("adb_inventory_valid", True),
+            phone_fact("adb_device_count", 1),
+            phone_fact("registered_device_match", True),
+            phone_fact("registered_device_match", False),
         ]
 
         state = MODULE.derive_snapshot(facts)
 
         self.assertEqual(state["phone_access"], "PHONE_ACCESS_CONFLICT")
 
-    def test_stale_access_fact_cannot_be_reused(self) -> None:
+    def test_complete_expired_access_proof_is_stale_not_unobserved(self) -> None:
         facts = [
-            F("phone", "adb_tool_available", True, lifecycle="STALE"),
-            F("phone", "adb_inventory_valid", True),
-            F("phone", "adb_device_count", 1),
-            F("phone", "registered_device_match", True),
-            F("phone", "registered_device_inventory_state", "device"),
-            F("phone", "adb_get_state", "device"),
-            F("phone", "adb_shell_probe", True),
+            phone_fact("adb_tool_available", True, lifecycle="STALE"),
+            phone_fact("adb_inventory_valid", True, lifecycle="STALE"),
+            phone_fact("adb_device_count", 1, lifecycle="STALE"),
+            phone_fact("registered_device_match", True, lifecycle="STALE"),
+            phone_fact("registered_device_inventory_state", "device", lifecycle="STALE"),
+            phone_fact("adb_get_state", "device", lifecycle="STALE"),
+            phone_fact("adb_shell_probe", True, lifecycle="STALE"),
+        ]
+
+        state = MODULE.derive_snapshot(facts)
+
+        self.assertEqual(state["phone_access"], "PHONE_ACCESS_STALE")
+        self.assertEqual(state["blocking_predicates"], ["phone_access=PHONE_ACCESS_STALE"])
+
+    def test_partial_stale_access_facts_are_not_promoted(self) -> None:
+        facts = [
+            phone_fact("adb_tool_available", True, lifecycle="STALE"),
+            phone_fact("adb_inventory_valid", True, lifecycle="STALE"),
         ]
 
         state = MODULE.derive_snapshot(facts)
