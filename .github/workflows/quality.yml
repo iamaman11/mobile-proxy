@@ -57,6 +57,7 @@ jobs:
             rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
           python3 scripts/check_architecture_boundaries.py
           python3 scripts/check_ten_out_of_ten_consistency.py
+          python3 scripts/check_fact_first_execution.py
           python3 -m unittest discover -s scripts/tests -p 'test_*.py'
           git diff --check
 
