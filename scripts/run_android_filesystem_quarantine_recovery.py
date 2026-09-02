@@ -248,6 +248,14 @@ def _remove_exact(serial: str, path: str, *, root: bool) -> None:
     _CERT.shell(serial, f"rm -rf -- {_CERT._q(path)}", root=root)
 
 
+def _cleanup_needed(report: dict[str, Any]) -> bool:
+    return any(
+        transaction[scope]["node_state"] == DIRECTORY
+        for transaction in report["transactions"]
+        for scope in ("scratch", "managed_root")
+    )
+
+
 def cleanup(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any]:
     canonical_sha = _PREFLIGHT.require_canonical_sha(canonical_sha)
     transaction_ids = _require_transaction_ids(transaction_ids)
@@ -285,6 +293,23 @@ def cleanup(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any
             "post_cleanup_observation": None,
         }
 
+    # The read-only pre-observation already proves the exact paths are absent.
+    # Do not create a second device dependency or claim a cleanup mutation when
+    # there is nothing to remove.
+    if not _cleanup_needed(pre):
+        return {
+            **base_report,
+            "state": "ALREADY_CLEAN",
+            "accepted": True,
+            "cleanup_attempted": False,
+            "cleanup_verified": True,
+            "phone_mutation_performed": False,
+            "failure_stage": None,
+            "failure_substep": None,
+            "failure": None,
+            "post_cleanup_observation": pre,
+        }
+
     # Re-prove the registered device immediately before the first possible delete.
     _PREFLIGHT.prove_registered_device(serial)
 
@@ -309,8 +334,21 @@ def cleanup(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any
     except (_CERT.CertificationFailure, _PREFLIGHT.PreflightFailure) as error:
         failure_message = str(error)
 
-    post = observe(canonical_sha, transaction_ids)
-    cleanup_verified = all(
+    # Once deletion has been attempted, inability to observe the post-state is a
+    # QUARANTINED operation result, not a pre-report transport failure. Preserve
+    # bounded mutation evidence even if the phone becomes unreachable here.
+    post: dict[str, Any] | None = None
+    try:
+        post = observe(canonical_sha, transaction_ids)
+    except (
+        QuarantineRecoveryFailure,
+        _CERT.CertificationFailure,
+        _PREFLIGHT.PreflightFailure,
+    ) as error:
+        failure_substep = "post_cleanup_observation"
+        failure_message = str(error)
+
+    cleanup_verified = post is not None and all(
         transaction["scratch"]["node_state"] == ABSENT
         and transaction["managed_root"]["node_state"] == ABSENT
         for transaction in post["transactions"]
@@ -319,7 +357,7 @@ def cleanup(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any
     if cleanup_verified:
         return {
             **base_report,
-            "state": "CLEANED" if cleanup_attempted else "ALREADY_CLEAN",
+            "state": "CLEANED",
             "accepted": True,
             "cleanup_attempted": cleanup_attempted,
             "cleanup_verified": True,
