@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, NamedTuple
 
 
 CURRENT = "CURRENT"
 UNKNOWN = object()
 
 
-@dataclass(frozen=True)
-class Fact:
+class Fact(NamedTuple):
     subject: str
     predicate: str
     value: Any
@@ -222,7 +220,7 @@ def derive_snapshot(facts: Iterable[Fact]) -> dict[str, Any]:
     facts = tuple(facts)
     mutation_performed = _current_value(facts, "mutation_performed")
     if mutation_performed is UNKNOWN:
-        mutation_performed = False
+        mutation_performed = None
 
     return {
         "command_job": derive_job_state(facts),
