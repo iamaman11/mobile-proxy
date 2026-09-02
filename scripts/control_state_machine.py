@@ -19,29 +19,33 @@ class FactConflict(RuntimeError):
     pass
 
 
-def _current_value(facts: Iterable[Fact], predicate: str) -> Any:
-    values = [fact.value for fact in facts if fact.predicate == predicate and fact.lifecycle == CURRENT]
+def _current_value(facts: Iterable[Fact], subject: str, predicate: str) -> Any:
+    values = [
+        fact.value
+        for fact in facts
+        if fact.subject == subject and fact.predicate == predicate and fact.lifecycle == CURRENT
+    ]
     if not values:
         return UNKNOWN
     first = values[0]
     if any(value != first for value in values[1:]):
-        raise FactConflict(f"conflicting current facts for {predicate}")
+        raise FactConflict(f"conflicting current facts for {subject}.{predicate}")
     return first
 
 
-def _has_conflict(facts: Iterable[Fact], predicates: set[str]) -> bool:
+def _has_conflict(facts: Iterable[Fact], subject: str, predicates: set[str]) -> bool:
     for predicate in predicates:
         try:
-            _current_value(facts, predicate)
+            _current_value(facts, subject, predicate)
         except FactConflict:
             return True
     return False
 
 
 def derive_job_state(facts: Iterable[Fact]) -> str:
-    status = _current_value(facts, "job_status")
-    conclusion = _current_value(facts, "job_conclusion")
-    runner_assigned = _current_value(facts, "runner_assigned")
+    status = _current_value(facts, "run", "job_status")
+    conclusion = _current_value(facts, "run", "job_conclusion")
+    runner_assigned = _current_value(facts, "run", "runner_assigned")
 
     if status is UNKNOWN:
         return "COMMAND_UNOBSERVED"
@@ -73,13 +77,13 @@ def derive_runner_state(facts: Iterable[Fact]) -> str:
         "runner_online",
         "runner_busy",
     }
-    if _has_conflict(facts, predicates):
+    if _has_conflict(facts, "runner", predicates):
         return "RUNNER_CONFLICT"
 
-    registered = _current_value(facts, "runner_registered")
-    labels_match = _current_value(facts, "runner_labels_match")
-    online = _current_value(facts, "runner_online")
-    busy = _current_value(facts, "runner_busy")
+    registered = _current_value(facts, "runner", "runner_registered")
+    labels_match = _current_value(facts, "runner", "runner_labels_match")
+    online = _current_value(facts, "runner", "runner_online")
+    busy = _current_value(facts, "runner", "runner_busy")
 
     if registered is False:
         return "RUNNER_UNREGISTERED"
@@ -97,12 +101,13 @@ def derive_runner_state(facts: Iterable[Fact]) -> str:
 
 
 def derive_transport_state(facts: Iterable[Fact]) -> str:
-    if _has_conflict(facts, {"transport_failed", "transport_tls_failure_recent", "transport_recent_success"}):
+    predicates = {"transport_failed", "transport_tls_failure_recent", "transport_recent_success"}
+    if _has_conflict(facts, "runner", predicates):
         return "TRANSPORT_UNKNOWN"
 
-    failed = _current_value(facts, "transport_failed")
-    tls_failure = _current_value(facts, "transport_tls_failure_recent")
-    recent_success = _current_value(facts, "transport_recent_success")
+    failed = _current_value(facts, "runner", "transport_failed")
+    tls_failure = _current_value(facts, "runner", "transport_tls_failure_recent")
+    recent_success = _current_value(facts, "runner", "transport_recent_success")
 
     if failed is True:
         return "TRANSPORT_FAILED"
@@ -114,7 +119,7 @@ def derive_transport_state(facts: Iterable[Fact]) -> str:
 
 
 def derive_source_fetch_state(facts: Iterable[Fact]) -> str:
-    result = _current_value(facts, "source_fetch_result")
+    result = _current_value(facts, "run", "source_fetch_result")
     mapping = {
         "success": "SOURCE_FETCH_SUCCEEDED",
         "transport_failure": "SOURCE_FETCH_FAILED_TRANSPORT",
@@ -137,22 +142,22 @@ def derive_phone_access_state(facts: Iterable[Fact]) -> str:
         "adb_get_state",
         "adb_shell_probe",
     }
-    if _has_conflict(facts, predicates):
+    if _has_conflict(facts, "phone", predicates):
         return "PHONE_ACCESS_CONFLICT"
 
-    adb_tool = _current_value(facts, "adb_tool_available")
+    adb_tool = _current_value(facts, "phone", "adb_tool_available")
     if adb_tool is UNKNOWN:
         return "PHONE_ACCESS_UNOBSERVED"
     if adb_tool is False:
         return "ADB_TOOL_UNAVAILABLE"
 
-    inventory_valid = _current_value(facts, "adb_inventory_valid")
+    inventory_valid = _current_value(facts, "phone", "adb_inventory_valid")
     if inventory_valid is UNKNOWN:
         return "PHONE_ACCESS_UNOBSERVED"
     if inventory_valid is False:
         return "ADB_INVENTORY_INVALID"
 
-    count = _current_value(facts, "adb_device_count")
+    count = _current_value(facts, "phone", "adb_device_count")
     if count is UNKNOWN:
         return "PHONE_ACCESS_UNOBSERVED"
     if count == 0:
@@ -160,25 +165,25 @@ def derive_phone_access_state(facts: Iterable[Fact]) -> str:
     if count != 1:
         return "ADB_MULTIPLE_DEVICES"
 
-    registered_match = _current_value(facts, "registered_device_match")
+    registered_match = _current_value(facts, "phone", "registered_device_match")
     if registered_match is UNKNOWN:
         return "PHONE_ACCESS_UNOBSERVED"
     if registered_match is False:
         return "ADB_WRONG_DEVICE"
 
-    inventory_state = _current_value(facts, "registered_device_inventory_state")
+    inventory_state = _current_value(facts, "phone", "registered_device_inventory_state")
     if inventory_state is UNKNOWN:
         return "PHONE_ACCESS_UNOBSERVED"
     if inventory_state != "device":
         return "ADB_REGISTERED_DEVICE_OFFLINE"
 
-    get_state = _current_value(facts, "adb_get_state")
+    get_state = _current_value(facts, "phone", "adb_get_state")
     if get_state is UNKNOWN:
         return "PHONE_ACCESS_UNOBSERVED"
     if get_state != "device":
         return "ADB_GET_STATE_FAILED"
 
-    shell_probe = _current_value(facts, "adb_shell_probe")
+    shell_probe = _current_value(facts, "phone", "adb_shell_probe")
     if shell_probe is UNKNOWN:
         return "PHONE_ACCESS_UNOBSERVED"
     if shell_probe is not True:
@@ -211,14 +216,14 @@ def derive_failure_stage(facts: Iterable[Fact]) -> str | None:
         ("recovery_failed", "RECOVERY"),
     )
     for predicate, stage in ordered:
-        if _current_value(facts, predicate) is True:
+        if _current_value(facts, "run", predicate) is True:
             return stage
     return None
 
 
 def derive_snapshot(facts: Iterable[Fact]) -> dict[str, Any]:
     facts = tuple(facts)
-    mutation_performed = _current_value(facts, "mutation_performed")
+    mutation_performed = _current_value(facts, "run", "mutation_performed")
     if mutation_performed is UNKNOWN:
         mutation_performed = None
 
