@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -111,6 +112,20 @@ def _select_comparator(probes: dict[str, str]) -> tuple[str, str]:
     return "NONE", UNSUPPORTED
 
 
+def render_comparator_command(selected: str, actual: str, expected: str) -> str:
+    """Render the exact invocation for a comparator already proven compatible."""
+
+    actual_q = shlex.quote(actual)
+    expected_q = shlex.quote(expected)
+    if selected == "cmp":
+        return f"cmp -s -- {actual_q} {expected_q}"
+    if selected == "toybox_cmp":
+        return f"toybox cmp -s {actual_q} {expected_q}"
+    if selected == "busybox_cmp":
+        return f"busybox cmp -s {actual_q} {expected_q}"
+    raise ToolingDiagnosticFailure(f"comparator is not compatibility-proven: {selected!r}")
+
+
 def _scope_probe(serial: str, *, root: bool) -> dict[str, Any]:
     probes: dict[str, str] = {
         "shell_set_eu": _probe(serial, "set -eu; true", root=root),
@@ -133,14 +148,20 @@ def _scope_probe(serial: str, *, root: bool) -> dict[str, Any]:
     }
 
 
+def probe_scope(serial: str, *, root: bool) -> dict[str, Any]:
+    """Public comparator admission surface shared by diagnostics and mutators."""
+
+    return _scope_probe(serial, root=root)
+
+
 def diagnose(canonical_sha: str) -> dict[str, Any]:
     canonical_sha = _PREFLIGHT.require_canonical_sha(canonical_sha)
     serial = _PREFLIGHT.require_expected_serial()
     _PREFLIGHT.require_tools()
     device = _PREFLIGHT.prove_registered_device(serial)
 
-    scratch = _scope_probe(serial, root=False)
-    managed_root = _scope_probe(serial, root=True)
+    scratch = probe_scope(serial, root=False)
+    managed_root = probe_scope(serial, root=True)
     diagnostic_complete = (
         scratch["probe_complete"] is True
         and managed_root["probe_complete"] is True
