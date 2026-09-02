@@ -10,7 +10,7 @@ All work must begin by reading that document. It defines the active delivery ord
 
 Status: **temporary execution focus**  
 Activated: **2026-08-30**  
-Updated: **2026-09-03 — fact-first execution doctrine promoted**  
+Updated: **2026-09-03 — Android physical-reality authority promoted**  
 Authority: subordinate to `docs/PRODUCTION_BASELINE_PLAN.md` and current repository state  
 Removal condition: delete this entire section after software-complete release-candidate acceptance is recorded on one immutable Git SHA, or when an explicit product decision supersedes this focus.
 
@@ -36,16 +36,26 @@ The active working rules are:
 7. The private execution repository transports commands, secrets and bounded evidence; it does not manufacture project truth or reinterpret the public state machine.
 8. Android is the first adapter to be proven end to end. VM/provider generalization comes only after the phone baseline demonstrates which operation primitives are actually reusable.
 
-This doctrine is not a new parallel architecture. It promotes the already implemented `control_state_machine.py` and `operation_state_machine.py` contracts as the normal way the project reasons about reality.
+### Android physical-reality authority
+
+The real registered production phone is the authoritative observation oracle for Android device reality. Hosted `Quality`, unit/integration tests, workflow state and private orchestration can prove software/policy coherence, reducer behavior and execution transport, but they cannot by themselves prove the current filesystem, package, signer, runtime, process, service, network or functional data-path state of the real Android target.
+
+If an Android predicate or postcondition can be verified on the real production phone, the dependent production state MUST NOT be completed or promoted solely from hosted/offline evidence. It requires bounded device-backed `CONTROL` evidence from an authorized real-phone operation, with the exact source/transaction scope, freshness and durable persistence required by that operation contract. Offline tests may prove that the observer/reducer is correct; they do not substitute for observing the device.
+
+Infrastructure or control-plane hardening may run ahead of the phone only to remove a demonstrated blocker to the next safe device-backed operation. Closing that blocker is not Android state progress by itself. Once the blocker is closed, execution returns immediately to the real-phone certification loop instead of expanding orchestration, governance or framework work without a new demonstrated device blocker.
+
+This doctrine is not a new parallel architecture. It promotes the already implemented `control_state_machine.py` and `operation_state_machine.py` contracts as the normal way the project reasons about reality, with the real phone as the source of Android physical-state observations.
 
 ### Current execution order
 
 1. Treat non-essential architecture/governance framework expansion as temporarily closed.
-2. Close evidence-reliability blockers first so a valid observation or mutation cannot be promoted merely because its workflow completed; bounded persistence failure must remain explicit and fail closed.
-3. Complete the Android adapter as evidence-backed vertical slices: current-SHA phone access -> capability inventory -> bounded filesystem certification and recovery.
-4. Move APK/signing work through the same transaction model: exact signed candidate -> pre-mutation observation -> boundary reproof -> controlled package mutation -> independent signer/version/digest verification -> explicit recovery/quarantine on uncertainty.
-5. Move native runtime deployment through the same model: materialize exact generation -> verify integrity/current binding -> start -> structural health -> bounded functional probe -> restart/rehydration -> recovery proof.
-6. Exercise the complete product data path on one unchanged candidate SHA:
+2. Close the demonstrated evidence-persistence blocker with the smallest safe bounded fix; do not retry or replay the phone operation merely to persist its evidence.
+3. Return immediately to the real phone: prove current-SHA phone admission, then perform one fresh read-only quarantine observation of the exact quarantined transaction set.
+4. Let durable device facts decide the next transition. If the quarantined paths are durably proven absent, skip cleanup; otherwise perform only the separately authorized bounded cleanup and independently verify its postcondition.
+5. Repeat bounded Android filesystem certification so create/write/read/compare/delete/post-absence and recovery/quarantine behavior are proven from real-phone evidence.
+6. Move APK/signing work through the same transaction model: exact signed candidate -> pre-mutation device observation -> boundary reproof -> controlled package mutation -> independent real-phone signer/version/digest verification -> explicit recovery/quarantine on uncertainty.
+7. Move native runtime deployment through the same model: materialize exact generation -> verify integrity/current binding on the phone -> start -> structural health -> bounded functional probe -> restart/rehydration -> recovery proof.
+8. Exercise the complete product data path on one unchanged candidate SHA:
 
    ```text
    startup
@@ -60,9 +70,9 @@ This doctrine is not a new parallel architecture. It promotes the already implem
      -> restore / rollback
    ```
 
-7. Execute the required failure/restart/recovery matrix and soak only while exact candidate identity and current authority remain valid; re-derive blockers after every transition instead of carrying narrative readiness forward.
-8. Record software-complete and physical acceptance only from the same immutable candidate with all required durable evidence, then follow the protected release ordering in the Production Baseline Plan.
-9. Only after the functional phone baseline is accepted, generalize the proven operation primitives to VM/provider adapters and perform a fresh architecture re-audit. Do not create a speculative generic execution framework before the Android evidence shows what is actually common.
+9. Execute the required failure/restart/recovery matrix and soak only while exact candidate identity and current authority remain valid; re-derive blockers after every transition instead of carrying narrative readiness forward.
+10. Record software-complete and physical acceptance only from the same immutable candidate with all required durable device-backed evidence, then follow the protected release ordering in the Production Baseline Plan.
+11. Only after the functional phone baseline is accepted, generalize the proven operation primitives to VM/provider adapters and perform a fresh architecture re-audit. Do not create a speculative generic execution framework before the Android evidence shows what is actually common.
 
 The ordering above is an execution discipline inside the active Production Baseline. It does not waive or reorder mandatory Item 20 provider, signing, acceptance or release-authority gates defined by `docs/PRODUCTION_BASELINE_PLAN.md`; the stricter prerequisite always wins.
 

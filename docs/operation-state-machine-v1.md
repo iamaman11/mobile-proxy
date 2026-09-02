@@ -50,6 +50,14 @@ Where a guard requires durable evidence, `evidence_persistence_result != success
 
 A canonical SHA advance also invalidates any prior SHA-bound admission for subsequent device operations. New source identity requires new current-SHA authority before later phone work can proceed.
 
+### Android physical-reality rule
+
+The real registered production phone is the authoritative observation oracle for Android device reality. Whenever an Android precondition, postcondition or acceptance predicate is technically observable on that phone, the phase may be completed only from bounded device-backed `CONTROL` evidence produced by the authorized real-phone operation.
+
+Hosted `Quality`, unit/integration tests and workflow policy prove software/policy coherence, transaction ordering and observer/reducer behavior. They do not prove the phone's current filesystem, package/signer, runtime generation, process/service state, network state or functional path. A hosted-successful phase that lacks required real-phone observation remains unproven for Android production state.
+
+Infrastructure/control-plane work may interrupt the device sequence only to remove a demonstrated blocker to the next safe real-phone phase. Once the blocker is closed, the operation returns to that real-phone phase; the infrastructure fix itself is not a substitute for the blocked device observation or postcondition.
+
 ## Android current-source clean-install lifecycle
 
 The full operation contract is:
@@ -85,18 +93,18 @@ source_quality
 | `runner_assignment` | OBSERVE | exact self-hosted Android production job is assigned to the expected runner contract |
 | `source_delivery` | VERIFY | exact immutable canonical operation logic is available in the executing job |
 | `phone_access_initial` | VERIFY | registered-device CONTROL preflight proves the target before capability work |
-| `capability_inventory` | VERIFY | every capability required by the operation is explicitly supported |
+| `capability_inventory` | VERIFY | every capability required by the operation is explicitly supported from bounded device-backed evidence where observable on the phone |
 | `mutation_lock` | VERIFY | global production-phone mutation serialization is held by the exact job |
 | `phone_access_boundary` | VERIFY | registered-device CONTROL proof is repeated in the same job immediately before mutation |
 | `stop_owned_runtime` | MUTATE | only project-owned running runtime is stopped or definite absence is proven |
 | `remove_owned_runtime` | MUTATE | only the explicitly-owned managed runtime namespace is removed/normalized |
 | `uninstall_legacy_apk` | MUTATE | legacy package is definitely absent afterwards; legacy presence is not required beforehand |
 | `install_new_apk` | MUTATE | Android package manager reports installation of the exact candidate attempt |
-| `verify_new_apk` | VERIFY | independent installed version + installed APK typed digest equal the exact candidate |
+| `verify_new_apk` | VERIFY | independent real-phone installed version + installed APK typed digest equal the exact candidate |
 | `materialize_runtime` | MUTATE | source-bound runtime/config is materialized in a fresh generation |
-| `verify_runtime` | VERIFY | runtime file identity/integrity/current-generation binding are independently proven |
+| `verify_runtime` | VERIFY | real-phone runtime file identity/integrity/current-generation binding are independently proven |
 | `start_runtime` | MUTATE | supervisor/application service start commands were executed for the exact new generation |
-| `structural_health` | ACCEPT | expected processes/services/local ports are structurally present for the exact generation |
+| `structural_health` | ACCEPT | expected processes/services/local ports are structurally present for the exact generation on the real phone |
 | `functional_probe` | ACCEPT | a bounded real data-path probe succeeds through the intended application path |
 | `accept` | ACCEPT | all preceding evidence belongs to the same transaction/generation and final acceptance is recorded |
 
@@ -217,6 +225,8 @@ For state advancement:
 - conflicting current evidence fails to `CONFLICT`;
 - evidence from another transaction, DIAGNOSTIC evidence, AUDIT evidence, or STALE evidence cannot advance the transaction.
 
+For Android device-verifiable phases, `CONTROL` evidence must also be device-backed by the real registered production phone. Hosted/offline evidence may validate the phase implementation but cannot stand in for the physical observation.
+
 Durability is evaluated separately from phase truth. If an enclosing operation requires a durable bounded evidence artifact, a phase trace can be internally valid while the production-control classification remains unpersisted and therefore inadmissible for the next dependent transition.
 
 ## Trace validity
@@ -249,7 +259,7 @@ SELF-HOSTED MUTATION (global phone lock)
   acquire/confirm transaction metadata
   PHONE_ACCESS boundary reproof
   perform ordered mutation phases
-  independently verify each postcondition
+  independently verify each postcondition on the real phone where observable
   perform structural + functional acceptance
   emit bounded operation evidence
 
@@ -259,9 +269,9 @@ EVIDENCE PERSISTENCE
   fail closed if required durability cannot be proven after bounded safe retry
 
 RECOVERY HANDLER (same self-hosted job/context where possible)
-  classify partial state
+  classify partial state from bounded device-backed evidence
   normalize only project-owned state
-  independently verify clean baseline
+  independently verify clean baseline on the real phone
   emit RECOVERED or QUARANTINED evidence
 ```
 
@@ -281,21 +291,24 @@ These are evidence that the fail-closed model is operationally necessary. They a
 
 The fastest reliable route to a proven adapter is:
 
-1. evidence-persistence reliability for bounded CONTROL artifacts, including bounded retry only for explicitly safe persistence transport failures;
-2. CONTROL phone-access certification on the exact current canonical SHA;
-3. read-only capability inventory;
-4. one bounded owned scratch/managed filesystem mutation with verify/delete/verify and explicit recovery/quarantine semantics;
-5. package query lifecycle on the exact app;
-6. current-source clean install through uninstall/install/verify;
-7. runtime materialization + integrity proof;
-8. process/service start and structural health;
-9. real bounded functional data-path probe;
-10. failure injection at pre-boundary, post-uninstall, post-install, runtime materialization and health stages;
-11. recovery proof to `RECOVERED` or explicit `QUARANTINED`;
-12. repeat clean transaction from recovered baseline;
-13. restart/rehydration and protected transport fallback/return proof;
-14. same-SHA soak/acceptance under the Production Baseline release gates;
-15. only then generalize the proven operation primitives to a VM/provider adapter.
+1. **evidence-persistence reliability** for bounded CONTROL artifacts, including bounded retry only for explicitly safe persistence transport failures and never replaying the device operation merely to persist evidence;
+2. **current-SHA phone access** — immediately re-establish `PHONE_ACCESS_PROVEN` on the real registered production phone for the exact current canonical SHA;
+3. **read-only quarantine reconciliation** — observe the exact quarantined transaction IDs named by the current #179 cursor on the real phone and persist the bounded result;
+4. **conditional cleanup** — mutate only if durable device facts prove cleanup is actually required; durable absence skips cleanup;
+5. **Android filesystem certification** — capability inventory plus one bounded owned scratch/managed-root create/write/read/compare/delete/post-absence transaction with explicit recovery/quarantine semantics;
+6. package query lifecycle on the exact app;
+7. current-source clean install through uninstall/install/real-phone verify;
+8. runtime materialization + integrity proof on the real phone;
+9. process/service start and structural health;
+10. real bounded functional data-path probe;
+11. failure injection at pre-boundary, post-uninstall, post-install, runtime materialization and health stages;
+12. recovery proof to `RECOVERED` or explicit `QUARANTINED`;
+13. repeat clean transaction from recovered baseline;
+14. restart/rehydration and protected transport fallback/return proof;
+15. same-SHA soak/acceptance under the Production Baseline release gates;
+16. only then generalize the proven operation primitives to a VM/provider adapter.
+
+Infrastructure/control-plane hardening is not an independent product lane in this order. It may be inserted only when a concrete blocker prevents the next safe device-backed phase, and execution returns to that phone phase as soon as the blocker is closed.
 
 ## Quality requirements
 
@@ -307,6 +320,7 @@ CI must permanently prove at least:
 - command success never implies postcondition success;
 - workflow success never substitutes for reducer acceptance;
 - required evidence persistence is independent from operation/postcondition truth and unpersisted evidence cannot authorize the next dependent transition;
+- hosted/unit/integration evidence cannot complete an Android precondition/postcondition that is verifiable on the real registered production phone;
 - structural health never substitutes for functional acceptance;
 - pre-boundary failure is non-mutating refusal;
 - post-boundary failure requires recovery;
@@ -315,4 +329,5 @@ CI must permanently prove at least:
 - out-of-order traces are rejected;
 - stale/diagnostic/other-transaction evidence cannot advance CONTROL state;
 - canonical SHA advancement invalidates prior SHA-bound admission for later production execution;
+- infrastructure blocker closure cannot be counted as completion of the device-backed Android phase it unblocks;
 - legacy rollback cannot silently reappear in the current-source clean-install contract.
