@@ -30,4 +30,5 @@ systemctl restart "$unit"
 systemctl is-active --quiet "$unit"
 systemctl show "$unit" -p Environment --value | grep -Fq 'DOTNET_SYSTEM_NET_DISABLEIPV6=1'
 systemctl show "$unit" -p Environment --value | grep -Fq 'DOTNET_SYSTEM_NET_SECURITY_DISABLETLSRESUME=1'
+systemctl show "$unit" -p Environment --value | grep -Fq 'DOTNET_SYSTEM_NET_HTTP_SOCKETSHTTPHANDLER_HTTP2SUPPORT=0'
 echo 'mobile_proxy_phone_runner_ipv4_override=installed'
