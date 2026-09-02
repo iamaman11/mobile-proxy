@@ -44,6 +44,7 @@ valid_until
 scope
 source_ref
 sensitivity
+authority
 lifecycle
 ```
 
@@ -59,9 +60,20 @@ Semantics:
 - `scope` binds the fact to exact SHA/run/job/transaction/target where applicable.
 - `source_ref` binds facts produced by one bounded evidence record/probe.
 - `sensitivity` is `PUBLIC` or `BOUNDED_PRIVATE`.
+- `authority` is `CONTROL`, `DIAGNOSTIC` or `AUDIT`.
 - `lifecycle` is one of `CURRENT`, `STALE`, `SUPERSEDED`, `CONFLICT`, `INVALID`.
 
 A fact without required provenance or scope MUST NOT participate in a permission decision.
+
+### Evidence authority
+
+`CONTROL` facts are produced by the accepted Git-driven control path and are the only facts allowed to satisfy production operation guards.
+
+`DIAGNOSTIC` facts may come from a bounded local/operator diagnostic. They can explain a blocker or choose the next safe observation, but they MUST NOT authorize install, delete, reconstruction, activation, rollback or any other production mutation.
+
+`AUDIT` facts are retained historical evidence. They may explain what happened but cannot authorize a current operation.
+
+A reducer may project each authority class independently. A `DIAGNOSTIC` projection can say `PHONE_ACCESS_PROVEN` for diagnosis while the `CONTROL` projection remains `PHONE_ACCESS_UNOBSERVED`. Mutation permission always consumes the `CONTROL` projection.
 
 ### Evidence rules
 
@@ -70,6 +82,7 @@ A fact without required provenance or scope MUST NOT participate in a permission
 3. `STALE`, `CONFLICT` and `INVALID` never mean true or false; they fail closed.
 4. Narrative issue comments are audit/cursor context. They do not become machine truth without bounded evidence references.
 5. Facts from different bounded probes MUST NOT be combined to manufacture a proof that no single probe established.
+6. Facts from different authority classes MUST NOT be combined to satisfy one control predicate.
 
 ## State regions
 
@@ -186,7 +199,7 @@ Installed package/runtime/process/network observations MUST NOT participate in t
 
 A complete previously proven probe whose facts have expired becomes `PHONE_ACCESS_STALE`. An incomplete set of stale observations remains `PHONE_ACCESS_UNOBSERVED`; it is not evidence that access once passed.
 
-For every mutation, access MUST be re-proved in the same self-hosted mutation job immediately before the destructive boundary. Historical preflight evidence cannot satisfy that guard.
+For every mutation, access MUST be re-proved as `CONTROL` evidence in the same self-hosted mutation job immediately before the destructive boundary. Historical or diagnostic access evidence cannot satisfy that guard.
 
 ### 7. Android capabilities
 
@@ -269,7 +282,7 @@ QUARANTINED
 
 `MUTATION_ELIGIBLE` is a derived permission state, not mutation authority by itself.
 
-Before `TRANSACTION_ACTIVE`, every operation-specific guard must be current in the same transaction scope.
+Before `TRANSACTION_ACTIVE`, every operation-specific guard must be current `CONTROL` evidence in the same transaction scope.
 
 After the first destructive boundary, an unresolved failure transitions to `RECOVERY_REQUIRED` unless independent evidence proves the target was unchanged. If safe target state/recovery cannot be established, transition to `QUARANTINED`.
 
@@ -331,7 +344,7 @@ The machine MUST NOT infer runner unavailability, ADB failure or phone failure f
 
 ## Permission is a predicate, never a stored global READY flag
 
-Every operation declares its own guard expression over current facts.
+Every operation declares its own guard expression over current `CONTROL` facts.
 
 Example read-only phone-access probe:
 
@@ -358,7 +371,7 @@ can_execute(test_managed_write) :=
   AND mutation_authority_current
 ```
 
-If any required term is absent, false, `UNKNOWN`, `STALE`, `CONFLICT` or invalid for the requested scope, permission is denied and exact blocking predicates are emitted.
+If any required term is absent, false, `UNKNOWN`, `STALE`, `CONFLICT`, diagnostic-only, audit-only or invalid for the requested scope, permission is denied and exact blocking predicates are emitted.
 
 ## Operation contract
 
@@ -405,7 +418,7 @@ A successful command is an operation result, not proof of its postcondition.
 
 Private read-only preflight run `33647329233` passed its hosted command gate and was assigned to exact production runner `mobile-proxy-phone-linux-production`. It then failed while fetching immutable canonical preflight logic with an SSL-connect transport error. All ADB/preflight steps were skipped.
 
-Correct classification for that run is therefore:
+Correct control classification for that run is therefore:
 
 ```text
 JOB_FAILED
@@ -474,6 +487,7 @@ Offline Quality MUST permanently test at least:
 - partial stale access observations do not become proof;
 - conflicting current facts fail closed;
 - package/runtime health never affects `PHONE_ACCESS_PROVEN`;
+- `DIAGNOSTIC` evidence cannot elevate the `CONTROL` projection;
 - missing mutation evidence stays unknown rather than becoming `false`;
 - command success never implies postcondition success;
 - mutation cannot enter `TRANSACTION_ACTIVE` without same-job access reproof and lock;
@@ -492,4 +506,4 @@ EXACT BLOCKING PREDICATES
 NEXT SAFE OBSERVATION OR OPERATION
 ```
 
-It MUST NOT collapse an upstream failure into assumptions about downstream layers.
+It MUST identify the authority class of observations and MUST NOT collapse an upstream failure into assumptions about downstream layers.
