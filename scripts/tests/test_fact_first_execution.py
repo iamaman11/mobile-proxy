@@ -68,6 +68,45 @@ class FactFirstExecutionTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("Android is the first adapter" in error for error in errors))
 
+    def test_real_phone_must_remain_android_reality_oracle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "docs/PRODUCTION_BASELINE_PLAN.md"
+            body = path.read_text(encoding="utf-8").replace(
+                "For Android physical state, the real registered production phone is the authoritative observation oracle.",
+                "Hosted CI is the authoritative source of Android physical state.",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("authoritative observation oracle" in error for error in errors))
+
+    def test_hosted_evidence_cannot_complete_device_verifiable_android_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "docs/PRODUCTION_BASELINE_PLAN.md"
+            body = path.read_text(encoding="utf-8").replace(
+                "Unit/integration/hosted-Actions evidence alone cannot complete that Android state.",
+                "Hosted evidence alone may complete Android state.",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("hosted-Actions" in error for error in errors))
+
+    def test_blocker_fix_must_return_to_real_phone_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "IMPLEMENTATION_PLAN.md"
+            body = path.read_text(encoding="utf-8").replace(
+                "Infrastructure or control-plane hardening may run ahead of the phone only to remove a demonstrated blocker",
+                "Infrastructure and orchestration hardening may continue independently of the phone",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("demonstrated blocker" in error for error in errors))
+
     def test_fact_first_delivery_order_cannot_be_reversed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -75,8 +114,8 @@ class FactFirstExecutionTests(unittest.TestCase):
             path = root / "docs/PRODUCTION_BASELINE_PLAN.md"
             body = path.read_text(encoding="utf-8")
             body = body.replace("**Evidence reliability**", "__FACT_FIRST_EVIDENCE__", 1)
-            body = body.replace("**Android filesystem**", "**Evidence reliability**", 1)
-            body = body.replace("__FACT_FIRST_EVIDENCE__", "**Android filesystem**", 1)
+            body = body.replace("**Current-SHA phone admission**", "**Evidence reliability**", 1)
+            body = body.replace("__FACT_FIRST_EVIDENCE__", "**Current-SHA phone admission**", 1)
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("delivery sequence is out of order" in error for error in errors))
