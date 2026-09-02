@@ -78,11 +78,14 @@ def package_present(serial: str) -> bool:
             text=True,
             timeout=30,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0 and any(
-        line.startswith("package:/") for line in result.stdout.splitlines()
-    )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise CleanInstallFailure("Android package presence probe failed") from error
+    require(result.returncode == 0, "Android package presence probe failed")
+    package_paths = [
+        line for line in result.stdout.splitlines() if line.startswith("package:/")
+    ]
+    require(len(package_paths) <= 1, "Android package presence probe is ambiguous")
+    return len(package_paths) == 1
 
 
 def package_version(serial: str) -> tuple[int, str]:
