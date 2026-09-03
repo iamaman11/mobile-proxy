@@ -13,6 +13,10 @@ STALE = "STALE"
 PASSED = "PASSED"
 FAILED = "FAILED"
 SKIPPED = "SKIPPED"
+DISPATCHED = "DISPATCHED"
+
+CAUSAL_REUSE_ALLOWED = "CAUSAL_REUSE_ALLOWED"
+SAME_TRANSACTION = "SAME_TRANSACTION"
 
 
 @dataclass(frozen=True)
@@ -26,11 +30,22 @@ class StepContract:
 
 
 @dataclass(frozen=True)
+class FactRequirement:
+    subject: str
+    predicate: str
+    freshness: str
+    required_scopes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class OperationContract:
     operation_id: str
     target: str
     steps: tuple[StepContract, ...]
     recovery_steps: tuple[StepContract, ...] = ()
+    reusable_facts: tuple[FactRequirement, ...] = ()
+    freshness_requirements: tuple[FactRequirement, ...] = ()
+    affected_domains: tuple[str, ...] = ()
     retryable: bool = False
     rollback_to_legacy_allowed: bool = False
 
@@ -46,6 +61,39 @@ class PhaseEvidence(NamedTuple):
 
 class EvidenceConflict(RuntimeError):
     pass
+
+
+_PHONE_ACCESS_CAUSAL = FactRequirement(
+    "phone",
+    "phone_access_proven",
+    CAUSAL_REUSE_ALLOWED,
+    (
+        "target/android-production",
+        "observer/phone-access",
+        "boot/android-production",
+    ),
+)
+_PHONE_ACCESS_BOUNDARY = FactRequirement(
+    "phone",
+    "phone_access_proven",
+    SAME_TRANSACTION,
+    (
+        "target/android-production",
+        "observer/phone-access",
+        "boot/android-production",
+        "transaction/operation",
+    ),
+)
+_FILESYSTEM_QUARANTINE_FACT = FactRequirement(
+    "filesystem",
+    "quarantine_transactions_absent",
+    CAUSAL_REUSE_ALLOWED,
+    (
+        "target/android-production",
+        "observer/filesystem-quarantine",
+        "domain/filesystem",
+    ),
+)
 
 
 ANDROID_PHONE_ACCESS_CERTIFICATION = OperationContract(
@@ -70,6 +118,7 @@ ANDROID_CAPABILITY_CERTIFICATION = OperationContract(
         StepContract("phone_access", "VERIFY", "ADB_SHELL"),
         StepContract("capability_inventory", "OBSERVE", "CAPABILITY", acceptance=True),
     ),
+    reusable_facts=(_PHONE_ACCESS_CAUSAL,),
 )
 
 
@@ -101,6 +150,40 @@ ANDROID_FILESYSTEM_CERTIFICATION = OperationContract(
         StepContract("recovery_cleanup_managed", "RECOVER", "RECOVERY", destructive=True),
         StepContract("recovery_verify_absent", "VERIFY", "RECOVERY", acceptance=True),
     ),
+    reusable_facts=(_PHONE_ACCESS_CAUSAL,),
+    freshness_requirements=(_PHONE_ACCESS_BOUNDARY,),
+    affected_domains=("filesystem",),
+    retryable=False,
+    rollback_to_legacy_allowed=False,
+)
+
+
+ANDROID_FILESYSTEM_QUARANTINE_CLEANUP = OperationContract(
+    operation_id="android.filesystem-quarantine-cleanup.v1",
+    target="android-production",
+    steps=(
+        StepContract("source_quality", "VERIFY", "SOURCE_AUTHORITY"),
+        StepContract("runner_assignment", "OBSERVE", "RUNNER_ASSIGNMENT"),
+        StepContract("source_delivery", "VERIFY", "SOURCE_FETCH"),
+        StepContract("phone_access_initial", "VERIFY", "ADB_SHELL"),
+        StepContract("quarantine_observation", "OBSERVE", "POSTCONDITION"),
+        StepContract("mutation_lock", "VERIFY", "MUTATION_LOCK"),
+        StepContract(
+            "phone_access_boundary",
+            "VERIFY",
+            "MUTATION_BOUNDARY",
+            mutation_boundary=True,
+        ),
+        StepContract("cleanup_dispatch", "MUTATE", "MUTATION_EXECUTION", destructive=True),
+        StepContract("post_cleanup_observation", "VERIFY", "POSTCONDITION"),
+        StepContract("accept", "ACCEPT", "POSTCONDITION", acceptance=True),
+    ),
+    recovery_steps=(
+        StepContract("recovery_observe", "VERIFY", "RECOVERY", acceptance=True),
+    ),
+    reusable_facts=(_FILESYSTEM_QUARANTINE_FACT,),
+    freshness_requirements=(_PHONE_ACCESS_BOUNDARY,),
+    affected_domains=("filesystem",),
     retryable=False,
     rollback_to_legacy_allowed=False,
 )
@@ -142,6 +225,9 @@ ANDROID_CURRENT_SOURCE_CLEAN_INSTALL = OperationContract(
         StepContract("recovery_normalize_package", "RECOVER", "RECOVERY", destructive=True),
         StepContract("recovery_verify_clean_baseline", "VERIFY", "RECOVERY", acceptance=True),
     ),
+    reusable_facts=(_PHONE_ACCESS_CAUSAL,),
+    freshness_requirements=(_PHONE_ACCESS_BOUNDARY,),
+    affected_domains=("filesystem", "package", "runtime"),
     retryable=False,
     rollback_to_legacy_allowed=False,
 )
@@ -153,6 +239,7 @@ _OPERATION_CONTRACTS = {
         ANDROID_PHONE_ACCESS_CERTIFICATION,
         ANDROID_CAPABILITY_CERTIFICATION,
         ANDROID_FILESYSTEM_CERTIFICATION,
+        ANDROID_FILESYSTEM_QUARANTINE_CLEANUP,
         ANDROID_CURRENT_SOURCE_CLEAN_INSTALL,
     )
 }
@@ -163,6 +250,30 @@ def operation_contract(operation_id: str) -> OperationContract:
         return _OPERATION_CONTRACTS[operation_id]
     except KeyError as error:
         raise ValueError(f"unknown operation contract: {operation_id}") from error
+
+
+def dispatch_generation_updates(
+    contract: OperationContract, transaction_id: str
+) -> dict[str, str]:
+    """Return the causal generation transition required before possible dispatch.
+
+    The private execution plane must durably persist this exact transition before a
+    destructive command may be dispatched. Advancing early can cause conservative
+    re-observation; advancing late can incorrectly reuse pre-mutation facts after an
+    ambiguous execution outcome.
+    """
+
+    if not transaction_id or not transaction_id.strip():
+        raise ValueError("transaction_id must be non-empty")
+    updates: dict[str, str] = {}
+    for domain in contract.affected_domains:
+        if not domain or not domain.strip() or "/" in domain:
+            raise ValueError(f"invalid affected physical domain: {domain!r}")
+        scope = f"domain/{domain}"
+        if scope in updates:
+            raise ValueError(f"duplicate affected physical domain: {domain}")
+        updates[scope] = transaction_id
+    return updates
 
 
 def _current_control_evidence(
@@ -181,20 +292,33 @@ def _status_by_step(
     evidence: Iterable[PhaseEvidence], transaction_id: str
 ) -> dict[str, str]:
     result: dict[str, str] = {}
-    refs: dict[str, str] = {}
+    refs_by_status: dict[tuple[str, str], str] = {}
     for item in _current_control_evidence(evidence, transaction_id):
         if not item.source_ref:
             raise EvidenceConflict(f"missing source_ref for {item.step_id}")
-        if item.status not in {PASSED, FAILED, SKIPPED}:
+        if item.status not in {PASSED, FAILED, SKIPPED, DISPATCHED}:
             raise EvidenceConflict(f"invalid status for {item.step_id}: {item.status}")
-        previous = result.get(item.step_id)
-        if previous is not None and previous != item.status:
-            raise EvidenceConflict(f"conflicting evidence for {item.step_id}")
-        previous_ref = refs.get(item.step_id)
+
+        ref_key = (item.step_id, item.status)
+        previous_ref = refs_by_status.get(ref_key)
         if previous_ref is not None and previous_ref != item.source_ref:
-            raise EvidenceConflict(f"multiple current probe scopes for {item.step_id}")
-        result[item.step_id] = item.status
-        refs[item.step_id] = item.source_ref
+            raise EvidenceConflict(
+                f"multiple current probe scopes for {item.step_id}:{item.status}"
+            )
+        refs_by_status[ref_key] = item.source_ref
+
+        previous = result.get(item.step_id)
+        if previous is None or previous == item.status:
+            result[item.step_id] = item.status
+            continue
+
+        transition = {previous, item.status}
+        if DISPATCHED in transition and (
+            PASSED in transition or FAILED in transition
+        ):
+            result[item.step_id] = PASSED if PASSED in transition else FAILED
+            continue
+        raise EvidenceConflict(f"conflicting evidence for {item.step_id}")
     return result
 
 
@@ -216,13 +340,22 @@ def _first_failed(
     return None
 
 
+def _first_dispatched(
+    steps: tuple[StepContract, ...], statuses: dict[str, str]
+) -> StepContract | None:
+    for step in steps:
+        if statuses.get(step.step_id) == DISPATCHED:
+            return step
+    return None
+
+
 def _destructive_started(
     steps: tuple[StepContract, ...], statuses: dict[str, str]
 ) -> bool:
-    # A failed destructive command can have partially mutated the target. Treat both
-    # PASSED and FAILED destructive execution as crossing the recovery boundary.
+    # A dispatch marker means the command may have reached the target even if the
+    # controller never receives a terminal result.
     return any(
-        step.destructive and statuses.get(step.step_id) in {PASSED, FAILED}
+        step.destructive and statuses.get(step.step_id) in {DISPATCHED, PASSED, FAILED}
         for step in steps
     )
 
@@ -248,6 +381,10 @@ def _boundary_passed(
         step.mutation_boundary and statuses.get(step.step_id) == PASSED
         for step in steps
     )
+
+
+def _recovery_entry(contract: OperationContract) -> str | None:
+    return contract.recovery_steps[0].step_id if contract.recovery_steps else None
 
 
 def derive_operation_state(
@@ -288,6 +425,26 @@ def derive_operation_state(
             "blocking_predicates": [f"unknown_step={step}" for step in unknown_steps],
         }
 
+    dispatched_non_destructive = [
+        step.step_id
+        for step in contract.steps + contract.recovery_steps
+        if statuses.get(step.step_id) == DISPATCHED and not step.destructive
+    ]
+    if dispatched_non_destructive:
+        return {
+            "operation_id": contract.operation_id,
+            "transaction_id": transaction_id,
+            "state": "INVALID_TRACE",
+            "current_step": dispatched_non_destructive[0],
+            "next_step": None,
+            "failure_stage": "MUTATION_EXECUTION",
+            "destructive_started": False,
+            "recovery_required": True,
+            "blocking_predicates": [
+                f"dispatch_marker_requires_destructive_step={dispatched_non_destructive[0]}"
+            ],
+        }
+
     out_of_order = _passed_later_step_before_required_predecessor(contract.steps, statuses)
     if out_of_order is not None:
         return {
@@ -315,6 +472,23 @@ def derive_operation_state(
             "destructive_started": True,
             "recovery_required": True,
             "blocking_predicates": ["mutation_boundary=PASSED"],
+        }
+
+    dispatched = _first_dispatched(contract.steps, statuses)
+    if dispatched is not None:
+        return {
+            "operation_id": contract.operation_id,
+            "transaction_id": transaction_id,
+            "state": "UNKNOWN_EXECUTION_OUTCOME",
+            "current_step": dispatched.step_id,
+            "next_step": _recovery_entry(contract),
+            "failure_stage": "MUTATION_EXECUTION",
+            "destructive_started": True,
+            "recovery_required": True,
+            "blocking_predicates": [
+                "execution_outcome=OBSERVE_OR_RECOVER",
+                "blind_retry=FORBIDDEN",
+            ],
         }
 
     failed = _first_failed(contract.steps, statuses)
@@ -401,6 +575,17 @@ def _derive_recovery_state(
             "state": "QUARANTINED",
             "next_step": None,
             "blocking_predicates": ["recovery_contract=DEFINED"],
+        }
+
+    dispatched = _first_dispatched(contract.recovery_steps, statuses)
+    if dispatched is not None:
+        return {
+            "state": "QUARANTINED",
+            "next_step": None,
+            "blocking_predicates": [
+                f"recovery_outcome_unknown={dispatched.step_id}",
+                "blind_retry=FORBIDDEN",
+            ],
         }
 
     failed = _first_failed(contract.recovery_steps, statuses)
