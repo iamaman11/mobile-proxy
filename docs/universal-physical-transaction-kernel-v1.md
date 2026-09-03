@@ -36,11 +36,11 @@ The detailed pure reducer may retain more specific recovery states such as `RECO
 - `UNKNOWN` means a physical dispatch may have reached the target but its result is ambiguous;
 - `QUARANTINED` means a post-dispatch state is known to be non-accepted, contradictory, invalid or requires explicit recovery/classification before another mutation.
 
-`UNKNOWN` is never rewritten as failure merely because a result channel or evidence upload was lost.
+Every terminal classification is written through `persist_terminal`. In particular, an ambiguous dispatch produces a durable `UNKNOWN` terminal record; it is never silently reduced to a transient workflow exception and never rewritten as failure merely because a result channel or supplemental artifact upload was lost.
 
 ## Semantic request identity
 
-The public kernel uses the same semantic identity contract as the private Issue #1 router:
+The canonical semantic identity contract is:
 
 ```text
 schema = production-control-request.v1
@@ -59,17 +59,28 @@ control_request_id = sha256(
 )
 ```
 
+The private Issue #1 router is the accepted ingress boundary that constructs these digests. The public canonical repository defines the contract above and the physical kernel consumes and validates the routed typed envelope. It deliberately does not introduce a second raw digest implementation in first-party Python; repository digest policy requires typed/approved digest boundaries rather than arbitrary local hashing.
+
+The public kernel validates at least:
+
+- exact schema;
+- normalized operation name and arguments;
+- exact `issue179-comment-<n>` authority-cursor shape;
+- typed `req-sha256:<64 lowercase hex>` request identity;
+- typed `gen-sha256:<64 lowercase hex>` desired generation.
+
 GitHub comment ID, workflow run ID and run attempt are provenance only and are deliberately excluded from semantic identity.
 
-A physical subtransaction derives a stable identity from:
+A physical subtransaction derives a stable, non-provenance identity from:
 
 ```text
-control_request_id
+physical-tx-v1
++ control_request_id digest payload
 + physical_operation_id
-+ desired_generation
++ desired_generation digest payload
 ```
 
-This permits one outer semantic control request to orchestrate more than one physical-domain operation without allowing a new comment or rerun to manufacture a different identity for the same physical effect.
+This permits one outer semantic control request to orchestrate more than one physical-domain operation without allowing a new comment or Actions rerun to manufacture a different identity for the same physical effect.
 
 ## Declarative operation contract
 
@@ -150,9 +161,9 @@ semantic request identity
   -> acquire global mutation scope
   -> causal/same-transaction preflight
   -> persist mutation intent and affected generations
-  -> persist DISPATCHED boundary
+  -> establish DISPATCHED replay boundary from the durable intent
   -> dispatch physical mutation exactly once
-  -> independently observe postcondition
+  -> independently observe postcondition when dispatch result is known
   -> persist classifiable terminal record
 ```
 
@@ -163,7 +174,7 @@ production-phone-global-mutation
 cancel-in-progress: false
 ```
 
-The kernel treats a persisted `DISPATCHED` marker as a may-have-reached-target boundary. If the dispatch result is lost:
+The durable mutation intent is written before the `DISPATCHED` evidence boundary and before the operation binding is invoked. A `DISPATCHED` trace is therefore a may-have-reached-target replay barrier. If the dispatch result is lost, the same evidence is classified and persisted as:
 
 ```text
 UNKNOWN
@@ -175,7 +186,7 @@ The same mutation is not invoked again merely because:
 - the workflow was retried;
 - a new GitHub comment was added;
 - a new Actions run/attempt exists;
-- evidence upload failed;
+- supplemental artifact upload failed;
 - the controller restarted.
 
 Transport retry is permitted only when the execution plane can prove the physical dispatch has not occurred.
@@ -206,15 +217,17 @@ Those are kernel/control-plane invariants and must not be copied into separate o
 
 The hosted foundation is accepted only when tests prove at least:
 
-- semantic request identity is deterministic and independent of GitHub provenance;
-- the semantic ID algorithm matches the private C.0o router contract;
+- the public typed semantic envelope accepts an independent golden vector of the private C.0o router algorithm;
+- semantic request identity is independent of GitHub comment/run/attempt provenance;
+- malformed routed semantic identity fails closed;
 - a generic non-APK multi-domain mutator uses the same kernel;
 - multiple reusable and same-transaction preflight facts are admitted through the same causal validity engine;
 - an unrelated source/Git context change does not stale a source-independent fact;
 - a changed declared domain generation refuses the transaction before intent or dispatch;
 - mutation intent advances only the operation's declared affected domains;
 - exactly one physical dispatch occurs on the accepted path;
-- post-dispatch ambiguity remains `UNKNOWN` and cannot be blindly retried;
+- post-dispatch ambiguity is durably terminalized as `UNKNOWN`;
+- an existing `UNKNOWN`/`DISPATCHED` trace forbids blind retry before any new authority/lock/device call;
 - the existing APK binding and reducer tests remain green.
 
 This stage proves architecture and hosted transaction semantics only. It does not prove current phone state and does not authorize a phone observer or mutation.
