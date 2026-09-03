@@ -1,126 +1,225 @@
-# Android signing migration and final release authority order
+# Product Release v2 and deployment authority order
 
-Status: **normative execution-order clarification**  
-Canonical repository: `iamaman11/mobile-proxy`  
-Machine contract: `contracts/operations/final-release-authority-v1.json`  
-Android signing gate: #115  
-Signing-generation migration tracker: #162  
-Physical acceptance tracker: #135  
-Canonical GitOps tracker: #90
+Status: **normative ownership and execution-order contract**  
+Canonical PRODUCT repository: `iamaman11/mobile-proxy`  
+Deployment Controller repository: `iamaman11/mobile-proxy-production`  
+Machine contract: `contracts/operations/product-release-authority-v2.json`  
+Canonical product-tag command surface: public Issue #90  
+Migration/development audit tracker: public Issue #179  
+Runtime deployment command surface: private Issue #1
 
 ## Purpose
 
-This document resolves the boundary between the one-time Android signing-generation migration and the later final semantic release. It does not create a new roadmap stage and does not supersede `docs/PRODUCTION_BASELINE_PLAN.md`; it makes the already-required Item 20 -> Item 21 ordering explicit and machine-enforceable.
+This document defines the corrected ownership boundary accepted by the Deployment Controller v2 migration.
 
-The critical distinction is:
+The public repository owns the PRODUCT:
 
-- Android release **version metadata** (`versionName=0.1.4`, `versionCode=1004`, workspace version `0.1.4`) may exist on a protected pre-release SHA so an exact signed migration candidate can be built and verified;
-- final **release authority** (`v0.1.4` annotated tag, GitHub Release, and any production-promotion authority derived from that tag) does not exist until Item 20 physical acceptance has completed on that same exact SHA.
+- application/runtime source;
+- public Quality;
+- Android and Linux product build;
+- Android product signing verification;
+- exact annotated semantic-version product tag;
+- immutable Product Release assets, manifest, provenance and checksums.
 
-Version metadata is not release authority.
+The private repository owns DEPLOYMENT CONTROL:
 
-## One release identity
+- `/deploy <target> <vX.Y.Z>` ingress on private Issue #1;
+- target admission and serialization;
+- target observation;
+- deployment State Machine / Transaction Kernel;
+- mutation intent, exactly-once destructive dispatch, recovery and quarantine;
+- durable canonical execution result/evidence;
+- bounded public GitHub Deployment status projection.
 
-The 10/10 release chain has one software identity:
+Public Issue #179 is a development/migration audit tracker. It is not a runtime execution cursor for normal deployments.
 
-```text
-accepted candidate SHA == exact protected `main` SHA == final tag target SHA == source SHA of published artifacts
-```
+## Core ordering rule
 
-There is no independent final-release control-plane SHA. `candidate_sha` and `control_plane_sha` may remain separate typed fields where useful for boundary validation, but Item 20 admission and final release require their values to be exactly equal. If protected `main` advances after candidate admission or physical acceptance, the acceptance window is stale and must be repeated for the new exact SHA before a final tag can be created.
+A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.
 
-Historical Item 19 candidate `d151dbdd156279e32a5361d304c90f996bd2d565` remains immutable historical provider-lifecycle evidence only. It is not active Item 20 candidate authority and is not eligible for the final release unless it independently became the exact current protected-main candidate and all candidate-specific evidence were regenerated, which is not the current plan.
-
-## Required order
-
-The only accepted order is:
-
-```text
-exact protected canonical main SHA selected as candidate
-  -> exact main Quality success
-  -> fresh software release-candidate evidence for that SHA
-  -> fresh acceptance authority and Vultr read-only preflight for that SHA
-  -> fresh provider proof required by Item 20 for that SHA
-  -> off-phone production signing proof
-  -> exact signed Android 0.1.4 candidate + typed digest/provenance retention
-  -> #162 narrow signing-generation migration on the registered phone
-  -> verify new signing generation / bounded local health
-  -> close #115 completed when its acceptance criteria are actually satisfied
-  -> Item 20 fresh JIT acceptance session + physical A-F acceptance on the same SHA
-  -> recovery/repetition matrix and soak on the same SHA
-  -> close #135 completed and record final_accepted_candidate_sha
-  -> require protected main still equals that accepted candidate
-  -> owner command on canonical #90
-  -> annotated v0.1.4 tag at that exact accepted SHA
-  -> exact tag Quality success
-  -> GitHub Release publication from that exact tag target SHA
-  -> later production promotion
-```
-
-A final `v*` tag is therefore an **output** of successful Item 20, never an input to #162.
-
-## #162 authority
-
-#162 is a narrowly authorized destructive migration from the unrecoverable historical Android signer to the already-proven private production signing identity.
-
-Its authority is bounded to an exact canonical SHA plus a successful retained signed-candidate build from that same SHA. The migration may retain the currently installed old APK, uninstall the old package, install the exact verified 0.1.4 APK, perform the bounded runtime-supervisor reprovisioning already defined by the phone GitOps contract, and automatically restore the retained old APK if the new generation cannot pass the required post-install gate.
-
-#162 does **not** authorize:
-
-- creation of `v0.1.4` or any other final `v*` tag;
-- GitHub Release publication;
-- Item 20 provider lifecycle or endpoint handoff;
-- unrelated phone/network mutation;
-- production promotion.
-
-The private execution satellite must fail closed if a final `v0.1.4` tag already exists before this migration. Such a tag would indicate that the required release ordering has been violated and must be reconciled in canonical Git first.
-
-## Item 20 and final release authority
-
-Item 20 remains the physical acceptance gate. A completed #162 migration only establishes the Android signing generation required to make the Item 20 phone workflow safe; it does not itself accept the complete product release.
-
-When Item 20 completes, #135 must be closed with state reason `completed` and its canonical body must contain exactly one line of the form:
+The accepted order is:
 
 ```text
-final_accepted_candidate_sha: <40 lowercase hexadecimal characters>
+exact protected public main SHA
+  -> exact successful Quality push on that same main SHA
+  -> owner /release-tag command on public #90
+  -> exact annotated vMAJOR.MINOR.PATCH tag bound to that SHA
+  -> tag Quality succeeds
+  -> public PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA
+  -> release-manifest.json format v2
+  -> provenance.json format v2
+  -> SHA256SUMS over the exact bundle
+  -> create GitHub Release as draft
+  -> attach and verify the exact five Release v2 assets
+  -> publish the verified draft
+  -> verify GitHub Release immutable == true
+  -> verify GitHub Release/asset integrity
+  -> only now may private /deploy <target> <tag> consume that Product Release
+  -> private controller observes / admits / mutates / verifies / recovers / classifies target
+  -> public GitHub Deployment receives bounded status/history projection only
 ```
 
-That marker is not populated early. It is written only at Item 20 closeout and identifies the exact candidate that completed the same-SHA software, provider, phone, recovery and soak acceptance window.
+The old ordering
 
-The release-tag workflow must independently require:
+```text
+phone/signing migration -> physical Item 20 acceptance -> final tag -> Release
+```
 
-1. owner command `/release-tag vX.Y.Z <sha>` on canonical tracker #90;
-2. #115 closed `completed`;
-3. #135 closed `completed`;
-4. exactly one `final_accepted_candidate_sha` in #135 and it equals the requested SHA;
-5. exact protected `main` still resolves to that SHA, not merely an ancestor containing it;
-6. an exact successful `Quality` push on `main` for that SHA;
-7. the Git/Cargo/Android release-version contract matches the requested semantic version;
-8. the tag does not already exist;
-9. the created tag object is annotated and resolves to the exact requested SHA.
+is superseded for Product Release authority. Physical acceptance belongs to deployment/runtime control after the immutable Product Release exists.
 
-Only the successful `v*` tag Quality run may trigger normal release publication. Release publication must build or package from the exact tag target SHA and record that exact SHA in its release manifest/provenance. Rebuilding from another branch/control-plane revision is forbidden. Reusing already accepted immutable artifacts is stronger when their digest/provenance is verified, but any published artifact must still be provably bound to the same accepted source SHA.
+## Product identity
 
-## Evidence and trust zones
+Product Release identity is:
 
-The public repository remains the only architecture, policy, roadmap and release authority. The private `mobile-proxy-production` repository remains execution-only.
+```text
+product_release = exact semantic tag + exact annotated-tag target source SHA + exact immutable Release v2 asset set
+```
 
-The signing-generation migration may retain private APK artifacts and bounded evidence, but private retention does not create public release authority. Conversely, the later public `v0.1.4` tag does not retroactively authorize a migration that did not already pass its exact SHA/build/device gates.
+For one Product Release:
 
-No secret, signer fingerprint, device identifier, runner machine name, provider identifier or plaintext transport endpoint is added to this ordering contract or to public closeout evidence.
+```text
+protected main SHA selected for tagging
+  == annotated tag target SHA
+  == source SHA recorded in release-manifest.json
+  == source SHA recorded in provenance.json
+```
+
+The private Deployment Controller revision is deliberately **not** part of Product Release identity. Runtime deployment identity is the pair:
+
+```text
+product_release + exact controller_revision
+```
+
+This permits controller fixes and recovery logic to evolve without rebuilding an unchanged product, while still preserving exact execution provenance.
+
+## Product tag authority
+
+The public `.github/workflows/release-tag.yml` is the only automated final product-tag creator.
+
+It must require:
+
+1. repository-owner command `/release-tag vX.Y.Z <full_sha>` on public Issue #90;
+2. exact 40-character lowercase SHA;
+3. requested SHA equals the exact current protected public `main` SHA;
+4. at least one completed successful `Quality` push on `main` for that exact SHA;
+5. Cargo/Android version contract matches the requested semantic version;
+6. requested tag does not already exist;
+7. created tag object is annotated and resolves exactly to the requested SHA.
+
+It must **not** require:
+
+- Item 20 / public #135 physical acceptance completion;
+- public #115 phone signing-generation migration completion;
+- `final_accepted_candidate_sha` from a physical tracker;
+- phone access;
+- deployment execution;
+- provider mutation.
+
+Creating the product tag authorizes only Product Release publication from that exact source. It does not authorize target mutation.
+
+## Product Release v2 publication
+
+The public `.github/workflows/release.yml` owns the Product Release build/publication plane.
+
+The protected public GitHub Environment is `product-release`.
+
+The workflow must fail closed before Release creation unless repository immutable Releases are enabled. The read-only settings check uses a separately scoped secret `PRODUCT_RELEASE_SETTINGS_TOKEN` that requires only repository **Administration: read**. Normal Release publication continues to use the workflow `GITHUB_TOKEN` with bounded `contents: write` permission.
+
+The public environment also supplies the existing Android product signing secrets:
+
+- `ANDROID_RELEASE_KEYSTORE_B64`;
+- `ANDROID_RELEASE_KEYSTORE_PASSWORD`;
+- `ANDROID_RELEASE_KEY_ALIAS`;
+- `ANDROID_RELEASE_KEY_PASSWORD`.
+
+Secret values, signing material and signer fingerprints are never written to public Release evidence.
+
+### Required exact Release v2 assets
+
+For tag `vX.Y.Z` the published Release has exactly five assets:
+
+```text
+mobile-proxy-linux-x86_64-vX.Y.Z.tar.gz
+mobile-proxy-android-vX.Y.Z.apk
+release-manifest.json
+provenance.json
+SHA256SUMS
+```
+
+`release-manifest.json` format v2 records the exact source SHA and artifact SHA-256 values. The Android entry also records `com.example.mobileproxy`, `versionName` and `versionCode`.
+
+`provenance.json` format v2 records the same exact source/tag identity, builder/workflow identity, and artifact SHA-256 values without secret/signing/phone fields.
+
+`SHA256SUMS` covers Linux, Android APK, manifest and provenance. The checksum file does not recursively hash itself.
+
+### Draft-first immutability boundary
+
+Publication is deliberately two-phase:
+
+1. create/reuse one exact draft;
+2. verify its complete asset set and remote SHA-256 digests against local bytes;
+3. only then publish it.
+
+Once published, the workflow must require `immutable == true` from the exact GitHub Release response. A mutable published Release is never accepted as deployable.
+
+An exact already-published immutable Release is an idempotent success only when every expected asset and digest still matches the locally rebuilt exact bundle. An existing mismatched draft, mismatched published Release, duplicate exact-tag Release, extra asset or missing asset fails closed. The workflow never overwrites or replaces Release assets.
+
+GitHub immutable Release verification and local asset verification are additional postconditions, not substitutes for the manifest/digest contract.
+
+## Deployment authority begins after Product Release
+
+The first runtime mutation authority appears only in the private Deployment Controller after it resolves an exact immutable Product Release v2.
+
+The active command surface is:
+
+```text
+/deploy <target> <vX.Y.Z>
+```
+
+The controller must resolve the exact tag/Release; `latest` or any moving alias is forbidden. The controller also binds the exact controller revision that is executing the request.
+
+A valid Product Release does not imply deployment success. It only supplies immutable product input. Target state, target admission, destructive dispatch, postcondition verification, recovery, `UNKNOWN`, `RECOVERED`, `QUARANTINED` and terminal execution classification remain private controller responsibilities.
+
+`RECOVERED` never retroactively means the original deployment was `ACCEPTED`.
+
+## Public GitHub Deployment projection
+
+A public GitHub Deployment may be created/updated as bounded status/history projection after private controller admission. It is not the canonical transaction ledger and does not authorize execution.
+
+If public projection is unavailable or delayed, the private durable controller ledger remains canonical. Projection failure must not cause a second physical dispatch.
+
+## Forbidden ownership regressions
+
+The public PRODUCT workflows must never:
+
+- access the phone;
+- invoke ADB;
+- acquire target-global deployment locks;
+- perform target mutation or recovery;
+- mutate provider/VM resources;
+- dispatch the private controller;
+- derive deployability from a mutable Release;
+- create a directly-published Release before verifying all draft assets;
+- replace assets on an existing Release;
+- use `latest` as deployment identity.
+
+The private controller must never become the canonical source/build/signing owner for PRODUCT artifacts.
+
+Historical public physical-kernel work may remain as immutable history, but active deployment-control ownership belongs private. Product code/runtime logic remains public.
 
 ## Failure semantics
 
-Any mismatch in order fails closed:
+Any ambiguity fails closed:
 
-- final tag before Item 20 completion -> reject;
-- #162 migration requiring or discovering a final `v0.1.4` tag -> reject;
-- missing/ambiguous `final_accepted_candidate_sha` -> reject;
-- protected `main` advanced after accepted evidence -> reject and re-run candidate-specific acceptance;
-- release command from #162 rather than #90 -> reject;
-- requested release SHA without exact successful main Quality -> reject;
-- final tag target other than accepted candidate -> reject;
-- published artifact source SHA other than final tag target -> reject;
-- migration build and migration caller from different private revisions -> reject.
+- requested tag SHA differs from exact protected main -> reject tag creation;
+- exact source SHA lacks successful main Quality -> reject tag creation/publication;
+- tag is lightweight, ambiguous or resolves to a different SHA -> reject;
+- public Android signing verification fails -> no Release creation;
+- immutable Releases setting cannot be positively proven enabled -> no Release creation;
+- draft asset set/digest differs -> do not publish;
+- published Release is mutable -> not deployable;
+- Release v2 lacks Linux/APK/manifest/provenance/checksums -> not deployable;
+- private controller cannot bind exact Product Release + controller revision -> no target mutation;
+- execution outcome becomes ambiguous after destructive boundary -> read-only recovery, never blind retry.
 
-The fix for an ordering failure is always to reconcile canonical Git/contracts first. Manual tagging, manual ADB, manual provider control, or a private-repository policy override is not an accepted recovery path.
+The recovery path for product publication is idempotent verification/reuse of the exact matching draft or immutable Release. The recovery path for deployment remains the private controller State Machine. These are separate trust domains and must not be collapsed.
