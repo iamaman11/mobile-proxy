@@ -345,25 +345,31 @@ class UniversalPhysicalTransactionKernelTests(unittest.TestCase):
         )
         self.assertEqual(ports.terminals[0].lifecycle_state, KERNEL.TERMINAL_ACCEPTED)
 
-    def test_changed_declared_domain_generation_blocks_before_intent_and_dispatch(self) -> None:
+    def test_changed_declared_domain_generation_is_durably_refused_before_intent_and_dispatch(self) -> None:
         ports = GenericPorts(runtime_generation="old-runtime-generation")
         binding = GenericBinding()
 
-        with self.assertRaisesRegex(KERNEL.TransactionRefusal, "not CURRENT"):
-            KERNEL.TransactionRunner().run(
-                object(),
-                ports=ports,
-                binding=binding,
-            )
+        result = KERNEL.TransactionRunner().run(
+            object(),
+            ports=ports,
+            binding=binding,
+        )
 
+        self.assertEqual(result.derived["state"], "REFUSED")
+        self.assertEqual(result.lifecycle_state, KERNEL.TERMINAL_REFUSED)
+        self.assertEqual(result.terminal_ref, "terminal-record-1")
         self.assertEqual(binding.dispatch_calls, 0)
         self.assertEqual(ports.intents, [])
+        self.assertEqual(len(ports.terminals), 1)
+        self.assertEqual(ports.terminals[0].lifecycle_state, KERNEL.TERMINAL_REFUSED)
+        self.assertEqual(ports.terminals[0].affected_domain_generations, {})
         self.assertEqual(
             ports.events,
             [
                 "authority",
                 "global_lock",
                 "preflight",
+                "terminal",
                 "global_lock_release",
             ],
         )
