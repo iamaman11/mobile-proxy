@@ -21,6 +21,8 @@ _TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 _SCRATCH_BASE = PurePosixPath("/data/local/tmp/mobile-proxy-adapter-test")
 _MANAGED_ROOT = PurePosixPath("/data/adb/mobile-proxy-node")
 _MANAGED_BASE = _MANAGED_ROOT / ".adapter-test"
+_FILESYSTEM_OBSERVER_ID = "run_android_filesystem_certification:v2"
+_DEFAULT_OBSERVATION_REF = "adapter:filesystem-certification:unpersisted"
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 StepMarker = Callable[[str], None]
@@ -39,6 +41,7 @@ def _load_module(name: str, filename: str):
 _PREFLIGHT = _load_module("run_private_phone_preflight", "run_private_phone_preflight.py")
 _CAPABILITIES = _load_module("run_android_capability_inventory", "run_android_capability_inventory.py")
 _COMPARATOR = _load_module("android_filesystem_comparator", "android_filesystem_comparator.py")
+_FACTS = _load_module("filesystem_observed_fact_envelope", "observed_fact_envelope.py")
 
 SUPPORTED = _COMPARATOR.SUPPORTED
 UNSUPPORTED = _COMPARATOR.UNSUPPORTED
@@ -433,9 +436,65 @@ def cleanup_paths(
         return False
 
 
-def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
+def _validate_fact_inputs(
+    filesystem_domain_generation: str | None,
+    observation_ref: str,
+) -> None:
+    _FACTS.require_bounded_ref(observation_ref, label="observation_ref")
+    if filesystem_domain_generation is not None:
+        _FACTS.require_bounded_ref(
+            filesystem_domain_generation,
+            label="filesystem_domain_generation",
+        )
+
+
+def _success_fact_envelopes(
+    canonical_sha: str,
+    serial: str,
+    filesystem_domain_generation: str | None,
+    observation_ref: str,
+) -> list[dict[str, Any]]:
+    if filesystem_domain_generation is None:
+        return []
+    dependencies = (
+        ("target/android-production", _PREFLIGHT.target_dependency_identity(serial)),
+        ("observer/filesystem-certification", _FILESYSTEM_OBSERVER_ID),
+        ("domain/filesystem", filesystem_domain_generation),
+    )
+    return [
+        _FACTS.make_envelope(
+            subject="filesystem",
+            predicate="mutation_capabilities_proven",
+            value=True,
+            target="android-production",
+            observation_ref=observation_ref,
+            source_ref=canonical_sha,
+            dependencies=dependencies,
+            persisted=False,
+        ),
+        _FACTS.make_envelope(
+            subject="filesystem",
+            predicate="certification_namespace_absent",
+            value=True,
+            target="android-production",
+            observation_ref=observation_ref,
+            source_ref=canonical_sha,
+            dependencies=dependencies,
+            persisted=False,
+        ),
+    ]
+
+
+def certify(
+    canonical_sha: str,
+    transaction_id: str,
+    *,
+    filesystem_domain_generation: str | None = None,
+    observation_ref: str = _DEFAULT_OBSERVATION_REF,
+) -> dict[str, Any]:
     canonical_sha = _PREFLIGHT.require_canonical_sha(canonical_sha)
     transaction_id = require_transaction_id(transaction_id)
+    _validate_fact_inputs(filesystem_domain_generation, observation_ref)
     paths = transaction_paths(transaction_id)
     serial = _PREFLIGHT.require_expected_serial()
     _PREFLIGHT.require_tools()
@@ -539,8 +598,14 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
         ):
             capabilities[name] = SUPPORTED
 
+        observed_facts = _success_fact_envelopes(
+            canonical_sha,
+            serial,
+            filesystem_domain_generation,
+            observation_ref,
+        )
         return {
-            "format_version": 1,
+            "format_version": 2,
             "repository": "iamaman11/mobile-proxy",
             "canonical_sha": canonical_sha,
             "operation_id": _OPERATION_ID,
@@ -560,6 +625,10 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
                 "managed_base": str(_MANAGED_BASE),
                 "transaction_scoped": True,
             },
+            "observed_facts": observed_facts,
+            "fact_dependency_envelope_complete": filesystem_domain_generation is not None,
+            "fact_reuse_eligible": False,
+            "fact_reuse_blocked": "evidence_not_yet_durably_persisted",
             "raw_device_identifier_recorded": False,
             "phone_mutation_performed": True,
             "accepted": True,
@@ -589,7 +658,7 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
         ):
             capabilities.setdefault(name, UNKNOWN)
         return {
-            "format_version": 1,
+            "format_version": 2,
             "repository": "iamaman11/mobile-proxy",
             "canonical_sha": canonical_sha,
             "operation_id": _OPERATION_ID,
@@ -610,6 +679,10 @@ def certify(canonical_sha: str, transaction_id: str) -> dict[str, Any]:
                 "managed_base": str(_MANAGED_BASE),
                 "transaction_scoped": True,
             },
+            "observed_facts": [],
+            "fact_dependency_envelope_complete": filesystem_domain_generation is not None,
+            "fact_reuse_eligible": False,
+            "fact_reuse_blocked": "operation_not_accepted",
             "raw_device_identifier_recorded": False,
             "phone_mutation_performed": mutation_started,
             "accepted": False,
@@ -621,18 +694,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--canonical-sha", required=True)
     parser.add_argument("--transaction-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--filesystem-domain-generation")
+    parser.add_argument("--observation-ref", default=_DEFAULT_OBSERVATION_REF)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        report = certify(args.canonical_sha, args.transaction_id)
+        report = certify(
+            args.canonical_sha,
+            args.transaction_id,
+            filesystem_domain_generation=args.filesystem_domain_generation,
+            observation_ref=args.observation_ref,
+        )
         args.output.write_text(
             json.dumps(report, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-    except (OSError, ValueError, CertificationFailure, _PREFLIGHT.PreflightFailure) as error:
+    except (
+        OSError,
+        ValueError,
+        CertificationFailure,
+        _PREFLIGHT.PreflightFailure,
+        _FACTS.ObservedFactEnvelopeError,
+    ) as error:
         print(f"android filesystem certification failed before report: {error}", file=sys.stderr)
         return 2
     if not report.get("accepted"):
