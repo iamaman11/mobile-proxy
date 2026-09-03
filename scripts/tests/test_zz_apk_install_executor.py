@@ -38,11 +38,13 @@ class FakeCommands:
         install_stdout: str = "Performing Streamed Install\nSuccess\n",
         package_stdout: str = "package:/data/app/example/base.apk\n",
         fail_install: bool = False,
+        fail_observe: bool = False,
         materialize_pull: bool = True,
     ) -> None:
         self.install_stdout = install_stdout
         self.package_stdout = package_stdout
         self.fail_install = fail_install
+        self.fail_observe = fail_observe
         self.materialize_pull = materialize_pull
         self.calls: list[tuple[tuple[str, ...], int]] = []
 
@@ -54,6 +56,8 @@ class FakeCommands:
                 raise APK.ApkExecutionFailure("simulated install transport failure")
             return APK.CommandResult(self.install_stdout)
         if argv[-4:] == ("shell", "pm", "path", "com.example.mobileproxy"):
+            if self.fail_observe:
+                raise APK.ApkExecutionFailure("simulated observation transport failure")
             return APK.CommandResult(self.package_stdout)
         if len(argv) >= 4 and argv[0] == "adb" and argv[3] == "pull":
             if self.materialize_pull:
@@ -180,7 +184,20 @@ class CanonicalApkInstallExecutorTests(unittest.TestCase):
         self.assertEqual(proof.source_ref, f"installed-apk:{OTHER_REF}")
         self.assertEqual(len(commands.calls), 2)
 
-    def test_postcondition_ambiguous_package_path_fails_closed_without_pull(self) -> None:
+    def test_postcondition_absent_package_is_known_failed_proof(self) -> None:
+        executor, commands, digests = self.executor(
+            commands=FakeCommands(package_stdout=""),
+            digests=FakeDigest(REF),
+        )
+
+        proof = executor.verify_postcondition(self.request)
+
+        self.assertFalse(proof.passed)
+        self.assertEqual(proof.source_ref, "installed-apk:absent")
+        self.assertEqual(len(commands.calls), 1)
+        self.assertEqual(digests.paths, [])
+
+    def test_postcondition_ambiguous_package_path_is_unobserved_error_without_pull(self) -> None:
         commands = FakeCommands(
             package_stdout=(
                 "package:/data/app/example/base.apk\n"
@@ -189,22 +206,30 @@ class CanonicalApkInstallExecutorTests(unittest.TestCase):
         )
         executor, commands, digests = self.executor(commands=commands, digests=FakeDigest(REF))
 
-        proof = executor.verify_postcondition(self.request)
+        with self.assertRaisesRegex(APK.ApkExecutionFailure, "ambiguous"):
+            executor.verify_postcondition(self.request)
 
-        self.assertFalse(proof.passed)
-        self.assertEqual(proof.source_ref, "installed-apk:unobserved")
         self.assertEqual(len(commands.calls), 1)
         self.assertEqual(digests.paths, [])
 
-    def test_postcondition_missing_capture_fails_closed(self) -> None:
+    def test_postcondition_missing_capture_is_unobserved_error(self) -> None:
         commands = FakeCommands(materialize_pull=False)
         executor, commands, digests = self.executor(commands=commands, digests=FakeDigest(REF))
 
-        proof = executor.verify_postcondition(self.request)
+        with self.assertRaisesRegex(APK.ApkExecutionFailure, "capture is unavailable"):
+            executor.verify_postcondition(self.request)
 
-        self.assertFalse(proof.passed)
-        self.assertEqual(proof.source_ref, "installed-apk:unobserved")
         self.assertEqual(len(commands.calls), 2)
+        self.assertEqual(digests.paths, [])
+
+    def test_postcondition_transport_failure_is_unobserved_error(self) -> None:
+        commands = FakeCommands(fail_observe=True)
+        executor, commands, digests = self.executor(commands=commands, digests=FakeDigest(REF))
+
+        with self.assertRaisesRegex(APK.ApkExecutionFailure, "observation transport"):
+            executor.verify_postcondition(self.request)
+
+        self.assertEqual(len(commands.calls), 1)
         self.assertEqual(digests.paths, [])
 
     def test_external_typed_digest_edge_accepts_only_canonical_shape(self) -> None:
