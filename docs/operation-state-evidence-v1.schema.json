@@ -20,6 +20,8 @@
       "enum": [
         "android.phone-access-certification.v1",
         "android.capability-certification.v1",
+        "android.filesystem-certification.v1",
+        "android.filesystem-quarantine-cleanup.v1",
         "android.current-source-clean-install.v1"
       ]
     },
@@ -46,7 +48,10 @@
       ],
       "properties": {
         "step_id": { "type": "string", "minLength": 1 },
-        "status": { "type": "string", "enum": ["PASSED", "FAILED", "SKIPPED"] },
+        "status": {
+          "type": "string",
+          "enum": ["PASSED", "FAILED", "SKIPPED", "DISPATCHED"]
+        },
         "transaction_id": { "type": "string", "minLength": 1 },
         "source_ref": { "type": "string", "minLength": 1 },
         "authority": { "type": "string", "enum": ["CONTROL", "DIAGNOSTIC", "AUDIT"] },
@@ -77,6 +82,7 @@
             "READY_FOR_BOUNDARY_REPROOF",
             "READY_TO_MUTATE",
             "TRANSACTION_ACTIVE",
+            "UNKNOWN_EXECUTION_OUTCOME",
             "ACCEPTED",
             "REFUSED",
             "RECOVERY_REQUIRED",
