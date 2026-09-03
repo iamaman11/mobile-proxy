@@ -134,7 +134,7 @@ def _serial(value: str) -> str:
     return value
 
 
-def _installed_apk_path(output: str) -> str:
+def _installed_apk_path(output: str) -> str | None:
     paths = []
     for line in output.splitlines():
         value = line.strip()
@@ -144,8 +144,10 @@ def _installed_apk_path(output: str) -> str:
         if prefix != "package" or separator != ":" or not path.startswith("/"):
             raise ApkExecutionFailure("installed APK path observation is invalid")
         paths.append(path)
+    if not paths:
+        return None
     if len(paths) != 1:
-        raise ApkExecutionFailure("installed APK path is unavailable or ambiguous")
+        raise ApkExecutionFailure("installed APK path observation is ambiguous")
     return paths[0]
 
 
@@ -209,23 +211,23 @@ class CanonicalApkInstallExecutor:
         request = _request(request)
         expected_ref = self._request_identity(request)
         serial = _serial(self.serial)
-        try:
-            path_result = self.commands.run(
-                ("adb", "-s", serial, "shell", "pm", "path", _PACKAGE),
-                timeout_seconds=30,
+        path_result = self.commands.run(
+            ("adb", "-s", serial, "shell", "pm", "path", _PACKAGE),
+            timeout_seconds=30,
+        )
+        remote_path = _installed_apk_path(path_result.stdout)
+        if remote_path is None:
+            return transaction.PostconditionProof(False, "installed-apk:absent")
+
+        with tempfile.TemporaryDirectory(prefix="mobile-proxy-installed-apk-") as raw:
+            local_path = Path(raw) / "installed-base.apk"
+            self.commands.run(
+                ("adb", "-s", serial, "pull", remote_path, str(local_path)),
+                timeout_seconds=120,
             )
-            remote_path = _installed_apk_path(path_result.stdout)
-            with tempfile.TemporaryDirectory(prefix="mobile-proxy-installed-apk-") as raw:
-                local_path = Path(raw) / "installed-base.apk"
-                self.commands.run(
-                    ("adb", "-s", serial, "pull", remote_path, str(local_path)),
-                    timeout_seconds=120,
-                )
-                if not local_path.is_file() or local_path.stat().st_size <= 0:
-                    raise ApkExecutionFailure("installed APK capture is unavailable")
-                observed_ref = _typed_artifact_ref(self.digests.digest(local_path))
-        except ApkExecutionFailure:
-            return transaction.PostconditionProof(False, "installed-apk:unobserved")
+            if not local_path.is_file() or local_path.stat().st_size <= 0:
+                raise ApkExecutionFailure("installed APK capture is unavailable")
+            observed_ref = _typed_artifact_ref(self.digests.digest(local_path))
 
         return transaction.PostconditionProof(
             hmac.compare_digest(observed_ref, expected_ref),
