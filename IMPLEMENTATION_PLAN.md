@@ -39,14 +39,58 @@ The State Machine foundation is accepted only when one coherent implementation c
 
 ### 1. Current reality is observed, not remembered
 
-`control_state_machine.py` answers **what is independently proven right now?**  
+`control_state_machine.py` answers **what is independently proven and reusable now?**  
 `operation_state_machine.py` answers **what exact transition may execute next in this transaction?**
 
 The real phone is the authoritative observation oracle for device-verifiable Android reality. Workflow state, issue text, remembered progress and a green job are not device state.
 
-No phone, runtime, package, VM or provider is globally `READY`. Permission is operation-specific and derived from exact current facts.
+No phone, runtime, package, VM or provider is globally `READY`. Permission is operation-specific and derived from admitted facts.
 
-### 2. One transaction model owns mutation semantics
+Git/GitHub remains the authority for canonical source, reviewed contracts, Quality, artifacts and execution admission. A Git SHA is **not** a global physical-device epoch.
+
+### 2. Physical facts use causal validity, not global SHA invalidation
+
+The model keeps three truth roles separate:
+
+```text
+Git/source authority
+observed device facts
+transaction evidence
+```
+
+A durable physical fact carries the exact dependencies that can make it unsafe to reuse, for example:
+
+```text
+target binding
+observer contract/version
+filesystem/package/runtime/process domain generation
+boot or session identity when relevant
+source identity only when the fact is source-relative
+artifact identity only when the fact is artifact-relative
+transaction identity when cross-transaction reuse is forbidden
+```
+
+The validity rule is deterministic:
+
+```text
+all declared dependencies still match -> VALID
+any declared dependency changed        -> STALE
+required current dependency unknown    -> UNKNOWN
+wrong authority / malformed evidence   -> UNUSABLE or INVALID
+required persistence missing           -> UNPERSISTED
+```
+
+Unrelated current-context changes are ignored. Therefore a docs-only merge does not invalidate a persisted filesystem observation merely because `main` moved.
+
+The exact source SHA that produced an observation remains provenance. It becomes a freshness dependency only when the operation/fact contract explicitly says the claim is source-relative.
+
+At the first destructive command that may have reached the phone, every affected physical domain advances to the new transaction generation before pre-mutation facts from that domain may be reused. This is true even if the runner/controller loses the result. Ambiguous execution therefore cannot fall back to an old “current” fact.
+
+Do not introduce one global `DeviceEpoch`; invalidate only affected domains/coupled scopes.
+
+See [ADR-003: Causal device-fact validity and Git authority](docs/architecture/ADR-003-causal-device-fact-validity-and-git-authority.md).
+
+### 3. One transaction model owns mutation semantics
 
 Every destructive operation follows:
 
@@ -69,7 +113,9 @@ UNKNOWN / FAILED
 
 A command returning success is not a postcondition. A workflow returning success is not acceptance.
 
-### 3. Three dimensions never collapse into one
+A reusable earlier phone fact may satisfy an operation precondition only if its causal dependencies and the operation contract allow reuse. It never substitutes for a fresh `phone_access_boundary` when the destructive operation requires same-transaction target reproof.
+
+### 4. Three dimensions never collapse into one
 
 The implementation must keep separate:
 
@@ -81,7 +127,7 @@ evidence_persistence_result
 
 Any of these may succeed while another fails. State promotion consumes the exact dimensions required by the operation contract; no narrative shortcut may merge them.
 
-### 4. Ambiguous controller/runner loss is a first-class state
+### 5. Ambiguous controller/runner loss is a first-class state
 
 If the runner, controller, transport or evidence channel disappears after a destructive command may have reached the phone, the system MUST NOT classify the target operation as simply failed or retry it blindly.
 
@@ -94,7 +140,7 @@ The State Machine must represent an explicit ambiguous execution outcome and req
 
 Non-idempotent mutation is never retried merely because the controller did not receive the result.
 
-### 5. Recovery is part of the primary design
+### 6. Recovery is part of the primary design
 
 Recovery is not an exception-handler afterthought. Every destructive boundary must have a tested path to a known state:
 
@@ -108,19 +154,22 @@ ACCEPTED
 
 A recovered transaction is not an accepted transaction. A fresh transaction is required after recovery when the original goal still needs to be performed.
 
-### 6. Restart and reboot cannot depend on narrative memory
+### 7. Restart and reboot cannot depend on narrative memory
 
 The controller may restart. The self-hosted runner may restart. The phone may reboot.
 
-After restart/reboot, the next decision must be reconstructible from durable bounded transaction identity plus fresh observation. The system must not require a human to remember which command probably ran.
+After restart/reboot, the next decision must be reconstructible from durable bounded transaction identity, current causal dependency context and fresh observation where the relevant fact became stale/unknown or the operation requires a fresh boundary proof. The system must not require a human to remember which command probably ran.
 
-### 7. Reproducibility is the foundation Definition of Done
+A derived cache may exist later for performance, but it cannot be independent authority and must be rebuildable from durable evidence.
+
+### 8. Reproducibility is the foundation Definition of Done
 
 The foundation is not complete because one mutation succeeded. It is complete when the project can repeatedly establish an allowed clean project-owned device state from current observations, perform an operation, independently verify it, survive injected interruption and recover or quarantine deterministically.
 
 The acceptance matrix must cover at least the device-control dimensions needed by the product:
 
 - phone identity/access;
+- causal fact reuse/invalidation;
 - capability inventory;
 - project-owned filesystem/materialization;
 - package query/install/uninstall/verification;
@@ -150,10 +199,12 @@ For the current milestone:
 - prefer deletion and simplification before adding code;
 - one concept has one authoritative owner;
 - GitHub Actions, ADB, shell and provider APIs are adapters, not alternate state machines;
+- Git source authority, physical observations and transaction traces must remain separate concepts;
 - do not create generic frameworks for hypothetical future targets;
 - do not add wrappers around wrappers;
 - do not add a checker only to verify another checker/test exists or ran;
 - do not add tests whose primary subject is other tests rather than product/state-machine behavior;
+- do not add a global device-state database/event-sourcing layer while durable bounded evidence plus pure reducers is sufficient;
 - add a new abstraction only after a real current requirement cannot be expressed clearly in the existing model;
 - every new module or mechanism must identify the concrete uncertainty it removes and its deletion path.
 
@@ -177,13 +228,13 @@ It does **not** mean “ignore security”. Real credentials must never be logge
 ## Single sequential execution order
 
 1. **Freeze non-essential feature/framework growth.** Remove or simplify unnecessary scaffolding when it obstructs local reasoning.
-2. **Specify the complete State Machine.** Enumerate state dimensions, operation contracts, destructive boundaries, ambiguous outcomes, recovery states and invariants before adding more domain-specific orchestration.
-3. **Prove deterministic reducer behavior offline.** Core state/guard/recovery logic must be deterministic and side-effect free where possible.
-4. **Prove real-phone observation.** Device identity and every device-verifiable pre/postcondition must come from bounded real-phone observation.
-5. **Prove mutation semantics.** For each representative destructive boundary, prove guard -> mutation -> independent observation without inferring post-state from command success.
-6. **Prove interruption semantics.** Inject controller/runner disconnect and evidence-persistence failure before, during and after destructive boundaries. Ambiguous outcome must force re-observation rather than blind retry.
+2. **Specify the complete State Machine.** Enumerate state dimensions, causal fact dependencies/invalidation, operation contracts, destructive boundaries, ambiguous outcomes, recovery states and invariants before adding more domain-specific orchestration.
+3. **Prove deterministic reducer behavior offline.** Core fact-validity, state, guard and recovery logic must be deterministic and side-effect free where possible.
+4. **Prove real-phone observation.** Device identity and every device-verifiable pre/postcondition must come from bounded real-phone observation; persist the causal dependency identities required for safe reuse.
+5. **Prove mutation semantics.** For each representative destructive boundary, advance affected domain generation, then prove guard -> mutation -> independent observation without inferring post-state from command success.
+6. **Prove interruption semantics.** Inject controller/runner disconnect and evidence-persistence failure before, during and after destructive boundaries. Ambiguous outcome must stale the pre-mutation affected-domain view and force re-observation rather than blind retry.
 7. **Prove recovery/quarantine.** Every injected partial state must converge to `RECOVERED`, `QUARANTINED` or independently proven `ACCEPTED`; nothing remains narratively “probably okay”.
-8. **Prove restart/reboot.** Restart controller/runner and reboot the phone; reconstruct authority from durable transaction identity plus fresh observation.
+8. **Prove restart/reboot.** Restart controller/runner and reboot the phone; reconstruct authority from durable transaction identity plus causal fact context and fresh observation where required.
 9. **Prove reproducible clean state.** Re-establish the defined project-owned baseline more than once without depending on hand-maintained device state.
 10. **Accept the physical-device control foundation.** Record bounded evidence for the unchanged exact candidate and no unresolved transition ambiguity.
 11. **Only then resume application growth.** APK/runtime/data-path/release work must use the accepted State Machine rather than extend workflow-specific control logic.
@@ -217,6 +268,7 @@ Production evidence remains bounded and must not expose credentials, raw device 
 - [Evidence-Derived Control State Machine v1](docs/control-state-machine-v1.md)
 - [Transactional Operation State Machine v1](docs/operation-state-machine-v1.md)
 - [Architecture Quality Standard](docs/architecture/ARCHITECTURE_STANDARD.md)
+- [ADR-003: Causal device-fact validity and Git authority](docs/architecture/ADR-003-causal-device-fact-validity-and-git-authority.md)
 - [Project Authority and Execution Satellites](docs/operations/project-authority.md)
 - [Machine-readable Project Authority Contract](contracts/operations/project-authority-v1.json)
 - [Machine-readable Module Boundaries](contracts/governance/module-boundaries-v1.json)
