@@ -790,22 +790,27 @@ class TransactionRunner:
                     field="dispatch_receipt.source_ref",
                 )
             except Exception as error:
-                unknown = _derive(contract, evidence, transaction_id)
-                lifecycle = _lifecycle_state(
+                record = _terminal_record(
                     contract,
-                    evidence,
                     transaction_id,
+                    generations,
+                    evidence,
                     roles,
+                    semantic,
                 )
-                if lifecycle != TERMINAL_UNKNOWN:
+                if record.lifecycle_state != TERMINAL_UNKNOWN:
                     raise RuntimeError("post-dispatch ambiguity must classify as UNKNOWN")
+                terminal_ref = _non_empty(
+                    ports.persist_terminal(record),
+                    field="terminal_ref",
+                )
                 return TransactionResult(
                     tuple(evidence),
-                    unknown,
-                    None,
+                    record.derived,
+                    terminal_ref,
                     dispatch_error=f"{type(error).__name__}: {error}",
-                    lifecycle_state=lifecycle,
-                    control_request_id="" if semantic is None else semantic.request_id,
+                    lifecycle_state=record.lifecycle_state,
+                    control_request_id=record.control_request_id,
                 )
 
             evidence.append(
