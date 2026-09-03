@@ -57,7 +57,7 @@ def require_expected_serial() -> str:
 def require_opaque_identity(value: str, label: str) -> str:
     value = value.strip()
     require(bool(value), f"{label} is required")
-    require(len(value) <= 160, f"{label} is invalid")
+    require(len(value) <= 256, f"{label} is invalid")
     require(not any(character.isspace() for character in value), f"{label} is invalid")
     require(all(32 < ord(character) < 127 for character in value), f"{label} is invalid")
     raw_serial = os.environ.get(_SERIAL_ENV, "")
