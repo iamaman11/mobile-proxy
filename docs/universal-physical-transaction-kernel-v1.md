@@ -235,4 +235,6 @@ The hosted foundation is accepted only when tests prove at least:
 - an existing `UNKNOWN`/`DISPATCHED` trace forbids blind retry before any new authority/lock/device call;
 - the existing APK binding and reducer tests remain green, including known-negative vs unobserved postcondition separation.
 
+The accepted proof boundary is therefore strict: only a valid `PostconditionProof` may advance the dispatch step to `PASSED` and permit the reducer to classify a known postcondition. Exceptions and malformed observer output stay behind the already durable `DISPATCHED` boundary and cannot be converted into a fabricated negative proof by the kernel.
+
 This stage proves architecture and hosted transaction semantics only. It does not prove current phone state and does not authorize a phone observer or mutation.
