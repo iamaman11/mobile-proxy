@@ -104,9 +104,11 @@ class FakeExecutor:
         *,
         unknown: bool = False,
         postcondition_passed: bool = True,
+        postcondition_error: bool = False,
     ) -> None:
         self.unknown = unknown
         self.postcondition_passed = postcondition_passed
+        self.postcondition_error = postcondition_error
         self.calls = 0
         self.events: list[str] | None = None
 
@@ -121,6 +123,8 @@ class FakeExecutor:
     def verify_postcondition(self, request):
         if self.events is not None:
             self.events.append("verify")
+        if self.postcondition_error:
+            raise RuntimeError("postcondition observation transport lost")
         return RUNNER.PostconditionProof(
             self.postcondition_passed,
             "postcondition-1",
@@ -269,6 +273,44 @@ class TransactionRunnerTests(unittest.TestCase):
                 "boundary",
                 "intent",
                 "dispatch",
+                "terminal",
+                "scope_release",
+            ],
+        )
+        self.assertEqual(
+            [(item.step_id, item.status) for item in result.evidence][-1],
+            ("install_apk", OP.DISPATCHED),
+        )
+
+    def test_lost_postcondition_observation_is_unknown_and_durably_terminalized(self) -> None:
+        ports = FakePorts()
+        executor = FakeExecutor(postcondition_error=True)
+        executor.events = ports.events
+
+        result = self.runner.run(
+            self.request,
+            ports=ports,
+            binding=self.binding(executor),
+        )
+
+        self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_UNKNOWN)
+        self.assertEqual(result.dispatch_error, None)
+        self.assertIn("postcondition observation transport lost", result.postcondition_error or "")
+        self.assertIn("blind_retry=FORBIDDEN", result.derived["blocking_predicates"])
+        self.assertEqual(result.terminal_ref, "terminal-record-1")
+        self.assertEqual(executor.calls, 1)
+        self.assertEqual(len(ports.terminals), 1)
+        self.assertEqual(ports.terminals[0].lifecycle_state, RUNNER.TERMINAL_UNKNOWN)
+        self.assertEqual(
+            ports.events,
+            [
+                "authority",
+                "scope:android-production",
+                "boundary",
+                "intent",
+                "dispatch",
+                "verify",
                 "terminal",
                 "scope_release",
             ],
