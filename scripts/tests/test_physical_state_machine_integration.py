@@ -22,9 +22,18 @@ def load(name: str, path: Path):
     return module
 
 
-OP = load("operation_state_machine_physical_integration", SCRIPT_DIR / "operation_state_machine.py")
-CONTROL = load("control_state_machine_physical_integration", SCRIPT_DIR / "control_state_machine.py")
-PREFLIGHT = load("private_phone_preflight_physical_integration", SCRIPT_DIR / "run_private_phone_preflight.py")
+OP = load(
+    "operation_state_machine_physical_integration",
+    SCRIPT_DIR / "operation_state_machine.py",
+)
+CONTROL = load(
+    "control_state_machine_physical_integration",
+    SCRIPT_DIR / "control_state_machine.py",
+)
+PREFLIGHT = load(
+    "private_phone_preflight_physical_integration",
+    SCRIPT_DIR / "run_private_phone_preflight.py",
+)
 QUARANTINE = load(
     "filesystem_quarantine_physical_integration",
     SCRIPT_DIR / "run_android_filesystem_quarantine_recovery.py",
@@ -62,8 +71,7 @@ class PhysicalStateMachineIntegrationTests(unittest.TestCase):
         self.assertFalse(contract.retryable)
 
         requirements = {
-            (item.subject, item.predicate): item
-            for item in contract.fact_requirements
+            (item.subject, item.predicate): item for item in contract.fact_requirements
         }
         boundary = requirements[("phone", "registered_phone_access_proven")]
         self.assertEqual(boundary.freshness, OP.SAME_TRANSACTION)
@@ -82,9 +90,7 @@ class PhysicalStateMachineIntegrationTests(unittest.TestCase):
     def test_dispatch_marker_is_unknown_outcome_and_never_blind_retry(self):
         contract = OP.ANDROID_FILESYSTEM_CERTIFICATION
         steps = OP.expected_step_ids(contract)
-        first_destructive = next(
-            step.step_id for step in contract.steps if step.destructive
-        )
+        first_destructive = next(step.step_id for step in contract.steps if step.destructive)
         destructive_index = steps.index(first_destructive)
         evidence = [passed(step) for step in steps[:destructive_index]]
         evidence.append(
@@ -105,11 +111,38 @@ class PhysicalStateMachineIntegrationTests(unittest.TestCase):
         self.assertNotEqual(state["next_step"], first_destructive)
         self.assertIn("blind_retry=FORBIDDEN", state["blocking_predicates"])
 
+    def test_dispatch_marker_can_be_followed_by_terminal_result(self):
+        contract = OP.ANDROID_FILESYSTEM_CERTIFICATION
+        steps = OP.expected_step_ids(contract)
+        first_destructive = next(step.step_id for step in contract.steps if step.destructive)
+        destructive_index = steps.index(first_destructive)
+        evidence = [passed(step) for step in steps[:destructive_index]]
+        evidence.extend(
+            (
+                OP.PhaseEvidence(
+                    first_destructive,
+                    OP.DISPATCHED,
+                    TX,
+                    "durable-dispatch-intent",
+                ),
+                OP.PhaseEvidence(
+                    first_destructive,
+                    OP.PASSED,
+                    TX,
+                    "device-result",
+                ),
+            )
+        )
+
+        state = OP.derive_operation_state(contract, evidence, transaction_id=TX)
+
+        self.assertEqual(state["state"], "TRANSACTION_ACTIVE")
+        self.assertTrue(state["destructive_started"])
+        self.assertEqual(state["next_step"], steps[destructive_index + 1])
+
     def test_dispatch_without_boundary_is_invalid_trace(self):
         contract = OP.ANDROID_FILESYSTEM_CERTIFICATION
-        first_destructive = next(
-            step.step_id for step in contract.steps if step.destructive
-        )
+        first_destructive = next(step.step_id for step in contract.steps if step.destructive)
         state = OP.derive_operation_state(
             contract,
             [
@@ -128,9 +161,7 @@ class PhysicalStateMachineIntegrationTests(unittest.TestCase):
     def test_recovery_can_resolve_unknown_dispatch_without_retry(self):
         contract = OP.ANDROID_FILESYSTEM_CERTIFICATION
         steps = OP.expected_step_ids(contract)
-        first_destructive = next(
-            step.step_id for step in contract.steps if step.destructive
-        )
+        first_destructive = next(step.step_id for step in contract.steps if step.destructive)
         destructive_index = steps.index(first_destructive)
         evidence = [passed(step) for step in steps[:destructive_index]]
         evidence.append(
@@ -167,8 +198,7 @@ class PhysicalStateMachineIntegrationTests(unittest.TestCase):
         self.assertNotIn("raw-device-serial", text)
         self.assertFalse(envelope["persisted"])
         dependencies = {
-            item["scope"]: item["identity"]
-            for item in envelope["dependencies"]
+            item["scope"]: item["identity"] for item in envelope["dependencies"]
         }
         self.assertEqual(
             dependencies["target/android-production"],
@@ -225,13 +255,11 @@ class PhysicalStateMachineIntegrationTests(unittest.TestCase):
             )
 
         absence = next(
-            item for item in envelopes
-            if item["predicate"] == "transactions_absent"
+            item for item in envelopes if item["predicate"] == "transactions_absent"
         )
         fact = self._control_fact(absence, persisted=True)
         context = {
-            item["scope"]: item["identity"]
-            for item in absence["dependencies"]
+            item["scope"]: item["identity"] for item in absence["dependencies"]
         }
         context["source/canonical"] = "b" * 40
 
@@ -246,9 +274,7 @@ class PhysicalStateMachineIntegrationTests(unittest.TestCase):
         )
         stale = CONTROL.classify_observed_fact(fact, context)
         self.assertEqual(stale.state, CONTROL.FACT_STALE)
-        self.assertTrue(
-            any("domain/filesystem" in reason for reason in stale.reasons)
-        )
+        self.assertTrue(any("domain/filesystem" in reason for reason in stale.reasons))
 
     def test_new_physical_evidence_schema_covers_fact_and_dispatch_contracts(self):
         physical = json.loads(

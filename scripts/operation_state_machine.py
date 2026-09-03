@@ -221,7 +221,11 @@ def affected_domain_generation_updates(
     updates: dict[str, str] = {}
     for domain in contract.affected_physical_domains:
         normalized = domain.strip()
-        if not normalized or "/" in normalized or any(character.isspace() for character in normalized):
+        if (
+            not normalized
+            or "/" in normalized
+            or any(character.isspace() for character in normalized)
+        ):
             raise ValueError(f"invalid physical domain: {domain}")
         scope = f"domain/{normalized}"
         if scope in updates:
@@ -248,21 +252,39 @@ def _current_control_evidence(
 def _status_by_step(
     evidence: Iterable[PhaseEvidence], transaction_id: str
 ) -> dict[str, str]:
-    result: dict[str, str] = {}
-    refs: dict[str, str] = {}
+    statuses: dict[str, set[str]] = {}
+    refs: dict[tuple[str, str], str] = {}
+    allowed = {PASSED, FAILED, SKIPPED, DISPATCHED}
+
     for item in _current_control_evidence(evidence, transaction_id):
         if not item.source_ref:
             raise EvidenceConflict(f"missing source_ref for {item.step_id}")
-        if item.status not in {PASSED, FAILED, SKIPPED, DISPATCHED}:
+        if item.status not in allowed:
             raise EvidenceConflict(f"invalid status for {item.step_id}: {item.status}")
-        previous = result.get(item.step_id)
-        if previous is not None and previous != item.status:
-            raise EvidenceConflict(f"conflicting evidence for {item.step_id}")
-        previous_ref = refs.get(item.step_id)
+
+        key = (item.step_id, item.status)
+        previous_ref = refs.get(key)
         if previous_ref is not None and previous_ref != item.source_ref:
-            raise EvidenceConflict(f"multiple current probe scopes for {item.step_id}")
-        result[item.step_id] = item.status
-        refs[item.step_id] = item.source_ref
+            raise EvidenceConflict(
+                f"multiple current probe scopes for {item.step_id}:{item.status}"
+            )
+        refs[key] = item.source_ref
+        statuses.setdefault(item.step_id, set()).add(item.status)
+
+    result: dict[str, str] = {}
+    for step_id, observed in statuses.items():
+        terminal = observed & {PASSED, FAILED, SKIPPED}
+        if len(terminal) > 1:
+            raise EvidenceConflict(f"conflicting evidence for {step_id}")
+        if DISPATCHED in observed and SKIPPED in terminal:
+            raise EvidenceConflict(f"dispatched step cannot be skipped: {step_id}")
+        if terminal:
+            # DISPATCHED is a monotonic pre-result marker. The eventual PASSED or
+            # FAILED result supersedes only the unknown outcome, not the fact that
+            # the destructive boundary was crossed.
+            result[step_id] = next(iter(terminal))
+        else:
+            result[step_id] = DISPATCHED
     return result
 
 
@@ -374,7 +396,9 @@ def derive_operation_state(
             "blocking_predicates": [f"unknown_step={step}" for step in unknown_steps],
         }
 
-    invalid_dispatch = _invalid_dispatch_step(contract.steps + contract.recovery_steps, statuses)
+    invalid_dispatch = _invalid_dispatch_step(
+        contract.steps + contract.recovery_steps, statuses
+    )
     if invalid_dispatch is not None:
         return {
             "operation_id": contract.operation_id,
@@ -388,7 +412,9 @@ def derive_operation_state(
             "blocking_predicates": [f"dispatched_non_destructive_step={invalid_dispatch}"],
         }
 
-    out_of_order = _passed_later_step_before_required_predecessor(contract.steps, statuses)
+    out_of_order = _passed_later_step_before_required_predecessor(
+        contract.steps, statuses
+    )
     if out_of_order is not None:
         return {
             "operation_id": contract.operation_id,
