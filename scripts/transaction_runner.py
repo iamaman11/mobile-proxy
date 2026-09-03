@@ -393,6 +393,11 @@ def _validate_binding(binding: OperationBinding) -> KernelStepRoles:
     dispatch = by_id[roles.dispatch_step_id][1]
     postcondition = by_id[roles.postcondition_step_id][1]
     acceptance = by_id[roles.acceptance_step_id][1]
+    primary_destructive = tuple(step.step_id for step in steps if step.destructive)
+    if primary_destructive != (roles.dispatch_step_id,):
+        raise TransactionRefusal(
+            "kernel-bound physical transaction must declare exactly one primary destructive dispatch step"
+        )
     if not boundary.mutation_boundary:
         raise TransactionRefusal("operation binding lacks mutation boundary")
     if not dispatch.destructive:
