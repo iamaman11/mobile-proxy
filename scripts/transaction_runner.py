@@ -2,10 +2,40 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Mapping, Protocol, Sequence
+import hashlib
+import json
+import re
+from typing import Iterable, Mapping, Protocol, Sequence
 
 import control_state_machine as control
 import operation_state_machine as operation
+
+
+SEMANTIC_REQUEST_SCHEMA = "production-control-request.v1"
+
+REQUESTED = "REQUESTED"
+AUTHORIZED = "AUTHORIZED"
+OBSERVED_PREFLIGHT = "OBSERVED/PREFLIGHT"
+INTENT_PERSISTED = "INTENT_PERSISTED"
+LIFECYCLE_DISPATCHED = "DISPATCHED"
+POSTCONDITION_VERIFIED = "POSTCONDITION_VERIFIED"
+
+TERMINAL_ACCEPTED = "ACCEPTED"
+TERMINAL_REFUSED = "REFUSED"
+TERMINAL_UNKNOWN = "UNKNOWN"
+TERMINAL_QUARANTINED = "QUARANTINED"
+
+TERMINAL_STATES = frozenset(
+    {
+        TERMINAL_ACCEPTED,
+        TERMINAL_REFUSED,
+        TERMINAL_UNKNOWN,
+        TERMINAL_QUARANTINED,
+    }
+)
+
+_OPERATION_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,95}")
+_CURSOR_RE = re.compile(r"issue179-comment-[1-9][0-9]*")
 
 
 class TransactionRefusal(RuntimeError):
@@ -20,6 +50,49 @@ class DispatchOutcomeUnknown(RuntimeError):
     """An operation binding cannot prove whether dispatch reached the target."""
 
 
+class SemanticRequestError(TransactionRefusal):
+    """The routed semantic request does not match the canonical request contract."""
+
+
+@dataclass(frozen=True)
+class SemanticRequestIdentity:
+    """Canonical semantic identity shared with the private Issue #1 router.
+
+    GitHub comment/run/attempt identifiers are intentionally absent. The private
+    control plane may retain them as provenance, but they never define mutation
+    identity.
+    """
+
+    schema: str
+    request_id: str
+    operation: str
+    arguments: tuple[str, ...]
+    authority_cursor: str
+    desired_generation: str
+
+    def semantic_payload(self) -> dict[str, object]:
+        return {
+            "schema": self.schema,
+            "operation": self.operation,
+            "arguments": list(self.arguments),
+            "authority_cursor": self.authority_cursor,
+            "desired_generation": self.desired_generation,
+        }
+
+
+@dataclass(frozen=True)
+class KernelStepRoles:
+    """Map an operation's declarative steps onto the universal lifecycle."""
+
+    authority_step_id: str
+    mutation_scope_step_id: str
+    preflight_step_id: str
+    intent_step_id: str
+    dispatch_step_id: str
+    postcondition_step_id: str
+    acceptance_step_id: str
+
+
 @dataclass(frozen=True)
 class AuthorityProof:
     authorized: bool
@@ -28,6 +101,8 @@ class AuthorityProof:
 
 @dataclass(frozen=True)
 class BoundaryProof:
+    """One observed fact plus the exact causal context used to validate it."""
+
     fact: control.ObservedFact
     current_context: Mapping[str, str]
 
@@ -40,6 +115,10 @@ class MutationIntent:
     dispatch_step_id: str
     mutation_subject_ref: str
     affected_domain_generations: Mapping[str, str]
+    control_request_id: str = ""
+    authority_cursor: str = ""
+    desired_generation: str = ""
+    preflight_observation_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -61,6 +140,10 @@ class TerminalRecord:
     affected_domain_generations: Mapping[str, str]
     evidence: tuple[operation.PhaseEvidence, ...]
     derived: Mapping[str, object]
+    lifecycle_state: str = REQUESTED
+    control_request_id: str = ""
+    authority_cursor: str = ""
+    desired_generation: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +152,8 @@ class TransactionResult:
     derived: Mapping[str, object]
     terminal_ref: str | None
     dispatch_error: str | None = None
+    lifecycle_state: str = REQUESTED
+    control_request_id: str = ""
 
 
 class TransactionPorts(Protocol):
@@ -96,16 +181,16 @@ class TransactionPorts(Protocol):
 
 
 class OperationBinding(Protocol):
-    """Operation-specific edge consumed by the generic transaction kernel.
+    """Operation-specific edge consumed by the universal physical kernel.
 
     The binding supplies request interpretation plus one physical dispatch and one
-    postcondition observation. It does not own transaction ordering or state.
+    postcondition observation. It does not own authority ordering, locking, causal
+    preflight admission, generation invalidation, intent durability, dispatch
+    classification, terminal classification, or retry policy.
     """
 
     contract: operation.OperationContract
-    dispatch_step_id: str
-    postcondition_step_id: str
-    acceptance_step_id: str
+    kernel_steps: KernelStepRoles
 
     def transaction_id(self, request: object) -> str: ...
 
@@ -114,6 +199,95 @@ class OperationBinding(Protocol):
     def dispatch_once(self, request: object) -> DispatchReceipt: ...
 
     def verify_postcondition(self, request: object) -> PostconditionProof: ...
+
+
+def _canonical_digest(payload: Mapping[str, object]) -> str:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def normalize_semantic_arguments(arguments: Iterable[str]) -> tuple[str, ...]:
+    result = tuple(str(value).strip() for value in arguments)
+    if any(not value for value in result):
+        raise SemanticRequestError("empty semantic argument")
+    if any("\n" in value or "\r" in value or "\x00" in value for value in result):
+        raise SemanticRequestError("multiline/NUL semantic argument")
+    return result
+
+
+def desired_generation(operation_id: str, arguments: Iterable[str]) -> str:
+    operation_id = operation_id.strip()
+    if _OPERATION_RE.fullmatch(operation_id) is None:
+        raise SemanticRequestError("invalid operation name")
+    args = normalize_semantic_arguments(arguments)
+    return "gen-sha256:" + _canonical_digest(
+        {"operation": operation_id, "arguments": list(args)}
+    )
+
+
+def build_semantic_request_identity(
+    *,
+    operation: str,
+    arguments: Iterable[str],
+    authority_cursor: str,
+    generation: str | None = None,
+) -> SemanticRequestIdentity:
+    """Build exactly the semantic ID used at the private control-router boundary."""
+
+    operation = operation.strip()
+    authority_cursor = authority_cursor.strip()
+    if _OPERATION_RE.fullmatch(operation) is None:
+        raise SemanticRequestError("invalid operation name")
+    if _CURSOR_RE.fullmatch(authority_cursor) is None:
+        raise SemanticRequestError("invalid authority cursor")
+
+    args = normalize_semantic_arguments(arguments)
+    generation_value = (generation or desired_generation(operation, args)).strip()
+    if not generation_value.startswith("gen-") or len(generation_value) > 160:
+        raise SemanticRequestError("invalid desired generation")
+
+    semantic = {
+        "schema": SEMANTIC_REQUEST_SCHEMA,
+        "operation": operation,
+        "arguments": list(args),
+        "authority_cursor": authority_cursor,
+        "desired_generation": generation_value,
+    }
+    return SemanticRequestIdentity(
+        schema=SEMANTIC_REQUEST_SCHEMA,
+        request_id="req-sha256:" + _canonical_digest(semantic),
+        operation=operation,
+        arguments=args,
+        authority_cursor=authority_cursor,
+        desired_generation=generation_value,
+    )
+
+
+def derive_physical_transaction_id(
+    semantic: SemanticRequestIdentity,
+    physical_operation_id: str,
+) -> str:
+    """Derive one stable physical transaction identity from one semantic request.
+
+    The outer control request may orchestrate more than one physical operation. The
+    physical operation id therefore participates in the derived identity while
+    GitHub comment/run provenance never does.
+    """
+
+    physical_operation_id = physical_operation_id.strip()
+    if _OPERATION_RE.fullmatch(physical_operation_id) is None:
+        raise SemanticRequestError("invalid physical operation name")
+    payload = {
+        "control_request_id": semantic.request_id,
+        "physical_operation": physical_operation_id,
+        "desired_generation": semantic.desired_generation,
+    }
+    return "tx-sha256:" + _canonical_digest(payload)
 
 
 def _non_empty(value: str, *, field: str) -> str:
@@ -151,38 +325,63 @@ def _derive(
     )
 
 
-def _validate_binding(binding: OperationBinding) -> None:
+def _roles(binding: OperationBinding) -> KernelStepRoles:
+    roles = getattr(binding, "kernel_steps", None)
+    if isinstance(roles, KernelStepRoles):
+        return roles
+
+    # Compatibility bridge for the already accepted first physical vertical
+    # slice. It is intentionally expressed in one place so existing bindings move
+    # through this universal kernel without creating a second transaction engine.
+    dispatch_step_id = getattr(binding, "dispatch_step_id", None)
+    postcondition_step_id = getattr(binding, "postcondition_step_id", None)
+    acceptance_step_id = getattr(binding, "acceptance_step_id", None)
+    if all(
+        isinstance(value, str) and value.strip()
+        for value in (dispatch_step_id, postcondition_step_id, acceptance_step_id)
+    ):
+        return KernelStepRoles(
+            authority_step_id="resolve_authority",
+            mutation_scope_step_id="mutation_scope",
+            preflight_step_id="phone_access_boundary",
+            intent_step_id="mutation_intent",
+            dispatch_step_id=dispatch_step_id,
+            postcondition_step_id=postcondition_step_id,
+            acceptance_step_id=acceptance_step_id,
+        )
+    raise TransactionRefusal("operation binding must declare universal kernel step roles")
+
+
+def _validate_binding(binding: OperationBinding) -> KernelStepRoles:
     contract = binding.contract
+    roles = _roles(binding)
     steps = tuple(contract.steps)
     by_id = {step.step_id: (index, step) for index, step in enumerate(steps)}
     if len(by_id) != len(steps):
         raise TransactionRefusal("operation contract has duplicate step ids")
 
-    required_kernel_steps = (
-        "resolve_authority",
-        "mutation_scope",
-        "phone_access_boundary",
-        "mutation_intent",
+    role_steps = (
+        roles.authority_step_id,
+        roles.mutation_scope_step_id,
+        roles.preflight_step_id,
+        roles.intent_step_id,
+        roles.dispatch_step_id,
+        roles.postcondition_step_id,
+        roles.acceptance_step_id,
     )
-    binding_steps = (
-        binding.dispatch_step_id,
-        binding.postcondition_step_id,
-        binding.acceptance_step_id,
-    )
-    all_steps = (*required_kernel_steps, *binding_steps)
-    if len(set(all_steps)) != len(all_steps):
-        raise TransactionRefusal("operation binding step ids must be distinct")
-    if any(step_id not in by_id for step_id in all_steps):
+    if len(set(role_steps)) != len(role_steps):
+        raise TransactionRefusal("universal kernel step roles must be distinct")
+    if any(step_id not in by_id for step_id in role_steps):
         raise TransactionRefusal("operation binding does not match operation contract")
 
-    indexes = [by_id[step_id][0] for step_id in all_steps]
+    indexes = [by_id[step_id][0] for step_id in role_steps]
     if indexes != sorted(indexes):
-        raise TransactionRefusal("operation binding steps are out of contract order")
+        raise TransactionRefusal("universal kernel steps are out of contract order")
 
-    boundary = by_id["phone_access_boundary"][1]
-    dispatch = by_id[binding.dispatch_step_id][1]
-    postcondition = by_id[binding.postcondition_step_id][1]
-    acceptance = by_id[binding.acceptance_step_id][1]
+    boundary = by_id[roles.preflight_step_id][1]
+    dispatch = by_id[roles.dispatch_step_id][1]
+    postcondition = by_id[roles.postcondition_step_id][1]
+    acceptance = by_id[roles.acceptance_step_id][1]
     if not boundary.mutation_boundary:
         raise TransactionRefusal("operation binding lacks mutation boundary")
     if not dispatch.destructive:
@@ -191,45 +390,57 @@ def _validate_binding(binding: OperationBinding) -> None:
         raise TransactionRefusal("postcondition step must be non-destructive")
     if not acceptance.acceptance:
         raise TransactionRefusal("acceptance step must be an acceptance step")
+    if contract.retryable:
+        raise TransactionRefusal(
+            "physical mutation binding cannot opt into blind retry at the kernel layer"
+        )
+
+    operation.affected_domain_generation_updates(contract, "kernel-validation")
+    return roles
 
 
-def _validate_boundary(
-    contract: operation.OperationContract,
+def _validate_one_fact_requirement(
+    requirement: operation.FactRequirement,
     proof: BoundaryProof,
     transaction_id: str,
 ) -> str:
-    requirements = tuple(
-        item
-        for item in contract.fact_requirements
-        if item.freshness == operation.SAME_TRANSACTION
-    )
-    if len(requirements) != 1:
-        raise TransactionRefusal(
-            "transaction operation requires exactly one SAME_TRANSACTION fact"
-        )
-
-    requirement = requirements[0]
     fact = proof.fact
     if fact.subject != requirement.subject or fact.predicate != requirement.predicate:
-        raise TransactionRefusal("boundary fact does not match operation contract")
+        raise TransactionRefusal("preflight fact does not match operation contract")
     if fact.value is not True:
-        raise TransactionRefusal("boundary fact value is not true")
-    if fact.target != contract.target:
-        raise TransactionRefusal("boundary fact target does not match operation target")
+        raise TransactionRefusal("preflight fact value is not true")
+    if fact.target.strip() == "":
+        raise TransactionRefusal("preflight fact target is empty")
 
-    dependency_scopes: list[str] = []
     dependencies = tuple(fact.dependencies)
+    dependency_scopes: list[str] = []
     for kind in requirement.required_dependency_kinds:
         matches = [item for item in dependencies if item.scope.startswith(f"{kind}/")]
         if len(matches) != 1:
             raise TransactionRefusal(
-                f"boundary fact requires exactly one {kind} dependency"
+                f"preflight fact requires exactly one {kind} dependency"
             )
         dependency_scopes.append(matches[0].scope)
-        if kind == "transaction":
+        if kind == "transaction" and requirement.freshness == operation.SAME_TRANSACTION:
             expected_scope = f"transaction/{transaction_id}"
             if matches[0].scope != expected_scope or matches[0].identity != transaction_id:
-                raise TransactionRefusal("boundary fact is not from this transaction")
+                raise TransactionRefusal("preflight fact is not from this transaction")
+
+    if requirement.freshness == operation.SAME_TRANSACTION:
+        transaction_dependencies = [
+            item for item in dependencies if item.scope.startswith("transaction/")
+        ]
+        if len(transaction_dependencies) != 1:
+            raise TransactionRefusal(
+                "SAME_TRANSACTION preflight fact requires one transaction dependency"
+            )
+        item = transaction_dependencies[0]
+        if item.scope != f"transaction/{transaction_id}" or item.identity != transaction_id:
+            raise TransactionRefusal("preflight fact is not from this transaction")
+    elif requirement.freshness != operation.CAUSAL_REUSE_ALLOWED:
+        raise TransactionRefusal(
+            f"unsupported fact freshness requirement: {requirement.freshness}"
+        )
 
     validity = control.classify_observed_fact(
         fact,
@@ -238,8 +449,150 @@ def _validate_boundary(
     )
     if validity.state != control.FACT_VALID:
         details = ",".join(validity.reasons) or validity.state
-        raise TransactionRefusal(f"boundary fact is not CURRENT: {details}")
-    return _non_empty(fact.observation_ref, field="boundary.observation_ref")
+        raise TransactionRefusal(f"preflight fact is not CURRENT: {details}")
+    return _non_empty(fact.observation_ref, field="preflight.observation_ref")
+
+
+def _preflight_proofs(
+    ports: TransactionPorts,
+    contract: operation.OperationContract,
+    transaction_id: str,
+) -> tuple[BoundaryProof, ...]:
+    provider = getattr(ports, "prove_preflight_requirements", None)
+    if callable(provider):
+        proofs = tuple(provider(contract, transaction_id))
+    else:
+        # Backward-compatible adapter surface for the first physical vertical.
+        # Multi-fact operations must implement prove_preflight_requirements.
+        proofs = (ports.prove_same_transaction_boundary(contract, transaction_id),)
+    return proofs
+
+
+def _validate_preflight(
+    contract: operation.OperationContract,
+    proofs: Sequence[BoundaryProof],
+    transaction_id: str,
+) -> tuple[str, ...]:
+    requirements = tuple(contract.fact_requirements)
+    if not requirements:
+        raise TransactionRefusal(
+            "physical mutation operation must declare at least one preflight fact requirement"
+        )
+    if len(proofs) != len(requirements):
+        raise TransactionRefusal(
+            "preflight proof count does not match operation fact requirements"
+        )
+
+    unused = list(proofs)
+    refs: list[str] = []
+    for requirement in requirements:
+        matches = [
+            item
+            for item in unused
+            if item.fact.subject == requirement.subject
+            and item.fact.predicate == requirement.predicate
+        ]
+        if len(matches) != 1:
+            raise TransactionRefusal(
+                f"preflight requirement is missing or ambiguous: "
+                f"{requirement.subject}.{requirement.predicate}"
+            )
+        proof = matches[0]
+        unused.remove(proof)
+        if proof.fact.target != contract.target:
+            raise TransactionRefusal("preflight fact target does not match operation target")
+        refs.append(
+            _validate_one_fact_requirement(requirement, proof, transaction_id)
+        )
+
+    if unused:
+        raise TransactionRefusal("unexpected preflight proof")
+    return tuple(refs)
+
+
+def _combined_preflight_ref(refs: Sequence[str]) -> str:
+    if not refs:
+        raise TransactionRefusal("preflight observation refs are empty")
+    if len(refs) == 1:
+        return _non_empty(refs[0], field="preflight.source_ref")
+    canonical = {"observation_refs": sorted(refs)}
+    return "preflight-sha256:" + _canonical_digest(canonical)
+
+
+def _semantic_identity(
+    binding: OperationBinding,
+    request: object,
+    contract: operation.OperationContract,
+) -> SemanticRequestIdentity | None:
+    provider = getattr(binding, "semantic_request_identity", None)
+    if not callable(provider):
+        return None
+    identity = provider(request)
+    if identity is None:
+        return None
+    if not isinstance(identity, SemanticRequestIdentity):
+        raise SemanticRequestError("binding returned invalid semantic request identity")
+    rebuilt = build_semantic_request_identity(
+        operation=identity.operation,
+        arguments=identity.arguments,
+        authority_cursor=identity.authority_cursor,
+        generation=identity.desired_generation,
+    )
+    if rebuilt != identity:
+        raise SemanticRequestError("semantic request identity is not canonical")
+    return identity
+
+
+def _lifecycle_state(
+    contract: operation.OperationContract,
+    evidence: Sequence[operation.PhaseEvidence],
+    transaction_id: str,
+    roles: KernelStepRoles,
+) -> str:
+    derived = _derive(contract, evidence, transaction_id)
+    reducer_state = str(derived.get("state", ""))
+
+    if reducer_state == "ACCEPTED":
+        return TERMINAL_ACCEPTED
+    if reducer_state == "REFUSED":
+        return TERMINAL_REFUSED
+    if reducer_state == "UNKNOWN_EXECUTION_OUTCOME":
+        return TERMINAL_UNKNOWN
+    if reducer_state in {
+        "QUARANTINED",
+        "RECOVERY_REQUIRED",
+        "RECOVERING",
+        "RECOVERED",
+        "CONFLICT",
+        "INVALID_TRACE",
+    }:
+        return TERMINAL_QUARANTINED
+
+    statuses = {
+        (item.step_id, item.status)
+        for item in evidence
+        if item.transaction_id == transaction_id
+        and item.authority == operation.CONTROL
+        and item.lifecycle == operation.CURRENT
+    }
+    if (
+        (roles.postcondition_step_id, operation.PASSED) in statuses
+        or (roles.postcondition_step_id, operation.FAILED) in statuses
+    ):
+        return POSTCONDITION_VERIFIED
+    if (
+        (roles.dispatch_step_id, operation.DISPATCHED) in statuses
+        or (roles.dispatch_step_id, operation.PASSED) in statuses
+        or (roles.dispatch_step_id, operation.FAILED) in statuses
+    ):
+        return LIFECYCLE_DISPATCHED
+    if (roles.intent_step_id, operation.PASSED) in statuses:
+        return INTENT_PERSISTED
+    if (roles.preflight_step_id, operation.PASSED) in statuses:
+        return OBSERVED_PREFLIGHT
+    if (roles.authority_step_id, operation.PASSED) in statuses:
+        return AUTHORIZED
+    return REQUESTED
 
 
 def _terminal_record(
@@ -247,6 +600,8 @@ def _terminal_record(
     transaction_id: str,
     generations: Mapping[str, str],
     evidence: Sequence[operation.PhaseEvidence],
+    roles: KernelStepRoles,
+    semantic: SemanticRequestIdentity | None,
 ) -> TerminalRecord:
     derived = _derive(contract, evidence, transaction_id)
     return TerminalRecord(
@@ -256,16 +611,29 @@ def _terminal_record(
         affected_domain_generations=dict(generations),
         evidence=tuple(evidence),
         derived=derived,
+        lifecycle_state=_lifecycle_state(
+            contract,
+            evidence,
+            transaction_id,
+            roles,
+        ),
+        control_request_id="" if semantic is None else semantic.request_id,
+        authority_cursor="" if semantic is None else semantic.authority_cursor,
+        desired_generation="" if semantic is None else semantic.desired_generation,
     )
 
 
 class TransactionRunner:
-    """Single imperative transaction kernel around the canonical reducers.
+    """Universal imperative physical transaction kernel around canonical reducers.
 
-    This class owns invariant ordering only. Operation-specific request, dispatch and
-    postcondition behavior arrives through ``OperationBinding``. All operation-state
-    classification stays in ``operation_state_machine.py`` and physical-fact
-    admission stays in ``control_state_machine.py``.
+    Invariant order:
+
+      semantic request -> authority -> global mutation scope -> causal preflight
+      -> durable intent/generation invalidation -> exactly-once dispatch
+      -> independent postcondition -> durable terminal classification
+
+    The kernel never owns operation-specific device commands. Bindings own only
+    request interpretation, one physical dispatch, and one postcondition observer.
     """
 
     def run(
@@ -276,7 +644,7 @@ class TransactionRunner:
         binding: OperationBinding,
         existing_evidence: Sequence[operation.PhaseEvidence] = (),
     ) -> TransactionResult:
-        _validate_binding(binding)
+        roles = _validate_binding(binding)
         contract = binding.contract
         transaction_id = _non_empty(
             binding.transaction_id(request),
@@ -286,6 +654,16 @@ class TransactionRunner:
             binding.mutation_subject_ref(request),
             field="mutation_subject_ref",
         )
+        semantic = _semantic_identity(binding, request, contract)
+        if semantic is not None:
+            expected_transaction_id = derive_physical_transaction_id(
+                semantic,
+                contract.operation_id,
+            )
+            if transaction_id != expected_transaction_id:
+                raise SemanticRequestError(
+                    "transaction_id does not match semantic physical transaction identity"
+                )
 
         prior_evidence = tuple(existing_evidence)
         if prior_evidence:
@@ -300,22 +678,35 @@ class TransactionRunner:
         if not authority.authorized:
             evidence.append(
                 _phase(
-                    "resolve_authority",
+                    roles.authority_step_id,
                     operation.FAILED,
                     transaction_id,
                     authority_ref,
                 )
             )
-            record = _terminal_record(contract, transaction_id, {}, evidence)
+            record = _terminal_record(
+                contract,
+                transaction_id,
+                {},
+                evidence,
+                roles,
+                semantic,
+            )
             terminal_ref = _non_empty(
                 ports.persist_terminal(record),
                 field="terminal_ref",
             )
-            return TransactionResult(tuple(evidence), record.derived, terminal_ref)
+            return TransactionResult(
+                tuple(evidence),
+                record.derived,
+                terminal_ref,
+                lifecycle_state=record.lifecycle_state,
+                control_request_id=record.control_request_id,
+            )
 
         evidence.append(
             _phase(
-                "resolve_authority",
+                roles.authority_step_id,
                 operation.PASSED,
                 transaction_id,
                 authority_ref,
@@ -328,28 +719,25 @@ class TransactionRunner:
         ) as scope_ref:
             evidence.append(
                 _phase(
-                    "mutation_scope",
+                    roles.mutation_scope_step_id,
                     operation.PASSED,
                     transaction_id,
                     scope_ref,
                 )
             )
 
-            boundary = ports.prove_same_transaction_boundary(
+            proofs = _preflight_proofs(ports, contract, transaction_id)
+            preflight_refs = _validate_preflight(
                 contract,
-                transaction_id,
-            )
-            boundary_ref = _validate_boundary(
-                contract,
-                boundary,
+                proofs,
                 transaction_id,
             )
             evidence.append(
                 _phase(
-                    "phone_access_boundary",
+                    roles.preflight_step_id,
                     operation.PASSED,
                     transaction_id,
-                    boundary_ref,
+                    _combined_preflight_ref(preflight_refs),
                 )
             )
 
@@ -361,9 +749,13 @@ class TransactionRunner:
                 operation_id=contract.operation_id,
                 target=contract.target,
                 transaction_id=transaction_id,
-                dispatch_step_id=binding.dispatch_step_id,
+                dispatch_step_id=roles.dispatch_step_id,
                 mutation_subject_ref=mutation_subject_ref,
                 affected_domain_generations=generations,
+                control_request_id="" if semantic is None else semantic.request_id,
+                authority_cursor="" if semantic is None else semantic.authority_cursor,
+                desired_generation="" if semantic is None else semantic.desired_generation,
+                preflight_observation_refs=preflight_refs,
             )
             intent_ref = _non_empty(
                 ports.persist_mutation_intent(intent),
@@ -371,7 +763,7 @@ class TransactionRunner:
             )
             evidence.append(
                 _phase(
-                    "mutation_intent",
+                    roles.intent_step_id,
                     operation.PASSED,
                     transaction_id,
                     intent_ref,
@@ -379,7 +771,7 @@ class TransactionRunner:
             )
             evidence.append(
                 _phase(
-                    binding.dispatch_step_id,
+                    roles.dispatch_step_id,
                     operation.DISPATCHED,
                     transaction_id,
                     intent_ref,
@@ -388,7 +780,9 @@ class TransactionRunner:
 
             dispatched = _derive(contract, evidence, transaction_id)
             if dispatched["state"] != "UNKNOWN_EXECUTION_OUTCOME":
-                raise RuntimeError("persisted dispatch must classify as unknown before result")
+                raise RuntimeError(
+                    "persisted dispatch must classify as unknown before result"
+                )
 
             try:
                 receipt = binding.dispatch_once(request)
@@ -398,16 +792,26 @@ class TransactionRunner:
                 )
             except Exception as error:
                 unknown = _derive(contract, evidence, transaction_id)
+                lifecycle = _lifecycle_state(
+                    contract,
+                    evidence,
+                    transaction_id,
+                    roles,
+                )
+                if lifecycle != TERMINAL_UNKNOWN:
+                    raise RuntimeError("post-dispatch ambiguity must classify as UNKNOWN")
                 return TransactionResult(
                     tuple(evidence),
                     unknown,
                     None,
                     dispatch_error=f"{type(error).__name__}: {error}",
+                    lifecycle_state=lifecycle,
+                    control_request_id="" if semantic is None else semantic.request_id,
                 )
 
             evidence.append(
                 _phase(
-                    binding.dispatch_step_id,
+                    roles.dispatch_step_id,
                     operation.PASSED,
                     transaction_id,
                     receipt_ref,
@@ -421,8 +825,10 @@ class TransactionRunner:
             )
             evidence.append(
                 _phase(
-                    binding.postcondition_step_id,
-                    operation.PASSED if postcondition.passed else operation.FAILED,
+                    roles.postcondition_step_id,
+                    operation.PASSED
+                    if postcondition.passed
+                    else operation.FAILED,
                     transaction_id,
                     post_ref,
                 )
@@ -431,7 +837,7 @@ class TransactionRunner:
             if postcondition.passed:
                 evidence.append(
                     _phase(
-                        binding.acceptance_step_id,
+                        roles.acceptance_step_id,
                         operation.PASSED,
                         transaction_id,
                         post_ref,
@@ -443,9 +849,17 @@ class TransactionRunner:
                 transaction_id,
                 generations,
                 evidence,
+                roles,
+                semantic,
             )
             terminal_ref = _non_empty(
                 ports.persist_terminal(record),
                 field="terminal_ref",
             )
-            return TransactionResult(tuple(evidence), record.derived, terminal_ref)
+            return TransactionResult(
+                tuple(evidence),
+                record.derived,
+                terminal_ref,
+                lifecycle_state=record.lifecycle_state,
+                control_request_id=record.control_request_id,
+            )
