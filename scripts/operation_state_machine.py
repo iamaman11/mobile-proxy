@@ -311,12 +311,8 @@ def _status_by_step(
         if previous is None or previous == item.status:
             result[item.step_id] = item.status
             continue
-
-        transition = {previous, item.status}
-        if DISPATCHED in transition and (
-            PASSED in transition or FAILED in transition
-        ):
-            result[item.step_id] = PASSED if PASSED in transition else FAILED
+        if previous == DISPATCHED and item.status in {PASSED, FAILED}:
+            result[item.step_id] = item.status
             continue
         raise EvidenceConflict(f"conflicting evidence for {item.step_id}")
     return result
@@ -476,6 +472,22 @@ def derive_operation_state(
 
     dispatched = _first_dispatched(contract.steps, statuses)
     if dispatched is not None:
+        recovery_observed = any(
+            statuses.get(step.step_id) is not None for step in contract.recovery_steps
+        )
+        if recovery_observed:
+            recovery = _derive_recovery_state(contract, statuses)
+            return {
+                "operation_id": contract.operation_id,
+                "transaction_id": transaction_id,
+                "state": recovery["state"],
+                "current_step": dispatched.step_id,
+                "next_step": recovery["next_step"],
+                "failure_stage": "MUTATION_EXECUTION",
+                "destructive_started": True,
+                "recovery_required": recovery["state"] != "RECOVERED",
+                "blocking_predicates": recovery["blocking_predicates"],
+            }
         return {
             "operation_id": contract.operation_id,
             "transaction_id": transaction_id,
