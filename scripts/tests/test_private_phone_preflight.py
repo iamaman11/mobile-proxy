@@ -100,6 +100,36 @@ class PrivatePhonePreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PreflightFailure, "canonical SHA"):
             MODULE.require_canonical_sha("main")
 
+    def test_canonical_physical_transaction_id_is_admitted_exactly(self):
+        transaction_id = (
+            "physical-tx-v1:"
+            + "a" * 64
+            + ":android.filesystem-scratch-roundtrip.v1:"
+            + "b" * 64
+        )
+
+        self.assertEqual(MODULE.require_transaction_id(transaction_id), transaction_id)
+        fact = MODULE.build_phone_access_fact_envelope(
+            "c" * 40,
+            target_binding_id="tb-hmac-sha256:" + "d" * 64,
+            session_id="scratch-tx-session:1:1",
+            observation_ref="scratch-boundary:1:1",
+            transaction_id=transaction_id,
+        )
+
+        self.assertEqual(
+            fact["dependencies"][-1],
+            {
+                "scope": f"transaction/{transaction_id}",
+                "identity": transaction_id,
+            },
+        )
+        self.assertFalse(fact["persisted"])
+
+    def test_arbitrary_colon_transaction_id_remains_rejected(self):
+        with self.assertRaisesRegex(MODULE.PreflightFailure, "transaction ID"):
+            MODULE.require_transaction_id("not:a:canonical:transaction")
+
 
 if __name__ == "__main__":
     unittest.main()
