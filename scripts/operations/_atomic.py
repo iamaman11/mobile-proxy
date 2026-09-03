@@ -66,6 +66,15 @@ class CanonicalAtomicBinding(Generic[RequestT]):
     def verify_postcondition(self, request: object) -> transaction.PostconditionProof:
         return self.executor.verify_postcondition(self._request(request))
 
+    def observe_recovery(self, request: object) -> transaction.PostconditionProof:
+        """Reuse only the canonical non-destructive postcondition observer.
+
+        The Universal Kernel exposes this through its dedicated recover_observe path,
+        which never calls dispatch_once or any mutation port.
+        """
+
+        return self.executor.verify_postcondition(self._request(request))
+
 
 def kernel_steps(spec: atomic.AtomicOperationSpec) -> transaction.KernelStepRoles:
     return transaction.KernelStepRoles(
