@@ -72,6 +72,55 @@ Two unrelated modules must not independently write the same canonical state.
 
 Physical-device control is one state-machine problem, not a collection of workflow-specific readiness flags. Filesystem, package, runtime, process, connectivity, reboot and recovery observations are dimensions consumed by operation guards; they are not independent global `READY` states.
 
+### 4.1 Three truth roles for Git-operated physical control
+
+Git/GitHub is the canonical authority for source, reviewed contracts, Quality, artifact provenance and execution admission. It is not the authoritative clock of physical device state.
+
+The architecture MUST keep three roles distinct:
+
+```text
+Git/source authority
+observed physical facts
+transaction evidence for one exact operation
+```
+
+- `control_state_machine.py` owns admission, conflict handling and causal validity/reuse of observed facts;
+- `operation_state_machine.py` owns the ordered trace, mutation boundary, ambiguity and recovery state of one exact transaction;
+- GitHub Actions, ADB, shell, private CONTROL and Issue #179 are adapters/transports/cursors, not additional state owners.
+
+The same observation may record an exact source SHA as provenance without becoming source-bound. Source identity participates in validity only when the fact/operation contract explicitly declares it as a dependency.
+
+### 4.2 Causal evidence validity
+
+Reusable physical facts MUST be invalidated by causes that can change their truth, not by unrelated repository movement.
+
+A durable observed fact carries a small dependency vector of scoped opaque identities. Supported scope families include target binding, semantic observer identity, physical mutation domain, boot/session, source, artifact and exact transaction. The reducer compares only dependencies declared by the fact/guard.
+
+Required behavior:
+
+```text
+all declared dependencies match -> VALID
+any declared dependency differs -> STALE
+required current context missing -> UNKNOWN
+not durably persisted            -> UNPERSISTED
+wrong authority                  -> UNUSABLE
+malformed dependency contract    -> INVALID
+```
+
+A docs-only merge, unrelated refactor or other context change that is not a declared dependency MUST NOT stale a physical fact.
+
+A destructive operation MUST declare every physical domain it may mutate. Once a destructive command may have reached the target, the affected domain generation moves to the transaction-scoped generation before any pre-mutation fact in that domain may be reused, even if controller/runner transport loses the result. This is the causal bridge from mutation to `UNKNOWN_EXECUTION_OUTCOME`.
+
+Do not introduce one global `DeviceEpoch`. Independent domain generations avoid invalidating unrelated facts. Coupled invalidation is explicit in the operation contract.
+
+Ephemeral facts such as reachability, process liveness and connectivity require an appropriate session/boot/transaction freshness dependency or another explicit operation contract. Durable persistence alone does not make an inherently ephemeral fact indefinitely current.
+
+Every destructive operation still performs the fresh target/access boundary reproof required by its transaction contract. Reusable prior evidence may reduce unnecessary observation for planning/preconditions; it never weakens the mutation boundary.
+
+Observer semantics have their own contract identity. If an observer defect or semantic change makes previous interpretations unsafe, that observer identity changes and invalidates only dependent facts. Do not use the whole repository SHA as a substitute observer version.
+
+See `docs/architecture/ADR-003-causal-device-fact-validity-and-git-authority.md`.
+
 ## 5. Side effects and determinism
 
 Side effects must remain visible and isolated:
@@ -84,6 +133,8 @@ Side effects must remain visible and isolated:
 Time, randomness, identity generation, environment, filesystem, process execution, external APIs and persistence are dependencies, not hidden globals, when they affect business or recovery semantics.
 
 The State Machine owns transition semantics. GitHub Actions, shell scripts, ADB transport and provider APIs are adapters/executors. They MUST NOT become alternative state machines by encoding independent transition truth in workflow names, job success, ad-hoc flags or narrative checkpoints.
+
+Causal fact classification and operation-state derivation should remain pure functions over explicit inputs. Any persisted fact/generation cache is derived convenience only and must be reconstructible from durable bounded evidence; it does not become independent authority.
 
 ## 6. Contracts and public surface
 
@@ -151,6 +202,8 @@ Before adding a new architectural mechanism, ask in this order:
 
 A PR that adds substantial architecture should identify the complexity it removes or the otherwise-unavoidable capability it introduces.
 
+For device fact validity specifically, durable bounded evidence plus pure reducers is the default. Do not add a new database, event-sourcing framework, background reconciler or generic state platform until a demonstrated requirement cannot be satisfied by that model.
+
 ## 8. Replaceability, deleteability and local reasoning
 
 A healthy boundary can be replaced or removed without unrelated rewrites.
@@ -158,6 +211,18 @@ A healthy boundary can be replaced or removed without unrelated rewrites.
 Changes should keep a capability understandable by reading a bounded portion of the repository. Editing one capability should not routinely require edits across unrelated services or crates. Broad cross-cutting edits are an architecture signal and require explanation.
 
 The codebase must remain understandable by one developer following a single execution path from state -> guard -> operation -> effect -> independent observation -> resulting state. A normal operation must not require mentally joining several roadmaps, trackers and workflow-specific interpretations.
+
+For physical-device work, local reasoning should additionally make the causal state explicit:
+
+```text
+admitted facts + dependency context
+  -> operation guard
+  -> exact transaction
+  -> affected domain generation
+  -> effect
+  -> independent observation
+  -> new admitted facts
+```
 
 Optional capabilities must have a bounded deletion path. External providers and platform integrations must sit behind the narrowest useful boundary rather than leak provider vocabulary into canonical domain concepts.
 
@@ -168,12 +233,15 @@ Before further application feature growth, the project MUST complete and accept 
 The foundation is complete only when the model and implementation can deterministically:
 
 - observe current device identity and required capabilities;
-- derive operation-specific guards from current facts;
+- classify which durable observations remain reusable from causal dependencies rather than global Git-SHA freshness;
+- derive operation-specific guards from admitted facts;
 - serialize destructive mutation;
 - execute bounded project-owned mutations;
+- advance only affected physical-domain generations at a possible destructive effect;
 - independently verify postconditions on the device;
 - distinguish execution result, verified target state and evidence persistence;
 - represent ambiguous controller/runner loss without guessing the target result;
+- prevent pre-mutation affected-domain facts from surviving an ambiguous mutation outcome;
 - re-observe after ambiguity before retrying a non-idempotent mutation;
 - recover or quarantine after interruption at every destructive boundary;
 - survive controller restart and device reboot without narrative state reconstruction;
@@ -219,6 +287,8 @@ Tests should prove externally meaningful behavior, state transitions, guards, re
 
 Production-relevant operations must expose enough structured, bounded evidence to determine what happened, where, under which immutable release identity and why a failure occurred without leaking secrets.
 
+For causal fact validity, direct reducer tests must prove that unrelated context changes do not stale a fact, declared dependency changes do stale it, missing dependency context remains unknown, and unpersisted/wrong-authority evidence cannot satisfy a durable CONTROL guard.
+
 For physical-device State Machine acceptance, fault injection is mandatory at every destructive boundary and at controller/runner disconnect, evidence-persistence failure and reboot/restart boundaries. Ambiguous outcomes must be resolved by re-observation, never by narrative inference.
 
 ## 12. Git and change discipline
@@ -234,6 +304,8 @@ Direct architectural exceptions are not allowed. If a rule must change, change t
 Architecture-significant pull requests must state complexity added/removed, the simpler alternative considered, ownership impact, rollback/deletion path and ADR status. Documentation-only assertions do not override failing machine contracts.
 
 During the State Machine foundation gate, pull requests should be sequential and narrowly scoped to the next unproven transition/recovery property. Do not open a second architecture lane to work around a blocked foundational property.
+
+A merge to `main` changes source authority. It does not automatically mutate the phone and therefore MUST NOT be treated as a universal invalidator of device facts. Any required re-observation must cite the causal dependency/freshness contract that requires it.
 
 ## 13. Supersession
 

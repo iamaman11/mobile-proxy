@@ -28,6 +28,7 @@ All normative sources below live in the canonical repository:
 - Runtime topology: RUNTIME_LAYOUT.md
 - Architecture quality standard: docs/architecture/ARCHITECTURE_STANDARD.md
 - Physical-device transaction semantics: docs/operation-state-machine-v1.md
+- Causal device-fact validity and Git authority: docs/architecture/ADR-003-causal-device-fact-validity-and-git-authority.md
 - Exact Rust workspace module graph: contracts/governance/module-boundaries-v1.json
 - Authoritative mutable-state ownership: contracts/governance/state-ownership-v1.json
 - Git delivery and release policy: docs/GIT_DELIVERY.md
@@ -49,7 +50,7 @@ Before further application feature growth, VM generalization, orchestration expa
 
 Until that gate is accepted, normal work is sequential:
 
-1. formalize one deterministic device-control model and its invariants;
+1. formalize one deterministic device-control model, including causal fact validity and its invariants;
 2. prove observation and operation-specific guards on the real registered phone;
 3. prove bounded mutation plus independent postcondition verification;
 4. prove explicit ambiguous-outcome handling after runner/controller loss;
@@ -59,6 +60,37 @@ Until that gate is accepted, normal work is sequential:
 8. only then resume feature growth and later generalize proven primitives to VM/provider targets.
 
 A blocked foundational property is not permission to start another architecture lane. Make only the smallest change necessary to prove the next unproven property.
+
+## Evidence validity and Git changes
+
+Git/GitHub is the authority for source, reviewed contracts, Quality, artifacts and execution admission. It is **not** a global clock for the physical phone.
+
+Keep three roles separate:
+
+```text
+Git/source authority
+observed physical facts
+one-operation transaction evidence
+```
+
+Rules:
+
+- do not mark all phone facts stale merely because canonical `main` advanced;
+- a Git SHA recorded on an observation is provenance unless `source/...` is explicitly one of that fact's validity dependencies;
+- a physical fact is reusable only while every declared causal dependency still matches current context;
+- use narrow dependencies such as target binding, semantic observer version, affected physical domain generation, boot/session identity, source identity, artifact identity or exact transaction identity;
+- an unrelated docs/source change must not invalidate filesystem/package/runtime facts that do not depend on source identity;
+- a source-bound guard or artifact-relative claim must still re-prove the exact current source/artifact authority required by its operation contract;
+- when observer semantics change incompatibly or a defect invalidates old interpretations, change the observer contract identity and thereby stale only facts that depend on it;
+- once a destructive command may have reached the target, advance the affected domain generation before any pre-mutation fact in that domain can be reused, even when the command result is lost;
+- do not use one global `DeviceEpoch`; invalidate only affected domains/coupled scopes;
+- ephemeral reachability/process/connectivity facts must use session/boot/transaction dependencies or another explicit freshness contract rather than being treated as indefinitely durable;
+- every destructive transaction still requires the fresh same-transaction target/access boundary proof declared by its operation contract;
+- never re-observe a phone fact *just because a Git SHA changed*; re-observe because a causal dependency is stale/unknown or the exact operation requires fresh boundary evidence.
+
+`control_state_machine.py` owns admission/reuse of observed facts. `operation_state_machine.py` owns the strict ordered trace of one transaction. Workflows, Issue #179 and private CONTROL must not invent an alternate freshness rule.
+
+See ADR-003 for the complete decision.
 
 ## Change discipline
 

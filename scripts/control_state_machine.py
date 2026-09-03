@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable, NamedTuple
+from typing import Any, Iterable, Mapping, NamedTuple
 
 
 CURRENT = "CURRENT"
@@ -9,6 +9,26 @@ CONTROL = "CONTROL"
 DIAGNOSTIC = "DIAGNOSTIC"
 AUDIT = "AUDIT"
 UNKNOWN = object()
+
+FACT_VALID = "VALID"
+FACT_STALE = "STALE"
+FACT_UNKNOWN = "UNKNOWN"
+FACT_UNPERSISTED = "UNPERSISTED"
+FACT_UNUSABLE = "UNUSABLE"
+FACT_INVALID = "INVALID"
+
+_DEPENDENCY_KINDS = frozenset(
+    {
+        "target",
+        "observer",
+        "domain",
+        "boot",
+        "session",
+        "source",
+        "artifact",
+        "transaction",
+    }
+)
 
 
 class Fact(NamedTuple):
@@ -20,8 +40,170 @@ class Fact(NamedTuple):
     authority: str = CONTROL
 
 
+class FactDependency(NamedTuple):
+    """One causal dependency that controls reuse of an observed physical fact."""
+
+    scope: str
+    identity: str
+
+
+class ObservedFact(NamedTuple):
+    """Durable physical observation before projection into the legacy reducer surface.
+
+    ``source_ref`` is provenance only. A source change invalidates this fact only when
+    ``source/...`` is explicitly present in ``dependencies``.
+    """
+
+    subject: str
+    predicate: str
+    value: Any
+    target: str
+    observation_ref: str
+    source_ref: str
+    dependencies: tuple[FactDependency, ...]
+    authority: str = CONTROL
+    persisted: bool = True
+
+
+class FactValidity(NamedTuple):
+    state: str
+    reasons: tuple[str, ...] = ()
+
+
 class FactConflict(RuntimeError):
     pass
+
+
+def _dependency_map(fact: ObservedFact) -> tuple[dict[str, str], tuple[str, ...]]:
+    dependencies: dict[str, str] = {}
+    errors: list[str] = []
+
+    for dependency in fact.dependencies:
+        scope = dependency.scope.strip()
+        identity = dependency.identity.strip()
+        kind, separator, name = scope.partition("/")
+
+        if not scope or not separator or not name or kind not in _DEPENDENCY_KINDS:
+            errors.append(f"invalid_dependency_scope={dependency.scope}")
+            continue
+        if not identity:
+            errors.append(f"missing_dependency_identity={scope}")
+            continue
+        if scope in dependencies:
+            errors.append(f"duplicate_dependency_scope={scope}")
+            continue
+        dependencies[scope] = identity
+
+    return dependencies, tuple(errors)
+
+
+def classify_observed_fact(
+    fact: ObservedFact,
+    current_context: Mapping[str, str],
+    *,
+    required_scopes: Iterable[str] = (),
+    required_authority: str = CONTROL,
+) -> FactValidity:
+    """Classify whether a durable physical fact is reusable in current context.
+
+    Only dependencies declared by the fact participate. Extra current-context entries
+    are intentionally ignored, so an unrelated Git/source change cannot stale a
+    source-independent physical observation.
+    """
+
+    metadata_errors: list[str] = []
+    if not fact.subject.strip():
+        metadata_errors.append("missing_subject")
+    if not fact.predicate.strip():
+        metadata_errors.append("missing_predicate")
+    if not fact.target.strip():
+        metadata_errors.append("missing_target")
+    if not fact.observation_ref.strip():
+        metadata_errors.append("missing_observation_ref")
+    if not fact.source_ref.strip():
+        metadata_errors.append("missing_source_ref")
+
+    dependencies, dependency_errors = _dependency_map(fact)
+    metadata_errors.extend(dependency_errors)
+
+    required = tuple(required_scopes)
+    for scope in required:
+        kind, separator, name = scope.partition("/")
+        if not scope or not separator or not name or kind not in _DEPENDENCY_KINDS:
+            metadata_errors.append(f"invalid_required_scope={scope}")
+        elif scope not in dependencies:
+            metadata_errors.append(f"missing_required_dependency={scope}")
+
+    if metadata_errors:
+        return FactValidity(FACT_INVALID, tuple(metadata_errors))
+
+    if fact.authority != required_authority:
+        return FactValidity(
+            FACT_UNUSABLE,
+            (f"authority={fact.authority};required={required_authority}",),
+        )
+
+    if not fact.persisted:
+        return FactValidity(FACT_UNPERSISTED, ("evidence_persisted=false",))
+
+    missing_context = [
+        scope
+        for scope in dependencies
+        if not current_context.get(scope, "").strip()
+    ]
+    if missing_context:
+        return FactValidity(
+            FACT_UNKNOWN,
+            tuple(f"missing_current_context={scope}" for scope in missing_context),
+        )
+
+    mismatches = [
+        (scope, observed_identity, current_context[scope])
+        for scope, observed_identity in dependencies.items()
+        if current_context[scope] != observed_identity
+    ]
+    if mismatches:
+        return FactValidity(
+            FACT_STALE,
+            tuple(
+                f"dependency_changed={scope}:{observed}->{current}"
+                for scope, observed, current in mismatches
+            ),
+        )
+
+    return FactValidity(FACT_VALID)
+
+
+def project_observed_fact(
+    fact: ObservedFact,
+    current_context: Mapping[str, str],
+    *,
+    required_scopes: Iterable[str] = (),
+    required_authority: str = CONTROL,
+) -> Fact | None:
+    """Project an admitted observed fact into the existing CURRENT/STALE reducer API."""
+
+    validity = classify_observed_fact(
+        fact,
+        current_context,
+        required_scopes=required_scopes,
+        required_authority=required_authority,
+    )
+    if validity.state == FACT_VALID:
+        lifecycle = CURRENT
+    elif validity.state == FACT_STALE:
+        lifecycle = STALE
+    else:
+        return None
+
+    return Fact(
+        fact.subject,
+        fact.predicate,
+        fact.value,
+        lifecycle=lifecycle,
+        source_ref=fact.observation_ref,
+        authority=fact.authority,
+    )
 
 
 def _facts_for(

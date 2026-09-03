@@ -8,7 +8,7 @@ Turn the evidence-derived control model into one deterministic lifecycle for phy
 
 The model has two responsibilities, not two roadmaps:
 
-1. `control_state_machine.py` answers **what is independently proven right now?**
+1. `control_state_machine.py` answers **what is independently proven and reusable right now?**
 2. `operation_state_machine.py` answers **what transition may execute next in this exact transaction?**
 
 A phone is never globally `READY`. Filesystem, package, runtime, process, connectivity, reboot and recovery observations are dimensions of current device state consumed by operation-specific guards.
@@ -114,7 +114,111 @@ Hosted `Quality`, unit/integration tests and workflow policy prove software/poli
 
 Infrastructure/control-plane work may interrupt the device sequence only to remove a demonstrated blocker to the next safe real-phone foundation transition. Once the blocker is closed, work returns to that transition rather than expanding an independent framework lane.
 
-A canonical SHA advance invalidates prior SHA-bound admission for later source-bound operations. New source identity requires new current-SHA authority where the operation contract requires it.
+A canonical SHA advance changes **source authority**, not physical reality. It invalidates prior SHA-bound admission only for later source-bound operations/facts whose contract declares source identity as a dependency. It MUST NOT globally stale unrelated persisted device facts merely because `main` moved.
+
+## Git authority and causal physical-fact validity
+
+The State Machine keeps three truth roles separate:
+
+```text
+GIT / SOURCE AUTHORITY
+  exact canonical source, Quality, artifacts and reviewed operation contracts
+
+OBSERVED DEVICE FACTS
+  bounded physical claims reusable only while declared causal dependencies match
+
+TRANSACTION EVIDENCE
+  exact ordered evidence for one operation transaction
+```
+
+Git is the control/software authority. The phone is the physical observation authority. Durable bounded evidence connects the two.
+
+### Durable observed facts
+
+A cross-transaction reusable physical fact is conceptually:
+
+```text
+ObservedFact
+  subject
+  predicate
+  value
+  target
+  observation_ref
+  source_ref              # provenance
+  authority
+  persisted
+  dependencies[]
+```
+
+Each dependency is one scoped opaque identity:
+
+```text
+scope -> identity
+```
+
+Supported scope families are intentionally small:
+
+- `target/...` — registered logical target-binding generation;
+- `observer/...` — semantic observer contract/version;
+- `domain/...` — physical mutation-domain generation;
+- `boot/...` — boot generation for reboot-sensitive facts;
+- `session/...` — runner/ADB/control session for ephemeral facts;
+- `source/...` — source identity only when the claim is source-relative;
+- `artifact/...` — exact artifact identity when required;
+- `transaction/...` — exact transaction when reuse outside it is forbidden.
+
+`source_ref` remains useful audit provenance even when `source/...` is not a validity dependency.
+
+### Validity algorithm
+
+`control_state_machine.py` must classify an admitted observed fact deterministically:
+
+```text
+wrong authority        -> UNUSABLE
+malformed dependencies -> INVALID
+required persistence missing -> UNPERSISTED
+required current dependency context missing -> UNKNOWN
+any declared dependency changed -> STALE
+all declared dependencies match -> VALID
+```
+
+Current-context entries that the fact did not declare are ignored. Therefore an unrelated docs/code merge does not invalidate a source-independent filesystem/package/runtime observation.
+
+### Domain-scoped invalidation
+
+Each destructive operation declares the physical domains it may change. Do not use one global `DeviceEpoch`.
+
+At the first destructive command that may have reached the target, every affected domain generation advances to a transaction-scoped identity **before pre-mutation facts in that domain may be reused**. This is true even if the result path is lost.
+
+Example:
+
+```text
+old package fact depends on:
+  domain/package = pkg-generation-8
+
+transaction tx-9 may reach package manager:
+  current domain/package = tx-9
+
+old package fact -> STALE
+```
+
+The next safe path is fresh package observation under the new generation, followed by `NOT_APPLIED`, `APPLIED_AND_VERIFIED`, `PARTIAL_RECOVERY_REQUIRED` or `QUARANTINED` classification as appropriate.
+
+A mutation invalidates only affected/coupled domains declared by its contract. A filesystem-only mutation must not globally stale package facts; a reboot may explicitly invalidate boot/session/process/connectivity-dependent facts.
+
+### Observer-version invalidation
+
+Observer semantics have their own identity. If a defect or semantic change makes old observations unsafe to interpret, the observer contract identity changes. Only facts depending on that observer become stale.
+
+Do not use the whole repository SHA as an implicit observer version; that would reintroduce global invalidation through unrelated edits.
+
+### Fresh destructive boundary remains mandatory
+
+Causal reuse removes unnecessary re-observation; it does not weaken mutation safety.
+
+An earlier valid access observation may be useful for planning or an initial guard. A destructive operation still requires the fresh `phone_access_boundary`/target proof declared by the exact transaction immediately before mutation.
+
+See `docs/architecture/ADR-003-causal-device-fact-validity-and-git-authority.md`.
 
 ## Authoritative transaction state
 
@@ -162,6 +266,8 @@ transaction_id
 target_identity
 source_identity / artifact_identity when applicable
 required_observations
+reusable_fact_requirements / freshness requirements
+affected_physical_domains
 operation_guard
 destructive_boundary
 mutation_effect
@@ -246,7 +352,7 @@ source_quality
 
 A capability observation adds `capability_inventory`.
 
-A previous successful access observation is useful historical/current evidence only within its exact scope. It cannot satisfy a later destructive boundary when that operation contract requires fresh target reproof.
+A previous successful access observation may remain a valid fact for the scope declared by its dependencies. Reachability itself is ephemeral and therefore must use the appropriate session/boot/transaction freshness scope when reused. In all cases it cannot satisfy a later destructive boundary when that operation contract requires fresh target reproof.
 
 The adapter should classify at least:
 
@@ -283,11 +389,12 @@ Rules:
 - a failure before any destructive effect is proven is `REFUSED`;
 - a proven partial destructive state is `RECOVERY_REQUIRED`;
 - an ambiguous destructive result is `UNKNOWN_EXECUTION_OUTCOME` until re-observation classifies it;
+- pre-mutation facts in affected domains are stale once a destructive command may have reached the target;
 - recovery consists of explicit operations and independent postcondition observations;
 - failed/skipped required recovery produces `QUARANTINED`;
 - complete recovery produces `RECOVERED`, not `ACCEPTED`;
 - after `RECOVERED`, a fresh transaction is required to retry the original goal;
-- if cleanup observation already proves target absence, absence satisfies the postcondition and no unnecessary cleanup mutation runs.
+- if an admitted current observation already proves the cleanup target absent under the current dependency generation, absence satisfies the postcondition and no unnecessary cleanup mutation runs.
 
 Recovery must be testable from every destructive boundary, including controller loss after the command was issued but before the result/evidence was received.
 
@@ -309,7 +416,17 @@ This does not weaken containment or confidentiality:
 
 ## Evidence isolation
 
-Every phase evidence item is bound to at least:
+There are two evidence shapes with different purposes.
+
+### Reusable observed facts
+
+Cross-transaction physical facts are admitted through the causal-validity model owned by `control_state_machine.py`. They retain observation/source provenance and a dependency vector. They are `VALID`, `STALE`, `UNKNOWN`, `UNPERSISTED`, `UNUSABLE` or `INVALID` according to current causal context.
+
+Only a fact that the exact operation contract permits to reuse may satisfy a guard. A fresh-boundary requirement cannot be satisfied by cross-transaction reuse.
+
+### Transaction phase evidence
+
+Every phase evidence item for `operation_state_machine.py` is bound to at least:
 
 ```text
 step_id
@@ -321,15 +438,17 @@ lifecycle
 target_identity_scope
 ```
 
-For state advancement:
+For transaction state advancement:
 
 - required authority is `CONTROL`;
 - required lifecycle is `CURRENT`;
 - transaction ID must match the operation transaction;
-- target/source scope must satisfy the operation contract;
+- target/source/artifact scope must satisfy the operation contract;
 - conflicting current evidence produces `CONFLICT`;
-- another transaction's evidence cannot advance the current transaction;
-- diagnostic/audit/stale evidence cannot satisfy mutation guards.
+- another transaction's phase evidence cannot advance the current transaction;
+- diagnostic/audit/stale phase evidence cannot satisfy mutation guards.
+
+Strict transaction isolation MUST NOT be weakened merely because a separate durable physical fact is causally reusable.
 
 For Android device-verifiable phases, current CONTROL evidence must be device-backed by the real registered production phone.
 
@@ -344,6 +463,7 @@ The reducer rejects impossible histories, including:
 - unknown step IDs;
 - contradictory current statuses for the same scoped fact;
 - post-boundary uncertainty silently falling back to pre-mutation readiness;
+- a pre-mutation affected-domain fact being reused after a command may have mutated that domain;
 - controller loss being rewritten as target-operation failure without re-observation;
 - `RECOVERED` being promoted to `ACCEPTED` without a fresh successful operation transaction.
 
@@ -357,17 +477,25 @@ HOSTED PREPARE
   build/sign exact artifacts where required
   publish bounded immutable inputs
 
+CONTROL FACT ADMISSION
+  resolve durable bounded observations
+  reconstruct required dependency context
+  classify each candidate fact by causal validity
+  reuse only facts explicitly admitted by the operation contract
+
 SELF-HOSTED DEVICE EXECUTION
   fetch/verify exact canonical operation logic
-  observe target + required capabilities
+  observe target + required capabilities where fresh evidence is required
   acquire mutation serialization
   re-observe target at destructive boundary
+  advance affected domain generation when mutation may reach the target
   execute only the authorized operation effect
   independently observe postcondition on the real phone
-  emit bounded operation evidence
+  emit bounded operation evidence + resulting fact dependencies
 
 AMBIGUITY HANDLER
   if controller/runner/result path is lost after possible mutation:
+    never fall back to old affected-domain facts
     do not blind-retry
     re-observe target read-only
     classify applied / not-applied / partial / quarantine
@@ -388,14 +516,14 @@ No additional workflow layer should exist merely to mirror these states. The Sta
 
 The physical-device control foundation is proven in one sequential order:
 
-1. **Specify the complete model** — state dimensions, operation contracts, invalid combinations, terminal states and recovery semantics are explicit.
-2. **Prove deterministic reducer/guard behavior offline** — side-effect-free logic is directly tested without workflow narrative.
-3. **Prove real-phone observation** — target identity and device-verifiable facts are observed on the real phone.
-4. **Prove representative effect domains through the same engine** — filesystem, package, runtime/process and connectivity operations use the same guard/mutation/verification semantics without separate workflow truth.
-5. **Inject controller/runner loss** before, during and after destructive boundaries; `UNKNOWN_EXECUTION_OUTCOME` requires re-observation before non-idempotent retry.
+1. **Specify the complete model** — state dimensions, causal fact dependencies/invalidation, operation contracts, invalid combinations, terminal states and recovery semantics are explicit.
+2. **Prove deterministic reducer/guard behavior offline** — causal fact validity and transaction logic are side-effect-free and directly tested without workflow narrative.
+3. **Prove real-phone observation** — target identity and device-verifiable facts are observed on the real phone with bounded dependency metadata required for safe reuse.
+4. **Prove representative effect domains through the same engine** — filesystem, package, runtime/process and connectivity operations use the same guard/mutation/generation/verification semantics without separate workflow truth.
+5. **Inject controller/runner loss** before, during and after destructive boundaries; affected-domain pre-mutation facts become stale and `UNKNOWN_EXECUTION_OUTCOME` requires re-observation before non-idempotent retry.
 6. **Inject evidence-persistence failure** after valid observation; device mutation is not replayed merely to obtain an artifact.
 7. **Prove recovery/quarantine** from every representative partial state.
-8. **Restart controller/runner and reboot the phone**; reconstruct the next decision from durable transaction identity plus fresh observation.
+8. **Restart controller/runner and reboot the phone**; reconstruct the next decision from durable transaction identity, causal dependency context and fresh observation where required.
 9. **Reproduce the clean project-owned device baseline repeatedly** without depending on incidental prior installation state.
 10. **Accept the foundation on the real phone** only when no defined transition requires narrative inference and no unresolved destructive ambiguity remains.
 11. **Only then grow application behavior through this engine.**
@@ -407,6 +535,9 @@ The State Machine foundation is complete only when:
 
 - every admitted state/operation combination has deterministic guard behavior;
 - unknown/invalid/conflicting combinations fail closed;
+- unrelated Git/source changes do not invalidate source-independent physical facts;
+- every reusable fact has explicit causal dependencies and every required dependency mismatch/missing context is handled deterministically;
+- every mutating operation declares affected physical domains and prevents pre-mutation affected-domain fact reuse after possible mutation;
 - every destructive boundary has an ambiguity classification and recovery/quarantine path;
 - command success never substitutes for independent target verification;
 - workflow success never substitutes for reducer acceptance;
@@ -415,7 +546,7 @@ The State Machine foundation is complete only when:
 - controller/runner restart and phone reboot do not require human narrative to recover transaction meaning;
 - the allowed project-owned phone baseline is reproducible more than once;
 - no correctness assumption depends on preserving the current incidental installation;
-- the model remains understandable as `state -> guard -> operation -> effect -> independent observation -> resulting state` without workflow-specific parallel truth.
+- the model remains understandable as `admitted facts -> guard -> transaction -> effect -> independent observation -> resulting facts/state` without workflow-specific parallel truth.
 
 ## Quality requirements
 
@@ -423,10 +554,12 @@ Verification should directly prove behavior or an independent invariant. Do not 
 
 Permanent automated evidence should focus on:
 
+- deterministic causal fact-validity behavior;
 - deterministic reducer and guard behavior;
 - impossible-trace rejection;
 - separation of execution/postcondition/persistence results;
 - mutation-boundary authority;
+- affected-domain invalidation after possible mutation;
 - ambiguous outcome requiring re-observation;
 - recovery/quarantine semantics;
 - idempotency rules;
