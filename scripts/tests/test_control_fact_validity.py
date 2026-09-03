@@ -55,7 +55,7 @@ class CausalFactValidityTests(unittest.TestCase):
         base = self.filesystem_fact()
         fact = OF(
             **{
-                **base.__dict__,
+                **base._asdict(),
                 "dependencies": base.dependencies
                 + (D("source/canonical", "cb949904edd562ff021d71e42e84f6df4bb1bfa0"),),
             }
@@ -137,7 +137,7 @@ class CausalFactValidityTests(unittest.TestCase):
         base = self.filesystem_fact()
         fact = OF(
             **{
-                **base.__dict__,
+                **base._asdict(),
                 "dependencies": base.dependencies
                 + (D("domain/filesystem", "other-generation"),),
             }
