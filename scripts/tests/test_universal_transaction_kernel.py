@@ -351,8 +351,9 @@ class UniversalPhysicalTransactionKernelTests(unittest.TestCase):
     def test_generic_postcondition_observer_failure_is_durable_unknown(self) -> None:
         ports = GenericPorts()
         binding = GenericBinding(postcondition_error=True)
+        runner = KERNEL.TransactionRunner()
 
-        result = KERNEL.TransactionRunner().run(
+        result = runner.run(
             object(),
             ports=ports,
             binding=binding,
@@ -369,6 +370,18 @@ class UniversalPhysicalTransactionKernelTests(unittest.TestCase):
             [(item.step_id, item.status) for item in result.evidence][-1],
             ("reconcile_runtime", OP.DISPATCHED),
         )
+
+        retry_ports = GenericPorts()
+        retry_binding = GenericBinding()
+        with self.assertRaisesRegex(KERNEL.BlindRetryForbidden, "blind retry"):
+            runner.run(
+                object(),
+                ports=retry_ports,
+                binding=retry_binding,
+                existing_evidence=result.evidence,
+            )
+        self.assertEqual(retry_ports.events, [])
+        self.assertEqual(retry_binding.dispatch_calls, 0)
 
     def test_changed_declared_domain_generation_is_durably_refused_before_intent_and_dispatch(self) -> None:
         ports = GenericPorts(runtime_generation="old-runtime-generation")
