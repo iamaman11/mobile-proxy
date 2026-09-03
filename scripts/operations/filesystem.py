@@ -134,6 +134,18 @@ class FilesystemScratchRoundtripExecutor:
     ) -> transaction.PostconditionProof:
         return self.observer.observe_scratch_roundtrip(request)
 
+    def observe_recovery(
+        self,
+        request: FilesystemScratchRoundtripRequest,
+    ) -> transaction.RecoveryObservation:
+        proof = self.observer.observe_scratch_roundtrip(request)
+        return transaction.RecoveryObservation(
+            transaction.RECOVERY_PROVEN_ABSENT
+            if proof.passed
+            else transaction.RECOVERY_RESIDUAL_PRESENT,
+            proof.source_ref,
+        )
+
 
 @dataclass(frozen=True)
 class FilesystemScratchAtomicReplaceExecutor:
