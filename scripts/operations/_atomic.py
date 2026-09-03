@@ -66,6 +66,19 @@ class CanonicalAtomicBinding(Generic[RequestT]):
     def verify_postcondition(self, request: object) -> transaction.PostconditionProof:
         return self.executor.verify_postcondition(self._request(request))
 
+    def observe_recovery(self, request: object) -> transaction.RecoveryObservation:
+        observer = getattr(self.executor, "observe_recovery", None)
+        if not callable(observer):
+            raise transaction.TransactionRefusal(
+                "atomic executor has no read-only recovery observer"
+            )
+        result = observer(self._request(request))
+        if not isinstance(result, transaction.RecoveryObservation):
+            raise transaction.TransactionRefusal(
+                "atomic recovery observer returned invalid result"
+            )
+        return result
+
 
 def kernel_steps(spec: atomic.AtomicOperationSpec) -> transaction.KernelStepRoles:
     return transaction.KernelStepRoles(
