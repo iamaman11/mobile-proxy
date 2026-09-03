@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import hashlib
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -75,6 +77,37 @@ GENERIC_ROLES = KERNEL.KernelStepRoles(
     postcondition_step_id="verify_runtime",
     acceptance_step_id="accept_runtime",
 )
+
+
+def private_router_semantic_vector(
+    operation_id: str,
+    arguments: tuple[str, ...],
+    authority_cursor: str,
+) -> tuple[str, str]:
+    """Independent test-only golden vector for the accepted private router contract."""
+
+    def digest(payload: dict[str, object]) -> str:
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    generation = "gen-sha256:" + digest(
+        {"operation": operation_id, "arguments": list(arguments)}
+    )
+    request_id = "req-sha256:" + digest(
+        {
+            "schema": KERNEL.SEMANTIC_REQUEST_SCHEMA,
+            "operation": operation_id,
+            "arguments": list(arguments),
+            "authority_cursor": authority_cursor,
+            "desired_generation": generation,
+        }
+    )
+    return generation, request_id
 
 
 def runtime_fact(*, generation: str = "runtime-generation-7") -> KERNEL.BoundaryProof:
@@ -206,28 +239,71 @@ class GenericBinding:
 
 
 class UniversalPhysicalTransactionKernelTests(unittest.TestCase):
-    def test_semantic_request_identity_matches_private_router_contract(self) -> None:
+    def test_routed_semantic_identity_matches_private_router_golden_vector(self) -> None:
         artifact = "b3:" + ("a" * 64)
-        identity = KERNEL.build_semantic_request_identity(
-            operation="android.apk-install.v1",
-            arguments=(artifact,),
-            authority_cursor="issue179-comment-5529791292",
+        operation_id = "android.apk-install.v1"
+        arguments = (artifact,)
+        authority_cursor = "issue179-comment-5529791292"
+        generation, request_id = private_router_semantic_vector(
+            operation_id,
+            arguments,
+            authority_cursor,
         )
+
         self.assertEqual(
-            identity.desired_generation,
+            generation,
             "gen-sha256:fe41ff66efff18c005734997b011f906d337b3c8f487f5a277c1a4522d0c31fb",
         )
         self.assertEqual(
-            identity.request_id,
+            request_id,
             "req-sha256:1c5e47745e42d9d5247e07ae3b9a980944297be69d103cc0d7bc182e0316195d",
         )
-        self.assertEqual(
-            KERNEL.derive_physical_transaction_id(
-                identity,
-                "android.apk-install.v1",
-            ),
-            "tx-sha256:20687b8375dea3be604b032384da3af4dd771f062013f90362ec6ed4a6163a84",
+
+        identity = KERNEL.routed_semantic_request_identity(
+            request_id=request_id,
+            operation=operation_id,
+            arguments=arguments,
+            authority_cursor=authority_cursor,
+            desired_generation=generation,
         )
+        self.assertEqual(
+            identity.semantic_payload(),
+            {
+                "schema": KERNEL.SEMANTIC_REQUEST_SCHEMA,
+                "operation": operation_id,
+                "arguments": [artifact],
+                "authority_cursor": authority_cursor,
+                "desired_generation": generation,
+            },
+        )
+        self.assertEqual(
+            KERNEL.derive_physical_transaction_id(identity, operation_id),
+            "physical-tx-v1:"
+            "1c5e47745e42d9d5247e07ae3b9a980944297be69d103cc0d7bc182e0316195d:"
+            "android.apk-install.v1:"
+            "fe41ff66efff18c005734997b011f906d337b3c8f487f5a277c1a4522d0c31fb",
+        )
+
+        # GitHub comment/run/attempt provenance cannot perturb semantic identity
+        # because none of those values participate in the typed kernel envelope.
+        same_identity = KERNEL.routed_semantic_request_identity(
+            request_id=request_id,
+            operation=operation_id,
+            arguments=arguments,
+            authority_cursor=authority_cursor,
+            desired_generation=generation,
+        )
+        self.assertEqual(identity, same_identity)
+
+    def test_malformed_routed_semantic_identity_fails_closed(self) -> None:
+        with self.assertRaisesRegex(KERNEL.SemanticRequestError, "request id"):
+            KERNEL.routed_semantic_request_identity(
+                request_id="comment-12345",
+                operation="android.apk-install.v1",
+                arguments=("b3:" + ("a" * 64),),
+                authority_cursor="issue179-comment-5529791292",
+                desired_generation="gen-sha256:" + ("b" * 64),
+            )
 
     def test_generic_multi_domain_operation_uses_one_kernel_and_targeted_generations(self) -> None:
         ports = GenericPorts()
