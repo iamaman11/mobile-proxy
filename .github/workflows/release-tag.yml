@@ -1,4 +1,4 @@
-name: Create protected release tag
+name: Create protected product release tag
 
 on:
   issue_comment:
@@ -10,12 +10,12 @@ permissions:
   issues: read
 
 concurrency:
-  group: canonical-release-tag
+  group: canonical-product-release-tag
   cancel-in-progress: false
 
 jobs:
   create-tag:
-    name: Bind final tag to exact accepted candidate
+    name: Bind product tag to exact protected main
     if: >-
       github.event.issue.number == 90 &&
       github.event.comment.user.login == github.repository_owner &&
@@ -25,8 +25,6 @@ jobs:
     env:
       COMMAND: ${{ github.event.comment.body }}
       GH_TOKEN: ${{ github.token }}
-      ITEM20_ISSUE: '135'
-      PHONE_SIGNING_ISSUE: '115'
     steps:
       - name: Parse exact owner command
         id: command
@@ -51,66 +49,34 @@ jobs:
               handle.write(f"target_sha={target_sha}\n")
           PY
 
-      - name: Fetch canonical completion gates and protected main
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/issues/$ITEM20_ISSUE" > item20.json
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PHONE_SIGNING_ISSUE" > phone-signing.json
-          gh api "repos/$GITHUB_REPOSITORY/branches/main" > protected-main.json
-
-      - name: Require completed Item 20 and exact accepted-candidate release marker
-        id: acceptance
+      - name: Require exact protected main
         env:
           TARGET_SHA: ${{ steps.command.outputs.target_sha }}
         shell: bash
         run: |
           set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/branches/main" > protected-main.json
           python3 - <<'PY'
           import json
           import os
-          import re
 
           target_sha = os.environ["TARGET_SHA"]
-          item20 = json.load(open("item20.json", encoding="utf-8"))
-          signing = json.load(open("phone-signing.json", encoding="utf-8"))
           protected_main = json.load(open("protected-main.json", encoding="utf-8"))
-
-          if item20.get("number") != 135 or item20.get("state") != "closed" or item20.get("state_reason") != "completed":
-              raise SystemExit("Item 20 tracker #135 is not closed completed")
-          if signing.get("number") != 115 or signing.get("state") != "closed" or signing.get("state_reason") != "completed":
-              raise SystemExit("phone signing gate #115 is not closed completed")
-
-          body = item20.get("body") or ""
-          matches = re.findall(
-              r"(?m)^final_accepted_candidate_sha:\s*([0-9a-f]{40})\s*$",
-              body,
-          )
-          if len(matches) != 1:
-              raise SystemExit("Item 20 final accepted candidate marker is missing or ambiguous")
-          accepted_candidate_sha = matches[0]
-          if target_sha != accepted_candidate_sha:
-              raise SystemExit("target SHA does not match Item 20 final accepted candidate")
-
           main_commit = protected_main.get("commit")
           if protected_main.get("name") != "main" or protected_main.get("protected") is not True:
               raise SystemExit("canonical main is not protected")
-          if not isinstance(main_commit, dict) or main_commit.get("sha") != accepted_candidate_sha:
-              raise SystemExit("protected main advanced or differs from the accepted candidate; acceptance is stale")
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-              handle.write(f"accepted_candidate_sha={accepted_candidate_sha}\n")
+          if not isinstance(main_commit, dict) or main_commit.get("sha") != target_sha:
+              raise SystemExit("target SHA does not equal exact protected main")
           PY
 
-      - name: Require exact successful main Quality for accepted candidate
+      - name: Require exact successful main Quality
         env:
-          TARGET_SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
+          TARGET_SHA: ${{ steps.command.outputs.target_sha }}
         shell: bash
         run: |
           set -euo pipefail
           gh api \
             -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
             "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&event=push&per_page=100" \
             > quality-runs.json
           python3 - <<'PY'
@@ -130,18 +96,18 @@ jobs:
               and run.get("conclusion") == "success"
           ]
           if not eligible:
-              raise SystemExit("exact accepted candidate has no eligible successful main Quality run")
+              raise SystemExit("exact protected main has no eligible successful Quality push")
           PY
 
-      - name: Check out exact accepted candidate
+      - name: Check out exact product source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
+          ref: ${{ steps.command.outputs.target_sha }}
           fetch-depth: 0
 
       - name: Verify exact source and release-version contract
         env:
-          TARGET_SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
+          TARGET_SHA: ${{ steps.command.outputs.target_sha }}
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
         shell: bash
         run: |
@@ -156,7 +122,7 @@ jobs:
             --expected-version "$version" \
             --output "${RUNNER_TEMP}/release-contract.json"
 
-      - name: Require absent final tag
+      - name: Require absent product tag
         env:
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
         shell: bash
@@ -164,13 +130,13 @@ jobs:
           set -euo pipefail
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG" || \
              git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "release tag already exists" >&2
+            echo "product release tag already exists" >&2
             exit 1
           fi
 
-      - name: Create and push exact annotated tag
+      - name: Create and push exact annotated product tag
         env:
-          TARGET_SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}
+          TARGET_SHA: ${{ steps.command.outputs.target_sha }}
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
         shell: bash
         run: |
@@ -178,23 +144,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$RELEASE_TAG" "$TARGET_SHA" \
-            -m "Release $RELEASE_TAG — accepted candidate $TARGET_SHA"
+            -m "Product Release $RELEASE_TAG — source $TARGET_SHA"
           test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"
           git push origin "refs/tags/$RELEASE_TAG"
 
-      - name: Record bounded release-authority result
+      - name: Record bounded product release authority result
         shell: bash
         run: |
           {
-            echo '## Final release tag authority'
+            echo '## Product release tag authority v2'
             echo "- Release tag: ${{ steps.command.outputs.tag }}"
-            echo "- Final accepted candidate SHA: ${{ steps.acceptance.outputs.accepted_candidate_sha }}"
-            echo '- Accepted candidate equals exact protected main: true'
-            echo '- Item 20 tracker closed completed: true'
-            echo '- Phone signing gate closed completed: true'
-            echo '- Exact main Quality required: true'
+            echo "- Exact protected main SHA: ${{ steps.command.outputs.target_sha }}"
+            echo '- Exact successful main Quality required: true'
+            echo '- Android product version contract verified: true'
             echo '- Annotated tag required: true'
-            echo '- Final tag target is the accepted candidate: true'
-            echo '- Production promotion authority created here: false'
+            echo '- Physical acceptance required before product tag: false'
+            echo '- Phone signing-generation gate required before product tag: false'
+            echo '- Phone access performed: false'
+            echo '- Deployment performed: false'
+            echo '- Next authority: public immutable Product Release v2 publication'
           } >> "$GITHUB_STEP_SUMMARY"
