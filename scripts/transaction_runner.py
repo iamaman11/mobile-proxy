@@ -529,6 +529,21 @@ def _combined_preflight_ref(refs: Sequence[str]) -> str:
     return f"preflight-set-v1:{canonical}"
 
 
+def _preflight_refusal_ref(
+    contract: operation.OperationContract,
+    proofs: Sequence[BoundaryProof],
+) -> str:
+    refs = tuple(
+        proof.fact.observation_ref.strip()
+        for proof in proofs
+        if proof.fact.observation_ref.strip()
+        and not any(character.isspace() for character in proof.fact.observation_ref.strip())
+    )
+    if refs:
+        return _combined_preflight_ref(refs)
+    return f"contract/{contract.operation_id}/preflight"
+
+
 def _semantic_identity(
     binding: OperationBinding,
     request: object,
@@ -726,11 +741,43 @@ class TransactionRunner:
             )
 
             proofs = _preflight_proofs(ports, contract, transaction_id)
-            preflight_refs = _validate_preflight(
-                contract,
-                proofs,
-                transaction_id,
-            )
+            try:
+                preflight_refs = _validate_preflight(
+                    contract,
+                    proofs,
+                    transaction_id,
+                )
+            except TransactionRefusal:
+                evidence.append(
+                    _phase(
+                        roles.preflight_step_id,
+                        operation.FAILED,
+                        transaction_id,
+                        _preflight_refusal_ref(contract, proofs),
+                    )
+                )
+                record = _terminal_record(
+                    contract,
+                    transaction_id,
+                    {},
+                    evidence,
+                    roles,
+                    semantic,
+                )
+                if record.lifecycle_state != TERMINAL_REFUSED:
+                    raise RuntimeError("pre-dispatch causal refusal must classify as REFUSED")
+                terminal_ref = _non_empty(
+                    ports.persist_terminal(record),
+                    field="terminal_ref",
+                )
+                return TransactionResult(
+                    tuple(evidence),
+                    record.derived,
+                    terminal_ref,
+                    lifecycle_state=record.lifecycle_state,
+                    control_request_id=record.control_request_id,
+                )
+
             evidence.append(
                 _phase(
                     roles.preflight_step_id,
