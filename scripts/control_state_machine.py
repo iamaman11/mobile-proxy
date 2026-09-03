@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, NamedTuple
 
 
@@ -41,16 +40,14 @@ class Fact(NamedTuple):
     authority: str = CONTROL
 
 
-@dataclass(frozen=True)
-class FactDependency:
+class FactDependency(NamedTuple):
     """One causal dependency that controls reuse of an observed physical fact."""
 
     scope: str
     identity: str
 
 
-@dataclass(frozen=True)
-class ObservedFact:
+class ObservedFact(NamedTuple):
     """Durable physical observation before projection into the legacy reducer surface.
 
     ``source_ref`` is provenance only. A source change invalidates this fact only when
@@ -68,8 +65,7 @@ class ObservedFact:
     persisted: bool = True
 
 
-@dataclass(frozen=True)
-class FactValidity:
+class FactValidity(NamedTuple):
     state: str
     reasons: tuple[str, ...] = ()
 
