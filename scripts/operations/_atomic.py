@@ -26,6 +26,13 @@ class AtomicExecutor(Protocol[RequestT]):
     ) -> transaction.PostconditionProof: ...
 
 
+class AtomicRecoveryObserver(Protocol[RequestT]):
+    def observe_recovery(
+        self,
+        request: RequestT,
+    ) -> transaction.RecoveryObservation: ...
+
+
 class CanonicalAtomicBinding(Generic[RequestT]):
     """Typed contract/request binding; lifecycle semantics remain in the kernel."""
 
@@ -34,8 +41,13 @@ class CanonicalAtomicBinding(Generic[RequestT]):
     kernel_steps: ClassVar[transaction.KernelStepRoles]
     request_type: ClassVar[type]
 
-    def __init__(self, executor: AtomicExecutor[RequestT]) -> None:
+    def __init__(
+        self,
+        executor: AtomicExecutor[RequestT],
+        recovery_observer: AtomicRecoveryObserver[RequestT] | None = None,
+    ) -> None:
         self.executor = executor
+        self.recovery_observer = recovery_observer
 
     def _request(self, value: object) -> RequestT:
         if not isinstance(value, self.request_type):
@@ -66,14 +78,14 @@ class CanonicalAtomicBinding(Generic[RequestT]):
     def verify_postcondition(self, request: object) -> transaction.PostconditionProof:
         return self.executor.verify_postcondition(self._request(request))
 
-    def observe_recovery(self, request: object) -> transaction.PostconditionProof:
-        """Reuse only the canonical non-destructive postcondition observer.
+    def observe_recovery(self, request: object) -> transaction.RecoveryObservation:
+        """Invoke only the explicitly injected read-only recovery observer."""
 
-        The Universal Kernel exposes this through its dedicated recover_observe path,
-        which never calls dispatch_once or any mutation port.
-        """
-
-        return self.executor.verify_postcondition(self._request(request))
+        if self.recovery_observer is None:
+            raise transaction.TransactionRefusal(
+                "operation binding lacks explicit typed recovery observer"
+            )
+        return self.recovery_observer.observe_recovery(self._request(request))
 
 
 def kernel_steps(spec: atomic.AtomicOperationSpec) -> transaction.KernelStepRoles:
