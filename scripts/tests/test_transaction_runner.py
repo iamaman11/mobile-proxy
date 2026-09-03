@@ -437,13 +437,23 @@ class TransactionRunnerTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, body)
 
-    def test_apk_binding_is_the_only_implemented_operation_binding(self) -> None:
+    def test_operation_binding_modules_match_c0r_inventory(self) -> None:
         operation_files = sorted(
             path.name
             for path in (SCRIPT_DIR / "operations").glob("*.py")
             if path.name != "__init__.py"
         )
-        self.assertEqual(operation_files, ["install_apk.py"])
+        self.assertEqual(
+            operation_files,
+            [
+                "_atomic.py",
+                "filesystem.py",
+                "install_apk.py",
+                "package.py",
+                "registry.py",
+                "runtime.py",
+            ],
+        )
 
     def test_binding_rejects_wrong_request_type_before_any_executor_call(self) -> None:
         executor = FakeExecutor()
