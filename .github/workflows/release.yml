@@ -14,32 +14,39 @@ on:
       - completed
 
 permissions:
-  actions: write
   contents: write
   id-token: write
   attestations: write
 
+env:
+  ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+  ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+  ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+  ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+
 concurrency:
-  group: publish-release-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.release_tag }}
+  group: publish-product-release-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.release_tag }}
   cancel-in-progress: false
 
 jobs:
   publish:
-    name: Publish verified tag
+    name: Publish verified product Release
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
-      - name: Check out verified SHA
+      - name: Check out exact tagged product source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.release_tag }}
           fetch-depth: 0
-      - name: Select the unique semantic version tag
+          persist-credentials: false
+
+      - name: Select one exact annotated semantic-version tag
         id: tag
         env:
           VERIFIED_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.release_tag }}
@@ -48,6 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$VERIFIED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git fetch origin --tags --force
           test "$(git cat-file -t "refs/tags/$VERIFIED_TAG")" = tag
           tag_sha=$(git rev-list -n 1 "$VERIFIED_TAG")
           if [[ -n "$VERIFIED_SHA" ]]; then
@@ -55,19 +63,24 @@ jobs:
           else
             VERIFIED_SHA="$tag_sha"
           fi
+          test "$(git rev-parse HEAD)" = "$VERIFIED_SHA"
           mapfile -t tags < <(git tag --points-at "$VERIFIED_SHA" --list 'v[0-9]*')
           test ${#tags[@]} -eq 1
           test "${tags[0]}" = "$VERIFIED_TAG"
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
           test "$VERIFIED_TAG" = "v$version"
+          python3 scripts/verify_android_release_contract.py \
+            --root . \
+            --expected-version "$version" \
+            --output "$RUNNER_TEMP/android-release-contract.json"
           {
-            echo 'eligible=true'
             echo "name=$VERIFIED_TAG"
             echo "sha=$VERIFIED_SHA"
+            echo "version=$version"
           } >> "$GITHUB_OUTPUT"
+
       - name: Select provenance mode
         id: provenance
-        if: steps.tag.outputs.eligible == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -79,27 +92,54 @@ jobs:
           if [[ "$visibility" = private && "$owner_type" = User ]]; then
             native=false
           fi
-          {
-            echo "native=$native"
-            echo "visibility=$visibility"
-            echo "owner_type=$owner_type"
-          } >> "$GITHUB_OUTPUT"
-      - name: Install pinned Rust toolchain
-        if: steps.tag.outputs.eligible == 'true'
-        run: rustup show active-toolchain
-      - name: Build immutable Linux release binaries
-        if: steps.tag.outputs.eligible == 'true'
+          echo "native=$native" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java 17 for product Android Release
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            apps/android-app/*.gradle*
+            apps/android-app/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Verify Android release-signing inputs are configured
+        shell: bash
         run: |
+          set -euo pipefail
+          test -n "$ANDROID_RELEASE_KEYSTORE_B64"
+          test -n "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          test -n "$ANDROID_RELEASE_KEY_PASSWORD"
+          python3 scripts/verify_android_release_keystore.py \
+            --source-sha "${{ steps.tag.outputs.sha }}" \
+            --output "$RUNNER_TEMP/android-release-keystore-proof.json"
+
+      - name: Build product Linux binaries
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain
           cargo build --release --locked \
             -p operator-cli \
             -p control-plane \
             -p relay-gate \
             -p reverse-tunnel-server
-      - name: Package release and provenance manifest
-        if: steps.tag.outputs.eligible == 'true'
+
+      - name: Build signed Android product Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/build_product_android_release.py \
+            --repository-root . \
+            --source-sha "${{ steps.tag.outputs.sha }}" \
+            --output-dir release
+
+      - name: Package Linux artifact and write release contract v2
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
           RELEASE_SHA: ${{ steps.tag.outputs.sha }}
+          RELEASE_VERSION: ${{ steps.tag.outputs.version }}
           NATIVE_ATTESTATION: ${{ steps.provenance.outputs.native }}
         shell: bash
         run: |
@@ -117,60 +157,124 @@ jobs:
             --root "$stage" \
             --output "release/mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" \
             --source-date-epoch "$source_date_epoch"
-          cd release
-          sha256sum "mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" > SHA256SUMS
-          python3 - "$RELEASE_TAG" "$RELEASE_SHA" <<'PY'
-          import json, pathlib, sys
-          tag, sha = sys.argv[1:]
-          checksum = pathlib.Path("SHA256SUMS").read_text(encoding="utf-8").split()[0]
-          pathlib.Path("release-manifest.json").write_text(json.dumps({
-              "format_version": 1,
-              "git_sha": sha,
-              "release_tag": tag,
-              "artifacts": [{
-                  "name": f"mobile-proxy-linux-x86_64-{tag}.tar.gz",
-                  "sha256": checksum,
-              }],
-          }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+          python3 - "$RELEASE_TAG" "$RELEASE_SHA" "$RELEASE_VERSION" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          tag, sha, version = sys.argv[1:]
+          release = Path('release')
+          linux = release / f'mobile-proxy-linux-x86_64-{tag}.tar.gz'
+          android = release / f'mobile-proxy-android-{tag}.apk'
+          build = json.loads((release / 'android-release-build.json').read_text(encoding='utf-8'))
+
+          def digest(path: Path) -> str:
+              h = hashlib.sha256()
+              with path.open('rb') as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          linux_digest = digest(linux)
+          android_digest = digest(android)
+          if build.get('source_sha') != sha or build.get('artifact_name') != android.name or build.get('sha256') != android_digest:
+              raise SystemExit('Android Release build evidence differs from packaged artifact')
+          if build.get('version_name') != version or build.get('package_name') != 'com.example.mobileproxy':
+              raise SystemExit('Android Release identity differs from product version')
+
+          artifacts = [
+              {
+                  'name': linux.name,
+                  'sha256': linux_digest,
+                  'kind': 'vm-linux-x86_64',
+              },
+              {
+                  'name': android.name,
+                  'sha256': android_digest,
+                  'kind': 'android-apk',
+                  'package_name': build['package_name'],
+                  'version_name': build['version_name'],
+                  'version_code': build['version_code'],
+              },
+          ]
+          manifest = {
+              'format_version': 2,
+              'git_sha': sha,
+              'release_tag': tag,
+              'artifacts': artifacts,
+          }
+          provenance = {
+              'format_version': 2,
+              'git_sha': sha,
+              'release_tag': tag,
+              'builder': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              'workflow_ref': os.environ['GITHUB_WORKFLOW_REF'],
+              'github_native_attestation': os.environ['NATIVE_ATTESTATION'] == 'true',
+              'artifacts': [
+                  {'name': item['name'], 'sha256': item['sha256']}
+                  for item in artifacts
+              ],
+          }
+          (release / 'release-manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          (release / 'provenance.json').write_text(json.dumps(provenance, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+          checks = [linux, android, release / 'release-manifest.json', release / 'provenance.json']
+          with (release / 'SHA256SUMS').open('w', encoding='utf-8') as handle:
+              for path in checks:
+                  handle.write(f'{digest(path)}  {path.name}\n')
           PY
+
+      - name: Validate release contract before publication
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.name }}
+          RELEASE_SHA: ${{ steps.tag.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
           python3 - "$RELEASE_TAG" "$RELEASE_SHA" <<'PY'
-          import json, os, pathlib, sys
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
           tag, sha = sys.argv[1:]
-          checksum = pathlib.Path("SHA256SUMS").read_text(encoding="utf-8").split()[0]
-          pathlib.Path("provenance.json").write_text(json.dumps({
-              "artifact": f"mobile-proxy-linux-x86_64-{tag}.tar.gz",
-              "artifact_sha256": checksum,
-              "builder": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
-              "format_version": 1,
-              "git_sha": sha,
-              "github_native_attestation": os.environ["NATIVE_ATTESTATION"] == "true",
-              "release_tag": tag,
-              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
-          }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          root = Path('release')
+          manifest = json.loads((root / 'release-manifest.json').read_text(encoding='utf-8'))
+          provenance = json.loads((root / 'provenance.json').read_text(encoding='utf-8'))
+          if manifest.get('format_version') != 2 or provenance.get('format_version') != 2:
+              raise SystemExit('release contract format differs')
+          if manifest.get('release_tag') != tag or provenance.get('release_tag') != tag:
+              raise SystemExit('release contract tag differs')
+          if manifest.get('git_sha') != sha or provenance.get('git_sha') != sha:
+              raise SystemExit('release contract source SHA differs')
+          checksum_lines = (root / 'SHA256SUMS').read_text(encoding='utf-8').splitlines()
+          names = [line.split(None, 1)[1].strip().removeprefix('*') for line in checksum_lines]
+          expected = {
+              f'mobile-proxy-linux-x86_64-{tag}.tar.gz',
+              f'mobile-proxy-android-{tag}.apk',
+              'release-manifest.json',
+              'provenance.json',
+          }
+          if set(names) != expected or len(names) != len(expected):
+              raise SystemExit('SHA256SUMS publication set differs')
+          print('PRODUCT_RELEASE_CONTRACT_V2_OK')
           PY
-          sha256sum \
-            "mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" \
-            release-manifest.json \
-            provenance.json > SHA256SUMS
-      - name: Attest release provenance
-        if: steps.tag.outputs.eligible == 'true' && steps.provenance.outputs.native == 'true'
+
+      - name: Attest product Release provenance
+        if: steps.provenance.outputs.native == 'true'
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
           subject-path: |
             release/mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz
+            release/mobile-proxy-android-${{ steps.tag.outputs.name }}.apk
             release/SHA256SUMS
             release/release-manifest.json
             release/provenance.json
-      - name: Record release provenance mode
-        if: steps.tag.outputs.eligible == 'true' && steps.provenance.outputs.native != 'true'
-        run: |
-          {
-            echo '## Provenance mode'
-            echo 'GitHub-native attestations are unavailable for this release context.'
-            echo 'The release includes provenance.json and SHA256SUMS covering every published artifact.'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Publish GitHub Release
-        if: steps.tag.outputs.eligible == 'true'
+
+      - name: Publish GitHub product Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
@@ -178,6 +282,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             release/mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz
+            release/mobile-proxy-android-${{ steps.tag.outputs.name }}.apk
             release/SHA256SUMS
             release/release-manifest.json
             release/provenance.json
