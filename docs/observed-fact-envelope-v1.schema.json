@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iamaman11/mobile-proxy/docs/observed-fact-envelope-v1.schema.json",
+  "title": "mobile-proxy observed physical fact envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "subject",
+    "predicate",
+    "value",
+    "target",
+    "observation_ref",
+    "source_ref",
+    "dependencies",
+    "authority",
+    "persisted"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "subject": { "type": "string", "minLength": 1 },
+    "predicate": { "type": "string", "minLength": 1 },
+    "value": { "type": ["string", "number", "boolean", "null"] },
+    "target": { "const": "android-production" },
+    "observation_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]*$"
+    },
+    "source_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]*$"
+    },
+    "dependencies": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/dependency" }
+    },
+    "authority": { "const": "CONTROL" },
+    "persisted": { "type": "boolean" }
+  },
+  "$defs": {
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "identity"],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "pattern": "^(target|observer|domain|boot|session|source|artifact|transaction)/[^/]+$"
+        },
+        "identity": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  }
+}
