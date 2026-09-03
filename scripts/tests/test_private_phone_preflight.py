@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -10,6 +11,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "run_private_phone_preflight.py"
 SPEC = importlib.util.spec_from_file_location("private_phone_preflight", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
@@ -34,6 +36,7 @@ class PrivatePhonePreflightTests(unittest.TestCase):
             ),
             SimpleNamespace(stdout="device\n"),
             SimpleNamespace(stdout=""),
+            SimpleNamespace(stdout="boot-identity-raw\n"),
         ]
 
         report = MODULE.build_report("a" * 40)
@@ -41,12 +44,64 @@ class PrivatePhonePreflightTests(unittest.TestCase):
         self.assertTrue(report["accepted"])
         self.assertFalse(report["mutation_performed"])
         self.assertFalse(report["raw_device_identifier_recorded"])
+        self.assertFalse(report["raw_boot_identifier_recorded"])
         self.assertNotIn("registered-device", str(report))
+        self.assertNotIn("boot-identity-raw", str(report))
         self.assertEqual(report["device"]["device_count"], 1)
         self.assertEqual(
-            run.call_args_list[-1].args[0],
+            run.call_args_list[-2].args[0],
             ["adb", "-s", "registered-device", "shell", "true"],
         )
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            [
+                "adb",
+                "-s",
+                "registered-device",
+                "shell",
+                "cat",
+                "/proc/sys/kernel/random/boot_id",
+            ],
+        )
+
+        self.assertEqual(report["format_version"], 2)
+        self.assertFalse(report["fact_reuse_eligible"])
+        self.assertEqual(len(report["observed_facts"]), 1)
+        fact = report["observed_facts"][0]
+        self.assertFalse(fact["persisted"])
+        self.assertEqual(fact["subject"], "phone")
+        self.assertEqual(fact["predicate"], "phone_access_proven")
+        scopes = {item["scope"] for item in fact["dependencies"]}
+        self.assertEqual(
+            scopes,
+            {
+                "target/android-production",
+                "observer/phone-access",
+                "boot/android-production",
+            },
+        )
+
+    @mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/tool")
+    @mock.patch.object(MODULE.subprocess, "run")
+    def test_transaction_bound_preflight_emits_same_transaction_dependency(
+        self, run, _which
+    ):
+        run.side_effect = [
+            SimpleNamespace(
+                stdout="List of devices attached\nregistered-device\tdevice\n"
+            ),
+            SimpleNamespace(stdout="device\n"),
+            SimpleNamespace(stdout=""),
+            SimpleNamespace(stdout="boot-2\n"),
+        ]
+
+        report = MODULE.build_report("b" * 40, transaction_id="tx-boundary")
+        dependencies = {
+            item["scope"]: item["identity"]
+            for item in report["observed_facts"][0]["dependencies"]
+        }
+        self.assertEqual(dependencies["transaction/operation"], "tx-boundary")
+        self.assertNotIn("b" * 40, dependencies.values())
 
     @mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/tool")
     @mock.patch.object(MODULE.subprocess, "run")
