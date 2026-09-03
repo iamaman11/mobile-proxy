@@ -181,12 +181,16 @@ ANDROID_RUNTIME_BINARY_REPLACE = _atomic_contract(
     extra_facts=(_RUNTIME_BINARY_BUNDLE_FACT,),
 )
 
+# This is the filesystem-mutation bootstrap certification transaction. Requiring
+# filesystem.mutation_capability_proven here would be circular: this operation is
+# the bounded mutation that first proves that capability on a real target. It still
+# requires a fresh SAME_TRANSACTION registered-phone boundary and all later
+# filesystem mutation operations retain the reusable capability requirement.
 ANDROID_FILESYSTEM_SCRATCH_ROUNDTRIP = _atomic_contract(
     operation_id="android.filesystem-scratch-roundtrip.v1",
     dispatch_step_id="scratch_roundtrip",
     postcondition_step_id="verify_scratch_roundtrip",
     affected_domains=("filesystem",),
-    extra_facts=(_FILESYSTEM_MUTATION_CAPABILITY_FACT,),
 )
 
 ANDROID_FILESYSTEM_SCRATCH_ATOMIC_REPLACE = _atomic_contract(
