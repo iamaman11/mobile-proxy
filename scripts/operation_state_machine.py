@@ -13,6 +13,10 @@ STALE = "STALE"
 PASSED = "PASSED"
 FAILED = "FAILED"
 SKIPPED = "SKIPPED"
+DISPATCHED = "DISPATCHED"
+
+CAUSAL_REUSE_ALLOWED = "CAUSAL_REUSE_ALLOWED"
+SAME_TRANSACTION = "SAME_TRANSACTION"
 
 
 @dataclass(frozen=True)
@@ -26,11 +30,29 @@ class StepContract:
 
 
 @dataclass(frozen=True)
+class FactRequirement:
+    """Physical fact requirement declared by an operation contract.
+
+    ``freshness`` is deliberately semantic rather than wall-clock based:
+    reusable durable facts are admitted through control_state_machine causal
+    dependency equality, while SAME_TRANSACTION facts must be freshly produced
+    for the exact operation transaction.
+    """
+
+    subject: str
+    predicate: str
+    freshness: str
+    required_dependency_kinds: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class OperationContract:
     operation_id: str
     target: str
     steps: tuple[StepContract, ...]
     recovery_steps: tuple[StepContract, ...] = ()
+    fact_requirements: tuple[FactRequirement, ...] = ()
+    affected_physical_domains: tuple[str, ...] = ()
     retryable: bool = False
     rollback_to_legacy_allowed: bool = False
 
@@ -46,6 +68,14 @@ class PhaseEvidence(NamedTuple):
 
 class EvidenceConflict(RuntimeError):
     pass
+
+
+_PHONE_ACCESS_BOUNDARY_FACT = FactRequirement(
+    "phone",
+    "registered_phone_access_proven",
+    SAME_TRANSACTION,
+    ("target", "observer", "transaction"),
+)
 
 
 ANDROID_PHONE_ACCESS_CERTIFICATION = OperationContract(
@@ -101,6 +131,8 @@ ANDROID_FILESYSTEM_CERTIFICATION = OperationContract(
         StepContract("recovery_cleanup_managed", "RECOVER", "RECOVERY", destructive=True),
         StepContract("recovery_verify_absent", "VERIFY", "RECOVERY", acceptance=True),
     ),
+    fact_requirements=(_PHONE_ACCESS_BOUNDARY_FACT,),
+    affected_physical_domains=("filesystem",),
     retryable=False,
     rollback_to_legacy_allowed=False,
 )
@@ -142,6 +174,8 @@ ANDROID_CURRENT_SOURCE_CLEAN_INSTALL = OperationContract(
         StepContract("recovery_normalize_package", "RECOVER", "RECOVERY", destructive=True),
         StepContract("recovery_verify_clean_baseline", "VERIFY", "RECOVERY", acceptance=True),
     ),
+    fact_requirements=(_PHONE_ACCESS_BOUNDARY_FACT,),
+    affected_physical_domains=("filesystem", "package", "runtime", "process"),
     retryable=False,
     rollback_to_legacy_allowed=False,
 )
@@ -165,6 +199,44 @@ def operation_contract(operation_id: str) -> OperationContract:
         raise ValueError(f"unknown operation contract: {operation_id}") from error
 
 
+def affected_domain_generation_updates(
+    contract: OperationContract,
+    transaction_id: str,
+) -> dict[str, str]:
+    """Return the exact causal-generation transition required before dispatch.
+
+    Adapters must durably persist this transition before a destructive command is
+    allowed to reach the target. Persisting it and then crashing before dispatch is
+    conservative (facts become stale unnecessarily) but safe. Dispatching before it
+    is persisted is forbidden because an ambiguous result could otherwise leave
+    pre-mutation facts reusable.
+    """
+
+    transaction_id = transaction_id.strip()
+    if not transaction_id:
+        raise ValueError("transaction_id must be non-empty")
+    if any(character.isspace() for character in transaction_id):
+        raise ValueError("transaction_id must not contain whitespace")
+
+    updates: dict[str, str] = {}
+    for domain in contract.affected_physical_domains:
+        normalized = domain.strip()
+        if (
+            not normalized
+            or "/" in normalized
+            or any(character.isspace() for character in normalized)
+        ):
+            raise ValueError(f"invalid physical domain: {domain}")
+        scope = f"domain/{normalized}"
+        if scope in updates:
+            raise ValueError(f"duplicate physical domain: {normalized}")
+        updates[scope] = transaction_id
+
+    if any(step.destructive for step in contract.steps) and not updates:
+        raise ValueError("destructive operation must declare affected physical domains")
+    return updates
+
+
 def _current_control_evidence(
     evidence: Iterable[PhaseEvidence], transaction_id: str
 ) -> tuple[PhaseEvidence, ...]:
@@ -180,21 +252,39 @@ def _current_control_evidence(
 def _status_by_step(
     evidence: Iterable[PhaseEvidence], transaction_id: str
 ) -> dict[str, str]:
-    result: dict[str, str] = {}
-    refs: dict[str, str] = {}
+    statuses: dict[str, set[str]] = {}
+    refs: dict[tuple[str, str], str] = {}
+    allowed = {PASSED, FAILED, SKIPPED, DISPATCHED}
+
     for item in _current_control_evidence(evidence, transaction_id):
         if not item.source_ref:
             raise EvidenceConflict(f"missing source_ref for {item.step_id}")
-        if item.status not in {PASSED, FAILED, SKIPPED}:
+        if item.status not in allowed:
             raise EvidenceConflict(f"invalid status for {item.step_id}: {item.status}")
-        previous = result.get(item.step_id)
-        if previous is not None and previous != item.status:
-            raise EvidenceConflict(f"conflicting evidence for {item.step_id}")
-        previous_ref = refs.get(item.step_id)
+
+        key = (item.step_id, item.status)
+        previous_ref = refs.get(key)
         if previous_ref is not None and previous_ref != item.source_ref:
-            raise EvidenceConflict(f"multiple current probe scopes for {item.step_id}")
-        result[item.step_id] = item.status
-        refs[item.step_id] = item.source_ref
+            raise EvidenceConflict(
+                f"multiple current probe scopes for {item.step_id}:{item.status}"
+            )
+        refs[key] = item.source_ref
+        statuses.setdefault(item.step_id, set()).add(item.status)
+
+    result: dict[str, str] = {}
+    for step_id, observed in statuses.items():
+        terminal = observed & {PASSED, FAILED, SKIPPED}
+        if len(terminal) > 1:
+            raise EvidenceConflict(f"conflicting evidence for {step_id}")
+        if DISPATCHED in observed and SKIPPED in terminal:
+            raise EvidenceConflict(f"dispatched step cannot be skipped: {step_id}")
+        if terminal:
+            # DISPATCHED is a monotonic pre-result marker. The eventual PASSED or
+            # FAILED result supersedes only the unknown outcome, not the fact that
+            # the destructive boundary was crossed.
+            result[step_id] = next(iter(terminal))
+        else:
+            result[step_id] = DISPATCHED
     return result
 
 
@@ -216,13 +306,22 @@ def _first_failed(
     return None
 
 
+def _first_dispatched(
+    steps: tuple[StepContract, ...], statuses: dict[str, str]
+) -> StepContract | None:
+    for step in steps:
+        if statuses.get(step.step_id) == DISPATCHED:
+            return step
+    return None
+
+
 def _destructive_started(
     steps: tuple[StepContract, ...], statuses: dict[str, str]
 ) -> bool:
-    # A failed destructive command can have partially mutated the target. Treat both
-    # PASSED and FAILED destructive execution as crossing the recovery boundary.
+    # DISPATCHED is a durable may-have-reached marker. A lost result is therefore
+    # already across the recovery boundary even when no success/failure result exists.
     return any(
-        step.destructive and statuses.get(step.step_id) in {PASSED, FAILED}
+        step.destructive and statuses.get(step.step_id) in {PASSED, FAILED, DISPATCHED}
         for step in steps
     )
 
@@ -248,6 +347,15 @@ def _boundary_passed(
         step.mutation_boundary and statuses.get(step.step_id) == PASSED
         for step in steps
     )
+
+
+def _invalid_dispatch_step(
+    steps: tuple[StepContract, ...], statuses: dict[str, str]
+) -> str | None:
+    for step in steps:
+        if statuses.get(step.step_id) == DISPATCHED and not step.destructive:
+            return step.step_id
+    return None
 
 
 def derive_operation_state(
@@ -288,7 +396,25 @@ def derive_operation_state(
             "blocking_predicates": [f"unknown_step={step}" for step in unknown_steps],
         }
 
-    out_of_order = _passed_later_step_before_required_predecessor(contract.steps, statuses)
+    invalid_dispatch = _invalid_dispatch_step(
+        contract.steps + contract.recovery_steps, statuses
+    )
+    if invalid_dispatch is not None:
+        return {
+            "operation_id": contract.operation_id,
+            "transaction_id": transaction_id,
+            "state": "INVALID_TRACE",
+            "current_step": invalid_dispatch,
+            "next_step": None,
+            "failure_stage": "MUTATION_EXECUTION",
+            "destructive_started": False,
+            "recovery_required": True,
+            "blocking_predicates": [f"dispatched_non_destructive_step={invalid_dispatch}"],
+        }
+
+    out_of_order = _passed_later_step_before_required_predecessor(
+        contract.steps, statuses
+    )
     if out_of_order is not None:
         return {
             "operation_id": contract.operation_id,
@@ -315,6 +441,34 @@ def derive_operation_state(
             "destructive_started": True,
             "recovery_required": True,
             "blocking_predicates": ["mutation_boundary=PASSED"],
+        }
+
+    dispatched = _first_dispatched(contract.steps, statuses)
+    if dispatched is not None:
+        recovery = _derive_recovery_state(contract, statuses)
+        if recovery["state"] == "RECOVERED":
+            state = "RECOVERED"
+        elif recovery["state"] == "RECOVERING":
+            state = "RECOVERING"
+        elif recovery["state"] == "QUARANTINED":
+            state = "QUARANTINED"
+        else:
+            state = "UNKNOWN_EXECUTION_OUTCOME"
+        return {
+            "operation_id": contract.operation_id,
+            "transaction_id": transaction_id,
+            "state": state,
+            "current_step": dispatched.step_id,
+            "next_step": recovery["next_step"],
+            "failure_stage": "MUTATION_EXECUTION",
+            "destructive_started": True,
+            "recovery_required": state != "RECOVERED",
+            "blocking_predicates": recovery["blocking_predicates"]
+            if state != "UNKNOWN_EXECUTION_OUTCOME"
+            else [
+                f"execution_result_known={dispatched.step_id}",
+                "blind_retry=FORBIDDEN",
+            ],
         }
 
     failed = _first_failed(contract.steps, statuses)

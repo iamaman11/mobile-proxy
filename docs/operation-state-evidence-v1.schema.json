@@ -20,6 +20,7 @@
       "enum": [
         "android.phone-access-certification.v1",
         "android.capability-certification.v1",
+        "android.filesystem-certification.v1",
         "android.current-source-clean-install.v1"
       ]
     },
@@ -29,6 +30,11 @@
     "phase_evidence": {
       "type": "array",
       "items": { "$ref": "#/$defs/phaseEvidence" }
+    },
+    "affected_domain_generations": {
+      "type": "object",
+      "propertyNames": { "pattern": "^domain/[a-z][a-z0-9_-]*$" },
+      "additionalProperties": { "type": "string", "minLength": 1 }
     },
     "derived": { "$ref": "#/$defs/derived" }
   },
@@ -46,11 +52,20 @@
       ],
       "properties": {
         "step_id": { "type": "string", "minLength": 1 },
-        "status": { "type": "string", "enum": ["PASSED", "FAILED", "SKIPPED"] },
+        "status": {
+          "type": "string",
+          "enum": ["PASSED", "FAILED", "SKIPPED", "DISPATCHED"]
+        },
         "transaction_id": { "type": "string", "minLength": 1 },
         "source_ref": { "type": "string", "minLength": 1 },
-        "authority": { "type": "string", "enum": ["CONTROL", "DIAGNOSTIC", "AUDIT"] },
-        "lifecycle": { "type": "string", "enum": ["CURRENT", "STALE", "SUPERSEDED", "CONFLICT", "INVALID"] }
+        "authority": {
+          "type": "string",
+          "enum": ["CONTROL", "DIAGNOSTIC", "AUDIT"]
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["CURRENT", "STALE", "SUPERSEDED", "CONFLICT", "INVALID"]
+        }
       }
     },
     "derived": {
@@ -77,6 +92,7 @@
             "READY_FOR_BOUNDARY_REPROOF",
             "READY_TO_MUTATE",
             "TRANSACTION_ACTIVE",
+            "UNKNOWN_EXECUTION_OUTCOME",
             "ACCEPTED",
             "REFUSED",
             "RECOVERY_REQUIRED",

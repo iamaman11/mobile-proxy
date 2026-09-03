@@ -14,9 +14,12 @@ from pathlib import Path
 from typing import Any
 
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 _REQUIRED_TOOLS = ("adb", "python", "git", "curl")
 _REQUIRED_RUNNER_LABELS = ("self-hosted", "Linux", "X64", "android-production")
 _SERIAL_ENV = "ANDROID_PRODUCTION_SERIAL"
+_TARGET = "android-production"
+_PHONE_ACCESS_OBSERVER = "android.phone-access-observer.v2"
 
 
 class PreflightFailure(RuntimeError):
@@ -46,6 +49,68 @@ def require_expected_serial() -> str:
         "registered production device binding is invalid",
     )
     return value
+
+
+def require_opaque_identity(value: str, label: str) -> str:
+    value = value.strip()
+    require(bool(value), f"{label} is required")
+    require(len(value) <= 160, f"{label} is invalid")
+    require(not any(character.isspace() for character in value), f"{label} is invalid")
+    require(all(32 < ord(character) < 127 for character in value), f"{label} is invalid")
+    raw_serial = os.environ.get(_SERIAL_ENV, "")
+    require(not raw_serial or value != raw_serial, f"{label} must not be a raw device identifier")
+    return value
+
+
+def require_transaction_id(value: str) -> str:
+    value = value.strip()
+    require(_TRANSACTION_ID.fullmatch(value) is not None, "transaction ID is invalid")
+    return value
+
+
+def build_phone_access_fact_envelope(
+    canonical_sha: str,
+    *,
+    target_binding_id: str,
+    session_id: str,
+    observation_ref: str,
+    transaction_id: str | None = None,
+) -> dict[str, Any]:
+    """Build the bounded causal envelope for a successful registered-phone probe.
+
+    The producer deliberately marks ``persisted`` false. Persistence is an
+    admission property of the outer GitHub evidence adapter, not a property of
+    the physical observation itself. A later durable CONTROL adapter may promote
+    the admitted envelope to persisted=true only after persistence succeeds.
+    """
+
+    canonical_sha = require_canonical_sha(canonical_sha)
+    target_binding_id = require_opaque_identity(target_binding_id, "target binding identity")
+    session_id = require_opaque_identity(session_id, "session identity")
+    observation_ref = require_opaque_identity(observation_ref, "observation reference")
+
+    dependencies = [
+        {"scope": f"target/{_TARGET}", "identity": target_binding_id},
+        {"scope": "observer/phone-access", "identity": _PHONE_ACCESS_OBSERVER},
+        {"scope": f"session/{_TARGET}", "identity": session_id},
+    ]
+    if transaction_id is not None:
+        transaction_id = require_transaction_id(transaction_id)
+        dependencies.append(
+            {"scope": f"transaction/{transaction_id}", "identity": transaction_id}
+        )
+
+    return {
+        "subject": "phone",
+        "predicate": "registered_phone_access_proven",
+        "value": True,
+        "target": _TARGET,
+        "observation_ref": observation_ref,
+        "source_ref": canonical_sha,
+        "dependencies": dependencies,
+        "authority": "CONTROL",
+        "persisted": False,
+    }
 
 
 def require_tools() -> dict[str, bool]:
@@ -106,10 +171,41 @@ def prove_registered_device(expected_serial: str) -> dict[str, Any]:
     }
 
 
-def build_report(canonical_sha: str) -> dict[str, Any]:
+def build_report(
+    canonical_sha: str,
+    *,
+    target_binding_id: str | None = None,
+    session_id: str | None = None,
+    observation_ref: str | None = None,
+    transaction_id: str | None = None,
+) -> dict[str, Any]:
     tools = require_tools()
     expected_serial = require_expected_serial()
     device = prove_registered_device(expected_serial)
+
+    context = (target_binding_id, session_id, observation_ref)
+    if any(value is not None for value in context) and not all(
+        value is not None for value in context
+    ):
+        raise PreflightFailure(
+            "causal fact context must provide target binding, session and observation reference together"
+        )
+
+    observed_facts: list[dict[str, Any]] = []
+    if all(value is not None for value in context):
+        assert target_binding_id is not None
+        assert session_id is not None
+        assert observation_ref is not None
+        observed_facts.append(
+            build_phone_access_fact_envelope(
+                canonical_sha,
+                target_binding_id=target_binding_id,
+                session_id=session_id,
+                observation_ref=observation_ref,
+                transaction_id=transaction_id,
+            )
+        )
+
     return {
         "format_version": 1,
         "repository": "iamaman11/mobile-proxy",
@@ -118,6 +214,8 @@ def build_report(canonical_sha: str) -> dict[str, Any]:
         "required_runner_labels": list(_REQUIRED_RUNNER_LABELS),
         "required_tools": tools,
         "device": device,
+        "observed_facts": observed_facts,
+        "causal_fact_envelope_emitted": bool(observed_facts),
         "raw_device_identifier_recorded": False,
         "mutation_performed": False,
         "accepted": True,
@@ -128,13 +226,23 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--canonical-sha", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--target-binding-id")
+    parser.add_argument("--session-id")
+    parser.add_argument("--observation-ref")
+    parser.add_argument("--transaction-id")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        report = build_report(args.canonical_sha)
+        report = build_report(
+            args.canonical_sha,
+            target_binding_id=args.target_binding_id,
+            session_id=args.session_id,
+            observation_ref=args.observation_ref,
+            transaction_id=args.transaction_id,
+        )
         args.output.write_text(
             json.dumps(report, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
