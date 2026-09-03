@@ -173,10 +173,35 @@ RUNTIME_RECONSTRUCTION_PLAN = _linear_plan(
     ),
 )
 
+RUNTIME_BINARY_REPAIR_PLAN = _linear_plan(
+    "android.runtime-binary-repair.plan.v1",
+    (
+        (
+            "replace_runtime_binaries",
+            "android.runtime-binary-replace.v1",
+            False,
+            None,
+        ),
+        (
+            "stop_runtime",
+            "android.runtime-stop.v1",
+            True,
+            "runtime_stopped",
+        ),
+        (
+            "start_runtime",
+            "android.runtime-start.v1",
+            False,
+            None,
+        ),
+    ),
+)
+
 COMPOSITE_PLANS = (
     CURRENT_SOURCE_CLEAN_INSTALL_PLAN,
     FILESYSTEM_CERTIFICATION_PLAN,
     RUNTIME_RECONSTRUCTION_PLAN,
+    RUNTIME_BINARY_REPAIR_PLAN,
 )
 
 _PLAN_BY_ID = {item.plan_id: item for item in COMPOSITE_PLANS}
@@ -352,8 +377,8 @@ PRIVATE_MUTATOR_INVENTORY = (
     ),
     PrivateMutatorInventoryEntry(
         workflow="phone-runtime-binary-repair.yml",
-        disposition="atomic",
-        operation_id="android.runtime-binary-repair.v1",
+        disposition="composite",
+        plan_id=RUNTIME_BINARY_REPAIR_PLAN.plan_id,
     ),
     PrivateMutatorInventoryEntry(
         workflow="runtime-reconstruction-execution.yml",
