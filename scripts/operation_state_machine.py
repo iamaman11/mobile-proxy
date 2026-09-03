@@ -565,6 +565,17 @@ def _derive_recovery_state(
             "blocking_predicates": [f"{failed.step_id}=PASSED"],
         }
 
+    dispatched = _first_dispatched(contract.recovery_steps, statuses)
+    if dispatched is not None:
+        return {
+            "state": "UNKNOWN_EXECUTION_OUTCOME",
+            "next_step": None,
+            "blocking_predicates": [
+                f"execution_result_known={dispatched.step_id}",
+                "blind_retry=FORBIDDEN",
+            ],
+        }
+
     first_open = _first_non_passed(contract.recovery_steps, statuses)
     if first_open is None:
         return {
