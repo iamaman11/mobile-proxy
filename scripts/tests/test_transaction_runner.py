@@ -14,6 +14,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import control_state_machine as CONTROL
 import operation_state_machine as OP
+from operations import install_apk as APK
 import transaction_runner as RUNNER
 
 
@@ -63,11 +64,9 @@ class FakePorts:
         *,
         authorized: bool = True,
         boundary: RUNNER.BoundaryProof | None = None,
-        postcondition_passed: bool = True,
     ) -> None:
         self.authorized = authorized
         self.boundary = boundary or boundary_proof()
-        self.postcondition_passed = postcondition_passed
         self.events: list[str] = []
         self.intents: list[RUNNER.MutationIntent] = []
         self.terminals: list[RUNNER.TerminalRecord] = []
@@ -93,22 +92,21 @@ class FakePorts:
         self.intents.append(intent)
         return "durable-intent-1"
 
-    def verify_apk_postcondition(self, request):
-        self.events.append("verify")
-        return RUNNER.PostconditionProof(
-            self.postcondition_passed,
-            "postcondition-1",
-        )
-
     def persist_terminal(self, record):
         self.events.append("terminal")
         self.terminals.append(record)
         return "terminal-record-1"
 
 
-class FakeAdapter:
-    def __init__(self, *, unknown: bool = False) -> None:
+class FakeExecutor:
+    def __init__(
+        self,
+        *,
+        unknown: bool = False,
+        postcondition_passed: bool = True,
+    ) -> None:
         self.unknown = unknown
+        self.postcondition_passed = postcondition_passed
         self.calls = 0
         self.events: list[str] | None = None
 
@@ -120,11 +118,22 @@ class FakeAdapter:
             raise RUNNER.DispatchOutcomeUnknown("result channel lost")
         return RUNNER.DispatchReceipt("adapter-result-1")
 
+    def verify_postcondition(self, request):
+        if self.events is not None:
+            self.events.append("verify")
+        return RUNNER.PostconditionProof(
+            self.postcondition_passed,
+            "postcondition-1",
+        )
+
 
 class TransactionRunnerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.runner = RUNNER.TransactionRunner()
-        self.request = RUNNER.ApkInstallRequest(TX, "artifact/candidate-apk-1")
+        self.request = APK.ApkInstallRequest(TX, "artifact/candidate-apk-1")
+
+    def binding(self, executor: FakeExecutor) -> APK.ApkInstallBinding:
+        return APK.ApkInstallBinding(executor)
 
     def test_apk_contract_is_single_package_domain_vertical_slice(self) -> None:
         contract = OP.ANDROID_APK_INSTALL
@@ -155,16 +164,33 @@ class TransactionRunnerTests(unittest.TestCase):
             {"domain/package": TX},
         )
 
+    def test_apk_binding_is_exactly_the_contract_edge(self) -> None:
+        executor = FakeExecutor()
+        binding = self.binding(executor)
+        self.assertIs(binding.contract, OP.ANDROID_APK_INSTALL)
+        self.assertEqual(binding.dispatch_step_id, "install_apk")
+        self.assertEqual(binding.postcondition_step_id, "verify_installed_apk")
+        self.assertEqual(binding.acceptance_step_id, "accept")
+        self.assertEqual(binding.transaction_id(self.request), TX)
+        self.assertEqual(
+            binding.mutation_subject_ref(self.request),
+            "artifact/candidate-apk-1",
+        )
+
     def test_success_path_enforces_transaction_order_and_persists_terminal_last(self) -> None:
         ports = FakePorts()
-        adapter = FakeAdapter()
-        adapter.events = ports.events
+        executor = FakeExecutor()
+        executor.events = ports.events
 
-        result = self.runner.run(self.request, ports=ports, adapter=adapter)
+        result = self.runner.run(
+            self.request,
+            ports=ports,
+            binding=self.binding(executor),
+        )
 
         self.assertEqual(result.derived["state"], "ACCEPTED")
         self.assertEqual(result.terminal_ref, "terminal-record-1")
-        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(executor.calls, 1)
         self.assertEqual(
             ports.events,
             [
@@ -181,6 +207,10 @@ class TransactionRunnerTests(unittest.TestCase):
         self.assertEqual(len(ports.intents), 1)
         intent = ports.intents[0]
         self.assertEqual(intent.dispatch_step_id, "install_apk")
+        self.assertEqual(
+            intent.mutation_subject_ref,
+            "artifact/candidate-apk-1",
+        )
         self.assertEqual(intent.affected_domain_generations, {"domain/package": TX})
         self.assertEqual(len(ports.terminals), 1)
         self.assertEqual(ports.terminals[0].derived["state"], "ACCEPTED")
@@ -201,15 +231,19 @@ class TransactionRunnerTests(unittest.TestCase):
 
     def test_lost_post_dispatch_result_is_unknown_and_not_terminalized(self) -> None:
         ports = FakePorts()
-        adapter = FakeAdapter(unknown=True)
-        adapter.events = ports.events
+        executor = FakeExecutor(unknown=True)
+        executor.events = ports.events
 
-        result = self.runner.run(self.request, ports=ports, adapter=adapter)
+        result = self.runner.run(
+            self.request,
+            ports=ports,
+            binding=self.binding(executor),
+        )
 
         self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
         self.assertIn("blind_retry=FORBIDDEN", result.derived["blocking_predicates"])
         self.assertEqual(result.derived["next_step"], "recovery_inspect_package")
-        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(executor.calls, 1)
         self.assertIsNone(result.terminal_ref)
         self.assertEqual(len(ports.terminals), 0)
         self.assertNotIn("verify", ports.events)
@@ -220,35 +254,39 @@ class TransactionRunnerTests(unittest.TestCase):
 
     def test_unknown_existing_trace_forbids_blind_retry_before_any_new_port_call(self) -> None:
         first_ports = FakePorts()
-        first_adapter = FakeAdapter(unknown=True)
+        first_executor = FakeExecutor(unknown=True)
         first = self.runner.run(
             self.request,
             ports=first_ports,
-            adapter=first_adapter,
+            binding=self.binding(first_executor),
         )
 
         retry_ports = FakePorts()
-        retry_adapter = FakeAdapter()
+        retry_executor = FakeExecutor()
         with self.assertRaisesRegex(RUNNER.BlindRetryForbidden, "blind retry"):
             self.runner.run(
                 self.request,
                 ports=retry_ports,
-                adapter=retry_adapter,
+                binding=self.binding(retry_executor),
                 existing_evidence=first.evidence,
             )
 
         self.assertEqual(retry_ports.events, [])
-        self.assertEqual(retry_adapter.calls, 0)
+        self.assertEqual(retry_executor.calls, 0)
 
     def test_same_transaction_boundary_is_required_before_intent_or_dispatch(self) -> None:
         stale = boundary_proof(current_transaction="different-transaction")
         ports = FakePorts(boundary=stale)
-        adapter = FakeAdapter()
+        executor = FakeExecutor()
 
         with self.assertRaisesRegex(RUNNER.TransactionRefusal, "not CURRENT"):
-            self.runner.run(self.request, ports=ports, adapter=adapter)
+            self.runner.run(
+                self.request,
+                ports=ports,
+                binding=self.binding(executor),
+            )
 
-        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(executor.calls, 0)
         self.assertEqual(ports.intents, [])
         self.assertEqual(
             ports.events,
@@ -257,38 +295,77 @@ class TransactionRunnerTests(unittest.TestCase):
 
     def test_unpersisted_boundary_is_rejected_before_mutation_intent(self) -> None:
         ports = FakePorts(boundary=boundary_proof(persisted=False))
-        adapter = FakeAdapter()
+        executor = FakeExecutor()
 
         with self.assertRaisesRegex(RUNNER.TransactionRefusal, "not CURRENT"):
-            self.runner.run(self.request, ports=ports, adapter=adapter)
+            self.runner.run(
+                self.request,
+                ports=ports,
+                binding=self.binding(executor),
+            )
 
-        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(executor.calls, 0)
         self.assertEqual(ports.intents, [])
 
     def test_authority_refusal_never_acquires_mutation_scope(self) -> None:
         ports = FakePorts(authorized=False)
-        adapter = FakeAdapter()
+        executor = FakeExecutor()
 
-        result = self.runner.run(self.request, ports=ports, adapter=adapter)
+        result = self.runner.run(
+            self.request,
+            ports=ports,
+            binding=self.binding(executor),
+        )
 
         self.assertEqual(result.derived["state"], "REFUSED")
-        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(executor.calls, 0)
         self.assertEqual(ports.events, ["authority", "terminal"])
         self.assertEqual(ports.terminals[0].derived["failure_stage"], "SOURCE_AUTHORITY")
 
     def test_failed_postcondition_is_known_failure_and_requires_recovery(self) -> None:
-        ports = FakePorts(postcondition_passed=False)
-        adapter = FakeAdapter()
+        ports = FakePorts()
+        executor = FakeExecutor(postcondition_passed=False)
 
-        result = self.runner.run(self.request, ports=ports, adapter=adapter)
+        result = self.runner.run(
+            self.request,
+            ports=ports,
+            binding=self.binding(executor),
+        )
 
         self.assertEqual(result.derived["state"], "RECOVERY_REQUIRED")
         self.assertEqual(result.derived["next_step"], "recovery_inspect_package")
-        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(executor.calls, 1)
         self.assertEqual(len(ports.terminals), 1)
-        self.assertNotIn(("accept", OP.PASSED), [
-            (item.step_id, item.status) for item in result.evidence
-        ])
+        self.assertNotIn(
+            ("accept", OP.PASSED),
+            [(item.step_id, item.status) for item in result.evidence],
+        )
+
+    def test_kernel_contains_no_apk_or_device_command_semantics(self) -> None:
+        body = (SCRIPT_DIR / "transaction_runner.py").read_text(encoding="utf-8").lower()
+        for forbidden in (
+            "apk",
+            "adb",
+            "artifact_ref",
+            "install_apk",
+            "verify_apk",
+        ):
+            self.assertNotIn(forbidden, body)
+
+    def test_apk_binding_is_the_only_implemented_operation_binding(self) -> None:
+        operation_files = sorted(
+            path.name
+            for path in (SCRIPT_DIR / "operations").glob("*.py")
+            if path.name != "__init__.py"
+        )
+        self.assertEqual(operation_files, ["install_apk.py"])
+
+    def test_binding_rejects_wrong_request_type_before_any_executor_call(self) -> None:
+        executor = FakeExecutor()
+        binding = self.binding(executor)
+        with self.assertRaisesRegex(TypeError, "ApkInstallRequest"):
+            binding.transaction_id(object())
+        self.assertEqual(executor.calls, 0)
 
     def test_operation_evidence_schema_registers_apk_install_contract(self) -> None:
         schema = json.loads(
