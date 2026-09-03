@@ -17,13 +17,7 @@ class BlindRetryForbidden(TransactionRefusal):
 
 
 class DispatchOutcomeUnknown(RuntimeError):
-    """Adapter cannot prove whether the persisted dispatch reached the target."""
-
-
-@dataclass(frozen=True)
-class ApkInstallRequest:
-    transaction_id: str
-    artifact_ref: str
+    """An operation binding cannot prove whether dispatch reached the target."""
 
 
 @dataclass(frozen=True)
@@ -44,7 +38,7 @@ class MutationIntent:
     target: str
     transaction_id: str
     dispatch_step_id: str
-    artifact_ref: str
+    mutation_subject_ref: str
     affected_domain_generations: Mapping[str, str]
 
 
@@ -80,7 +74,7 @@ class TransactionResult:
 class TransactionPorts(Protocol):
     def resolve_authority(
         self,
-        request: ApkInstallRequest,
+        request: object,
         contract: operation.OperationContract,
     ) -> AuthorityProof: ...
 
@@ -98,16 +92,28 @@ class TransactionPorts(Protocol):
 
     def persist_mutation_intent(self, intent: MutationIntent) -> str: ...
 
-    def verify_apk_postcondition(
-        self,
-        request: ApkInstallRequest,
-    ) -> PostconditionProof: ...
-
     def persist_terminal(self, record: TerminalRecord) -> str: ...
 
 
-class ApkInstallAdapter(Protocol):
-    def dispatch_once(self, request: ApkInstallRequest) -> DispatchReceipt: ...
+class OperationBinding(Protocol):
+    """Operation-specific edge consumed by the generic transaction kernel.
+
+    The binding supplies request interpretation plus one physical dispatch and one
+    postcondition observation. It does not own transaction ordering or state.
+    """
+
+    contract: operation.OperationContract
+    dispatch_step_id: str
+    postcondition_step_id: str
+    acceptance_step_id: str
+
+    def transaction_id(self, request: object) -> str: ...
+
+    def mutation_subject_ref(self, request: object) -> str: ...
+
+    def dispatch_once(self, request: object) -> DispatchReceipt: ...
+
+    def verify_postcondition(self, request: object) -> PostconditionProof: ...
 
 
 def _non_empty(value: str, *, field: str) -> str:
@@ -145,6 +151,48 @@ def _derive(
     )
 
 
+def _validate_binding(binding: OperationBinding) -> None:
+    contract = binding.contract
+    steps = tuple(contract.steps)
+    by_id = {step.step_id: (index, step) for index, step in enumerate(steps)}
+    if len(by_id) != len(steps):
+        raise TransactionRefusal("operation contract has duplicate step ids")
+
+    required_kernel_steps = (
+        "resolve_authority",
+        "mutation_scope",
+        "phone_access_boundary",
+        "mutation_intent",
+    )
+    binding_steps = (
+        binding.dispatch_step_id,
+        binding.postcondition_step_id,
+        binding.acceptance_step_id,
+    )
+    all_steps = (*required_kernel_steps, *binding_steps)
+    if len(set(all_steps)) != len(all_steps):
+        raise TransactionRefusal("operation binding step ids must be distinct")
+    if any(step_id not in by_id for step_id in all_steps):
+        raise TransactionRefusal("operation binding does not match operation contract")
+
+    indexes = [by_id[step_id][0] for step_id in all_steps]
+    if indexes != sorted(indexes):
+        raise TransactionRefusal("operation binding steps are out of contract order")
+
+    boundary = by_id["phone_access_boundary"][1]
+    dispatch = by_id[binding.dispatch_step_id][1]
+    postcondition = by_id[binding.postcondition_step_id][1]
+    acceptance = by_id[binding.acceptance_step_id][1]
+    if not boundary.mutation_boundary:
+        raise TransactionRefusal("operation binding lacks mutation boundary")
+    if not dispatch.destructive:
+        raise TransactionRefusal("operation dispatch step must be destructive")
+    if postcondition.destructive:
+        raise TransactionRefusal("postcondition step must be non-destructive")
+    if not acceptance.acceptance:
+        raise TransactionRefusal("acceptance step must be an acceptance step")
+
+
 def _validate_boundary(
     contract: operation.OperationContract,
     proof: BoundaryProof,
@@ -156,7 +204,9 @@ def _validate_boundary(
         if item.freshness == operation.SAME_TRANSACTION
     )
     if len(requirements) != 1:
-        raise TransactionRefusal("apk install requires exactly one SAME_TRANSACTION fact")
+        raise TransactionRefusal(
+            "transaction operation requires exactly one SAME_TRANSACTION fact"
+        )
 
     requirement = requirements[0]
     fact = proof.fact
@@ -210,35 +260,42 @@ def _terminal_record(
 
 
 class TransactionRunner:
-    """Stage C.0c transaction kernel for the APK install vertical slice only.
+    """Single imperative transaction kernel around the canonical reducers.
 
-    This class is imperative orchestration, not a reducer. All operation-state
+    This class owns invariant ordering only. Operation-specific request, dispatch and
+    postcondition behavior arrives through ``OperationBinding``. All operation-state
     classification stays in ``operation_state_machine.py`` and physical-fact
     admission stays in ``control_state_machine.py``.
     """
 
-    contract = operation.ANDROID_APK_INSTALL
-
     def run(
         self,
-        request: ApkInstallRequest,
+        request: object,
         *,
         ports: TransactionPorts,
-        adapter: ApkInstallAdapter,
+        binding: OperationBinding,
         existing_evidence: Sequence[operation.PhaseEvidence] = (),
     ) -> TransactionResult:
-        transaction_id = _non_empty(request.transaction_id, field="transaction_id")
-        _non_empty(request.artifact_ref, field="artifact_ref")
+        _validate_binding(binding)
+        contract = binding.contract
+        transaction_id = _non_empty(
+            binding.transaction_id(request),
+            field="transaction_id",
+        )
+        mutation_subject_ref = _non_empty(
+            binding.mutation_subject_ref(request),
+            field="mutation_subject_ref",
+        )
 
         prior_evidence = tuple(existing_evidence)
         if prior_evidence:
-            prior = _derive(self.contract, prior_evidence, transaction_id)
+            prior = _derive(contract, prior_evidence, transaction_id)
             if prior["state"] == "UNKNOWN_EXECUTION_OUTCOME":
                 raise BlindRetryForbidden("blind retry forbidden after persisted dispatch")
-            raise TransactionRefusal("Stage C.0c does not implement transaction resume")
+            raise TransactionRefusal("transaction resume is not implemented")
 
         evidence: list[operation.PhaseEvidence] = []
-        authority = ports.resolve_authority(request, self.contract)
+        authority = ports.resolve_authority(request, contract)
         authority_ref = _non_empty(authority.source_ref, field="authority.source_ref")
         if not authority.authorized:
             evidence.append(
@@ -249,7 +306,7 @@ class TransactionRunner:
                     authority_ref,
                 )
             )
-            record = _terminal_record(self.contract, transaction_id, {}, evidence)
+            record = _terminal_record(contract, transaction_id, {}, evidence)
             terminal_ref = _non_empty(
                 ports.persist_terminal(record),
                 field="terminal_ref",
@@ -266,7 +323,7 @@ class TransactionRunner:
         )
 
         with ports.acquire_mutation_scope(
-            self.contract.target,
+            contract.target,
             transaction_id,
         ) as scope_ref:
             evidence.append(
@@ -279,11 +336,11 @@ class TransactionRunner:
             )
 
             boundary = ports.prove_same_transaction_boundary(
-                self.contract,
+                contract,
                 transaction_id,
             )
             boundary_ref = _validate_boundary(
-                self.contract,
+                contract,
                 boundary,
                 transaction_id,
             )
@@ -297,15 +354,15 @@ class TransactionRunner:
             )
 
             generations = operation.affected_domain_generation_updates(
-                self.contract,
+                contract,
                 transaction_id,
             )
             intent = MutationIntent(
-                operation_id=self.contract.operation_id,
-                target=self.contract.target,
+                operation_id=contract.operation_id,
+                target=contract.target,
                 transaction_id=transaction_id,
-                dispatch_step_id="install_apk",
-                artifact_ref=request.artifact_ref,
+                dispatch_step_id=binding.dispatch_step_id,
+                mutation_subject_ref=mutation_subject_ref,
                 affected_domain_generations=generations,
             )
             intent_ref = _non_empty(
@@ -322,25 +379,25 @@ class TransactionRunner:
             )
             evidence.append(
                 _phase(
-                    "install_apk",
+                    binding.dispatch_step_id,
                     operation.DISPATCHED,
                     transaction_id,
                     intent_ref,
                 )
             )
 
-            dispatched = _derive(self.contract, evidence, transaction_id)
+            dispatched = _derive(contract, evidence, transaction_id)
             if dispatched["state"] != "UNKNOWN_EXECUTION_OUTCOME":
                 raise RuntimeError("persisted dispatch must classify as unknown before result")
 
             try:
-                receipt = adapter.dispatch_once(request)
+                receipt = binding.dispatch_once(request)
                 receipt_ref = _non_empty(
                     receipt.source_ref,
                     field="dispatch_receipt.source_ref",
                 )
             except Exception as error:
-                unknown = _derive(self.contract, evidence, transaction_id)
+                unknown = _derive(contract, evidence, transaction_id)
                 return TransactionResult(
                     tuple(evidence),
                     unknown,
@@ -350,21 +407,21 @@ class TransactionRunner:
 
             evidence.append(
                 _phase(
-                    "install_apk",
+                    binding.dispatch_step_id,
                     operation.PASSED,
                     transaction_id,
                     receipt_ref,
                 )
             )
 
-            postcondition = ports.verify_apk_postcondition(request)
+            postcondition = binding.verify_postcondition(request)
             post_ref = _non_empty(
                 postcondition.source_ref,
                 field="postcondition.source_ref",
             )
             evidence.append(
                 _phase(
-                    "verify_installed_apk",
+                    binding.postcondition_step_id,
                     operation.PASSED if postcondition.passed else operation.FAILED,
                     transaction_id,
                     post_ref,
@@ -374,7 +431,7 @@ class TransactionRunner:
             if postcondition.passed:
                 evidence.append(
                     _phase(
-                        "accept",
+                        binding.acceptance_step_id,
                         operation.PASSED,
                         transaction_id,
                         post_ref,
@@ -382,7 +439,7 @@ class TransactionRunner:
                 )
 
             record = _terminal_record(
-                self.contract,
+                contract,
                 transaction_id,
                 generations,
                 evidence,
