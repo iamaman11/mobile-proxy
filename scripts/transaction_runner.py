@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-import hashlib
 import json
 import re
 from typing import Iterable, Mapping, Protocol, Sequence
@@ -36,6 +35,8 @@ TERMINAL_STATES = frozenset(
 
 _OPERATION_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,95}")
 _CURSOR_RE = re.compile(r"issue179-comment-[1-9][0-9]*")
+_REQUEST_ID_RE = re.compile(r"req-sha256:[0-9a-f]{64}")
+_GENERATION_RE = re.compile(r"gen-sha256:[0-9a-f]{64}")
 
 
 class TransactionRefusal(RuntimeError):
@@ -56,11 +57,13 @@ class SemanticRequestError(TransactionRefusal):
 
 @dataclass(frozen=True)
 class SemanticRequestIdentity:
-    """Canonical semantic identity shared with the private Issue #1 router.
+    """Typed semantic identity produced by the private Issue #1 router.
 
-    GitHub comment/run/attempt identifiers are intentionally absent. The private
-    control plane may retain them as provenance, but they never define mutation
-    identity.
+    The private router owns the accepted request digest construction. This public
+    kernel owns the canonical envelope shape and validates routed identity before
+    it can participate in physical transaction identity. GitHub comment/run/attempt
+    identifiers are intentionally absent because they are provenance, not semantic
+    mutation identity.
     """
 
     schema: str
@@ -201,16 +204,6 @@ class OperationBinding(Protocol):
     def verify_postcondition(self, request: object) -> PostconditionProof: ...
 
 
-def _canonical_digest(payload: Mapping[str, object]) -> str:
-    canonical = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def normalize_semantic_arguments(arguments: Iterable[str]) -> tuple[str, ...]:
     result = tuple(str(value).strip() for value in arguments)
     if any(not value for value in result):
@@ -220,74 +213,91 @@ def normalize_semantic_arguments(arguments: Iterable[str]) -> tuple[str, ...]:
     return result
 
 
-def desired_generation(operation_id: str, arguments: Iterable[str]) -> str:
-    operation_id = operation_id.strip()
-    if _OPERATION_RE.fullmatch(operation_id) is None:
-        raise SemanticRequestError("invalid operation name")
-    args = normalize_semantic_arguments(arguments)
-    return "gen-sha256:" + _canonical_digest(
-        {"operation": operation_id, "arguments": list(args)}
-    )
-
-
-def build_semantic_request_identity(
-    *,
-    operation: str,
-    arguments: Iterable[str],
-    authority_cursor: str,
-    generation: str | None = None,
+def validate_semantic_request_identity(
+    identity: SemanticRequestIdentity,
 ) -> SemanticRequestIdentity:
-    """Build exactly the semantic ID used at the private control-router boundary."""
+    """Validate one routed semantic envelope without inventing a digest contract.
 
-    operation = operation.strip()
-    authority_cursor = authority_cursor.strip()
-    if _OPERATION_RE.fullmatch(operation) is None:
+    Request-id and desired-generation digests are produced at the already accepted
+    private router boundary. Public code validates exact schema/shape and owns all
+    downstream semantic use. This deliberately avoids introducing a second raw
+    digest implementation in first-party Python, which repository policy forbids.
+    """
+
+    if not isinstance(identity, SemanticRequestIdentity):
+        raise SemanticRequestError("invalid semantic request identity type")
+    if identity.schema != SEMANTIC_REQUEST_SCHEMA:
+        raise SemanticRequestError("invalid semantic request schema")
+
+    operation_id = identity.operation.strip()
+    authority_cursor = identity.authority_cursor.strip()
+    request_id = identity.request_id.strip()
+    generation = identity.desired_generation.strip()
+    arguments = normalize_semantic_arguments(identity.arguments)
+
+    if _OPERATION_RE.fullmatch(operation_id) is None:
         raise SemanticRequestError("invalid operation name")
     if _CURSOR_RE.fullmatch(authority_cursor) is None:
         raise SemanticRequestError("invalid authority cursor")
-
-    args = normalize_semantic_arguments(arguments)
-    generation_value = (generation or desired_generation(operation, args)).strip()
-    if not generation_value.startswith("gen-") or len(generation_value) > 160:
+    if _REQUEST_ID_RE.fullmatch(request_id) is None:
+        raise SemanticRequestError("invalid semantic request id")
+    if _GENERATION_RE.fullmatch(generation) is None:
         raise SemanticRequestError("invalid desired generation")
+    if arguments != identity.arguments:
+        raise SemanticRequestError("semantic arguments are not normalized")
+    if operation_id != identity.operation:
+        raise SemanticRequestError("operation name is not normalized")
+    if authority_cursor != identity.authority_cursor:
+        raise SemanticRequestError("authority cursor is not normalized")
+    if request_id != identity.request_id or generation != identity.desired_generation:
+        raise SemanticRequestError("semantic digest fields are not normalized")
+    return identity
 
-    semantic = {
-        "schema": SEMANTIC_REQUEST_SCHEMA,
-        "operation": operation,
-        "arguments": list(args),
-        "authority_cursor": authority_cursor,
-        "desired_generation": generation_value,
-    }
-    return SemanticRequestIdentity(
+
+def routed_semantic_request_identity(
+    *,
+    request_id: str,
+    operation: str,
+    arguments: Iterable[str],
+    authority_cursor: str,
+    desired_generation: str,
+) -> SemanticRequestIdentity:
+    """Construct the public typed view of an already routed semantic request."""
+
+    identity = SemanticRequestIdentity(
         schema=SEMANTIC_REQUEST_SCHEMA,
-        request_id="req-sha256:" + _canonical_digest(semantic),
+        request_id=request_id,
         operation=operation,
-        arguments=args,
+        arguments=tuple(arguments),
         authority_cursor=authority_cursor,
-        desired_generation=generation_value,
+        desired_generation=desired_generation,
     )
+    return validate_semantic_request_identity(identity)
 
 
 def derive_physical_transaction_id(
     semantic: SemanticRequestIdentity,
     physical_operation_id: str,
 ) -> str:
-    """Derive one stable physical transaction identity from one semantic request.
+    """Derive one stable physical transaction identity without provenance inputs.
 
-    The outer control request may orchestrate more than one physical operation. The
-    physical operation id therefore participates in the derived identity while
-    GitHub comment/run provenance never does.
+    The semantic request id already commits to normalized arguments, authority
+    cursor and desired generation at the router boundary. The physical operation id
+    disambiguates subtransactions when one semantic control request orchestrates
+    more than one physical effect. No new digest primitive is introduced here.
     """
 
+    semantic = validate_semantic_request_identity(semantic)
     physical_operation_id = physical_operation_id.strip()
     if _OPERATION_RE.fullmatch(physical_operation_id) is None:
         raise SemanticRequestError("invalid physical operation name")
-    payload = {
-        "control_request_id": semantic.request_id,
-        "physical_operation": physical_operation_id,
-        "desired_generation": semantic.desired_generation,
-    }
-    return "tx-sha256:" + _canonical_digest(payload)
+
+    request_digest = semantic.request_id.removeprefix("req-sha256:")
+    generation_digest = semantic.desired_generation.removeprefix("gen-sha256:")
+    return (
+        "physical-tx-v1:"
+        f"{request_digest}:{physical_operation_id}:{generation_digest}"
+    )
 
 
 def _non_empty(value: str, *, field: str) -> str:
@@ -501,9 +511,7 @@ def _validate_preflight(
         unused.remove(proof)
         if proof.fact.target != contract.target:
             raise TransactionRefusal("preflight fact target does not match operation target")
-        refs.append(
-            _validate_one_fact_requirement(requirement, proof, transaction_id)
-        )
+        refs.append(_validate_one_fact_requirement(requirement, proof, transaction_id))
 
     if unused:
         raise TransactionRefusal("unexpected preflight proof")
@@ -515,14 +523,15 @@ def _combined_preflight_ref(refs: Sequence[str]) -> str:
         raise TransactionRefusal("preflight observation refs are empty")
     if len(refs) == 1:
         return _non_empty(refs[0], field="preflight.source_ref")
-    canonical = {"observation_refs": sorted(refs)}
-    return "preflight-sha256:" + _canonical_digest(canonical)
+    for ref in refs:
+        _non_empty(ref, field="preflight.source_ref")
+    canonical = json.dumps(sorted(refs), separators=(",", ":"), ensure_ascii=True)
+    return f"preflight-set-v1:{canonical}"
 
 
 def _semantic_identity(
     binding: OperationBinding,
     request: object,
-    contract: operation.OperationContract,
 ) -> SemanticRequestIdentity | None:
     provider = getattr(binding, "semantic_request_identity", None)
     if not callable(provider):
@@ -530,17 +539,7 @@ def _semantic_identity(
     identity = provider(request)
     if identity is None:
         return None
-    if not isinstance(identity, SemanticRequestIdentity):
-        raise SemanticRequestError("binding returned invalid semantic request identity")
-    rebuilt = build_semantic_request_identity(
-        operation=identity.operation,
-        arguments=identity.arguments,
-        authority_cursor=identity.authority_cursor,
-        generation=identity.desired_generation,
-    )
-    if rebuilt != identity:
-        raise SemanticRequestError("semantic request identity is not canonical")
-    return identity
+    return validate_semantic_request_identity(identity)
 
 
 def _lifecycle_state(
@@ -654,7 +653,7 @@ class TransactionRunner:
             binding.mutation_subject_ref(request),
             field="mutation_subject_ref",
         )
-        semantic = _semantic_identity(binding, request, contract)
+        semantic = _semantic_identity(binding, request)
         if semantic is not None:
             expected_transaction_id = derive_physical_transaction_id(
                 semantic,
