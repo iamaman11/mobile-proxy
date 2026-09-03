@@ -33,6 +33,19 @@ TERMINAL_STATES = frozenset(
     }
 )
 
+RECOVERY_PROVEN_COMPLETE = "PROVEN_COMPLETE"
+RECOVERY_PROVEN_ABSENT = "PROVEN_ABSENT"
+RECOVERY_RESIDUAL_PRESENT = "RESIDUAL_PRESENT"
+RECOVERY_INDETERMINATE = "INDETERMINATE"
+RECOVERY_DISPOSITIONS = frozenset(
+    {
+        RECOVERY_PROVEN_COMPLETE,
+        RECOVERY_PROVEN_ABSENT,
+        RECOVERY_RESIDUAL_PRESENT,
+        RECOVERY_INDETERMINATE,
+    }
+)
+
 _OPERATION_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,95}")
 _CURSOR_RE = re.compile(r"issue179-comment-[1-9][0-9]*")
 _REQUEST_ID_RE = re.compile(r"req-sha256:[0-9a-f]{64}")
@@ -136,6 +149,12 @@ class PostconditionProof:
 
 
 @dataclass(frozen=True)
+class RecoveryObservation:
+    disposition: str
+    source_ref: str
+
+
+@dataclass(frozen=True)
 class TerminalRecord:
     operation_id: str
     target: str
@@ -150,6 +169,25 @@ class TerminalRecord:
 
 
 @dataclass(frozen=True)
+class RecoveryRecord:
+    operation_id: str
+    target: str
+    transaction_id: str
+    mutation_subject_ref: str
+    prior_terminal_ref: str
+    recovery_authority_ref: str
+    recovery_step_id: str
+    disposition: str
+    observation_source_ref: str
+    evidence: tuple[operation.PhaseEvidence, ...]
+    derived: Mapping[str, object]
+    lifecycle_state: str
+    control_request_id: str = ""
+    authority_cursor: str = ""
+    desired_generation: str = ""
+
+
+@dataclass(frozen=True)
 class TransactionResult:
     evidence: tuple[operation.PhaseEvidence, ...]
     derived: Mapping[str, object]
@@ -158,6 +196,7 @@ class TransactionResult:
     postcondition_error: str | None = None
     lifecycle_state: str = REQUESTED
     control_request_id: str = ""
+    recovery_disposition: str | None = None
 
 
 class TransactionPorts(Protocol):
@@ -182,6 +221,19 @@ class TransactionPorts(Protocol):
     def persist_mutation_intent(self, intent: MutationIntent) -> str: ...
 
     def persist_terminal(self, record: TerminalRecord) -> str: ...
+
+
+class RecoveryPorts(Protocol):
+    def resolve_recovery_authority(
+        self,
+        request: object,
+        contract: operation.OperationContract,
+        transaction_id: str,
+        mutation_subject_ref: str,
+        prior_terminal_ref: str,
+    ) -> AuthorityProof: ...
+
+    def persist_recovery(self, record: RecoveryRecord) -> str: ...
 
 
 class OperationBinding(Protocol):
@@ -341,9 +393,6 @@ def _roles(binding: OperationBinding) -> KernelStepRoles:
     if isinstance(roles, KernelStepRoles):
         return roles
 
-    # Compatibility bridge for the already accepted first physical vertical
-    # slice. It is intentionally expressed in one place so existing bindings move
-    # through this universal kernel without creating a second transaction engine.
     dispatch_step_id = getattr(binding, "dispatch_step_id", None)
     postcondition_step_id = getattr(binding, "postcondition_step_id", None)
     acceptance_step_id = getattr(binding, "acceptance_step_id", None)
@@ -478,8 +527,6 @@ def _preflight_proofs(
     if callable(provider):
         proofs = tuple(provider(contract, transaction_id))
     else:
-        # Backward-compatible adapter surface for the first physical vertical.
-        # Multi-fact operations must implement prove_preflight_requirements.
         proofs = (ports.prove_same_transaction_boundary(contract, transaction_id),)
     return proofs
 
@@ -631,12 +678,7 @@ def _terminal_record(
         affected_domain_generations=dict(generations),
         evidence=tuple(evidence),
         derived=derived,
-        lifecycle_state=_lifecycle_state(
-            contract,
-            evidence,
-            transaction_id,
-            roles,
-        ),
+        lifecycle_state=_lifecycle_state(contract, evidence, transaction_id, roles),
         control_request_id="" if semantic is None else semantic.request_id,
         authority_cursor="" if semantic is None else semantic.authority_cursor,
         desired_generation="" if semantic is None else semantic.desired_generation,
@@ -644,17 +686,7 @@ def _terminal_record(
 
 
 class TransactionRunner:
-    """Universal imperative physical transaction kernel around canonical reducers.
-
-    Invariant order:
-
-      semantic request -> authority -> global mutation scope -> causal preflight
-      -> durable intent/generation invalidation -> exactly-once dispatch
-      -> independent postcondition -> durable terminal classification
-
-    The kernel never owns operation-specific device commands. Bindings own only
-    request interpretation, one physical dispatch, and one postcondition observer.
-    """
+    """Universal imperative physical transaction kernel around canonical reducers."""
 
     def run(
         self,
@@ -666,19 +698,14 @@ class TransactionRunner:
     ) -> TransactionResult:
         roles = _validate_binding(binding)
         contract = binding.contract
-        transaction_id = _non_empty(
-            binding.transaction_id(request),
-            field="transaction_id",
-        )
+        transaction_id = _non_empty(binding.transaction_id(request), field="transaction_id")
         mutation_subject_ref = _non_empty(
-            binding.mutation_subject_ref(request),
-            field="mutation_subject_ref",
+            binding.mutation_subject_ref(request), field="mutation_subject_ref"
         )
         semantic = _semantic_identity(binding, request)
         if semantic is not None:
             expected_transaction_id = derive_physical_transaction_id(
-                semantic,
-                contract.operation_id,
+                semantic, contract.operation_id
             )
             if transaction_id != expected_transaction_id:
                 raise SemanticRequestError(
@@ -697,62 +724,28 @@ class TransactionRunner:
         authority_ref = _non_empty(authority.source_ref, field="authority.source_ref")
         if not authority.authorized:
             evidence.append(
-                _phase(
-                    roles.authority_step_id,
-                    operation.FAILED,
-                    transaction_id,
-                    authority_ref,
-                )
+                _phase(roles.authority_step_id, operation.FAILED, transaction_id, authority_ref)
             )
-            record = _terminal_record(
-                contract,
-                transaction_id,
-                {},
-                evidence,
-                roles,
-                semantic,
-            )
-            terminal_ref = _non_empty(
-                ports.persist_terminal(record),
-                field="terminal_ref",
-            )
+            record = _terminal_record(contract, transaction_id, {}, evidence, roles, semantic)
+            terminal_ref = _non_empty(ports.persist_terminal(record), field="terminal_ref")
             return TransactionResult(
-                tuple(evidence),
-                record.derived,
-                terminal_ref,
+                tuple(evidence), record.derived, terminal_ref,
                 lifecycle_state=record.lifecycle_state,
                 control_request_id=record.control_request_id,
             )
 
         evidence.append(
-            _phase(
-                roles.authority_step_id,
-                operation.PASSED,
-                transaction_id,
-                authority_ref,
-            )
+            _phase(roles.authority_step_id, operation.PASSED, transaction_id, authority_ref)
         )
 
-        with ports.acquire_mutation_scope(
-            contract.target,
-            transaction_id,
-        ) as scope_ref:
+        with ports.acquire_mutation_scope(contract.target, transaction_id) as scope_ref:
             evidence.append(
-                _phase(
-                    roles.mutation_scope_step_id,
-                    operation.PASSED,
-                    transaction_id,
-                    scope_ref,
-                )
+                _phase(roles.mutation_scope_step_id, operation.PASSED, transaction_id, scope_ref)
             )
 
             proofs = _preflight_proofs(ports, contract, transaction_id)
             try:
-                preflight_refs = _validate_preflight(
-                    contract,
-                    proofs,
-                    transaction_id,
-                )
+                preflight_refs = _validate_preflight(contract, proofs, transaction_id)
             except TransactionRefusal:
                 evidence.append(
                     _phase(
@@ -762,24 +755,12 @@ class TransactionRunner:
                         _preflight_refusal_ref(contract, proofs),
                     )
                 )
-                record = _terminal_record(
-                    contract,
-                    transaction_id,
-                    {},
-                    evidence,
-                    roles,
-                    semantic,
-                )
+                record = _terminal_record(contract, transaction_id, {}, evidence, roles, semantic)
                 if record.lifecycle_state != TERMINAL_REFUSED:
                     raise RuntimeError("pre-dispatch causal refusal must classify as REFUSED")
-                terminal_ref = _non_empty(
-                    ports.persist_terminal(record),
-                    field="terminal_ref",
-                )
+                terminal_ref = _non_empty(ports.persist_terminal(record), field="terminal_ref")
                 return TransactionResult(
-                    tuple(evidence),
-                    record.derived,
-                    terminal_ref,
+                    tuple(evidence), record.derived, terminal_ref,
                     lifecycle_state=record.lifecycle_state,
                     control_request_id=record.control_request_id,
                 )
@@ -793,10 +774,7 @@ class TransactionRunner:
                 )
             )
 
-            generations = operation.affected_domain_generation_updates(
-                contract,
-                transaction_id,
-            )
+            generations = operation.affected_domain_generation_updates(contract, transaction_id)
             intent = MutationIntent(
                 operation_id=contract.operation_id,
                 target=contract.target,
@@ -810,57 +788,33 @@ class TransactionRunner:
                 preflight_observation_refs=preflight_refs,
             )
             intent_ref = _non_empty(
-                ports.persist_mutation_intent(intent),
-                field="mutation_intent.source_ref",
+                ports.persist_mutation_intent(intent), field="mutation_intent.source_ref"
             )
             evidence.append(
-                _phase(
-                    roles.intent_step_id,
-                    operation.PASSED,
-                    transaction_id,
-                    intent_ref,
-                )
+                _phase(roles.intent_step_id, operation.PASSED, transaction_id, intent_ref)
             )
             evidence.append(
-                _phase(
-                    roles.dispatch_step_id,
-                    operation.DISPATCHED,
-                    transaction_id,
-                    intent_ref,
-                )
+                _phase(roles.dispatch_step_id, operation.DISPATCHED, transaction_id, intent_ref)
             )
 
             dispatched = _derive(contract, evidence, transaction_id)
             if dispatched["state"] != "UNKNOWN_EXECUTION_OUTCOME":
-                raise RuntimeError(
-                    "persisted dispatch must classify as unknown before result"
-                )
+                raise RuntimeError("persisted dispatch must classify as unknown before result")
 
             try:
                 receipt = binding.dispatch_once(request)
                 receipt_ref = _non_empty(
-                    receipt.source_ref,
-                    field="dispatch_receipt.source_ref",
+                    receipt.source_ref, field="dispatch_receipt.source_ref"
                 )
             except Exception as error:
                 record = _terminal_record(
-                    contract,
-                    transaction_id,
-                    generations,
-                    evidence,
-                    roles,
-                    semantic,
+                    contract, transaction_id, generations, evidence, roles, semantic
                 )
                 if record.lifecycle_state != TERMINAL_UNKNOWN:
                     raise RuntimeError("post-dispatch ambiguity must classify as UNKNOWN")
-                terminal_ref = _non_empty(
-                    ports.persist_terminal(record),
-                    field="terminal_ref",
-                )
+                terminal_ref = _non_empty(ports.persist_terminal(record), field="terminal_ref")
                 return TransactionResult(
-                    tuple(evidence),
-                    record.derived,
-                    terminal_ref,
+                    tuple(evidence), record.derived, terminal_ref,
                     dispatch_error=f"{type(error).__name__}: {error}",
                     lifecycle_state=record.lifecycle_state,
                     control_request_id=record.control_request_id,
@@ -869,80 +823,185 @@ class TransactionRunner:
             try:
                 postcondition = binding.verify_postcondition(request)
                 post_ref = _non_empty(
-                    postcondition.source_ref,
-                    field="postcondition.source_ref",
+                    postcondition.source_ref, field="postcondition.source_ref"
                 )
             except Exception as error:
                 record = _terminal_record(
-                    contract,
-                    transaction_id,
-                    generations,
-                    evidence,
-                    roles,
-                    semantic,
+                    contract, transaction_id, generations, evidence, roles, semantic
                 )
                 if record.lifecycle_state != TERMINAL_UNKNOWN:
                     raise RuntimeError(
                         "unobserved postcondition after dispatch must classify as UNKNOWN"
                     )
-                terminal_ref = _non_empty(
-                    ports.persist_terminal(record),
-                    field="terminal_ref",
-                )
+                terminal_ref = _non_empty(ports.persist_terminal(record), field="terminal_ref")
                 return TransactionResult(
-                    tuple(evidence),
-                    record.derived,
-                    terminal_ref,
+                    tuple(evidence), record.derived, terminal_ref,
                     postcondition_error=f"{type(error).__name__}: {error}",
                     lifecycle_state=record.lifecycle_state,
                     control_request_id=record.control_request_id,
                 )
 
             evidence.append(
-                _phase(
-                    roles.dispatch_step_id,
-                    operation.PASSED,
-                    transaction_id,
-                    receipt_ref,
-                )
+                _phase(roles.dispatch_step_id, operation.PASSED, transaction_id, receipt_ref)
             )
             evidence.append(
                 _phase(
                     roles.postcondition_step_id,
-                    operation.PASSED
-                    if postcondition.passed
-                    else operation.FAILED,
+                    operation.PASSED if postcondition.passed else operation.FAILED,
                     transaction_id,
                     post_ref,
                 )
             )
-
             if postcondition.passed:
                 evidence.append(
-                    _phase(
-                        roles.acceptance_step_id,
-                        operation.PASSED,
-                        transaction_id,
-                        post_ref,
-                    )
+                    _phase(roles.acceptance_step_id, operation.PASSED, transaction_id, post_ref)
                 )
 
             record = _terminal_record(
-                contract,
-                transaction_id,
-                generations,
-                evidence,
-                roles,
-                semantic,
+                contract, transaction_id, generations, evidence, roles, semantic
             )
-            terminal_ref = _non_empty(
-                ports.persist_terminal(record),
-                field="terminal_ref",
-            )
+            terminal_ref = _non_empty(ports.persist_terminal(record), field="terminal_ref")
             return TransactionResult(
-                tuple(evidence),
-                record.derived,
-                terminal_ref,
+                tuple(evidence), record.derived, terminal_ref,
                 lifecycle_state=record.lifecycle_state,
                 control_request_id=record.control_request_id,
             )
+
+    def recover(
+        self,
+        request: object,
+        *,
+        ports: RecoveryPorts,
+        binding: OperationBinding,
+        existing_evidence: Sequence[operation.PhaseEvidence],
+        prior_terminal_ref: str,
+    ) -> TransactionResult:
+        """Run only the contract-declared read-only recovery observation for UNKNOWN.
+
+        This entrypoint cannot acquire mutation scope, persist mutation intent, update
+        physical-domain generations, or invoke the primary dispatch edge.
+        """
+
+        roles = _validate_binding(binding)
+        contract = binding.contract
+        transaction_id = _non_empty(binding.transaction_id(request), field="transaction_id")
+        mutation_subject_ref = _non_empty(
+            binding.mutation_subject_ref(request), field="mutation_subject_ref"
+        )
+        semantic = _semantic_identity(binding, request)
+        if semantic is not None:
+            expected_transaction_id = derive_physical_transaction_id(
+                semantic, contract.operation_id
+            )
+            if transaction_id != expected_transaction_id:
+                raise SemanticRequestError(
+                    "transaction_id does not match semantic physical transaction identity"
+                )
+
+        evidence = list(existing_evidence)
+        if not evidence:
+            raise TransactionRefusal("recovery requires existing transaction evidence")
+        if any(item.transaction_id != transaction_id for item in evidence):
+            raise TransactionRefusal("recovery evidence mixes transaction identities")
+
+        prior = _derive(contract, evidence, transaction_id)
+        if prior.get("state") != "UNKNOWN_EXECUTION_OUTCOME":
+            raise TransactionRefusal("read-only recovery requires UNKNOWN_EXECUTION_OUTCOME")
+        next_step_id = str(prior.get("next_step") or "")
+        recovery_steps = {step.step_id: step for step in contract.recovery_steps}
+        recovery_step = recovery_steps.get(next_step_id)
+        if recovery_step is None:
+            raise TransactionRefusal("UNKNOWN trace has no declared recovery step")
+        if recovery_step.destructive or recovery_step.kind != "OBSERVE":
+            raise TransactionRefusal("recovery entrypoint permits only non-destructive OBSERVE")
+
+        prior_terminal_ref = _non_empty(
+            prior_terminal_ref, field="prior_terminal_ref"
+        )
+        authority = ports.resolve_recovery_authority(
+            request,
+            contract,
+            transaction_id,
+            mutation_subject_ref,
+            prior_terminal_ref,
+        )
+        authority_ref = _non_empty(
+            authority.source_ref, field="recovery_authority.source_ref"
+        )
+        if not authority.authorized:
+            raise TransactionRefusal("recovery authority refused")
+
+        observer = getattr(binding, "observe_recovery", None)
+        if not callable(observer):
+            raise TransactionRefusal("operation binding has no recovery observer")
+        observation = observer(request)
+        if not isinstance(observation, RecoveryObservation):
+            raise TransactionRefusal("recovery observer returned invalid result")
+        if observation.disposition not in RECOVERY_DISPOSITIONS:
+            raise TransactionRefusal("recovery observer returned unsupported disposition")
+        observation_ref = _non_empty(
+            observation.source_ref, field="recovery_observation.source_ref"
+        )
+
+        if observation.disposition in {
+            RECOVERY_PROVEN_COMPLETE,
+            RECOVERY_PROVEN_ABSENT,
+        }:
+            evidence.append(
+                _phase(next_step_id, operation.PASSED, transaction_id, observation_ref)
+            )
+        elif observation.disposition == RECOVERY_RESIDUAL_PRESENT:
+            evidence.append(
+                _phase(next_step_id, operation.FAILED, transaction_id, observation_ref)
+            )
+
+        derived = _derive(contract, evidence, transaction_id)
+        if observation.disposition in {
+            RECOVERY_PROVEN_COMPLETE,
+            RECOVERY_PROVEN_ABSENT,
+        } and derived.get("state") != "RECOVERED":
+            raise RuntimeError("proven recovery observation must classify as RECOVERED")
+        if (
+            observation.disposition == RECOVERY_RESIDUAL_PRESENT
+            and derived.get("state") != "QUARANTINED"
+        ):
+            raise RuntimeError("residual recovery observation must classify as QUARANTINED")
+        if (
+            observation.disposition == RECOVERY_INDETERMINATE
+            and derived.get("state") != "UNKNOWN_EXECUTION_OUTCOME"
+        ):
+            raise RuntimeError("indeterminate recovery observation must remain UNKNOWN")
+        if derived.get("state") == "ACCEPTED":
+            raise RuntimeError("recovery observation cannot accept the original mutation")
+
+        lifecycle_state = _lifecycle_state(
+            contract, evidence, transaction_id, roles
+        )
+        record = RecoveryRecord(
+            operation_id=contract.operation_id,
+            target=contract.target,
+            transaction_id=transaction_id,
+            mutation_subject_ref=mutation_subject_ref,
+            prior_terminal_ref=prior_terminal_ref,
+            recovery_authority_ref=authority_ref,
+            recovery_step_id=next_step_id,
+            disposition=observation.disposition,
+            observation_source_ref=observation_ref,
+            evidence=tuple(evidence),
+            derived=derived,
+            lifecycle_state=lifecycle_state,
+            control_request_id="" if semantic is None else semantic.request_id,
+            authority_cursor="" if semantic is None else semantic.authority_cursor,
+            desired_generation="" if semantic is None else semantic.desired_generation,
+        )
+        recovery_ref = _non_empty(
+            ports.persist_recovery(record), field="recovery_ref"
+        )
+        return TransactionResult(
+            tuple(evidence),
+            derived,
+            recovery_ref,
+            lifecycle_state=lifecycle_state,
+            control_request_id=record.control_request_id,
+            recovery_disposition=observation.disposition,
+        )
