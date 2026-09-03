@@ -33,10 +33,24 @@ TERMINAL_STATES = frozenset(
     }
 )
 
+RECOVERY_PROVEN_COMPLETE = "PROVEN_COMPLETE"
+RECOVERY_PROVEN_ABSENT = "PROVEN_ABSENT"
+RECOVERY_RESIDUAL_PRESENT = "RESIDUAL_PRESENT"
+RECOVERY_INDETERMINATE = "INDETERMINATE"
+RECOVERY_DISPOSITIONS = frozenset(
+    {
+        RECOVERY_PROVEN_COMPLETE,
+        RECOVERY_PROVEN_ABSENT,
+        RECOVERY_RESIDUAL_PRESENT,
+        RECOVERY_INDETERMINATE,
+    }
+)
+
 _OPERATION_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,95}")
 _CURSOR_RE = re.compile(r"issue179-comment-[1-9][0-9]*")
 _REQUEST_ID_RE = re.compile(r"req-sha256:[0-9a-f]{64}")
 _GENERATION_RE = re.compile(r"gen-sha256:[0-9a-f]{64}")
+_RECOVERY_SOURCE_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}")
 
 
 class TransactionRefusal(RuntimeError):
@@ -136,6 +150,14 @@ class PostconditionProof:
 
 
 @dataclass(frozen=True)
+class RecoveryObservation:
+    """Bounded recovery-only classification; never raw device output."""
+
+    disposition: str
+    source_ref: str
+
+
+@dataclass(frozen=True)
 class TerminalRecord:
     operation_id: str
     target: str
@@ -157,6 +179,7 @@ class TransactionResult:
     dispatch_error: str | None = None
     postcondition_error: str | None = None
     recovery_error: str | None = None
+    recovery_disposition: str | None = None
     prior_terminal_ref: str | None = None
     lifecycle_state: str = REQUESTED
     control_request_id: str = ""
@@ -190,6 +213,7 @@ class TransactionPorts(Protocol):
         record: TerminalRecord,
         *,
         prior_terminal_ref: str,
+        recovery_observation: RecoveryObservation | None,
         recovery_error: str | None,
     ) -> str: ...
 
@@ -214,7 +238,7 @@ class OperationBinding(Protocol):
 
     def verify_postcondition(self, request: object) -> PostconditionProof: ...
 
-    def observe_recovery(self, request: object) -> PostconditionProof: ...
+    def observe_recovery(self, request: object) -> RecoveryObservation: ...
 
 
 def normalize_semantic_arguments(arguments: Iterable[str]) -> tuple[str, ...]:
@@ -320,6 +344,24 @@ def _non_empty(value: str, *, field: str) -> str:
     if any(character.isspace() for character in normalized):
         raise TransactionRefusal(f"{field} must not contain whitespace")
     return normalized
+
+
+def _bounded_recovery_source_ref(value: str) -> str:
+    normalized = value.strip()
+    if _RECOVERY_SOURCE_REF_RE.fullmatch(normalized) is None:
+        raise TransactionRefusal("recovery observation source_ref is not bounded")
+    return normalized
+
+
+def _validate_recovery_observation(value: object) -> RecoveryObservation:
+    if not isinstance(value, RecoveryObservation):
+        raise TransactionRefusal("recovery observer returned invalid typed observation")
+    if value.disposition not in RECOVERY_DISPOSITIONS:
+        raise TransactionRefusal("recovery observer returned unsupported disposition")
+    return RecoveryObservation(
+        disposition=value.disposition,
+        source_ref=_bounded_recovery_source_ref(value.source_ref),
+    )
 
 
 def _phase(
@@ -697,8 +739,10 @@ def _validate_prior_unknown_terminal(
     ):
         raise TransactionRefusal("prior terminal semantic identity differs")
 
-    generations = operation.affected_domain_generation_updates(contract, transaction_id)
-    if dict(prior.affected_domain_generations) != generations:
+    expected_generations = {
+        domain: transaction_id for domain in contract.affected_physical_domains
+    }
+    if dict(prior.affected_domain_generations) != expected_generations:
         raise TransactionRefusal("prior terminal physical domain generation differs")
 
     derived = _derive(contract, prior.evidence, transaction_id)
@@ -718,7 +762,7 @@ def _validate_prior_unknown_terminal(
     blockers = tuple(derived.get("blocking_predicates", ()))
     if "blind_retry=FORBIDDEN" not in blockers:
         raise TransactionRefusal("prior UNKNOWN does not preserve blind-retry prohibition")
-    return generations
+    return expected_generations
 
 
 class TransactionRunner:
@@ -1028,7 +1072,7 @@ class TransactionRunner:
                 control_request_id=record.control_request_id,
             )
 
-    def recover_observe(
+    def recover(
         self,
         request: object,
         *,
@@ -1036,18 +1080,16 @@ class TransactionRunner:
         binding: OperationBinding,
         prior_terminal: TerminalRecord,
         prior_terminal_ref: str,
+        prior_mutation_subject_ref: str,
     ) -> TransactionResult:
-        """Append one read-only recovery observation to one durable UNKNOWN.
+        """Append one bounded read-only recovery observation to one durable UNKNOWN.
 
-        This path is intentionally not ``run`` resume. It never resolves mutation
-        authority, acquires a mutation scope, proves mutation preflight, persists a
-        new mutation intent, or invokes physical dispatch. It accepts only a fully
-        bound canonical UNKNOWN terminal for the same semantic/physical transaction
-        and appends exactly one declared OBSERVE recovery step.
-
-        A successful recovery observation means the physical environment is safe to
-        classify as RECOVERED; it never retroactively proves the original mutation
-        completed and never re-enables blind retry for this physical transaction.
+        This is not ``run`` resume. It never resolves primary mutation authority,
+        acquires mutation scope, proves mutation preflight, creates generations,
+        persists mutation intent, or invokes physical dispatch. Admission requires
+        the same semantic request, desired generation, physical transaction,
+        operation target and mutation subject plus the exact immutable UNKNOWN
+        terminal reference.
         """
 
         roles = _validate_binding(binding)
@@ -1057,6 +1099,17 @@ class TransactionRunner:
             binding.transaction_id(request),
             field="transaction_id",
         )
+        mutation_subject_ref = _non_empty(
+            binding.mutation_subject_ref(request),
+            field="mutation_subject_ref",
+        )
+        prior_subject_ref = _non_empty(
+            prior_mutation_subject_ref,
+            field="prior_mutation_subject_ref",
+        )
+        if mutation_subject_ref != prior_subject_ref:
+            raise TransactionRefusal("prior terminal mutation subject differs")
+
         semantic = _semantic_identity(binding, request)
         if semantic is not None:
             expected_transaction_id = derive_physical_transaction_id(
@@ -1083,13 +1136,7 @@ class TransactionRunner:
 
         evidence = list(prior_terminal.evidence)
         try:
-            observation = observer(request)
-            if not isinstance(observation, PostconditionProof):
-                raise TransactionRefusal("recovery observer returned invalid proof")
-            observation_ref = _non_empty(
-                observation.source_ref,
-                field="recovery_observation.source_ref",
-            )
+            observation = _validate_recovery_observation(observer(request))
         except Exception as error:
             recovery_error = f"{type(error).__name__}: {error}"
             record = _terminal_record(
@@ -1106,6 +1153,7 @@ class TransactionRunner:
                 ports.persist_recovery_terminal(
                     record,
                     prior_terminal_ref=prior_ref,
+                    recovery_observation=None,
                     recovery_error=recovery_error,
                 ),
                 field="recovery_terminal_ref",
@@ -1120,12 +1168,46 @@ class TransactionRunner:
                 control_request_id=record.control_request_id,
             )
 
+        if observation.disposition == RECOVERY_INDETERMINATE:
+            record = _terminal_record(
+                contract,
+                transaction_id,
+                generations,
+                evidence,
+                roles,
+                semantic,
+            )
+            if record.lifecycle_state != TERMINAL_UNKNOWN:
+                raise RuntimeError("indeterminate recovery must preserve UNKNOWN")
+            terminal_ref = _non_empty(
+                ports.persist_recovery_terminal(
+                    record,
+                    prior_terminal_ref=prior_ref,
+                    recovery_observation=observation,
+                    recovery_error=None,
+                ),
+                field="recovery_terminal_ref",
+            )
+            return TransactionResult(
+                tuple(evidence),
+                record.derived,
+                terminal_ref,
+                recovery_disposition=observation.disposition,
+                prior_terminal_ref=prior_ref,
+                lifecycle_state=record.lifecycle_state,
+                control_request_id=record.control_request_id,
+            )
+
+        passed = observation.disposition in {
+            RECOVERY_PROVEN_COMPLETE,
+            RECOVERY_PROVEN_ABSENT,
+        }
         evidence.append(
             _phase(
                 recovery_step.step_id,
-                operation.PASSED if observation.passed else operation.FAILED,
+                operation.PASSED if passed else operation.FAILED,
                 transaction_id,
-                observation_ref,
+                observation.source_ref,
             )
         )
         record = _terminal_record(
@@ -1136,7 +1218,7 @@ class TransactionRunner:
             roles,
             semantic,
         )
-        expected_state = "RECOVERED" if observation.passed else "QUARANTINED"
+        expected_state = "RECOVERED" if passed else "QUARANTINED"
         if record.derived.get("state") != expected_state:
             raise RuntimeError("recovery observation classified unexpectedly")
         if record.lifecycle_state != TERMINAL_QUARANTINED:
@@ -1145,6 +1227,7 @@ class TransactionRunner:
             ports.persist_recovery_terminal(
                 record,
                 prior_terminal_ref=prior_ref,
+                recovery_observation=observation,
                 recovery_error=None,
             ),
             field="recovery_terminal_ref",
@@ -1153,6 +1236,7 @@ class TransactionRunner:
             tuple(evidence),
             record.derived,
             terminal_ref,
+            recovery_disposition=observation.disposition,
             prior_terminal_ref=prior_ref,
             lifecycle_state=record.lifecycle_state,
             control_request_id=record.control_request_id,
