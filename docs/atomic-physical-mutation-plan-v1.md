@@ -6,7 +6,7 @@ Status: hosted control-foundation contract. This document does not authorize pho
 
 The accepted Universal Physical Transaction Kernel gives one physical transaction a durable replay boundary around exactly one destructive dispatch role. Several legacy workflows predate that rule and combine multiple semantically independent destructive effects in one workflow/job.
 
-Examples include current-source clean install and filesystem certification. Treating either legacy multi-effect contract as one kernel binding would create a false exactly-once claim: the Python/workflow wrapper might be invoked once while several physical effects inside it would still lack independent intent, generation, postcondition and terminal boundaries.
+Examples include current-source clean install, filesystem certification and runtime binary repair. Treating a legacy multi-effect workflow as one kernel binding would create a false exactly-once claim: the Python/workflow wrapper might be invoked once while several physical effects inside it would still lack independent intent, generation, postcondition and terminal boundaries.
 
 C.0q therefore introduces **decomposition, not a second State Machine**:
 
@@ -128,6 +128,18 @@ runtime-stop
 
 This is a local-runtime plan only. It grants no provider access and no full-serving/final-release authority.
 
+### Runtime binary repair
+
+The accepted private legacy workflow proves binary replacement and process activation as separate physical facts. C.0q therefore keeps those boundaries separate:
+
+```text
+runtime-binary-replace
+  -> runtime-stop
+  -> runtime-start
+```
+
+`runtime-binary-replace` affects only filesystem/runtime generations and ends only after exact committed binary digests are proven. Process retirement/activation is a later atomic transaction boundary; failure or ambiguity at replacement stops the plan before process mutation.
+
 ## Bounded private-mutator inventory
 
 C.0q records a non-secret inventory snapshot against accepted private execution SHA:
@@ -151,7 +163,7 @@ Current mapping:
 | `phone-filesystem-certification.yml` | filesystem-certification composite plan |
 | `phone-filesystem-quarantine-cleanup.yml` | atomic filesystem quarantine cleanup |
 | `phone-runtime-recovery.yml` | hard-blocked legacy existing-layout recovery |
-| `phone-runtime-binary-repair.yml` | atomic runtime binary repair |
+| `phone-runtime-binary-repair.yml` | runtime-binary-repair composite plan |
 | `runtime-reconstruction-execution.yml` | runtime-reconstruction composite plan |
 
 The hard blocks are preserved; C.0q does not revive either path.
@@ -169,6 +181,7 @@ C.0q is accepted only when hosted tests prove:
 - every atomic catalog entry has exactly one primary destructive dispatch;
 - the kernel rejects a multi-destructive binding before request/authority/lock/port calls;
 - legacy clean-install and filesystem-certification contracts are demonstrably non-atomic and are decomposed rather than wrapped;
+- runtime binary repair separates exact binary replacement from later process stop/start boundaries;
 - plan progress is prefix-ordered and fail-closed;
 - `REFUSED`, `UNKNOWN` and `QUARANTINED` stop a composite plan;
 - already-satisfied skips are explicit and predicate-bound;
