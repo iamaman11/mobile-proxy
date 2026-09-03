@@ -22,6 +22,8 @@ UNSUPPORTED = "UNSUPPORTED"
 
 _OBSERVE_OPERATION_ID = "android.filesystem-quarantine-observation.v1"
 _CLEANUP_OPERATION_ID = "android.filesystem-quarantine-cleanup.v1"
+_FILESYSTEM_QUARANTINE_OBSERVER_ID = "run_android_filesystem_quarantine_recovery:v2"
+_DEFAULT_OBSERVATION_REF = "adapter:filesystem-quarantine:unpersisted"
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -41,6 +43,7 @@ _CERT = _load_module(
     "run_android_filesystem_certification",
     "run_android_filesystem_certification.py",
 )
+_FACTS = _load_module("quarantine_observed_fact_envelope", "observed_fact_envelope.py")
 
 
 class QuarantineRecoveryFailure(RuntimeError):
@@ -206,16 +209,71 @@ def _cleanup_admissible(report: dict[str, Any]) -> bool:
     )
 
 
-def observe(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any]:
+def _all_transactions_absent(report: dict[str, Any]) -> bool:
+    return all(
+        transaction["scratch"]["node_state"] == ABSENT
+        and transaction["managed_root"]["node_state"] == ABSENT
+        for transaction in report["transactions"]
+    )
+
+
+def _validate_fact_inputs(
+    filesystem_domain_generation: str | None,
+    observation_ref: str,
+) -> None:
+    _FACTS.require_bounded_ref(observation_ref, label="observation_ref")
+    if filesystem_domain_generation is not None:
+        _FACTS.require_bounded_ref(
+            filesystem_domain_generation,
+            label="filesystem_domain_generation",
+        )
+
+
+def _observation_fact_envelopes(
+    report: dict[str, Any],
+    *,
+    serial: str,
+    filesystem_domain_generation: str | None,
+    observation_ref: str,
+) -> list[dict[str, Any]]:
+    if not report["observation_complete"] or filesystem_domain_generation is None:
+        return []
+    dependencies = (
+        ("target/android-production", _PREFLIGHT.target_dependency_identity(serial)),
+        ("observer/filesystem-quarantine", _FILESYSTEM_QUARANTINE_OBSERVER_ID),
+        ("domain/filesystem", filesystem_domain_generation),
+    )
+    return [
+        _FACTS.make_envelope(
+            subject="filesystem",
+            predicate="quarantine_transactions_absent",
+            value=_all_transactions_absent(report),
+            target="android-production",
+            observation_ref=observation_ref,
+            source_ref=report["canonical_sha"],
+            dependencies=dependencies,
+            persisted=False,
+        )
+    ]
+
+
+def observe(
+    canonical_sha: str,
+    transaction_ids: Iterable[str],
+    *,
+    filesystem_domain_generation: str | None = None,
+    observation_ref: str = _DEFAULT_OBSERVATION_REF,
+) -> dict[str, Any]:
     canonical_sha = _PREFLIGHT.require_canonical_sha(canonical_sha)
     transaction_ids = _require_transaction_ids(transaction_ids)
+    _validate_fact_inputs(filesystem_domain_generation, observation_ref)
     serial = _PREFLIGHT.require_expected_serial()
     _PREFLIGHT.require_tools()
     _PREFLIGHT.prove_registered_device(serial)
 
     first_paths = _CERT.transaction_paths(transaction_ids[0])
     report: dict[str, Any] = {
-        "format_version": 1,
+        "format_version": 2,
         "repository": "iamaman11/mobile-proxy",
         "canonical_sha": canonical_sha,
         "operation_id": _OBSERVE_OPERATION_ID,
@@ -241,6 +299,17 @@ def observe(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any
     }
     report["observation_complete"] = _observation_complete(report)
     report["cleanup_admissible"] = _cleanup_admissible(report)
+    report["observed_facts"] = _observation_fact_envelopes(
+        report,
+        serial=serial,
+        filesystem_domain_generation=filesystem_domain_generation,
+        observation_ref=observation_ref,
+    )
+    report["fact_dependency_envelope_complete"] = (
+        report["observation_complete"] and filesystem_domain_generation is not None
+    )
+    report["fact_reuse_eligible"] = False
+    report["fact_reuse_blocked"] = "evidence_not_yet_durably_persisted"
     return report
 
 
@@ -256,16 +325,28 @@ def _cleanup_needed(report: dict[str, Any]) -> bool:
     )
 
 
-def cleanup(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any]:
+def cleanup(
+    canonical_sha: str,
+    transaction_ids: Iterable[str],
+    *,
+    filesystem_domain_generation: str | None = None,
+    observation_ref: str = _DEFAULT_OBSERVATION_REF,
+) -> dict[str, Any]:
     canonical_sha = _PREFLIGHT.require_canonical_sha(canonical_sha)
     transaction_ids = _require_transaction_ids(transaction_ids)
+    _validate_fact_inputs(filesystem_domain_generation, observation_ref)
     serial = _PREFLIGHT.require_expected_serial()
     _PREFLIGHT.require_tools()
     _PREFLIGHT.prove_registered_device(serial)
 
-    pre = observe(canonical_sha, transaction_ids)
+    pre = observe(
+        canonical_sha,
+        transaction_ids,
+        filesystem_domain_generation=filesystem_domain_generation,
+        observation_ref=observation_ref,
+    )
     base_report = {
-        "format_version": 1,
+        "format_version": 2,
         "repository": "iamaman11/mobile-proxy",
         "canonical_sha": canonical_sha,
         "operation_id": _CLEANUP_OPERATION_ID,
@@ -282,6 +363,8 @@ def cleanup(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any
         "raw_directory_contents_recorded": False,
         "raw_command_output_recorded": False,
         "raw_device_identifier_recorded": False,
+        "fact_dependency_envelope_complete": filesystem_domain_generation is not None,
+        "fact_reuse_eligible": False,
     }
     if not pre["cleanup_admissible"]:
         return {
@@ -339,11 +422,17 @@ def cleanup(canonical_sha: str, transaction_ids: Iterable[str]) -> dict[str, Any
     # bounded mutation evidence even if the phone becomes unreachable here.
     post: dict[str, Any] | None = None
     try:
-        post = observe(canonical_sha, transaction_ids)
+        post = observe(
+            canonical_sha,
+            transaction_ids,
+            filesystem_domain_generation=filesystem_domain_generation,
+            observation_ref=observation_ref,
+        )
     except (
         QuarantineRecoveryFailure,
         _CERT.CertificationFailure,
         _PREFLIGHT.PreflightFailure,
+        _FACTS.ObservedFactEnvelopeError,
     ) as error:
         failure_substep = "post_cleanup_observation"
         failure_message = str(error)
@@ -388,6 +477,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--canonical-sha", required=True)
     parser.add_argument("--transaction-id", action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--filesystem-domain-generation")
+    parser.add_argument("--observation-ref", default=_DEFAULT_OBSERVATION_REF)
     return parser.parse_args()
 
 
@@ -395,9 +486,19 @@ def main() -> int:
     args = parse_args()
     try:
         if args.mode == "observe":
-            report = observe(args.canonical_sha, args.transaction_id)
+            report = observe(
+                args.canonical_sha,
+                args.transaction_id,
+                filesystem_domain_generation=args.filesystem_domain_generation,
+                observation_ref=args.observation_ref,
+            )
         else:
-            report = cleanup(args.canonical_sha, args.transaction_id)
+            report = cleanup(
+                args.canonical_sha,
+                args.transaction_id,
+                filesystem_domain_generation=args.filesystem_domain_generation,
+                observation_ref=args.observation_ref,
+            )
         args.output.write_text(
             json.dumps(report, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -408,6 +509,7 @@ def main() -> int:
         QuarantineRecoveryFailure,
         _CERT.CertificationFailure,
         _PREFLIGHT.PreflightFailure,
+        _FACTS.ObservedFactEnvelopeError,
     ) as error:
         print(f"filesystem quarantine recovery failed before report: {error}", file=sys.stderr)
         return 2
