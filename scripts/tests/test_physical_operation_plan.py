@@ -70,6 +70,24 @@ class PhysicalOperationPlanTests(unittest.TestCase):
             1,
         )
 
+    def test_runtime_binary_repair_separates_replace_stop_and_start(self) -> None:
+        plan = PLAN.RUNTIME_BINARY_REPAIR_PLAN
+        self.assertEqual(PLAN.validate_plan(plan), ())
+        self.assertEqual(
+            tuple((step.step_id, step.operation_id) for step in plan.steps),
+            (
+                ("replace_runtime_binaries", "android.runtime-binary-replace.v1"),
+                ("stop_runtime", "android.runtime-stop.v1"),
+                ("start_runtime", "android.runtime-start.v1"),
+            ),
+        )
+        replace = ATOMIC.atomic_operation_spec("android.runtime-binary-replace.v1")
+        self.assertEqual(
+            replace.contract.affected_physical_domains,
+            ("filesystem", "runtime"),
+        )
+        self.assertNotIn("process", replace.contract.affected_physical_domains)
+
     def test_legacy_clean_install_contract_is_not_atomic(self) -> None:
         destructive = ATOMIC.primary_destructive_steps(
             OP.ANDROID_CURRENT_SOURCE_CLEAN_INSTALL
@@ -267,6 +285,7 @@ class PhysicalOperationPlanTests(unittest.TestCase):
         self.assertEqual(dispositions["android-signing-migration.yml"], "hard_blocked")
         self.assertEqual(dispositions["phone-runtime-recovery.yml"], "hard_blocked")
         self.assertEqual(dispositions["phone-clean-install.yml"], "composite")
+        self.assertEqual(dispositions["phone-runtime-binary-repair.yml"], "composite")
         self.assertEqual(
             dispositions["runtime-reconstruction-execution.yml"],
             "composite",
