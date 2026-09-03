@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import subprocess
@@ -68,11 +67,6 @@ def _require_transaction_ids(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _transaction_set_identity(transaction_ids: Iterable[str]) -> str:
-    encoded = "\n".join(sorted(transaction_ids)).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
 def build_quarantine_fact_envelopes(
     canonical_sha: str,
     transaction_ids: Iterable[str],
@@ -84,10 +78,10 @@ def build_quarantine_fact_envelopes(
 ) -> list[dict[str, Any]]:
     """Build reusable filesystem facts from one complete bounded observation.
 
-    The exact transaction set is represented by an opaque digest dependency so a
-    fact for one quarantine set cannot accidentally satisfy a different set. The
-    producer does not claim persistence; the outer durable CONTROL adapter owns
-    that transition.
+    Each exact quarantine transaction is a separate causal dependency. This keeps
+    the transaction set explicit and bounded without inventing an untyped digest
+    contract. The producer does not claim persistence; the outer durable CONTROL
+    adapter owns that transition.
     """
 
     canonical_sha = _PREFLIGHT.require_canonical_sha(canonical_sha)
@@ -125,11 +119,11 @@ def build_quarantine_fact_envelopes(
         {"scope": f"target/{_TARGET}", "identity": target_binding_id},
         {"scope": "observer/filesystem-quarantine", "identity": _QUARANTINE_OBSERVER},
         {"scope": "domain/filesystem", "identity": filesystem_generation},
-        {
-            "scope": "transaction/quarantine-set",
-            "identity": _transaction_set_identity(transaction_ids),
-        },
     ]
+    dependencies.extend(
+        {"scope": f"transaction/{transaction_id}", "identity": transaction_id}
+        for transaction_id in transaction_ids
+    )
 
     common = {
         "target": _TARGET,
