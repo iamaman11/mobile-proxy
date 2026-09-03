@@ -189,6 +189,7 @@ class TransactionRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.derived["state"], "ACCEPTED")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_ACCEPTED)
         self.assertEqual(result.terminal_ref, "terminal-record-1")
         self.assertEqual(executor.calls, 1)
         self.assertEqual(
@@ -214,6 +215,10 @@ class TransactionRunnerTests(unittest.TestCase):
         self.assertEqual(intent.affected_domain_generations, {"domain/package": TX})
         self.assertEqual(len(ports.terminals), 1)
         self.assertEqual(ports.terminals[0].derived["state"], "ACCEPTED")
+        self.assertEqual(
+            ports.terminals[0].lifecycle_state,
+            RUNNER.TERMINAL_ACCEPTED,
+        )
 
         statuses = [(item.step_id, item.status) for item in result.evidence]
         self.assertLess(
@@ -229,7 +234,7 @@ class TransactionRunnerTests(unittest.TestCase):
             statuses.index(("accept", OP.PASSED)),
         )
 
-    def test_lost_post_dispatch_result_is_unknown_and_not_terminalized(self) -> None:
+    def test_lost_post_dispatch_result_is_unknown_and_durably_terminalized(self) -> None:
         ports = FakePorts()
         executor = FakeExecutor(unknown=True)
         executor.events = ports.events
@@ -241,12 +246,33 @@ class TransactionRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_UNKNOWN)
         self.assertIn("blind_retry=FORBIDDEN", result.derived["blocking_predicates"])
         self.assertEqual(result.derived["next_step"], "recovery_inspect_package")
         self.assertEqual(executor.calls, 1)
-        self.assertIsNone(result.terminal_ref)
-        self.assertEqual(len(ports.terminals), 0)
+        self.assertEqual(result.terminal_ref, "terminal-record-1")
+        self.assertEqual(len(ports.terminals), 1)
+        self.assertEqual(
+            ports.terminals[0].lifecycle_state,
+            RUNNER.TERMINAL_UNKNOWN,
+        )
+        self.assertEqual(
+            ports.terminals[0].derived["state"],
+            "UNKNOWN_EXECUTION_OUTCOME",
+        )
         self.assertNotIn("verify", ports.events)
+        self.assertEqual(
+            ports.events,
+            [
+                "authority",
+                "scope:android-production",
+                "boundary",
+                "intent",
+                "dispatch",
+                "terminal",
+                "scope_release",
+            ],
+        )
         self.assertEqual(
             [(item.step_id, item.status) for item in result.evidence][-1],
             ("install_apk", OP.DISPATCHED),
@@ -260,6 +286,9 @@ class TransactionRunnerTests(unittest.TestCase):
             ports=first_ports,
             binding=self.binding(first_executor),
         )
+
+        self.assertEqual(first.lifecycle_state, RUNNER.TERMINAL_UNKNOWN)
+        self.assertEqual(first.terminal_ref, "terminal-record-1")
 
         retry_ports = FakePorts()
         retry_executor = FakeExecutor()
@@ -318,6 +347,7 @@ class TransactionRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.derived["state"], "REFUSED")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_REFUSED)
         self.assertEqual(executor.calls, 0)
         self.assertEqual(ports.events, ["authority", "terminal"])
         self.assertEqual(ports.terminals[0].derived["failure_stage"], "SOURCE_AUTHORITY")
@@ -333,6 +363,7 @@ class TransactionRunnerTests(unittest.TestCase):
         )
 
         self.assertEqual(result.derived["state"], "RECOVERY_REQUIRED")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_QUARANTINED)
         self.assertEqual(result.derived["next_step"], "recovery_inspect_package")
         self.assertEqual(executor.calls, 1)
         self.assertEqual(len(ports.terminals), 1)
