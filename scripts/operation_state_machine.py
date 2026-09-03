@@ -183,6 +183,33 @@ ANDROID_FILESYSTEM_QUARANTINE_CLEANUP = OperationContract(
 )
 
 
+ANDROID_APK_INSTALL = OperationContract(
+    operation_id="android.apk-install.v1",
+    target="android-production",
+    steps=(
+        StepContract("resolve_authority", "VERIFY", "SOURCE_AUTHORITY"),
+        StepContract("mutation_scope", "VERIFY", "MUTATION_LOCK"),
+        StepContract(
+            "phone_access_boundary",
+            "VERIFY",
+            "MUTATION_BOUNDARY",
+            mutation_boundary=True,
+        ),
+        StepContract("mutation_intent", "VERIFY", "MUTATION_BOUNDARY"),
+        StepContract("install_apk", "MUTATE", "MUTATION_EXECUTION", destructive=True),
+        StepContract("verify_installed_apk", "VERIFY", "POSTCONDITION"),
+        StepContract("accept", "ACCEPT", "POSTCONDITION", acceptance=True),
+    ),
+    recovery_steps=(
+        StepContract("recovery_inspect_package", "OBSERVE", "RECOVERY", acceptance=True),
+    ),
+    fact_requirements=(_PHONE_ACCESS_BOUNDARY_FACT,),
+    affected_physical_domains=("package",),
+    retryable=False,
+    rollback_to_legacy_allowed=False,
+)
+
+
 ANDROID_CURRENT_SOURCE_CLEAN_INSTALL = OperationContract(
     operation_id="android.current-source-clean-install.v1",
     target="android-production",
@@ -233,6 +260,7 @@ _OPERATION_CONTRACTS = {
         ANDROID_CAPABILITY_CERTIFICATION,
         ANDROID_FILESYSTEM_CERTIFICATION,
         ANDROID_FILESYSTEM_QUARANTINE_CLEANUP,
+        ANDROID_APK_INSTALL,
         ANDROID_CURRENT_SOURCE_CLEAN_INSTALL,
     )
 }
