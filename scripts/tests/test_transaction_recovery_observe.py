@@ -33,28 +33,46 @@ class ForbiddenFilesystemEdge:
         raise AssertionError("recovery observation must never dispatch")
 
 
-class RecoveryObserver:
-    def __init__(self, *, passed: bool = True, error: bool = False) -> None:
-        self.passed = passed
-        self.error = error
+class ForbiddenPostconditionObserver:
+    def __init__(self) -> None:
         self.calls = 0
 
     def observe_scratch_roundtrip(self, request):
         self.calls += 1
+        raise AssertionError("recovery must not reuse normal postcondition observer")
+
+
+class TypedRecoveryObserver:
+    def __init__(
+        self,
+        disposition: str,
+        *,
+        source_ref: str = "recovery-observation:filesystem-scratch",
+        error: bool = False,
+    ) -> None:
+        self.disposition = disposition
+        self.source_ref = source_ref
+        self.error = error
+        self.calls = 0
+
+    def observe_recovery(self, request):
+        self.calls += 1
         if self.error:
             raise RuntimeError("recovery observation transport lost")
-        return RUNNER.PostconditionProof(
-            self.passed,
-            "recovery-observation:filesystem-scratch-absent"
-            if self.passed
-            else "recovery-observation:filesystem-scratch-present",
-        )
+        return RUNNER.RecoveryObservation(self.disposition, self.source_ref)
 
 
 class RecoveryOnlyPorts:
     def __init__(self) -> None:
         self.events: list[str] = []
-        self.recovery_terminals: list[tuple[RUNNER.TerminalRecord, str, str | None]] = []
+        self.recovery_terminals: list[
+            tuple[
+                RUNNER.TerminalRecord,
+                str,
+                RUNNER.RecoveryObservation | None,
+                str | None,
+            ]
+        ] = []
 
     def _forbidden(self, name: str):
         self.events.append(f"FORBIDDEN:{name}")
@@ -83,11 +101,12 @@ class RecoveryOnlyPorts:
         record,
         *,
         prior_terminal_ref,
+        recovery_observation,
         recovery_error,
     ):
         self.events.append("recovery_terminal")
         self.recovery_terminals.append(
-            (record, prior_terminal_ref, recovery_error)
+            (record, prior_terminal_ref, recovery_observation, recovery_error)
         )
         return f"recovery-terminal-{len(self.recovery_terminals)}"
 
@@ -110,14 +129,25 @@ def request() -> FILESYSTEM.FilesystemScratchRoundtripRequest:
     )
 
 
-def binding(*, passed: bool = True, error: bool = False):
+def binding(
+    disposition: str = RUNNER.RECOVERY_PROVEN_ABSENT,
+    *,
+    source_ref: str = "recovery-observation:filesystem-scratch",
+    error: bool = False,
+):
     filesystem = ForbiddenFilesystemEdge()
-    observer = RecoveryObserver(passed=passed, error=error)
-    executor = FILESYSTEM.FilesystemScratchRoundtripExecutor(filesystem, observer)
+    postcondition = ForbiddenPostconditionObserver()
+    recovery = TypedRecoveryObserver(
+        disposition,
+        source_ref=source_ref,
+        error=error,
+    )
+    executor = FILESYSTEM.FilesystemScratchRoundtripExecutor(filesystem, postcondition)
     return (
-        FILESYSTEM.FilesystemScratchRoundtripBinding(executor),
+        FILESYSTEM.FilesystemScratchRoundtripBinding(executor, recovery),
         filesystem,
-        observer,
+        postcondition,
+        recovery,
     )
 
 
@@ -149,32 +179,45 @@ def unknown_terminal(bound: FILESYSTEM.FilesystemScratchRoundtripBinding):
     )
 
 
+def recover(
+    bound: FILESYSTEM.FilesystemScratchRoundtripBinding,
+    ports: RecoveryOnlyPorts,
+    prior: RUNNER.TerminalRecord,
+):
+    return RUNNER.TransactionRunner().recover(
+        request(),
+        ports=ports,
+        binding=bound,
+        prior_terminal=prior,
+        prior_terminal_ref=PRIOR_REF,
+        prior_mutation_subject_ref=SCRATCH,
+    )
+
+
 class RecoveryObserveKernelTests(unittest.TestCase):
-    def test_absent_observation_recovers_environment_without_accepting_or_retrying(self) -> None:
-        bound, filesystem, observer = binding(passed=True)
+    def test_proven_absent_recovers_baseline_without_accepting_or_retrying(self) -> None:
+        bound, filesystem, postcondition, observer = binding(
+            RUNNER.RECOVERY_PROVEN_ABSENT,
+            source_ref="recovery-observation:filesystem-scratch-absent",
+        )
         prior = unknown_terminal(bound)
         ports = RecoveryOnlyPorts()
-        runner = RUNNER.TransactionRunner()
 
-        result = runner.recover_observe(
-            request(),
-            ports=ports,
-            binding=bound,
-            prior_terminal=prior,
-            prior_terminal_ref=PRIOR_REF,
-        )
+        result = recover(bound, ports, prior)
 
         self.assertEqual(result.derived["state"], "RECOVERED")
         self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_QUARANTINED)
         self.assertNotEqual(result.lifecycle_state, RUNNER.TERMINAL_ACCEPTED)
+        self.assertEqual(result.recovery_disposition, RUNNER.RECOVERY_PROVEN_ABSENT)
         self.assertEqual(result.prior_terminal_ref, PRIOR_REF)
         self.assertIsNone(result.recovery_error)
         self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
         self.assertEqual(observer.calls, 1)
         self.assertEqual(ports.events, ["recovery_terminal"])
-        self.assertEqual(len(ports.recovery_terminals), 1)
-        record, prior_ref, recovery_error = ports.recovery_terminals[0]
+        record, prior_ref, observation, recovery_error = ports.recovery_terminals[0]
         self.assertEqual(prior_ref, PRIOR_REF)
+        self.assertEqual(observation.disposition, RUNNER.RECOVERY_PROVEN_ABSENT)
         self.assertIsNone(recovery_error)
         self.assertEqual(record.derived["state"], "RECOVERED")
         self.assertEqual(record.lifecycle_state, RUNNER.TERMINAL_QUARANTINED)
@@ -186,9 +229,9 @@ class RecoveryObserveKernelTests(unittest.TestCase):
         )
 
         retry_ports = RecoveryOnlyPorts()
-        retry_bound, retry_filesystem, retry_observer = binding(passed=True)
+        retry_bound, retry_filesystem, retry_postcondition, retry_observer = binding()
         with self.assertRaisesRegex(RUNNER.BlindRetryForbidden, "blind retry"):
-            runner.run(
+            RUNNER.TransactionRunner().run(
                 request(),
                 ports=retry_ports,
                 binding=retry_bound,
@@ -196,24 +239,24 @@ class RecoveryObserveKernelTests(unittest.TestCase):
             )
         self.assertEqual(retry_ports.events, [])
         self.assertEqual(retry_filesystem.dispatch_calls, 0)
+        self.assertEqual(retry_postcondition.calls, 0)
         self.assertEqual(retry_observer.calls, 0)
 
-    def test_present_observation_quarantines_without_cleanup_or_dispatch(self) -> None:
-        bound, filesystem, observer = binding(passed=False)
+    def test_residual_present_quarantines_without_cleanup_or_dispatch(self) -> None:
+        bound, filesystem, postcondition, observer = binding(
+            RUNNER.RECOVERY_RESIDUAL_PRESENT,
+            source_ref="recovery-observation:filesystem-scratch-present",
+        )
         prior = unknown_terminal(bound)
         ports = RecoveryOnlyPorts()
 
-        result = RUNNER.TransactionRunner().recover_observe(
-            request(),
-            ports=ports,
-            binding=bound,
-            prior_terminal=prior,
-            prior_terminal_ref=PRIOR_REF,
-        )
+        result = recover(bound, ports, prior)
 
         self.assertEqual(result.derived["state"], "QUARANTINED")
         self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_QUARANTINED)
+        self.assertEqual(result.recovery_disposition, RUNNER.RECOVERY_RESIDUAL_PRESENT)
         self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
         self.assertEqual(observer.calls, 1)
         self.assertEqual(ports.events, ["recovery_terminal"])
         self.assertEqual(
@@ -221,69 +264,142 @@ class RecoveryObserveKernelTests(unittest.TestCase):
             ("recovery_observe", OP.FAILED),
         )
 
-    def test_lost_recovery_observation_preserves_unknown_and_persists_error(self) -> None:
-        bound, filesystem, observer = binding(error=True)
+    def test_indeterminate_observation_preserves_unknown_without_recovery_phase(self) -> None:
+        bound, filesystem, postcondition, observer = binding(
+            RUNNER.RECOVERY_INDETERMINATE,
+            source_ref="recovery-observation:filesystem-scratch-indeterminate",
+        )
         prior = unknown_terminal(bound)
         ports = RecoveryOnlyPorts()
 
-        result = RUNNER.TransactionRunner().recover_observe(
-            request(),
-            ports=ports,
-            binding=bound,
-            prior_terminal=prior,
-            prior_terminal_ref=PRIOR_REF,
-        )
+        result = recover(bound, ports, prior)
 
         self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
         self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_UNKNOWN)
         self.assertEqual(result.evidence, prior.evidence)
+        self.assertEqual(result.recovery_disposition, RUNNER.RECOVERY_INDETERMINATE)
+        self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
+        self.assertEqual(observer.calls, 1)
+        record, _, observation, recovery_error = ports.recovery_terminals[0]
+        self.assertEqual(record.evidence, prior.evidence)
+        self.assertEqual(observation.disposition, RUNNER.RECOVERY_INDETERMINATE)
+        self.assertIsNone(recovery_error)
+
+    def test_transport_loss_preserves_unknown_and_persists_bounded_error(self) -> None:
+        bound, filesystem, postcondition, observer = binding(error=True)
+        prior = unknown_terminal(bound)
+        ports = RecoveryOnlyPorts()
+
+        result = recover(bound, ports, prior)
+
+        self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_UNKNOWN)
+        self.assertEqual(result.evidence, prior.evidence)
+        self.assertIsNone(result.recovery_disposition)
         self.assertIn("recovery observation transport lost", result.recovery_error or "")
         self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
         self.assertEqual(observer.calls, 1)
-        self.assertEqual(ports.events, ["recovery_terminal"])
-        _, prior_ref, recovery_error = ports.recovery_terminals[0]
+        _, prior_ref, observation, recovery_error = ports.recovery_terminals[0]
         self.assertEqual(prior_ref, PRIOR_REF)
+        self.assertIsNone(observation)
         self.assertIn("recovery observation transport lost", recovery_error or "")
 
+    def test_scratch_binding_never_converts_late_absence_to_proven_complete(self) -> None:
+        bound, filesystem, postcondition, observer = binding(
+            RUNNER.RECOVERY_PROVEN_COMPLETE,
+            source_ref="recovery-observation:filesystem-scratch-absent",
+        )
+        prior = unknown_terminal(bound)
+        ports = RecoveryOnlyPorts()
+
+        result = recover(bound, ports, prior)
+
+        self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_UNKNOWN)
+        self.assertIsNone(result.recovery_disposition)
+        self.assertIn("cannot prove historical completion", result.recovery_error or "")
+        self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
+        self.assertEqual(observer.calls, 1)
+        self.assertFalse(
+            any(
+                item.step_id == "recovery_observe" and item.status == OP.PASSED
+                for item in result.evidence
+            )
+        )
+
+    def test_unbounded_recovery_source_ref_is_not_admitted_as_evidence(self) -> None:
+        bound, filesystem, postcondition, observer = binding(
+            RUNNER.RECOVERY_PROVEN_ABSENT,
+            source_ref="raw adb stdout contains spaces and device data",
+        )
+        prior = unknown_terminal(bound)
+        ports = RecoveryOnlyPorts()
+
+        result = recover(bound, ports, prior)
+
+        self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
+        self.assertEqual(result.evidence, prior.evidence)
+        self.assertIsNone(result.recovery_disposition)
+        self.assertIn("source_ref is not bounded", result.recovery_error or "")
+        self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
+        self.assertEqual(observer.calls, 1)
+
     def test_prior_terminal_semantic_mismatch_refuses_before_observer_or_ports(self) -> None:
-        bound, filesystem, observer = binding()
-        prior = replace(unknown_terminal(bound), control_request_id="req-sha256:" + ("f" * 64))
+        bound, filesystem, postcondition, observer = binding()
+        prior = replace(
+            unknown_terminal(bound),
+            control_request_id="req-sha256:" + ("f" * 64),
+        )
         ports = RecoveryOnlyPorts()
 
         with self.assertRaisesRegex(RUNNER.TransactionRefusal, "semantic identity"):
-            RUNNER.TransactionRunner().recover_observe(
+            recover(bound, ports, prior)
+
+        self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
+        self.assertEqual(observer.calls, 0)
+        self.assertEqual(ports.events, [])
+
+    def test_mutation_subject_mismatch_refuses_before_observer_or_ports(self) -> None:
+        bound, filesystem, postcondition, observer = binding()
+        prior = unknown_terminal(bound)
+        ports = RecoveryOnlyPorts()
+
+        with self.assertRaisesRegex(RUNNER.TransactionRefusal, "mutation subject"):
+            RUNNER.TransactionRunner().recover(
                 request(),
                 ports=ports,
                 binding=bound,
                 prior_terminal=prior,
                 prior_terminal_ref=PRIOR_REF,
+                prior_mutation_subject_ref=SCRATCH + "-other",
             )
 
         self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
         self.assertEqual(observer.calls, 0)
         self.assertEqual(ports.events, [])
 
     def test_prior_terminal_must_be_canonical_unknown_at_dispatch_boundary(self) -> None:
-        bound, filesystem, observer = binding()
+        bound, filesystem, postcondition, observer = binding()
         prior = unknown_terminal(bound)
         forged = replace(prior, lifecycle_state=RUNNER.TERMINAL_QUARANTINED)
         ports = RecoveryOnlyPorts()
 
         with self.assertRaisesRegex(RUNNER.TransactionRefusal, "canonical UNKNOWN"):
-            RUNNER.TransactionRunner().recover_observe(
-                request(),
-                ports=ports,
-                binding=bound,
-                prior_terminal=forged,
-                prior_terminal_ref=PRIOR_REF,
-            )
+            recover(bound, ports, forged)
 
         self.assertEqual(filesystem.dispatch_calls, 0)
+        self.assertEqual(postcondition.calls, 0)
         self.assertEqual(observer.calls, 0)
         self.assertEqual(ports.events, [])
 
-    def test_recovery_method_has_no_mutation_port_or_dispatch_call_surface(self) -> None:
-        body = inspect.getsource(RUNNER.TransactionRunner.recover_observe)
+    def test_recovery_entrypoint_has_no_primary_mutation_surface(self) -> None:
+        body = inspect.getsource(RUNNER.TransactionRunner.recover)
         for forbidden in (
             ".dispatch_once(",
             "resolve_authority(",
@@ -292,10 +408,23 @@ class RecoveryObserveKernelTests(unittest.TestCase):
             "prove_preflight_requirements(",
             "persist_mutation_intent(",
             "persist_terminal(",
+            "affected_domain_generation_updates(",
         ):
             self.assertNotIn(forbidden, body)
         self.assertIn("persist_recovery_terminal(", body)
         self.assertIn("observe_recovery", body)
+        self.assertIn("RECOVERY_INDETERMINATE", body)
+
+    def test_disposition_set_is_exactly_bounded(self) -> None:
+        self.assertEqual(
+            RUNNER.RECOVERY_DISPOSITIONS,
+            {
+                "PROVEN_COMPLETE",
+                "PROVEN_ABSENT",
+                "RESIDUAL_PRESENT",
+                "INDETERMINATE",
+            },
+        )
 
 
 if __name__ == "__main__":
