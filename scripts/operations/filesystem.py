@@ -215,6 +215,14 @@ class FilesystemScratchRoundtripBinding(
     kernel_steps = kernel_steps(spec)
     request_type = FilesystemScratchRoundtripRequest
 
+    def observe_recovery(self, request: object) -> transaction.RecoveryObservation:
+        observation = super().observe_recovery(request)
+        if observation.disposition == transaction.RECOVERY_PROVEN_COMPLETE:
+            raise transaction.TransactionRefusal(
+                "scratch roundtrip recovery cannot prove historical completion"
+            )
+        return observation
+
 
 class FilesystemScratchAtomicReplaceBinding(
     CanonicalAtomicBinding[FilesystemScratchAtomicReplaceRequest]
