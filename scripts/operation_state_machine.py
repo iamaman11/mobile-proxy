@@ -77,6 +77,13 @@ _PHONE_ACCESS_BOUNDARY_FACT = FactRequirement(
     ("target", "observer", "transaction"),
 )
 
+_QUARANTINE_CLEANUP_ADMISSION_FACT = FactRequirement(
+    "filesystem-quarantine",
+    "cleanup_admissible",
+    CAUSAL_REUSE_ALLOWED,
+    ("target", "observer", "domain", "transaction"),
+)
+
 
 ANDROID_PHONE_ACCESS_CERTIFICATION = OperationContract(
     operation_id="android.phone-access-certification.v1",
@@ -138,6 +145,43 @@ ANDROID_FILESYSTEM_CERTIFICATION = OperationContract(
 )
 
 
+ANDROID_FILESYSTEM_QUARANTINE_CLEANUP = OperationContract(
+    operation_id="android.filesystem-quarantine-cleanup.v1",
+    target="android-production",
+    steps=(
+        StepContract("source_quality", "VERIFY", "SOURCE_AUTHORITY"),
+        StepContract("runner_assignment", "OBSERVE", "RUNNER_ASSIGNMENT"),
+        StepContract("source_delivery", "VERIFY", "SOURCE_FETCH"),
+        StepContract("quarantine_observation_admission", "VERIFY", "RECOVERY"),
+        StepContract("mutation_lock", "VERIFY", "MUTATION_LOCK"),
+        StepContract(
+            "phone_access_boundary",
+            "VERIFY",
+            "MUTATION_BOUNDARY",
+            mutation_boundary=True,
+        ),
+        StepContract("cleanup_paths", "RECOVER", "MUTATION_EXECUTION", destructive=True),
+        StepContract("post_cleanup_observation", "VERIFY", "POSTCONDITION"),
+        StepContract("accept", "ACCEPT", "POSTCONDITION", acceptance=True),
+    ),
+    recovery_steps=(
+        StepContract(
+            "recovery_post_cleanup_observation",
+            "VERIFY",
+            "RECOVERY",
+            acceptance=True,
+        ),
+    ),
+    fact_requirements=(
+        _QUARANTINE_CLEANUP_ADMISSION_FACT,
+        _PHONE_ACCESS_BOUNDARY_FACT,
+    ),
+    affected_physical_domains=("filesystem",),
+    retryable=False,
+    rollback_to_legacy_allowed=False,
+)
+
+
 ANDROID_CURRENT_SOURCE_CLEAN_INSTALL = OperationContract(
     operation_id="android.current-source-clean-install.v1",
     target="android-production",
@@ -187,6 +231,7 @@ _OPERATION_CONTRACTS = {
         ANDROID_PHONE_ACCESS_CERTIFICATION,
         ANDROID_CAPABILITY_CERTIFICATION,
         ANDROID_FILESYSTEM_CERTIFICATION,
+        ANDROID_FILESYSTEM_QUARANTINE_CLEANUP,
         ANDROID_CURRENT_SOURCE_CLEAN_INSTALL,
     )
 }
