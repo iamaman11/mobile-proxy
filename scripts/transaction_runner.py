@@ -155,6 +155,7 @@ class TransactionResult:
     derived: Mapping[str, object]
     terminal_ref: str | None
     dispatch_error: str | None = None
+    postcondition_error: str | None = None
     lifecycle_state: str = REQUESTED
     control_request_id: str = ""
 
@@ -860,6 +861,38 @@ class TransactionRunner:
                     control_request_id=record.control_request_id,
                 )
 
+            try:
+                postcondition = binding.verify_postcondition(request)
+                post_ref = _non_empty(
+                    postcondition.source_ref,
+                    field="postcondition.source_ref",
+                )
+            except Exception as error:
+                record = _terminal_record(
+                    contract,
+                    transaction_id,
+                    generations,
+                    evidence,
+                    roles,
+                    semantic,
+                )
+                if record.lifecycle_state != TERMINAL_UNKNOWN:
+                    raise RuntimeError(
+                        "unobserved postcondition after dispatch must classify as UNKNOWN"
+                    )
+                terminal_ref = _non_empty(
+                    ports.persist_terminal(record),
+                    field="terminal_ref",
+                )
+                return TransactionResult(
+                    tuple(evidence),
+                    record.derived,
+                    terminal_ref,
+                    postcondition_error=f"{type(error).__name__}: {error}",
+                    lifecycle_state=record.lifecycle_state,
+                    control_request_id=record.control_request_id,
+                )
+
             evidence.append(
                 _phase(
                     roles.dispatch_step_id,
@@ -867,12 +900,6 @@ class TransactionRunner:
                     transaction_id,
                     receipt_ref,
                 )
-            )
-
-            postcondition = binding.verify_postcondition(request)
-            post_ref = _non_empty(
-                postcondition.source_ref,
-                field="postcondition.source_ref",
             )
             evidence.append(
                 _phase(
