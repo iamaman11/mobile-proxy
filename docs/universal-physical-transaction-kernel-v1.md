@@ -129,6 +129,8 @@ For every requirement the kernel verifies that the proof:
 
 Extra current-context values that a fact did not declare are ignored. Therefore an unrelated public Git SHA change cannot stale a source-independent physical fact. Source identity participates only when the fact explicitly declares a `source/...` dependency.
 
+A causal/preflight mismatch before mutation intent is a durable terminal `REFUSED`. The kernel does not leave a pre-dispatch refusal as an uncaptured workflow exception, and it does not advance affected-domain generations or invoke the physical binding for a refused request.
+
 ## Targeted domain generations
 
 Every destructive operation declares its affected physical domains.
@@ -236,5 +238,7 @@ The hosted foundation is accepted only when tests prove at least:
 - the existing APK binding and reducer tests remain green, including known-negative vs unobserved postcondition separation.
 
 The accepted proof boundary is therefore strict: only a valid `PostconditionProof` may advance the dispatch step to `PASSED` and permit the reducer to classify a known postcondition. Exceptions and malformed observer output stay behind the already durable `DISPATCHED` boundary and cannot be converted into a fabricated negative proof by the kernel.
+
+This foundation deliberately stops before runtime/filesystem/provider/reboot production migration, bounded Issue #1 state-index work, or any new physical observation/mutation. Those require a later #179 cursor after this hosted kernel is accepted.
 
 This stage proves architecture and hosted transaction semantics only. It does not prove current phone state and does not authorize a phone observer or mutation.
