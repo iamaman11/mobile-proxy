@@ -173,11 +173,11 @@ ANDROID_RUNTIME_START = _atomic_contract(
     extra_facts=(_RUNTIME_MATERIALIZED_FACT,),
 )
 
-ANDROID_RUNTIME_BINARY_REPAIR = _atomic_contract(
-    operation_id="android.runtime-binary-repair.v1",
-    dispatch_step_id="repair_runtime_binaries",
-    postcondition_step_id="verify_runtime_binaries",
-    affected_domains=("filesystem", "runtime", "process"),
+ANDROID_RUNTIME_BINARY_REPLACE = _atomic_contract(
+    operation_id="android.runtime-binary-replace.v1",
+    dispatch_step_id="replace_runtime_binaries",
+    postcondition_step_id="verify_runtime_binary_digests",
+    affected_domains=("filesystem", "runtime"),
     extra_facts=(_RUNTIME_BINARY_BUNDLE_FACT,),
 )
 
@@ -229,7 +229,7 @@ ATOMIC_OPERATION_SPECS = (
     ANDROID_RUNTIME_REMOVE,
     ANDROID_RUNTIME_MATERIALIZE,
     ANDROID_RUNTIME_START,
-    ANDROID_RUNTIME_BINARY_REPAIR,
+    ANDROID_RUNTIME_BINARY_REPLACE,
     ANDROID_FILESYSTEM_SCRATCH_ROUNDTRIP,
     ANDROID_FILESYSTEM_SCRATCH_ATOMIC_REPLACE,
     ANDROID_FILESYSTEM_MANAGED_ROOT_WRITE,
