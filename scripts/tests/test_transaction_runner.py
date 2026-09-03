@@ -303,38 +303,50 @@ class TransactionRunnerTests(unittest.TestCase):
         self.assertEqual(retry_ports.events, [])
         self.assertEqual(retry_executor.calls, 0)
 
-    def test_same_transaction_boundary_is_required_before_intent_or_dispatch(self) -> None:
+    def test_same_transaction_boundary_refusal_is_durable_before_intent_or_dispatch(self) -> None:
         stale = boundary_proof(current_transaction="different-transaction")
         ports = FakePorts(boundary=stale)
         executor = FakeExecutor()
 
-        with self.assertRaisesRegex(RUNNER.TransactionRefusal, "not CURRENT"):
-            self.runner.run(
-                self.request,
-                ports=ports,
-                binding=self.binding(executor),
-            )
-
-        self.assertEqual(executor.calls, 0)
-        self.assertEqual(ports.intents, [])
-        self.assertEqual(
-            ports.events,
-            ["authority", "scope:android-production", "boundary", "scope_release"],
+        result = self.runner.run(
+            self.request,
+            ports=ports,
+            binding=self.binding(executor),
         )
 
-    def test_unpersisted_boundary_is_rejected_before_mutation_intent(self) -> None:
+        self.assertEqual(result.derived["state"], "REFUSED")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_REFUSED)
+        self.assertEqual(result.terminal_ref, "terminal-record-1")
+        self.assertEqual(executor.calls, 0)
+        self.assertEqual(ports.intents, [])
+        self.assertEqual(len(ports.terminals), 1)
+        self.assertEqual(ports.terminals[0].affected_domain_generations, {})
+        self.assertEqual(
+            ports.events,
+            [
+                "authority",
+                "scope:android-production",
+                "boundary",
+                "terminal",
+                "scope_release",
+            ],
+        )
+
+    def test_unpersisted_boundary_is_durably_refused_before_mutation_intent(self) -> None:
         ports = FakePorts(boundary=boundary_proof(persisted=False))
         executor = FakeExecutor()
 
-        with self.assertRaisesRegex(RUNNER.TransactionRefusal, "not CURRENT"):
-            self.runner.run(
-                self.request,
-                ports=ports,
-                binding=self.binding(executor),
-            )
+        result = self.runner.run(
+            self.request,
+            ports=ports,
+            binding=self.binding(executor),
+        )
 
+        self.assertEqual(result.derived["state"], "REFUSED")
+        self.assertEqual(result.lifecycle_state, RUNNER.TERMINAL_REFUSED)
         self.assertEqual(executor.calls, 0)
         self.assertEqual(ports.intents, [])
+        self.assertEqual(len(ports.terminals), 1)
 
     def test_authority_refusal_never_acquires_mutation_scope(self) -> None:
         ports = FakePorts(authorized=False)
