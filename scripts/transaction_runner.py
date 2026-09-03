@@ -436,7 +436,7 @@ def _recovery_observation_step(
             "recovery observation requires exactly one declared recovery step"
         )
     step = recovery_steps[0]
-    if step.kind != "OBSERVE" or step.stage != "RECOVERY":
+    if step.kind != "OBSERVE" or step.failure_stage != "RECOVERY":
         raise TransactionRefusal("recovery step must be an OBSERVE/RECOVERY step")
     if step.destructive or step.mutation_boundary:
         raise TransactionRefusal("recovery observation must be non-destructive")
