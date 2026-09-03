@@ -22,6 +22,7 @@
         "android.capability-certification.v1",
         "android.filesystem-certification.v1",
         "android.filesystem-quarantine-cleanup.v1",
+        "android.apk-install.v1",
         "android.current-source-clean-install.v1"
       ]
     },
