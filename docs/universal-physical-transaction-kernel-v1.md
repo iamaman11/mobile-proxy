@@ -33,10 +33,12 @@ The detailed pure reducer may retain more specific recovery states such as `RECO
 
 - `ACCEPTED` means the desired physical postcondition is independently proven;
 - `REFUSED` means the request was rejected before a physical effect was established;
-- `UNKNOWN` means a physical dispatch may have reached the target but its result is ambiguous;
+- `UNKNOWN` means a physical dispatch may have reached the target but its result or required postcondition observation is ambiguous;
 - `QUARANTINED` means a post-dispatch state is known to be non-accepted, contradictory, invalid or requires explicit recovery/classification before another mutation.
 
-Every terminal classification is written through `persist_terminal`. In particular, an ambiguous dispatch produces a durable `UNKNOWN` terminal record; it is never silently reduced to a transient workflow exception and never rewritten as failure merely because a result channel or supplemental artifact upload was lost.
+Every terminal classification is written through `persist_terminal`. In particular, an ambiguous dispatch or an unavailable/invalid postcondition observation after dispatch produces a durable `UNKNOWN` terminal record; it is never silently reduced to a transient workflow exception and never rewritten as failure merely because a result channel, observer transport or supplemental artifact upload was lost.
+
+A binding may return `PostconditionProof(passed=False, ...)` only for a valid observation that positively proves the desired postcondition is not satisfied. Observer transport failure, ambiguous output, missing capture, malformed evidence or inability to establish the observation must propagate as an observation error so the kernel preserves the `DISPATCHED` replay barrier and terminalizes `UNKNOWN`. This prevents “unobserved” from being misreported as a known physical failure.
 
 ## Semantic request identity
 
@@ -174,12 +176,14 @@ production-phone-global-mutation
 cancel-in-progress: false
 ```
 
-The durable mutation intent is written before the `DISPATCHED` evidence boundary and before the operation binding is invoked. A `DISPATCHED` trace is therefore a may-have-reached-target replay barrier. If the dispatch result is lost, the same evidence is classified and persisted as:
+The durable mutation intent is written before the `DISPATCHED` evidence boundary and before the operation binding is invoked. A `DISPATCHED` trace is therefore a may-have-reached-target replay barrier. If the dispatch result is lost, or dispatch returns but its mandatory postcondition cannot be validly observed, the replay barrier remains the authoritative execution state and the transaction is classified and persisted as:
 
 ```text
 UNKNOWN
 blind retry = FORBIDDEN
 ```
+
+A successful dispatch receipt is not itself release acceptance and is not promoted to a completed reducer step until the postcondition observer returns a valid proof. This ensures an observer crash cannot leave a non-terminal transaction or authorize a retry of an already dispatched physical effect.
 
 The same mutation is not invoked again merely because:
 
@@ -198,7 +202,7 @@ A migrated physical operation binding owns only:
 1. typed request decoding;
 2. mutation subject/target reference;
 3. exactly one physical dispatch implementation;
-4. an independent postcondition observation;
+4. an independent postcondition observation that distinguishes a valid negative proof from inability to observe;
 5. explicit `KernelStepRoles`.
 
 A binding does not own:
@@ -223,11 +227,12 @@ The hosted foundation is accepted only when tests prove at least:
 - a generic non-APK multi-domain mutator uses the same kernel;
 - multiple reusable and same-transaction preflight facts are admitted through the same causal validity engine;
 - an unrelated source/Git context change does not stale a source-independent fact;
-- a changed declared domain generation refuses the transaction before intent or dispatch;
+- a changed declared domain generation durably refuses the transaction before intent or dispatch;
 - mutation intent advances only the operation's declared affected domains;
 - exactly one physical dispatch occurs on the accepted path;
-- post-dispatch ambiguity is durably terminalized as `UNKNOWN`;
+- dispatch ambiguity is durably terminalized as `UNKNOWN`;
+- postcondition observer ambiguity after dispatch is durably terminalized as `UNKNOWN` rather than misreported as a known failed postcondition;
 - an existing `UNKNOWN`/`DISPATCHED` trace forbids blind retry before any new authority/lock/device call;
-- the existing APK binding and reducer tests remain green.
+- the existing APK binding and reducer tests remain green, including known-negative vs unobserved postcondition separation.
 
 This stage proves architecture and hosted transaction semantics only. It does not prove current phone state and does not authorize a phone observer or mutation.
