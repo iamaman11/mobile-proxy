@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Any
 
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-_TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+# Physical transaction IDs are canonical semantic identities produced by
+# transaction_runner (physical-tx-v1:<request>:<operation>:<generation>). Keep
+# legacy short IDs valid while allowing the colon separators and bounded length
+# required by the Universal Transaction Kernel.
+_TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _REQUIRED_TOOLS = ("adb", "python", "git", "curl")
 _REQUIRED_RUNNER_LABELS = ("self-hosted", "Linux", "X64", "android-production")
 _SERIAL_ENV = "ANDROID_PRODUCTION_SERIAL"
