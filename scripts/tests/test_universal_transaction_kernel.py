@@ -221,8 +221,9 @@ class GenericBinding:
     contract = GENERIC_CONTRACT
     kernel_steps = GENERIC_ROLES
 
-    def __init__(self) -> None:
+    def __init__(self, *, postcondition_error: bool = False) -> None:
         self.dispatch_calls = 0
+        self.postcondition_error = postcondition_error
 
     def transaction_id(self, request):
         return TX
@@ -235,6 +236,8 @@ class GenericBinding:
         return KERNEL.DispatchReceipt("runtime-dispatch-receipt-1")
 
     def verify_postcondition(self, request):
+        if self.postcondition_error:
+            raise RuntimeError("generic runtime observer unavailable")
         return KERNEL.PostconditionProof(True, "runtime-postcondition-1")
 
 
@@ -344,6 +347,28 @@ class UniversalPhysicalTransactionKernelTests(unittest.TestCase):
             ),
         )
         self.assertEqual(ports.terminals[0].lifecycle_state, KERNEL.TERMINAL_ACCEPTED)
+
+    def test_generic_postcondition_observer_failure_is_durable_unknown(self) -> None:
+        ports = GenericPorts()
+        binding = GenericBinding(postcondition_error=True)
+
+        result = KERNEL.TransactionRunner().run(
+            object(),
+            ports=ports,
+            binding=binding,
+        )
+
+        self.assertEqual(result.derived["state"], "UNKNOWN_EXECUTION_OUTCOME")
+        self.assertEqual(result.lifecycle_state, KERNEL.TERMINAL_UNKNOWN)
+        self.assertIn("generic runtime observer unavailable", result.postcondition_error or "")
+        self.assertEqual(binding.dispatch_calls, 1)
+        self.assertEqual(len(ports.intents), 1)
+        self.assertEqual(len(ports.terminals), 1)
+        self.assertEqual(ports.terminals[0].lifecycle_state, KERNEL.TERMINAL_UNKNOWN)
+        self.assertEqual(
+            [(item.step_id, item.status) for item in result.evidence][-1],
+            ("reconcile_runtime", OP.DISPATCHED),
+        )
 
     def test_changed_declared_domain_generation_is_durably_refused_before_intent_and_dispatch(self) -> None:
         ports = GenericPorts(runtime_generation="old-runtime-generation")
