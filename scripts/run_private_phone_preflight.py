@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any
 
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-_TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_LEGACY_TRANSACTION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_PHYSICAL_TRANSACTION_ID = re.compile(
+    r"^physical-tx-v1:[0-9a-f]{64}:[a-z0-9][a-z0-9._-]{0,95}:[0-9a-f]{64}$"
+)
 _REQUIRED_TOOLS = ("adb", "python", "git", "curl")
 _REQUIRED_RUNNER_LABELS = ("self-hosted", "Linux", "X64", "android-production")
 _SERIAL_ENV = "ANDROID_PRODUCTION_SERIAL"
@@ -54,7 +57,7 @@ def require_expected_serial() -> str:
 def require_opaque_identity(value: str, label: str) -> str:
     value = value.strip()
     require(bool(value), f"{label} is required")
-    require(len(value) <= 160, f"{label} is invalid")
+    require(len(value) <= 256, f"{label} is invalid")
     require(not any(character.isspace() for character in value), f"{label} is invalid")
     require(all(32 < ord(character) < 127 for character in value), f"{label} is invalid")
     raw_serial = os.environ.get(_SERIAL_ENV, "")
@@ -64,7 +67,11 @@ def require_opaque_identity(value: str, label: str) -> str:
 
 def require_transaction_id(value: str) -> str:
     value = value.strip()
-    require(_TRANSACTION_ID.fullmatch(value) is not None, "transaction ID is invalid")
+    require(
+        _LEGACY_TRANSACTION_ID.fullmatch(value) is not None
+        or _PHYSICAL_TRANSACTION_ID.fullmatch(value) is not None,
+        "transaction ID is invalid",
+    )
     return value
 
 

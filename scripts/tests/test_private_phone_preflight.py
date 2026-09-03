@@ -100,6 +100,46 @@ class PrivatePhonePreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PreflightFailure, "canonical SHA"):
             MODULE.require_canonical_sha("main")
 
+    def test_canonical_physical_transaction_id_is_admitted_exactly(self):
+        transaction_id = (
+            "physical-tx-v1:"
+            + "a" * 64
+            + ":android.filesystem-scratch-roundtrip.v1:"
+            + "b" * 64
+        )
+        session_id = f"scratch-tx-session:33800000000:1:{transaction_id}"
+        observation_ref = f"scratch-boundary:33800000000:1:{transaction_id}"
+
+        self.assertLessEqual(len(session_id), 256)
+        self.assertLessEqual(len(observation_ref), 256)
+        self.assertEqual(MODULE.require_transaction_id(transaction_id), transaction_id)
+        fact = MODULE.build_phone_access_fact_envelope(
+            "c" * 40,
+            target_binding_id="tb-hmac-sha256:" + "d" * 64,
+            session_id=session_id,
+            observation_ref=observation_ref,
+            transaction_id=transaction_id,
+        )
+
+        self.assertEqual(fact["observation_ref"], observation_ref)
+        self.assertEqual(
+            fact["dependencies"][-1],
+            {
+                "scope": f"transaction/{transaction_id}",
+                "identity": transaction_id,
+            },
+        )
+        self.assertFalse(fact["persisted"])
+
+    def test_arbitrary_colon_transaction_id_remains_rejected(self):
+        with self.assertRaisesRegex(MODULE.PreflightFailure, "transaction ID"):
+            MODULE.require_transaction_id("not:a:canonical:transaction")
+
+    def test_opaque_identity_stays_bounded(self):
+        self.assertEqual(MODULE.require_opaque_identity("x" * 256, "opaque"), "x" * 256)
+        with self.assertRaisesRegex(MODULE.PreflightFailure, "opaque is invalid"):
+            MODULE.require_opaque_identity("x" * 257, "opaque")
+
 
 if __name__ == "__main__":
     unittest.main()
