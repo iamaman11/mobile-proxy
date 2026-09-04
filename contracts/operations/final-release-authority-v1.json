@@ -1,7 +1,11 @@
 {
   "contract_version": 1,
-  "status": "protected",
+  "status": "protected_historical_non_executable",
   "canonical_repository": "iamaman11/mobile-proxy",
+  "historical_snapshot": true,
+  "superseded_by": "contracts/operations/product-release-authority-v2.json",
+  "execution_authority": false,
+  "historical_semantics": "The fields below preserve the superseded pre-Product-Release-v2 ordering for audit only and grant no current tag, release, phone, provider, VM or deployment authority.",
   "workflow": ".github/workflows/release-tag.yml",
   "command": {
     "issue": 90,
