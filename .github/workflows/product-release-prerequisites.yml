@@ -1,0 +1,122 @@
+name: Product Release prerequisites
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  environment-metadata:
+    name: Verify product-release environment metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require existing protected product-release environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/environments/product-release" \
+            > environment.json
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/environments/product-release/deployment-branch-policies?per_page=100" \
+            > deployment-branch-policies.json
+          python3 - <<'PY'
+          import json
+
+          environment = json.load(open("environment.json", encoding="utf-8"))
+          if environment.get("name") != "product-release":
+              raise SystemExit("product-release environment is missing or resolves incorrectly")
+          policy = environment.get("deployment_branch_policy")
+          if policy != {"protected_branches": False, "custom_branch_policies": True}:
+              raise SystemExit("product-release environment must use custom deployment ref policies")
+
+          policies = json.load(open("deployment-branch-policies.json", encoding="utf-8"))
+          resolved = {
+              (item.get("type"), item.get("name"))
+              for item in policies.get("branch_policies", [])
+              if isinstance(item, dict)
+          }
+          expected = {("branch", "main")}
+          if resolved != expected:
+              raise SystemExit(
+                  "product-release environment deployment policy must be exactly branch:main; "
+                  f"resolved={sorted(resolved)!r}"
+              )
+          PY
+
+  environment-bindings:
+    name: Verify environment secret bindings and immutable Releases
+    needs: environment-metadata
+    runs-on: ubuntu-latest
+    environment: product-release
+    timeout-minutes: 5
+    env:
+      PRODUCT_RELEASE_SETTINGS_TOKEN: ${{ secrets.PRODUCT_RELEASE_SETTINGS_TOKEN }}
+      ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+      ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+    steps:
+      - name: Require exact environment-bound secret names
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            PRODUCT_RELEASE_SETTINGS_TOKEN \
+            ANDROID_RELEASE_KEYSTORE_B64 \
+            ANDROID_RELEASE_KEYSTORE_PASSWORD \
+            ANDROID_RELEASE_KEY_ALIAS \
+            ANDROID_RELEASE_KEY_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "missing required product-release environment binding: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Require immutable Releases enabled with read-only administration token
+        env:
+          GH_TOKEN: ${{ secrets.PRODUCT_RELEASE_SETTINGS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            > immutable-releases.json
+          python3 - <<'PY'
+          import json
+
+          value = json.load(open("immutable-releases.json", encoding="utf-8"))
+          if value.get("enabled") is not True:
+              raise SystemExit("repository immutable Releases are not enabled")
+          PY
+
+      - name: Record bounded prerequisite evidence
+        shell: bash
+        run: |
+          {
+            echo '## Product Release prerequisite evidence'
+            echo '- Environment: product-release'
+            echo '- Environment deployment ref policy: branch main only'
+            echo '- Required environment secret bindings present: true'
+            echo '- Immutable Releases enabled: true'
+            echo '- Phone access performed: false'
+            echo '- Deployment performed: false'
+            echo '- Provider or VM mutation performed: false'
+            echo '- Secret values emitted: false'
+          } >> "$GITHUB_STEP_SUMMARY"
