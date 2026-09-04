@@ -214,7 +214,7 @@ def check_repository(root: Path) -> list[str]:
         PROJECT_DOC,
         (
             "One product, two authoritative planes",
-            "authority": "deployment_controller",
+            "The private repository is the canonical deployment-execution controller.",
             "runtime_deployment_identity",
             "A Product Release is an input to deployment.",
             "public GitHub Deployment is not the execution ledger",
