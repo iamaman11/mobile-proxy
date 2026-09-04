@@ -37,6 +37,16 @@
     "current_product_release_authority": "contracts/operations/product-release-authority-v2.json",
     "current_runtime_deployment_authority": "iamaman11/mobile-proxy-production"
   },
+  "residual_provider_access_retirement": {
+    "workflow": ".github/workflows/production-preflight.yml",
+    "status": "historical_only_non_executable",
+    "former_environment": "production-vultr",
+    "former_provider": "vultr",
+    "former_capability": "read_only_provider_account_probe",
+    "execution_authority": false,
+    "current_runtime_owner": "iamaman11/mobile-proxy-production",
+    "credential_cleanup": "separate_read_only_ownership_audit_required_before_mutation"
+  },
   "execution": {
     "workflow_files_must_be_absent": true,
     "issue_comment_execution": false,
