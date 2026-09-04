@@ -21,15 +21,6 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertNotIn("phone-production", release)
         self.assertNotIn("mobile-proxy-production", release)
 
-    def test_legacy_deployment_workflow_is_an_explicit_migration_gate(self) -> None:
-        deployment = (ROOT / ".github/workflows/deploy-production.yml").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn("workflow_dispatch:", deployment)
-        self.assertIn("Production deployment is blocked", deployment)
-        self.assertNotIn("self-hosted", deployment)
-
     def test_quality_gate_owns_immutable_release_candidate_evidence(self) -> None:
         quality = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
 
