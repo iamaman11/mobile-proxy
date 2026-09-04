@@ -20,7 +20,9 @@ class ProductReleasePrerequisiteWorkflowTests(unittest.TestCase):
             "ANDROID_RELEASE_KEY_PASSWORD",
             "environments/product-release",
             "deployment-branch-policies?per_page=100",
-            'if "v*" not in names:',
+            'expected = {("branch", "main")}',
+            "if resolved != expected:",
+            "Environment deployment ref policy: branch main only",
             "repos/$GITHUB_REPOSITORY/immutable-releases",
             'value.get("enabled") is not True',
             "Required environment secret bindings present: true",
@@ -50,6 +52,13 @@ class ProductReleasePrerequisiteWorkflowTests(unittest.TestCase):
         bindings = body.index("environment-bindings:")
         self.assertLess(metadata, bindings)
         self.assertIn("needs: environment-metadata", body)
+
+    def test_only_release_and_prerequisite_workflows_can_reference_environment(self) -> None:
+        references = set()
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            if "environment: product-release" in path.read_text(encoding="utf-8"):
+                references.add(path.name)
+        self.assertEqual(references, {"release.yml", "product-release-prerequisites.yml"})
 
 
 if __name__ == "__main__":
