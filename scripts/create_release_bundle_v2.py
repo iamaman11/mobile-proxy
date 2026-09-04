@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the canonical PRODUCT Release v2 manifest, provenance and checksums.
+"""Create the canonical PRODUCT Release v2 manifest, provenance and typed digests.
 
 This module is deliberately target-agnostic with respect to deployment. It consumes
 already-built product artifacts and bounded Android signing evidence; it never talks
@@ -9,15 +9,17 @@ to a phone, provider, private deployment controller or GitHub deployment API.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 _TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 _SHA = re.compile(r"[0-9a-f]{40}")
+_TYPED_DIGEST = re.compile(r"b3:[0-9a-f]{64}")
 _PACKAGE = "com.example.mobileproxy"
+_DIGEST_DOMAIN = "mobile-proxy/product-release-asset/v2"
 
 
 class ReleaseBundleError(ValueError):
@@ -29,14 +31,6 @@ def require(condition: bool, message: str) -> None:
         raise ReleaseBundleError(message)
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _load_object(path: Path, label: str) -> Mapping[str, object]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -45,6 +39,38 @@ def _load_object(path: Path, label: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise ReleaseBundleError(f"{label} must be a JSON object")
     return value
+
+
+def typed_asset_digest(repository_root: Path, asset_name: str, path: Path) -> str:
+    repository_root = repository_root.resolve()
+    command = [
+        "cargo",
+        "run",
+        "--quiet",
+        "--locked",
+        "--release",
+        "-p",
+        "operator-cli",
+        "--bin",
+        "product-release-asset-digest",
+        "--",
+        asset_name,
+        str(path.resolve()),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseBundleError("typed Product Release asset digest failed") from exc
+    digest = result.stdout.strip()
+    require(_TYPED_DIGEST.fullmatch(digest) is not None, "typed Product Release asset digest is invalid")
+    return digest
 
 
 def _validated_android_evidence(
@@ -80,6 +106,7 @@ def _validated_android_evidence(
 
 def create_bundle(
     *,
+    repository_root: Path,
     release_dir: Path,
     tag: str,
     source_sha: str,
@@ -87,12 +114,14 @@ def create_bundle(
     builder: str,
     workflow_ref: str,
     github_native_attestation: bool,
+    digest_file: Callable[[Path, str, Path], str] = typed_asset_digest,
 ) -> tuple[dict[str, object], dict[str, object], dict[str, str]]:
     require(_TAG.fullmatch(tag) is not None, "Release tag is invalid")
     require(_SHA.fullmatch(source_sha) is not None, "Release source SHA is invalid")
     require(bool(builder) and "\n" not in builder and "\r" not in builder, "Release builder identity is invalid")
     require(bool(workflow_ref) and "\n" not in workflow_ref and "\r" not in workflow_ref, "Release workflow ref is invalid")
 
+    repository_root = repository_root.resolve()
     release_dir = release_dir.resolve()
     linux_name = f"mobile-proxy-linux-x86_64-{tag}.tar.gz"
     apk_name = f"mobile-proxy-android-{tag}.apk"
@@ -106,21 +135,27 @@ def create_bundle(
         evidence, tag=tag, source_sha=source_sha, apk_name=apk_name
     )
     artifact_digests = {
-        linux_name: _sha256(linux),
-        apk_name: _sha256(apk),
+        linux_name: digest_file(repository_root, linux_name, linux),
+        apk_name: digest_file(repository_root, apk_name, apk),
     }
+    for name, digest in artifact_digests.items():
+        require(_TYPED_DIGEST.fullmatch(digest) is not None, f"typed digest is invalid: {name}")
 
     artifacts: list[dict[str, object]] = [
         {
+            "content_digest": artifact_digests[linux_name],
+            "content_digest_algorithm": "blake3-256",
+            "content_digest_domain": _DIGEST_DOMAIN,
             "kind": "linux-x86_64-tar",
             "name": linux_name,
-            "sha256": artifact_digests[linux_name],
         },
         {
+            "content_digest": artifact_digests[apk_name],
+            "content_digest_algorithm": "blake3-256",
+            "content_digest_domain": _DIGEST_DOMAIN,
             "kind": "android-apk",
             "name": apk_name,
             "package_name": _PACKAGE,
-            "sha256": artifact_digests[apk_name],
             "version_code": version_code,
             "version_name": version,
         },
@@ -133,8 +168,18 @@ def create_bundle(
     }
     provenance: dict[str, object] = {
         "artifacts": [
-            {"name": linux_name, "sha256": artifact_digests[linux_name]},
-            {"name": apk_name, "sha256": artifact_digests[apk_name]},
+            {
+                "content_digest": artifact_digests[linux_name],
+                "content_digest_algorithm": "blake3-256",
+                "content_digest_domain": _DIGEST_DOMAIN,
+                "name": linux_name,
+            },
+            {
+                "content_digest": artifact_digests[apk_name],
+                "content_digest_algorithm": "blake3-256",
+                "content_digest_domain": _DIGEST_DOMAIN,
+                "name": apk_name,
+            },
         ],
         "builder": builder,
         "format_version": 2,
@@ -149,22 +194,33 @@ def create_bundle(
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     provenance_path.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    checksums = {
-        linux_name: artifact_digests[linux_name],
-        apk_name: artifact_digests[apk_name],
-        "release-manifest.json": _sha256(manifest_path),
-        "provenance.json": _sha256(provenance_path),
+    contract_digests = {
+        "release-manifest.json": digest_file(repository_root, "release-manifest.json", manifest_path),
+        "provenance.json": digest_file(repository_root, "provenance.json", provenance_path),
     }
-    checksum_path = release_dir / "SHA256SUMS"
-    checksum_path.write_text(
-        "".join(f"{digest}  {name}\n" for name, digest in sorted(checksums.items())),
+    digests = {**artifact_digests, **contract_digests}
+    for name, digest in digests.items():
+        require(_TYPED_DIGEST.fullmatch(digest) is not None, f"typed digest is invalid: {name}")
+
+    digest_set = {
+        "algorithm": "blake3-256",
+        "assets": [
+            {"digest": digest, "name": name}
+            for name, digest in sorted(digests.items())
+        ],
+        "digest_domain": _DIGEST_DOMAIN,
+        "format_version": 1,
+    }
+    (release_dir / "artifact-digests.json").write_text(
+        json.dumps(digest_set, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    return manifest, provenance, checksums
+    return manifest, provenance, digests
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--repository-root", type=Path, required=True)
     parser.add_argument("--release-dir", type=Path, required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--source-sha", required=True)
@@ -175,6 +231,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         create_bundle(
+            repository_root=args.repository_root,
             release_dir=args.release_dir,
             tag=args.tag,
             source_sha=args.source_sha,
