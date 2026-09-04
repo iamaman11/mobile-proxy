@@ -31,6 +31,12 @@
   "mixed_context_docs": {
     "docs/architecture/vm-ownership-boundary.md": "provider_neutral_ownership_safety_is_current_but_item18_item19_execution_chronology_is_historical_only"
   },
+  "residual_authority_classification": {
+    "legacy_public_item20_execution_authority": "historical_only_non_executable",
+    "legacy_final_release_v1_authority": "historical_only_non_executable",
+    "current_product_release_authority": "contracts/operations/product-release-authority-v2.json",
+    "current_runtime_deployment_authority": "iamaman11/mobile-proxy-production"
+  },
   "execution": {
     "workflow_files_must_be_absent": true,
     "issue_comment_execution": false,
@@ -39,9 +45,7 @@
     "provider_mutation": false,
     "phone_execution": false,
     "private_controller_mutation": false,
-    "product_release_authority_changed": false,
-    "legacy_public_item20_execution_authority": false,
-    "legacy_final_release_v1_authority": false
+    "product_release_authority_changed": false
   },
   "immutable_historical_item19_evidence": {
     "candidate_sha": "d151dbdd156279e32a5361d304c90f996bd2d565",
