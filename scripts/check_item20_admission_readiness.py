@@ -1,74 +1,16 @@
 #!/usr/bin/env python3
-"""Fail closed when the protected Item 20 read-only readiness surface drifts."""
+"""Fail closed if the retired public Item 20 readiness workflow returns."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-
 CONTRACT = Path("contracts/operations/item20-admission-readiness-v1.json")
+RETIREMENT = Path("contracts/operations/historical-public-acceptance-retirement-v1.json")
 WORKFLOW = Path(".github/workflows/item20-admission-readiness.yml")
 SELECTOR = Path("scripts/select_item20_candidate_evidence.py")
 TESTS = Path("scripts/tests/test_item20_admission_readiness.py")
-
-_EXPECTED_CONTRACT = {
-    "authorization": {
-        "endpoint_handoff_authorized": False,
-        "final_production_authority": False,
-        "live_execution_authorized": False,
-        "phone_mutation_authorized": False,
-        "provider_mutation_authorized": False,
-    },
-    "candidate_evidence_workflow": {
-        "admission_core_wiring": "implemented_exact_result_match",
-        "artifact_selection": "exact_same_sha_candidate_artifact_bound_to_exact_current_protected_main_run",
-        "candidate_sha": "same_exact_current_protected_main_as_control_plane",
-        "candidate_control_plane_exact_equality_required": True,
-        "control_plane_sha": "exact_current_protected_main",
-        "output_artifact_name_template": "item20-admission-readiness-<candidate_sha>",
-        "selector": "scripts/select_item20_candidate_evidence.py",
-        "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
-        "status": "protected_read_only_candidate_evidence_wiring",
-        "verifier": "scripts/verify_item20_candidate_evidence.py",
-        "workflow": ".github/workflows/item20-admission-readiness.yml",
-    },
-    "canonical_repository": "iamaman11/mobile-proxy",
-    "contract_version": 1,
-    "execution_boundary": {
-        "environment": "none",
-        "executor": "github-hosted",
-        "permissions": ["actions:read", "contents:read"],
-        "phone_execution": False,
-        "provider_api_execution": False,
-        "provider_credentials": "forbidden",
-        "trigger": "workflow_dispatch",
-    },
-    "forbidden": [
-        "candidate_control_plane_sha_mismatch",
-        "historical_item19_candidate_as_active_item20_candidate",
-        "acceptance_or_preflight_workflow_dispatch_from_readiness",
-        "provider_api_call_from_readiness",
-        "provider_credentials_in_readiness",
-        "provider_mutation_from_readiness",
-        "phone_execution_from_readiness",
-        "endpoint_handoff_from_readiness",
-        "production_vultr_authority",
-        "final_release_or_production_promotion",
-        "public_provider_uuid_or_transport_endpoint_recording",
-    ],
-    "phone_signing_gate_issue": 115,
-    "status": "protected_read_only_foundation_not_live_authority",
-    "tracker_issue": 135,
-}
-
-
-def _read(root: Path, path: Path, errors: list[str]) -> str:
-    try:
-        return (root / path).read_text(encoding="utf-8")
-    except OSError as error:
-        errors.append(f"cannot read {path}: {error}")
-        return ""
 
 
 def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
@@ -83,86 +25,58 @@ def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
     return value
 
 
+def _read(root: Path, path: Path, errors: list[str]) -> str:
+    try:
+        return (root / path).read_text(encoding="utf-8")
+    except OSError as error:
+        errors.append(f"cannot read {path}: {error}")
+        return ""
+
+
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     contract = _load(root, CONTRACT, errors)
-    workflow = _read(root, WORKFLOW, errors)
+    retirement = _load(root, RETIREMENT, errors)
     selector = _read(root, SELECTOR, errors)
     tests = _read(root, TESTS, errors)
 
-    if contract != _EXPECTED_CONTRACT:
-        errors.append("Item 20 read-only admission-readiness contract differs from protected single-SHA value")
+    if (root / WORKFLOW).exists():
+        errors.append("retired Item 20 admission-readiness workflow is executable again")
 
-    for required in (
-        "name: Item 20 read-only admission readiness",
-        "workflow_dispatch:",
-        "actions: read",
-        "contents: read",
-        "runs-on: ubuntu-latest",
-        "CANDIDATE_SHA: ${{ github.sha }}",
-        "CONTROL_PLANE_SHA: ${{ github.sha }}",
-        'test "$CANDIDATE_SHA" = "$CONTROL_PLANE_SHA"',
-        "workflow SHA is not exact current protected main",
-        "scripts/select_item20_candidate_evidence.py verify-contract",
-        "scripts/select_item20_candidate_evidence.py select-artifact",
-        "scripts/verify_item20_candidate_evidence.py",
-        "vultr-acceptance-authority-$CANDIDATE_SHA",
-        "vultr-readonly-preflight-$CANDIDATE_SHA",
-        "item20-admission-readiness-${{ github.sha }}",
-        "Candidate/control-plane exact equality verified: true",
-        "Provider credentials consumed by this workflow: false",
-        "Provider API called by this workflow: false",
-        "Provider mutation authorized: false",
-        "Phone execution invoked: false",
-        "Phone mutation authorized: false",
-        "Endpoint handoff authorized: false",
-        "Live execution authorized: false",
-        "Final production authority: false",
-    ):
-        if required not in workflow:
-            errors.append(f"Item 20 readiness workflow is missing protected token {required!r}")
+    retired = retirement.get("retired_workflows")
+    if retirement.get("status") != "protected_historical_non_executable" or not isinstance(retired, list) or str(WORKFLOW) not in retired:
+        errors.append("retirement contract does not bind Item 20 admission-readiness as historical/non-executable")
 
-    lowered_workflow = workflow.lower()
-    for forbidden in (
-        "d151dbdd156279e32a5361d304c90f996bd2d565",
-        "environment: acceptance-vultr",
-        "environment: production-vultr",
-        "vultr_api_key",
-        "vultr_ssh_private_key",
-        "item20_phone_handoff_token",
-        "item20_handoff_private_key_b64",
-        "sealed_session_envelope",
-        "self-hosted",
-        "adb ",
-        "/v2/instances",
-        "gh workflow run",
-        "actions/workflows/acceptance-authority.yml/dispatches",
-        "actions/workflows/vultr-readonly-preflight.yml/dispatches",
-        "curl --request post",
-        "curl --request delete",
-        "curl --request patch",
-    ):
-        if forbidden in lowered_workflow:
-            errors.append(f"Item 20 readiness workflow contains forbidden live/stale token {forbidden!r}")
+    if contract.get("contract_version") != 1 or contract.get("canonical_repository") != "iamaman11/mobile-proxy":
+        errors.append("historical Item 20 readiness contract identity differs")
+    workflow_snapshot = contract.get("candidate_evidence_workflow")
+    if not isinstance(workflow_snapshot, dict) or workflow_snapshot.get("workflow") != str(WORKFLOW):
+        errors.append("historical Item 20 readiness snapshot lost workflow provenance")
+    if not isinstance(workflow_snapshot, dict) or workflow_snapshot.get("candidate_control_plane_exact_equality_required") is not True:
+        errors.append("historical Item 20 readiness snapshot lost same-SHA invariant")
+    authorization = contract.get("authorization")
+    if authorization != {
+        "endpoint_handoff_authorized": False,
+        "final_production_authority": False,
+        "live_execution_authorized": False,
+        "phone_mutation_authorized": False,
+        "provider_mutation_authorized": False,
+    }:
+        errors.append("historical Item 20 readiness contract grants authority")
 
     for required in (
         "def verify_readiness_contract(",
         "def select_artifact(",
-        '"candidate_sha": "same_exact_current_protected_main_as_control_plane"',
-        '"candidate_control_plane_exact_equality_required": True',
+        "candidate_sha != control_plane_sha",
         '"acceptance": "vultr-acceptance-authority"',
         '"preflight": "vultr-readonly-preflight"',
-        "candidate_sha != control_plane_sha",
         'workflow_run.get("head_branch") != "main"',
         'workflow_run.get("head_sha") != candidate_sha',
-        'raise ValueError(f"no unexpired {kind} artifact binds exact single-SHA candidate")',
     ):
         if required not in selector:
-            errors.append(f"Item 20 readiness selector is missing protected single-SHA token {required!r}")
-
-    lowered_selector = selector.lower()
+            errors.append(f"retained Item 20 pure selector is missing {required!r}")
+    lowered = selector.lower()
     for forbidden in (
-        "_immutable_candidate",
         "subprocess.",
         "urllib.request",
         "requests.",
@@ -170,27 +84,23 @@ def check_repository(root: Path) -> list[str]:
         "socket.",
         "vultr_api_key",
         "vultr_ssh_private_key",
-        "/v2/instances",
         "create_instance(",
         "delete_instance(",
         "adb ",
         "gh workflow run",
     ):
-        if forbidden in lowered_selector:
-            errors.append(f"Item 20 readiness selector contains forbidden stale/I/O/live token {forbidden!r}")
+        if forbidden in lowered:
+            errors.append(f"retained Item 20 selector gained external/live token {forbidden!r}")
 
     for required in (
         "class Item20AdmissionReadinessTests",
-        "test_contract_is_exact_single_sha_validation_only",
+        "test_contract_snapshot_remains_validation_only",
         "test_selector_uses_same_sha_candidate_and_run",
         "test_selector_rejects_candidate_control_plane_mismatch",
-        "test_historical_item19_candidate_is_not_privileged",
-        "test_selector_rejects_expired_wrong_or_malformed_artifacts",
-        "test_workflow_derives_candidate_from_exact_protected_main_and_is_read_only",
-        "test_session_workflow_consumes_existing_readiness_without_dispatch",
+        "test_retired_workflow_is_absent",
     ):
         if required not in tests:
-            errors.append(f"Item 20 readiness regression coverage is missing {required!r}")
+            errors.append(f"Item 20 readiness retirement coverage is missing {required!r}")
 
     return errors
 
