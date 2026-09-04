@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,24 +9,38 @@ from scripts.verify_published_release_v2 import PublishedReleaseError, validate_
 
 
 TAG = "v0.1.4"
+DOMAIN = "mobile-proxy/product-release-asset/v2"
 
 
-def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def fake_digest(_repository_root: Path, asset_name: str, path: Path) -> str:
+    seed = (sum(asset_name.encode("utf-8")) + len(path.read_bytes())) % 16
+    return "b3:" + format(seed, "x") * 64
 
 
 class VerifyPublishedReleaseV2Tests(unittest.TestCase):
     def make_bundle(self, root: Path) -> list[str]:
-        names = [
+        covered = [
             f"mobile-proxy-linux-x86_64-{TAG}.tar.gz",
             f"mobile-proxy-android-{TAG}.apk",
             "release-manifest.json",
             "provenance.json",
-            "SHA256SUMS",
         ]
-        for index, name in enumerate(names, start=1):
+        for index, name in enumerate(covered, start=1):
             (root / name).write_bytes(f"asset-{index}-{name}\n".encode())
-        return names
+        typed = {
+            "algorithm": "blake3-256",
+            "assets": [
+                {"digest": fake_digest(root, name, root / name), "name": name}
+                for name in sorted(covered)
+            ],
+            "digest_domain": DOMAIN,
+            "format_version": 1,
+        }
+        (root / "artifact-digests.json").write_text(
+            json.dumps(typed, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return [*covered, "artifact-digests.json"]
 
     def make_release(self, root: Path, *, draft: bool = False, immutable: bool = True) -> dict[str, object]:
         names = self.make_bundle(root)
@@ -38,45 +52,63 @@ class VerifyPublishedReleaseV2Tests(unittest.TestCase):
             "immutable": immutable,
             "assets": [
                 {
+                    "id": index,
                     "name": name,
                     "state": "uploaded",
-                    "digest": f"sha256:{digest(root / name)}",
+                    "digest": "sha256:" + format(index % 16, "x") * 64,
                 }
-                for name in names
+                for index, name in enumerate(names, start=1)
             ],
         }
+
+    def verify(self, release: dict[str, object], root: Path, *, allow_draft: bool = False) -> int:
+        return validate_release(
+            release,
+            repository_root=root,
+            tag=TAG,
+            release_dir=root,
+            allow_draft=allow_draft,
+            digest_file=fake_digest,
+        )
 
     def test_published_immutable_release_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             release = self.make_release(root)
-            self.assertEqual(validate_release(release, tag=TAG, release_dir=root), 123)
+            self.assertEqual(self.verify(release, root), 123)
 
     def test_mutable_published_release_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             release = self.make_release(root, immutable=False)
             with self.assertRaisesRegex(PublishedReleaseError, "not immutable"):
-                validate_release(release, tag=TAG, release_dir=root)
+                self.verify(release, root)
 
     def test_exact_draft_can_be_verified_only_in_recovery_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             release = self.make_release(root, draft=True, immutable=False)
-            self.assertEqual(
-                validate_release(release, tag=TAG, release_dir=root, allow_draft=True),
-                123,
-            )
+            self.assertEqual(self.verify(release, root, allow_draft=True), 123)
             with self.assertRaisesRegex(PublishedReleaseError, "not published"):
-                validate_release(release, tag=TAG, release_dir=root)
+                self.verify(release, root)
 
-    def test_asset_digest_mismatch_is_refused(self) -> None:
+    def test_invalid_github_platform_digest_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             release = self.make_release(root)
-            release["assets"][0]["digest"] = "sha256:" + "0" * 64  # type: ignore[index]
-            with self.assertRaisesRegex(PublishedReleaseError, "digest differs"):
-                validate_release(release, tag=TAG, release_dir=root)
+            release["assets"][0]["digest"] = "invalid"  # type: ignore[index]
+            with self.assertRaisesRegex(PublishedReleaseError, "lacks platform digest"):
+                self.verify(release, root)
+
+    def test_typed_local_digest_mismatch_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            release = self.make_release(root)
+            value = json.loads((root / "artifact-digests.json").read_text(encoding="utf-8"))
+            value["assets"][0]["digest"] = "b3:" + "f" * 64
+            (root / "artifact-digests.json").write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(PublishedReleaseError, "local typed digest differs"):
+                self.verify(release, root)
 
     def test_missing_or_extra_asset_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -84,7 +116,7 @@ class VerifyPublishedReleaseV2Tests(unittest.TestCase):
             release = self.make_release(root)
             release["assets"] = release["assets"][:-1]  # type: ignore[index]
             with self.assertRaisesRegex(PublishedReleaseError, "asset set differs"):
-                validate_release(release, tag=TAG, release_dir=root)
+                self.verify(release, root)
 
     def test_non_uploaded_asset_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,7 +124,15 @@ class VerifyPublishedReleaseV2Tests(unittest.TestCase):
             release = self.make_release(root)
             release["assets"][0]["state"] = "new"  # type: ignore[index]
             with self.assertRaisesRegex(PublishedReleaseError, "not uploaded"):
-                validate_release(release, tag=TAG, release_dir=root)
+                self.verify(release, root)
+
+    def test_invalid_asset_id_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            release = self.make_release(root)
+            release["assets"][0]["id"] = 0  # type: ignore[index]
+            with self.assertRaisesRegex(PublishedReleaseError, "asset id is invalid"):
+                self.verify(release, root)
 
 
 if __name__ == "__main__":
