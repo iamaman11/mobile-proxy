@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 SURFACE = (
     "contracts/operations/product-release-authority-v2.json",
+    ".github/workflows/product-release-readiness.yml",
     ".github/workflows/release-tag.yml",
     ".github/workflows/release.yml",
     "docs/operations/final-release-authority-order.md",
@@ -45,6 +46,30 @@ class ProductReleaseAuthorityOrderTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("canonical public tracker #90" in error for error in errors))
 
+    def test_readiness_command_must_remain_owner_read_only_on_issue_90(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / "contracts/operations/product-release-authority-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["readiness_command"]["mutation_authority"] = True
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("readiness command authority differs" in error for error in errors))
+
+    def test_settings_token_must_keep_administration_and_environments_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / "contracts/operations/product-release-authority-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["preconditions"]["settings_token_permissions"] = [
+                "repository_administration_read"
+            ]
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("preconditions differ" in error for error in errors))
+
     def test_product_tag_cannot_restore_physical_acceptance_precondition(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -56,6 +81,45 @@ class ProductReleaseAuthorityOrderTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("preconditions differ" in error for error in errors))
 
+    def test_readiness_workflow_cannot_receive_android_signing_secret_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/product-release-readiness.yml"
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "\n# ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}\n",
+                encoding="utf-8",
+            )
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("retired/wrong-owner token" in error for error in errors))
+
+    def test_readiness_workflow_must_list_environment_secret_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/product-release-readiness.yml"
+            body = path.read_text(encoding="utf-8").replace(
+                "repos/$GITHUB_REPOSITORY/environments/product-release/secrets?per_page=100",
+                "repos/$GITHUB_REPOSITORY/actions/secrets",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("missing protected Product Release v2 token" in error for error in errors))
+
+    def test_readiness_workflow_must_prove_environment_protection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/product-release-readiness.yml"
+            body = path.read_text(encoding="utf-8").replace(
+                "product-release environment has no protection rules",
+                "environment unchecked",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("missing protected Product Release v2 token" in error for error in errors))
+
     def test_release_tag_workflow_must_bind_exact_protected_main(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -64,6 +128,19 @@ class ProductReleaseAuthorityOrderTests(unittest.TestCase):
             body = path.read_text(encoding="utf-8").replace(
                 "target SHA does not equal exact protected main",
                 "target mismatch",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("missing protected Product Release v2 token" in error for error in errors))
+
+    def test_release_tag_requires_exact_same_sha_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/release-tag.yml"
+            body = path.read_text(encoding="utf-8").replace(
+                "exact protected main has no eligible successful Product Release Readiness proof",
+                "readiness skipped",
             )
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
