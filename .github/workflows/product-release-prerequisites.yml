@@ -43,13 +43,17 @@ jobs:
               raise SystemExit("product-release environment must use custom deployment ref policies")
 
           policies = json.load(open("deployment-branch-policies.json", encoding="utf-8"))
-          names = {
-              item.get("name")
+          resolved = {
+              (item.get("type"), item.get("name"))
               for item in policies.get("branch_policies", [])
               if isinstance(item, dict)
           }
-          if "v*" not in names:
-              raise SystemExit("product-release environment must allow only an explicit semantic-tag family such as v*")
+          expected = {("branch", "main")}
+          if resolved != expected:
+              raise SystemExit(
+                  "product-release environment deployment policy must be exactly branch:main; "
+                  f"resolved={sorted(resolved)!r}"
+              )
           PY
 
   environment-bindings:
@@ -108,7 +112,7 @@ jobs:
           {
             echo '## Product Release prerequisite evidence'
             echo '- Environment: product-release'
-            echo '- Environment custom deployment ref policy: v*'
+            echo '- Environment deployment ref policy: branch main only'
             echo '- Required environment secret bindings present: true'
             echo '- Immutable Releases enabled: true'
             echo '- Phone access performed: false'
