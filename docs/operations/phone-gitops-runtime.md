@@ -47,6 +47,18 @@ The production Android package is `com.example.mobileproxy`. The Android app is 
 
 A topology that does not require an app capability need not mutate the APK. A topology that does require it must bind the exact Product Release artifact, package/version and bounded signer-verification evidence before physical mutation.
 
+## Historical Item 19 / Item 20 provider-isolation boundary
+
+The controller-v2 migration supersedes the old **release ordering**, but it does not erase historical provider-isolation safety facts. The following constraints remain intentionally preserved for audit and fail-closed compatibility with historical Item 19/Item 20 evidence:
+
+- The private runner has no Vultr credentials.
+- Before enabling any mutable phone workflow: the responsible execution authority must prove its own target, identity, admission and recovery preconditions; historical provider proof never authorizes a phone mutation by itself.
+- Item 19 provider proof is COMPLETE.
+- The historical Item 19 proof SHA remains historical evidence; that SHA is not active Item 20 release authority.
+- Under the historical Item 20 handoff, private Item 20 phone execution must not call Vultr APIs.
+
+These statements preserve the old provider-isolation boundary only. They do **not** restore Item 20, signing-generation #115 or `final_accepted_candidate_sha` as prerequisites for an annotated Product tag or immutable Product Release v2. Current product/deployment ordering is defined by the v2 authority contracts at the top of this document.
+
 ## Registered-device boundary
 
 `ANDROID_PRODUCTION_SERIAL` is a private target binding. It is used only to select the registered production phone and must never be emitted in public evidence.
