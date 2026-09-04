@@ -33,7 +33,7 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "Public PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.",
         "durable mutation intent exists before destructive dispatch",
         "UNKNOWN continuation is read-only observation/reconciliation",
-        "Do not verify verification.",
+        "No verification of verification.",
         "Do not preserve disposable bootstrap state",
     ),
     ARCHITECTURE: (
