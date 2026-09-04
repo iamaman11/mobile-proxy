@@ -19,7 +19,7 @@ The public repository owns the PRODUCT:
 - Android and Linux product build;
 - Android product signing verification;
 - exact annotated semantic-version product tag;
-- immutable Product Release assets, manifest, provenance and checksums.
+- immutable Product Release assets, manifest, provenance and typed content digests.
 
 The private repository owns DEPLOYMENT CONTROL:
 
@@ -48,12 +48,13 @@ exact protected public main SHA
   -> public PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA
   -> release-manifest.json format v2
   -> provenance.json format v2
-  -> SHA256SUMS over the exact bundle
+  -> artifact-digests.json with typed Product Release content digests
   -> create GitHub Release as draft
   -> attach and verify the exact five Release v2 assets
+  -> compare every draft asset against local exact bytes
   -> publish the verified draft
   -> verify GitHub Release immutable == true
-  -> verify GitHub Release/asset integrity
+  -> verify GitHub Release/asset integrity with GitHub-native verification
   -> only now may private /deploy <target> <tag> consume that Product Release
   -> private controller observes / admits / mutates / verifies / recovers / classifies target
   -> public GitHub Deployment receives bounded status/history projection only
@@ -143,28 +144,38 @@ mobile-proxy-linux-x86_64-vX.Y.Z.tar.gz
 mobile-proxy-android-vX.Y.Z.apk
 release-manifest.json
 provenance.json
-SHA256SUMS
+artifact-digests.json
 ```
 
-`release-manifest.json` format v2 records the exact source SHA and artifact SHA-256 values. The Android entry also records `com.example.mobileproxy`, `versionName` and `versionCode`.
+`release-manifest.json` format v2 records the exact source SHA and typed content digest for each product artifact. The Android entry also records `com.example.mobileproxy`, `versionName` and `versionCode`.
 
-`provenance.json` format v2 records the same exact source/tag identity, builder/workflow identity, and artifact SHA-256 values without secret/signing/phone fields.
+`provenance.json` format v2 records the same exact source/tag identity, builder/workflow identity and typed product-artifact digests without secret/signing/phone fields.
 
-`SHA256SUMS` covers Linux, Android APK, manifest and provenance. The checksum file does not recursively hash itself.
+`artifact-digests.json` uses the canonical first-party digest policy:
+
+```text
+algorithm: blake3-256
+domain: mobile-proxy/product-release-asset/v2
+```
+
+Its typed digests cover the Linux archive, Android APK, `release-manifest.json` and `provenance.json`. The digest-set file does not hash itself. First-party release code must not introduce a separate direct cryptographic primitive; all content identity goes through the typed foundation `ContentDigest` contract with domain separation.
+
+GitHub may expose its own platform digest for uploaded Release assets. That external field is validated as GitHub metadata, but first-party code does not reimplement GitHub's hashing algorithm. For a draft, remote assets are downloaded through the authenticated asset API and compared to local files as exact bytes before publication. After publication, GitHub-native immutable Release and asset verification supplies the independent platform-integrity postcondition.
 
 ### Draft-first immutability boundary
 
 Publication is deliberately two-phase:
 
 1. create/reuse one exact draft;
-2. verify its complete asset set and remote SHA-256 digests against local bytes;
-3. only then publish it.
+2. verify its complete asset set and local typed-digest contract;
+3. download each draft asset and compare it to the local asset as exact bytes;
+4. only then publish it.
 
 Once published, the workflow must require `immutable == true` from the exact GitHub Release response. A mutable published Release is never accepted as deployable.
 
-An exact already-published immutable Release is an idempotent success only when every expected asset and digest still matches the locally rebuilt exact bundle. An existing mismatched draft, mismatched published Release, duplicate exact-tag Release, extra asset or missing asset fails closed. The workflow never overwrites or replaces Release assets.
+An exact already-published immutable Release is an idempotent success only when every expected local typed digest is valid and GitHub-native Release/asset verification succeeds against the locally rebuilt bundle. An existing mismatched draft, mismatched published Release, duplicate exact-tag Release, extra asset or missing asset fails closed. The workflow never overwrites or replaces Release assets.
 
-GitHub immutable Release verification and local asset verification are additional postconditions, not substitutes for the manifest/digest contract.
+GitHub immutable Release verification, exact-byte draft comparison and typed content identity are independent postconditions; none is silently substituted for another.
 
 ## Deployment authority begins after Product Release
 
@@ -201,6 +212,7 @@ The public PRODUCT workflows must never:
 - derive deployability from a mutable Release;
 - create a directly-published Release before verifying all draft assets;
 - replace assets on an existing Release;
+- bypass the canonical typed digest foundation with a first-party direct digest primitive;
 - use `latest` as deployment identity.
 
 The private controller must never become the canonical source/build/signing owner for PRODUCT artifacts.
@@ -215,10 +227,12 @@ Any ambiguity fails closed:
 - exact source SHA lacks successful main Quality -> reject tag creation/publication;
 - tag is lightweight, ambiguous or resolves to a different SHA -> reject;
 - public Android signing verification fails -> no Release creation;
+- typed Product Release digest contract fails -> no Release creation/publication;
 - immutable Releases setting cannot be positively proven enabled -> no Release creation;
-- draft asset set/digest differs -> do not publish;
+- draft asset set differs -> do not publish;
+- any downloaded draft asset differs from local exact bytes -> do not publish;
 - published Release is mutable -> not deployable;
-- Release v2 lacks Linux/APK/manifest/provenance/checksums -> not deployable;
+- Release v2 lacks Linux/APK/manifest/provenance/typed-digest set -> not deployable;
 - private controller cannot bind exact Product Release + controller revision -> no target mutation;
 - execution outcome becomes ambiguous after destructive boundary -> read-only recovery, never blind retry.
 
