@@ -45,12 +45,58 @@ The older “private thin execution satellite; public physical State Machine own
 
 Public Issue #179 is the migration/development audit tracker, not the normal runtime deployment ledger. Public Issue #228 is backlog only. Private Issue #1 is the Deployment Controller command surface and canonical runtime execution ledger.
 
-## 3. Product Release precedes deployment
+## 3. Retained PRODUCT invariants
+
+The authority migration does not weaken previously audited PRODUCT behavior. The following remain current PRODUCT requirements unless a separately reviewed compatibility migration changes them.
+
+### 3.1 Protected compatibility surface
+
+- mixed SOCKS5/HTTP compatibility remains public on port `1080`;
+- SOCKS5 remains public on port `1081`;
+- HTTP including CONNECT remains public on port `3128`;
+- QUIC remains the primary reverse-tunnel transport;
+- certificate-pinned TLS/TCP reserve remains available and plaintext downgrade remains forbidden;
+- WireGuard remains a controlled compatibility/rollback path until an explicit accepted deprecation;
+- operator CLI/admin API compatibility is preserved unless a versioned migration explicitly changes it.
+
+These are PRODUCT behavior contracts. The private Deployment Controller decides whether and how an exact immutable Product Release is applied to a target; it does not redefine the product compatibility surface.
+
+### 3.2 Architecture and state ownership
+
+Inside PRODUCT, dependency direction remains foundation/domain -> application -> infrastructure/adapters -> composition/delivery. Pure/domain modules do not take transport, persistence, Android, filesystem, process, environment or provider responsibilities. External inputs are converted into typed product/domain values at boundaries where the existing contracts require it.
+
+Every currently registered PRODUCT/operational mutable-state group has one declared authoritative owner. Other contexts mutate durable product state only through the existing typed application/persistence boundaries. HTTP handlers do not own SQL transaction ordering or canonical business transitions.
+
+The v2 cross-repository authority split is an additional boundary: deployment admission, target mutation, exactly-once dispatch and recovery are not PRODUCT mutable-state ownership and belong to the private Deployment Controller.
+
+### 3.3 Durable PRODUCT state
+
+The existing durable control-plane invariants remain unchanged:
+
+- canonical mutable PRODUCT control-plane state is durable rather than memory-only;
+- SQLite retains WAL, foreign keys, bounded busy timeout, single-writer/short-transaction discipline, integrity checks, backup and clean restore behavior;
+- related device/command/replay/projection changes that form one product operation commit atomically as required by the existing persistence contract;
+- legacy JSON migration remains bounded import/parity/diagnostic/rollback compatibility rather than an alternate canonical runtime store.
+
+These PRODUCT persistence invariants are distinct from the private deployment mutation ledger.
+
+### 3.4 Typed contracts, security and bounded operation
+
+Existing typed identifier/status/error/protocol/tunnel/strategy contracts and typed BLAKE3 content/fingerprint policy remain in force. Secret values do not enter public Git/evidence. Public Actions remain least-privilege, fork-safe and free of production phone/ADB access.
+
+Requests, mutation idempotency, queue/retry bounds, liveness/readiness separation, authentication and fail-closed proxy/session behavior remain governed by their existing PRODUCT contracts and tests. This Stage 1 authority correction does not waive those invariants.
+
+### 3.5 Delivery integrity
+
+Public PRODUCT delivery continues to require reviewed exact source, exact successful Quality where required, immutable product identity, deterministic build/signing verification, bounded checksums/SBOM/provenance and immutable Product Release evidence. Mutable `latest`, branch names or approximate artifact identity are forbidden as production deployment identity.
+
+## 4. Product Release precedes deployment
 
 The normal authority order is:
 
 ```text
 protected public main + exact successful Quality
+  -> Product Release prerequisite proof where required
   -> annotated product tag
   -> public signed PRODUCT build
   -> immutable Product Release v2
@@ -58,11 +104,11 @@ protected public main + exact successful Quality
   -> private controller admission / observation / possible mutation / verification / recovery
 ```
 
-Physical phone acceptance is not a prerequisite for creating the immutable Product Release under v2. Runtime identity combines the exact immutable Product Release and exact admitted private controller revision.
+Physical phone acceptance is not a prerequisite for creating the immutable Product Release under v2. Runtime identity combines the exact immutable Product Release and the exact admitted private controller revision.
 
 `latest`, mutable branches, a public GitHub Deployment record, a historical acceptance candidate or Issue prose are not deployment identity.
 
-## 4. Deployment execution invariants
+## 5. Deployment execution invariants
 
 The private Deployment Controller owns the runtime transaction model:
 
@@ -92,7 +138,17 @@ Required invariants:
 
 Public PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.
 
-## 5. Ordered 10/10 development stages
+## 6. Historical Item 19 / Item 20 evidence boundary
+
+This section preserves immutable historical evidence required by existing audits; it is **not current runtime or release authority** under v2.
+
+Historical Item 19 candidate `d151dbdd156279e32a5361d304c90f996bd2d565` remains historical provider-lifecycle proof only. Item 19 historical provider proof is COMPLETE. Its terminal proof intent, provider evidence and candidate identity are not reusable as a current deployment request, Product Release or private-controller terminal.
+
+In the superseded Item19/Item20 roadmap, Item 20 is the first unfinished delivery item and Item 20 remains blocked by the signing-continuity gate recorded by that historical acceptance design. Any historical Item 20 JIT session required a distinct ownership intent rather than reuse Item 19's terminal proof intent.
+
+Those statements are retained only so historical evidence remains auditable. Current work does **not** resume the old Item20 release ordering: Product Release v2 now precedes deployment, private Issue #1 is the runtime ingress/ledger, and the newest #179 checkpoint alone determines whether any future live acceptance action is permitted.
+
+## 7. Ordered 10/10 development stages
 
 Issue #228 carries the detailed backlog. The stages below are the canonical durable order; #179 chooses the exact current item.
 
@@ -183,12 +239,13 @@ When authorized, the private Deployment Controller consumes the exact immutable 
 
 Old failed GitHub workflow runs are not manually rerun as a deployment mechanism. Re-entry is derived from the canonical private ledger.
 
-## 6. PRODUCT acceptance criteria
+## 8. PRODUCT acceptance criteria
 
 PRODUCT 10/10-ready requires, on reviewed exact source identities:
 
 - coherent v2 authority documentation/contracts;
 - no active duplicate deployment runtime owner in public after Stage 2;
+- retained PRODUCT compatibility, architecture, persistence, security and bounded-operation invariants remain protected;
 - Android secret persistence/backup boundaries fail closed;
 - strong behavior coverage for the independent Android production contracts;
 - exact Quality success;
@@ -200,7 +257,7 @@ PRODUCT 10/10-ready requires, on reviewed exact source identities:
 
 Public Quality proves PRODUCT software/policy. It does not manufacture target state.
 
-## 7. Deployment Controller acceptance criteria
+## 9. Deployment Controller acceptance criteria
 
 The private controller is accepted only while it proves:
 
@@ -220,7 +277,7 @@ The private controller is accepted only while it proves:
 
 VM production remains fail-closed until its controller-owned target adapter is proven end-to-end.
 
-## 8. Full production 10/10
+## 10. Full production 10/10
 
 Full production 10/10 is reached only when all three are true:
 
@@ -230,7 +287,7 @@ Full production 10/10 is reached only when all three are true:
 
 Do not collapse those three evidence domains into one green workflow.
 
-## 9. Engineering doctrine
+## 11. Engineering doctrine
 
 1. No code for code.
 2. No verification of verification.
@@ -243,7 +300,7 @@ Do not collapse those three evidence domains into one green workflow.
 9. Private Deployment Controller never independently builds/signs/tags/releases the product.
 10. Manual SSH, raw/manual ADB and workstation/provider CLI are not normal production control paths.
 
-## 10. Quality and checkpoint discipline
+## 12. Quality and checkpoint discipline
 
 For docs/policy-sized work:
 
