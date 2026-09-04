@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 import tempfile
@@ -16,6 +15,11 @@ from create_release_bundle_v2 import ReleaseBundleError, create_bundle
 class ReleaseBundleV2Tests(unittest.TestCase):
     tag = "v0.1.4"
     sha = "a" * 40
+
+    @staticmethod
+    def fake_digest(_repository_root: Path, asset_name: str, path: Path) -> str:
+        seed = (sum(asset_name.encode("utf-8")) + len(path.read_bytes())) % 16
+        return "b3:" + format(seed, "x") * 64
 
     def fixture(self, root: Path) -> Path:
         release = root / "release"
@@ -47,6 +51,7 @@ class ReleaseBundleV2Tests(unittest.TestCase):
 
     def build(self, release: Path, evidence: Path, **overrides):
         kwargs = {
+            "repository_root": release.parent,
             "release_dir": release,
             "tag": self.tag,
             "source_sha": self.sha,
@@ -54,6 +59,7 @@ class ReleaseBundleV2Tests(unittest.TestCase):
             "builder": "https://github.com/iamaman11/mobile-proxy/actions/runs/123",
             "workflow_ref": "iamaman11/mobile-proxy/.github/workflows/release.yml@refs/tags/v0.1.4",
             "github_native_attestation": True,
+            "digest_file": self.fake_digest,
         }
         kwargs.update(overrides)
         return create_bundle(**kwargs)
@@ -62,7 +68,7 @@ class ReleaseBundleV2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             release = Path(raw) / "release"
             evidence = self.fixture(Path(raw))
-            manifest, provenance, checksums = self.build(release, evidence)
+            manifest, provenance, digests = self.build(release, evidence)
             self.assertEqual(manifest["format_version"], 2)
             self.assertEqual(provenance["format_version"], 2)
             artifacts = {item["name"]: item for item in manifest["artifacts"]}
@@ -73,12 +79,18 @@ class ReleaseBundleV2Tests(unittest.TestCase):
             self.assertEqual(artifacts[apk_name]["package_name"], "com.example.mobileproxy")
             self.assertEqual(artifacts[apk_name]["version_name"], "0.1.4")
             self.assertEqual(artifacts[apk_name]["version_code"], 1004)
-            self.assertEqual(checksums[apk_name], hashlib.sha256(b"android-artifact").hexdigest())
-            self.assertEqual(checksums[linux_name], hashlib.sha256(b"linux-artifact").hexdigest())
-            sums = (release / "SHA256SUMS").read_text(encoding="utf-8")
-            self.assertIn("release-manifest.json", sums)
-            self.assertIn("provenance.json", sums)
-            self.assertNotIn("SHA256SUMS  SHA256SUMS", sums)
+            self.assertEqual(artifacts[apk_name]["content_digest"], digests[apk_name])
+            self.assertEqual(artifacts[linux_name]["content_digest"], digests[linux_name])
+            digest_set = json.loads((release / "artifact-digests.json").read_text(encoding="utf-8"))
+            self.assertEqual(digest_set["format_version"], 1)
+            self.assertEqual(digest_set["algorithm"], "blake3-256")
+            self.assertEqual(digest_set["digest_domain"], "mobile-proxy/product-release-asset/v2")
+            covered = {entry["name"] for entry in digest_set["assets"]}
+            self.assertEqual(
+                covered,
+                {apk_name, linux_name, "release-manifest.json", "provenance.json"},
+            )
+            self.assertNotIn("artifact-digests.json", covered)
 
     def test_wrong_android_version_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -118,6 +130,13 @@ class ReleaseBundleV2Tests(unittest.TestCase):
             (release / f"mobile-proxy-android-{self.tag}.apk").unlink()
             with self.assertRaises(ReleaseBundleError):
                 self.build(release, evidence)
+
+    def test_invalid_typed_digest_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            release = Path(raw) / "release"
+            evidence = self.fixture(Path(raw))
+            with self.assertRaises(ReleaseBundleError):
+                self.build(release, evidence, digest_file=lambda *_args: "invalid")
 
     def test_contract_does_not_copy_private_build_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
