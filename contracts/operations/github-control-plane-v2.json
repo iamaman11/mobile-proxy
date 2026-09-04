@@ -1,0 +1,88 @@
+{
+  "contract_version": 2,
+  "status": "protected",
+  "project_authority_contract": "contracts/operations/project-authority-v2.json",
+  "production_topology_contract": "contracts/operations/production-topology-v2.json",
+  "product_release_contract": "contracts/operations/product-release-authority-v2.json",
+  "public_product_repository": {
+    "name": "iamaman11/mobile-proxy",
+    "visibility": "public",
+    "self_hosted_runners": "forbidden",
+    "owns": [
+      "source",
+      "quality",
+      "product_build",
+      "product_signing_verification",
+      "product_tag",
+      "immutable_product_release"
+    ]
+  },
+  "public_rulesets": {
+    "main": {
+      "required_check": "Quality Gate",
+      "pull_request_required": true,
+      "required_approvals": 0,
+      "review_thread_resolution_required": true,
+      "branch_must_be_up_to_date": true,
+      "deletion_forbidden": true,
+      "non_fast_forward_forbidden": true,
+      "bypass_actors": "none"
+    },
+    "release_tags": {
+      "pattern": "v*",
+      "deletion_forbidden": true,
+      "non_fast_forward_forbidden": true,
+      "bypass_actors": "none"
+    }
+  },
+  "product_release_environment": {
+    "name": "product-release",
+    "executor": "github-hosted",
+    "required_secret_names": [
+      "PRODUCT_RELEASE_SETTINGS_TOKEN",
+      "ANDROID_RELEASE_KEYSTORE_B64",
+      "ANDROID_RELEASE_KEYSTORE_PASSWORD",
+      "ANDROID_RELEASE_KEY_ALIAS",
+      "ANDROID_RELEASE_KEY_PASSWORD"
+    ],
+    "phone_or_target_access": "forbidden",
+    "provider_mutation": "forbidden"
+  },
+  "private_deployment_controller": {
+    "name": "iamaman11/mobile-proxy-production",
+    "visibility": "private",
+    "authority": "deployment_controller",
+    "control_issue": 1,
+    "command": "/deploy <target> <vX.Y.Z>",
+    "product_source_copy": "forbidden",
+    "product_build_or_signing": "forbidden",
+    "canonical_runtime_evidence": true,
+    "bounded_public_deployment_projection": true
+  },
+  "historical_acceptance_surfaces": {
+    "public_item19_item20_workflows": "historical_or_development_only_not_product_release_or_runtime_deployment_authority",
+    "acceptance_vultr_environment": "historical_acceptance_boundary_not_normal_production_deployment_authority",
+    "public_phone_handoff": "superseded_by_private_deployment_controller_v2"
+  },
+  "runtime_identity": {
+    "product_release": "exact_immutable_product_release_v2",
+    "controller_revision": "exact_private_controller_revision",
+    "latest": "forbidden",
+    "public_issue_179_cursor": "forbidden_for_normal_runtime"
+  },
+  "actions_security": {
+    "default_workflow_permissions": "read",
+    "fork_write_token_or_secrets": "forbidden",
+    "public_self_hosted_runner": "forbidden"
+  },
+  "forbidden": [
+    "public_release_workflow_adb_or_phone_access",
+    "public_release_workflow_provider_mutation",
+    "public_release_workflow_private_controller_dispatch",
+    "private_controller_independent_product_release",
+    "mutable_release_deployment",
+    "latest_release_deployment",
+    "physical_acceptance_as_product_tag_precondition",
+    "public_github_deployment_as_canonical_execution_ledger"
+  ]
+}

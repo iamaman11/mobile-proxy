@@ -1,0 +1,72 @@
+{
+  "contract_version": 2,
+  "status": "protected",
+  "public_product_authority": {
+    "repository": "iamaman11/mobile-proxy",
+    "visibility": "public",
+    "responsibilities": [
+      "application_and_runtime_source",
+      "shared_domain_and_product_architecture",
+      "public_quality",
+      "product_build",
+      "product_signing_verification",
+      "annotated_product_tags",
+      "immutable_product_releases",
+      "product_release_contracts_and_provenance"
+    ],
+    "forbidden": [
+      "phone_or_vm_target_mutation",
+      "private_target_secrets",
+      "runtime_deployment_transaction_ledger",
+      "deployment_exactly_once_dispatch_authority"
+    ]
+  },
+  "private_deployment_authority": {
+    "repository": "iamaman11/mobile-proxy-production",
+    "visibility": "private",
+    "control_issue": 1,
+    "authority": "deployment_controller",
+    "responsibilities": [
+      "deployment_command_ingress",
+      "deployment_state_machine_and_transaction_kernel",
+      "target_admission_and_serialization",
+      "target_observation_and_adapters",
+      "durable_mutation_intent",
+      "exactly_once_destructive_dispatch",
+      "postcondition_verification",
+      "recovery_and_quarantine",
+      "private_target_bindings_and_secrets",
+      "durable_canonical_runtime_execution_evidence",
+      "bounded_public_deployment_projection"
+    ],
+    "forbidden": [
+      "application_source_copy",
+      "independent_product_build",
+      "independent_product_signing_policy",
+      "independent_product_release_creation",
+      "independent_product_tag_authority",
+      "product_release_asset_rewrite"
+    ]
+  },
+  "runtime_identity": {
+    "product_release": "exact_immutable_public_product_release_v2",
+    "controller_revision": "exact_private_controller_git_revision",
+    "identity": "product_release_plus_controller_revision",
+    "public_main_sha_as_runtime_cursor": "forbidden",
+    "public_issue_179_as_runtime_cursor": "forbidden"
+  },
+  "product_release_identity": {
+    "repository": "iamaman11/mobile-proxy",
+    "tag": "vMAJOR.MINOR.PATCH",
+    "tag_kind": "annotated",
+    "required_release_contract": "contracts/operations/product-release-authority-v2.json",
+    "mutable_or_latest_identity": "forbidden"
+  },
+  "evidence_authority": {
+    "runtime_execution_truth": "private_deployment_controller_durable_ledger",
+    "public_github_deployment": "bounded_status_and_history_projection_only",
+    "public_migration_tracker": "issue_179_development_audit_only",
+    "secret_or_device_sensitive_values_in_public": "forbidden"
+  },
+  "conflict_policy": "fail_closed_by_authority_domain_and_reconcile_before_mutation"
+}

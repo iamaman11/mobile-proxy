@@ -1,0 +1,82 @@
+{
+  "contract_version": 2,
+  "status": "protected",
+  "canonical_repository": "iamaman11/mobile-proxy",
+  "deployment_controller_repository": "iamaman11/mobile-proxy-production",
+  "tag_workflow": ".github/workflows/release-tag.yml",
+  "publication_workflow": ".github/workflows/release.yml",
+  "command": {
+    "issue": 90,
+    "syntax": "/release-tag vMAJOR.MINOR.PATCH <full_sha>",
+    "authorized_actor": "repository_owner"
+  },
+  "preconditions": {
+    "target_sha": "exact_full_40_char_sha",
+    "protected_main_sha": "must_equal_exact_target_sha",
+    "target_main_quality": "at_least_one_completed_successful_push_on_main_for_exact_target_sha",
+    "canonical_release_contract_verified": true,
+    "tag_kind": "annotated",
+    "publication_source_sha": "must_equal_exact_tag_target_sha",
+    "immutable_releases_enabled_before_release_creation": true,
+    "product_release_environment": "product-release",
+    "immutable_settings_token_permission": "repository_administration_read",
+    "signed_android_release_required": true
+  },
+  "ordering": {
+    "product_source_acceptance": "exact_protected_main_sha_plus_exact_successful_main_quality",
+    "final_v_tag": "after_product_source_acceptance_and_before_any_release_deployment",
+    "release_build": "public_product_repository_builds_linux_and_exact_signed_android_from_final_tag_target",
+    "release_publication": "draft_first_attach_exact_v2_bundle_then_publish_immutable",
+    "deployment_admission": "private_controller_only_after_exact_immutable_product_release_v2_exists",
+    "physical_acceptance": "private_controller_observes_executes_recovers_and_classifies_target_after_product_release_exists",
+    "public_deployment_projection": "bounded_status_history_only_not_execution_authority"
+  },
+  "required_release_assets": [
+    "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
+    "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
+    "release-manifest.json",
+    "provenance.json",
+    "artifact-digests.json"
+  ],
+  "manifest": {
+    "format_version": 2,
+    "android_package": "com.example.mobileproxy",
+    "source_sha": "exact_final_tag_target_sha",
+    "content_digest_algorithm": "blake3-256",
+    "content_digest_domain": "mobile-proxy/product-release-asset/v2"
+  },
+  "digest_set": {
+    "format_version": 1,
+    "algorithm": "blake3-256",
+    "domain": "mobile-proxy/product-release-asset/v2",
+    "covers": [
+      "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
+      "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
+      "release-manifest.json",
+      "provenance.json"
+    ],
+    "self_digest_forbidden": true
+  },
+  "tag": {
+    "kind": "annotated",
+    "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+    "deletion_forbidden_after_immutable_publication": true,
+    "non_fast_forward_forbidden_after_immutable_publication": true
+  },
+  "forbidden": [
+    "physical_acceptance_required_before_product_tag",
+    "phone_signing_gate_required_before_product_tag",
+    "item20_final_accepted_candidate_required_before_product_tag",
+    "public_release_workflow_accessing_phone",
+    "public_release_workflow_mutating_provider",
+    "public_release_workflow_executing_private_deployment_controller",
+    "release_publication_without_exact_signed_android_apk",
+    "release_publication_without_immutable_releases_enabled",
+    "direct_published_release_creation_before_assets_are_verified",
+    "overwrite_or_replace_existing_release_assets",
+    "accept_mutable_published_release_as_deployable",
+    "deployment_from_latest_or_moving_release_alias",
+    "deployment_before_exact_immutable_product_release_v2",
+    "first_party_direct_cryptographic_digest_primitive"
+  ]
+}
