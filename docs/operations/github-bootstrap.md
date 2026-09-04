@@ -1,112 +1,138 @@
 # GitHub control-plane bootstrap
 
-`iamaman11/mobile-proxy` is the public, versioned and **sole canonical repository for project
-information**. It contains desired control-plane state, contracts, workflow logic, release identity
-and safe evidence policy. It does not contain credential values, private keys, mutable provider
-bindings, physical-phone secrets or workstation paths; those are deliberately external runtime
-state.
+This document describes the GitHub trust/configuration boundary for the accepted v2 authority model.
 
-The private `iamaman11/mobile-proxy-production` repository is only an execution satellite for the
-physical phone runner. It cannot define an independent roadmap, architecture, desired state or
-release policy. See [project authority](project-authority.md).
+## Two authoritative planes
 
-## Reconciled GitHub state
+- Public `iamaman11/mobile-proxy` = **PRODUCT** authority.
+- Private `iamaman11/mobile-proxy-production` = **DEPLOYMENT CONTROLLER** authority.
+
+The private repository is not a thin execution satellite and not a second product source. It owns deployment-controller code/policy and canonical runtime execution evidence, while remaining forbidden from copying/building/signing/tagging/publishing the product.
+
+Normative contracts:
+
+- [`project-authority-v2.json`](../../contracts/operations/project-authority-v2.json)
+- [`github-control-plane-v2.json`](../../contracts/operations/github-control-plane-v2.json)
+- [`production-topology-v2.json`](../../contracts/operations/production-topology-v2.json)
+- [`product-release-authority-v2.json`](../../contracts/operations/product-release-authority-v2.json)
+- [Project authority](project-authority.md)
+
+Older v1 control-plane/topology bootstrap wording is historical when it conflicts with v2.
+
+## Required GitHub state
 
 | Boundary | Required state |
 | --- | --- |
-| `iamaman11/mobile-proxy` | Public canonical repository; zero self-hosted runners. |
-| `main` | Active PR ruleset with `Quality Gate`, no bypass, no deletion/force push. |
-| `v*` | Active tag ruleset with no bypass, no deletion or non-fast-forward movement. |
-| Public Actions | Read-only default token; all external fork contributors require approval; fork write token/secrets forbidden. |
-| `acceptance-vultr` | Pre-release acceptance-only secret boundary; GitHub-hosted jobs only; exact acceptance evidence required; item 17 permits only credential/key validation and one `GET /v2/account`; no final-production authority or VM lifecycle. |
-| `production-vultr` | Final-production boundary; protected tag-only `v*`, no reviewer/wait timer/admin bypass; GitHub-hosted jobs only. |
-| `iamaman11/mobile-proxy-production` | Private execution satellite; Actions/Issues available; no canonical project policy. |
-| Private control Issue | `iamaman11/mobile-proxy-production#1`, reserved as command/audit transport only. |
-| Phone runner | Private-repo only; labels `self-hosted`, `Linux`, `X64`, `android-production`. |
+| public `iamaman11/mobile-proxy` | public PRODUCT repository; no production self-hosted runner |
+| public `main` | protected PR delivery with required `Quality Gate`; no destructive ref rewrite |
+| protected `v*` | immutable product-tag identity; never delete/move/reuse |
+| public Actions | least privilege; no production target access from fork/PR trust boundary |
+| `product-release` environment | protected PRODUCT release/signing inputs only; no target/provider mutation |
+| private `iamaman11/mobile-proxy-production` | private Deployment Controller repository; Actions/Issues; canonical controller runtime evidence |
+| private Issue #1 | owner-controlled deployment ingress and canonical runtime ledger |
+| `android-production` runner | private controller runner for the registered phone |
+| `vm-production` | fail-closed until a controller-owned VM adapter is proven end-to-end |
 
-The machine-readable requirements are:
+The exact current machine-readable desired state is in the v2 contracts above.
 
-- [`project-authority-v1.json`](../../contracts/operations/project-authority-v1.json)
-- [`github-control-plane-v1.json`](../../contracts/operations/github-control-plane-v1.json)
-- [`production-topology-v1.json`](../../contracts/operations/production-topology-v1.json)
-- [`acceptance-authority-v1.json`](../../contracts/operations/acceptance-authority-v1.json)
-- [`vultr-readonly-preflight-v1.json`](../../contracts/operations/vultr-readonly-preflight-v1.json)
+## Public PRODUCT credential boundary
 
-## Credential boundary
+The public `product-release` environment owns only PRODUCT build/release credentials required by the Product Release contract, including the configured Android product signing inputs.
 
-Both `acceptance-vultr` and `production-vultr` use the encrypted environment-secret names
-`VULTR_API_KEY` and `VULTR_SSH_PRIVATE_KEY`, but they grant different authority. Their values are
-never committed, printed, copied to the phone runner or used by a pull-request workflow.
+Rules:
 
-`acceptance-vultr` is available only to the GitHub-hosted read-only preflight after exact immutable
-acceptance-authority evidence has been verified. In item 17 it may validate secret presence, parse
-the SSH private key locally and perform exactly one authenticated `GET /v2/account`; the response
-body is discarded and no provider account data is evidence. It cannot list or mutate VMs and cannot
-be treated as final production authority.
+- secret values are never committed or emitted as evidence;
+- public PR/fork workflows cannot receive production signing secrets;
+- product release jobs have no production phone/ADB/provider mutation authority;
+- release prerequisite proof should inspect only the minimum configuration metadata necessary and must not load signing secret values merely to prove names exist once that hardening is implemented.
 
-`production-vultr` remains protected by the final release-tag gate. A pre-release candidate cannot
-use it merely because the same provider credentials may ultimately be needed for production.
+Local/workstation secret stores are bootstrap/recovery aids only, never the normal production execution path.
 
-Local Secret Vault may bootstrap/recover a GitHub secret but is not part of the standard
-GitHub-hosted Vultr runtime path.
+## Private Deployment Controller boundary
 
-The phone runner is intentionally separate because physical USB/ADB access cannot be supplied by a
-GitHub-hosted runner. It must not receive Vultr credentials, an unrelated broad PAT or normal-job OS
-administrative privilege.
+The private repository owns the deployment runtime control plane:
 
-## Private execution-satellite boundary
+```text
+private Issue #1
+  -> semantic deployment request
+  -> exact Product Release resolution
+  -> target-global serialization
+  -> target observation/admission
+  -> durable mutation intent
+  -> at most one destructive dispatch per intent
+  -> independent postcondition
+  -> canonical terminal / recovery / quarantine evidence
+```
 
-The private repository should remain as small as GitHub permits. Allowed content is a thin caller
-or shim, private runner wiring, bounded private evidence and the command/audit transport. Canonical
-phone orchestration logic belongs in `iamaman11/mobile-proxy` and should be invoked at an immutable
-ref or delivered as a verified immutable release artifact.
+It may contain:
 
-A private GitHub Actions caller may use a reusable workflow stored in this public repository. For
-self-hosted jobs, GitHub evaluates runner access from the caller context, allowing the canonical
-workflow logic to remain public/versioned while the `android-production` runner remains private.
+- Deployment Controller source/policy;
+- private runner wiring;
+- target adapters/observers;
+- private target bindings/secrets;
+- bounded canonical runtime evidence;
+- recovery/quarantine logic.
 
-If private execution state conflicts with canonical project state, do not repair the canonical
-state from the private repository. Stop and reconcile `iamaman11/mobile-proxy` first.
+It must not contain a copied PRODUCT source tree or independent product build/sign/tag/release authority.
 
-## Delivery status
+## Phone runner boundary
 
-The immutable pre-release acceptance authority is implemented and live-proven for an exact
-canonical candidate. The next bounded gate is the GitHub-hosted Vultr read-only account/key
-preflight in `acceptance-vultr`. VM lifecycle remains unavailable until the typed ownership adapter
-and its rejection tests are implemented in the following baseline item.
+The phone runner exists privately because physical target access cannot be supplied by a public GitHub-hosted runner.
 
-The legacy public deployment workflow is intentionally blocked. Before production deployment is
-enabled, the canonical repository must implement and verify:
+Normal production jobs must:
 
-- an agent-invokable final release control entrypoint;
-- protected annotated-tag/release provenance flow after physical acceptance;
-- typed Vultr lifecycle satisfying the [VM ownership boundary](../architecture/vm-ownership-boundary.md);
-- GitHub-hosted Vultr preflight/apply/verify/evidence/rollback under the staged acceptance/final-production authority split;
-- private-caller phone preflight/apply/verify/evidence/rollback;
-- existing Android signing identity discovery before any signing-key replacement;
-- deterministic rollback and safe evidence correlation by immutable release tuple.
+- bind the exact private `android-production` target/runner contract;
+- obtain target authority through the private controller, not raw/manual ADB;
+- keep provider credentials off the phone runner unless a future explicit adapter contract requires a separate bounded boundary;
+- never publish the raw device identifier or sensitive target values;
+- preserve exactly-once destructive dispatch and read-only ambiguous-outcome recovery.
 
-The private read-only phone preflight itself is complete: the private caller ran on the exact
-`android-production` Linux runner, proved its required tools and the single registered ADB device,
-and produced bounded evidence without publishing the device identifier or mutating the phone.
-This is a runtime proof only; it does not make a mutable phone command available. The canonical
-record and remaining Android signing/lifecycle gate are in
-[phone GitOps runtime](phone-gitops-runtime.md).
+The existence or online state of a runner is not itself deployment authority.
 
-No bootstrap step authorizes creating a VM, installing an APK, changing phone networking, or
-running an arbitrary SSH/ADB/provider command. Those operations become available only through the
-ordered baseline gates.
+## Product Release -> deployment handoff
 
-Release immutability remains disabled until the release workflow publishes only after all intended
-assets, checksums, SBOM and attestations/provenance are attached.
+The handoff is:
+
+```text
+protected public source + Quality
+  -> annotated product tag
+  -> immutable Product Release v2
+  -> private /deploy <target> <tag>
+```
+
+The controller independently binds the exact Product Release and exact admitted controller revision.
+
+A public GitHub Deployment object is a bounded visibility projection only. It is never the controller ledger.
+
+## Re-entry / recovery
+
+If a prior request has ambiguous history, never infer permission from workflow failure or public Deployment status.
+
+The private controller rereads its canonical ledger:
+
+- terminal exists -> semantic duplicate/no second mutation;
+- durable intent exists without terminal -> recovery-only/read-only reconciliation as allowed by controller semantics;
+- neither exists -> a fresh semantic execution may be eligible only when separately authorized;
+- no old workflow run is manually rerun as a destructive retry mechanism.
+
+## Control surfaces
+
+- public Issue #179 = development/migration checkpoint authority;
+- public Issue #228 = 10/10 backlog only;
+- public Issue #90 = product tag/release surface where required by Product Release policy;
+- private Issue #1 = deployment ingress/runtime ledger.
+
+Always reread the newest #179 checkpoint before any GitHub state change that could affect production authority.
 
 ## Reconciliation procedure
 
-GitHub environment/secret bootstrap is external encrypted configuration. Re-run it only with an
-administrator credential and compare live state against the versioned contracts. Record only
-presence/result metadata in the canonical tracker; do not record secret material or unsafe
-provider/device identifiers.
+When GitHub configuration needs reconciliation:
 
-Some live properties cannot be independently read through every agent connector. Secret presence,
-runner online/idle state and physical ADB state therefore require bounded GitHub Actions preflights
-for runtime proof rather than claims based on chat or manual observation.
+1. identify the owning plane;
+2. compare live safe metadata against the matching v2 contract;
+3. change only the minimum required setting/secret binding;
+4. never print/read secret values merely to prove configuration;
+5. run bounded hosted proof where live connector visibility is insufficient;
+6. checkpoint only non-sensitive result metadata.
+
+No bootstrap/reconciliation action itself authorizes phone, VM or provider mutation.
