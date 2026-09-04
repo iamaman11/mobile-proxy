@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the fail-closed shared-provider VM lifecycle contract."""
+"""Validate provider-neutral VM ownership safety without legacy execution authority."""
 
 from __future__ import annotations
 
@@ -8,14 +8,15 @@ from pathlib import Path
 
 
 CONTRACT_PATH = Path("contracts/governance/vm-ownership-v1.json")
+RETIREMENT_PATH = Path("contracts/operations/historical-public-acceptance-retirement-v1.json")
+PROJECT_V2_PATH = Path("contracts/operations/project-authority-v2.json")
+TOPOLOGY_V2_PATH = Path("contracts/operations/production-topology-v2.json")
 DOCUMENT_PATH = Path("docs/architecture/vm-ownership-boundary.md")
 ITEM19_STATE_DOC = Path("docs/architecture/acceptance-vm-binding-store.md")
 PROVIDER_POLICY_PATH = Path("crates/proxy-core/src/provider_lifecycle.rs")
 VULTR_ADAPTER_PATH = Path("apps/operator-cli/src/vultr_lifecycle.rs")
 VULTR_CLIENT_PATH = Path("apps/operator-cli/src/vultr_client.rs")
 DURABLE_STATE_PATH = Path("apps/operator-cli/src/github_vm_binding_store.rs")
-TOPOLOGY_PATH = Path("contracts/operations/production-topology-v1.json")
-GITHUB_CONTROL_PLANE_PATH = Path("contracts/operations/github-control-plane-v1.json")
 
 REQUIRED_STATES = {
     "empty",
@@ -56,19 +57,9 @@ REQUIRED_FORBIDDEN = {
     "blind_create_retry_after_dispatch_fence",
     "binding_clear_before_provider_confirmed_delete",
     "terminal_intent_reset_to_generation_one",
-    "item_18_live_provider_mutation",
-    "item_18_final_production_authority",
-    "item_19_production_authority",
+    "provider_mutation_without_current_deployment_controller_admission",
+    "public_product_repository_runtime_provider_mutation_authority",
 }
-
-EXPECTED_HISTORICAL_ITEM19_LIFECYCLE = (
-    "historical_item_19_complete_provider_only_live_run_33342000338_exact_candidate_deployed_verified_deleted_"
-    "and_durable_terminal_confirmed_not_active_item20_candidate_authority"
-)
-EXPECTED_ITEM20_NEXT_LIFECYCLE = (
-    "item_20_must_select_exact_current_protected_main_as_candidate_and_control_plane_then_open_fresh_jit_"
-    "acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent"
-)
 
 
 def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
@@ -96,27 +87,59 @@ def _require_tokens(path: Path, root: Path, tokens: tuple[str, ...], errors: lis
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     contract = _load(root, CONTRACT_PATH, errors)
-    topology = _load(root, TOPOLOGY_PATH, errors)
-    github = _load(root, GITHUB_CONTROL_PLANE_PATH, errors)
+    retirement = _load(root, RETIREMENT_PATH, errors)
+    project_v2 = _load(root, PROJECT_V2_PATH, errors)
+    topology_v2 = _load(root, TOPOLOGY_V2_PATH, errors)
     if not contract:
         return errors
 
-    if contract.get("contract_version") != 1 or contract.get("status") != "protected":
-        errors.append("VM ownership contract must remain protected version 1")
+    if contract.get("contract_version") != 1 or contract.get("status") != "protected_provider_neutral_safety":
+        errors.append("VM ownership contract must remain protected provider-neutral safety version 1")
     if contract.get("owner") != "operator-cli":
         errors.append("VM ownership contract owner must remain operator-cli")
+
+    current_authority = contract.get("current_authority")
+    expected_authority = {
+        "project_authority": str(PROJECT_V2_PATH),
+        "production_topology": str(TOPOLOGY_V2_PATH),
+        "runtime_deployment_controller": "iamaman11/mobile-proxy-production",
+        "execution_authority": False,
+        "historical_item18_item19_chronology": "context_only_not_current_runtime_authority",
+    }
+    if current_authority != expected_authority:
+        errors.append("VM ownership safety contract current authority binding differs from v2/private controller boundary")
 
     implementation = contract.get("implementation")
     required_implementation = {
         "provider_neutral_policy": str(PROVIDER_POLICY_PATH),
         "vultr_adapter": str(VULTR_ADAPTER_PATH),
         "vultr_http_client": str(VULTR_CLIENT_PATH),
-        "durable_acceptance_state": str(DURABLE_STATE_PATH),
-        "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates",
-        "first_live_vm_creation_item": 19,
+        "durable_lifecycle_state_model": str(DURABLE_STATE_PATH),
+        "execution_authority": False,
     }
     if implementation != required_implementation:
-        errors.append("VM ownership implementation boundary differs from protected item-19 Slice A state")
+        errors.append("VM ownership implementation boundary differs from provider-neutral safety contract")
+
+    private = project_v2.get("private_deployment_authority")
+    public = project_v2.get("public_product_authority")
+    if not isinstance(private, dict) or private.get("repository") != "iamaman11/mobile-proxy-production" or private.get("authority") != "deployment_controller":
+        errors.append("project v2 no longer binds the private Deployment Controller as runtime authority")
+    if not isinstance(public, dict) or "phone_or_vm_target_mutation" not in public.get("forbidden", []):
+        errors.append("project v2 no longer forbids public PRODUCT VM target mutation")
+
+    targets = topology_v2.get("targets")
+    vm_target = targets.get("vm-production") if isinstance(targets, dict) else None
+    if not isinstance(vm_target, dict) or vm_target.get("destructive_dispatch") != "forbidden_until_proven" or vm_target.get("reuses_same_controller_kernel") is not True:
+        errors.append("production topology v2 VM target no longer reuses the fail-closed private controller kernel")
+
+    historical_docs = retirement.get("historical_execution_docs")
+    mixed_docs = retirement.get("mixed_context_docs")
+    if not isinstance(historical_docs, list) or str(ITEM19_STATE_DOC) not in historical_docs:
+        errors.append("Item19 VM binding-store execution design is not classified as historical-only")
+    if not isinstance(mixed_docs, dict) or mixed_docs.get(str(DOCUMENT_PATH)) != (
+        "provider_neutral_ownership_safety_is_current_but_item18_item19_execution_chronology_is_historical_only"
+    ):
+        errors.append("VM ownership document does not separate current safety from historical Item18/Item19 chronology")
 
     binding = contract.get("binding")
     if not isinstance(binding, dict):
@@ -126,7 +149,7 @@ def check_repository(root: Path) -> list[str]:
             "state_store": "durable owner-controlled state outside version control",
             "identity": "provider-assigned immutable instance UUID/ID",
             "ownership_intent": "exact immutable lifecycle scope plus exact intent ID",
-            "serialized_writer": "one repository-wide acceptance lifecycle workflow concurrency group with cancel-in-progress false",
+            "serialized_writer": "runtime must provide exactly one serialized lifecycle writer; concrete lock and transaction ownership is defined by the current deployment controller",
             "fork_policy": "non-linear durable history fails closed",
             "terminal_reuse": "forbidden",
         }
@@ -217,71 +240,27 @@ def check_repository(root: Path) -> list[str]:
             "replacement_generation_must_be_exactly_current_plus_one",
             "replacement_must_be_verified_before_binding_swap",
             "atomically_replace_provider_identity_and_generation_with_compare_and_swap",
+            "replacement_dispatch_fencing_cannot_be_bypassed",
         )
     ):
-        errors.append("VM replace must advance exactly one verified generation with CAS")
+        errors.append("VM replace must advance exactly one verified generation with CAS and preserved dispatch fencing")
 
     failures = contract.get("fail_closed")
     if not isinstance(failures, list) or set(failures) != REQUIRED_FAILURES:
-        errors.append("VM ownership fail_closed set differs from protected item-19 failures")
+        errors.append("VM ownership fail_closed set differs from protected provider-neutral failures")
     forbidden = contract.get("forbidden")
     if not isinstance(forbidden, list) or set(forbidden) != REQUIRED_FORBIDDEN:
-        errors.append("VM ownership forbidden set differs from protected item-19 behaviours")
+        errors.append("VM ownership forbidden set differs from protected provider-neutral behaviours")
 
-    if contract.get("item_18_execution") != {
-        "allowed": "contract_policy_adapter_and_non_mutating_tests_only",
-        "live_provider_mutation": False,
-        "real_vm_creation": False,
-        "production_vultr_authority": False,
-        "phone_mutation": False,
+    if contract.get("activation_condition") != (
+        "Any runtime provider adapter must satisfy this provider-neutral safety contract before destructive lifecycle dispatch is admitted by the current deployment controller."
+    ):
+        errors.append("VM ownership activation condition is not controller-v2 neutral")
+    if contract.get("historical_execution_context") != {
+        "item18_item19_public_acceptance_chronology": "historical_only_not_current_runtime_authority",
+        "old_public_acceptance_workflow_serialization": "retired_not_current_writer_authority",
     }:
-        errors.append("item 18 execution boundary must remain non-mutating")
-    if contract.get("item_19_slice_a") != {
-        "allowed": "durable_state_typed_http_client_contracts_docs_and_non_mutating_tests",
-        "live_provider_mutation": False,
-        "real_vm_creation": False,
-        "production_vultr_authority": False,
-        "phone_mutation": False,
-    }:
-        errors.append("item 19 Slice A must remain non-mutating and non-production")
-
-    if topology:
-        migration = topology.get("migration_status")
-        if not isinstance(migration, dict):
-            errors.append("production topology migration_status must be an object")
-        else:
-            if migration.get("vultr_adapter") != "implemented_typed_provider_neutral_ownership_and_generation_policy":
-                errors.append("production topology must keep item 18 typed Vultr adapter protected")
-            if migration.get("vultr_durable_acceptance_state") != "item_19_complete_crash_safe_dispatch_fencing_and_terminal_cleanup_proven_live":
-                errors.append("production topology must bind the completed item-19 durable state boundary")
-            if migration.get("vultr_typed_http_client") != "item_19_complete_acceptance_only_bounded_full_instance_enumeration_and_live_execution_proven":
-                errors.append("production topology must bind the completed item-19 typed client boundary")
-            if migration.get("vultr_live_lifecycle") != EXPECTED_HISTORICAL_ITEM19_LIFECYCLE:
-                errors.append("production topology must preserve the terminal Item19 live proof as historical-only evidence")
-            if migration.get("next_acceptance_lifecycle") != EXPECTED_ITEM20_NEXT_LIFECYCLE:
-                errors.append("production topology must require exact-current same-SHA selection plus a fresh Item20 lifecycle intent")
-
-    if github:
-        adapter = github.get("vultr_lifecycle_adapter")
-        if not isinstance(adapter, dict):
-            errors.append("GitHub control plane must define item-19 lifecycle adapter state")
-        else:
-            required = {
-                "status": "item_19_slice_a_typed_client_and_durable_state_active_no_live_entrypoint",
-                "provider_identity": "typed_provider_assigned_immutable_uuid_id",
-                "ownership_matching": "exact_project_manager_scope_intent_generation",
-                "generation_cas": "required",
-                "create_dispatch_fence": "durable_before_provider_post_and_never_blindly_redispatched",
-                "delete_dispatch_fence": "durable_before_provider_delete",
-                "terminal_intent_reuse": "forbidden",
-                "full_provider_enumeration": "bounded_cursor_pagination_required_before_lifecycle_decisions",
-                "live_execution": "forbidden_until_item_19_bounded_workflow_and_exact_current_gates",
-                "first_live_vm_creation_item": 19,
-                "production_vultr_authority": False,
-            }
-            for key, value in required.items():
-                if adapter.get(key) != value:
-                    errors.append(f"GitHub lifecycle adapter {key!r} differs from protected item-19 state")
+        errors.append("VM ownership historical execution chronology is not explicitly non-authoritative")
 
     _require_tokens(
         PROVIDER_POLICY_PATH,
@@ -350,7 +329,6 @@ def check_repository(root: Path) -> list[str]:
             "blind second POST",
             "Terminal",
             "Complete provider enumeration",
-            "production-vultr",
         ),
         errors,
     )
@@ -364,7 +342,6 @@ def check_repository(root: Path) -> list[str]:
             "generation",
             "compare-and-swap",
             "fail closed",
-            "item 19",
         ),
         errors,
     )
