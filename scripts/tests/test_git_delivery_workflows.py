@@ -6,11 +6,20 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class GitDeliveryWorkflowTests(unittest.TestCase):
-    def test_release_never_dispatches_legacy_production(self) -> None:
+    def test_release_is_product_publication_only(self) -> None:
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
-        self.assertIn("actions: write", release)
+        self.assertIn("actions: read", release)
+        self.assertIn("contents: write", release)
+        self.assertIn("environment: product-release", release)
+        self.assertIn("scripts/build_signed_android_release.py", release)
+        self.assertIn("repos/$GITHUB_REPOSITORY/immutable-releases", release)
+        self.assertIn("gh release create", release)
+        self.assertIn("--draft", release)
         self.assertNotIn("gh workflow run deploy-production.yml", release)
+        self.assertNotIn("/deploy ", release)
+        self.assertNotIn("phone-production", release)
+        self.assertNotIn("mobile-proxy-production", release)
 
     def test_legacy_deployment_workflow_is_an_explicit_migration_gate(self) -> None:
         deployment = (ROOT / ".github/workflows/deploy-production.yml").read_text(
