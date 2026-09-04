@@ -3,6 +3,7 @@
   "status": "protected",
   "canonical_repository": "iamaman11/mobile-proxy",
   "deployment_controller_repository": "iamaman11/mobile-proxy-production",
+  "readiness_workflow": ".github/workflows/product-release-readiness.yml",
   "tag_workflow": ".github/workflows/release-tag.yml",
   "publication_workflow": ".github/workflows/release.yml",
   "command": {
@@ -10,21 +11,35 @@
     "syntax": "/release-tag vMAJOR.MINOR.PATCH <full_sha>",
     "authorized_actor": "repository_owner"
   },
+  "readiness_command": {
+    "issue": 90,
+    "syntax": "/release-readiness",
+    "authorized_actor": "repository_owner",
+    "mutation_authority": false
+  },
   "preconditions": {
     "target_sha": "exact_full_40_char_sha",
     "protected_main_sha": "must_equal_exact_target_sha",
     "target_main_quality": "at_least_one_completed_successful_push_on_main_for_exact_target_sha",
+    "target_product_release_readiness": "at_least_one_completed_successful_issue_comment_run_for_exact_target_sha",
     "canonical_release_contract_verified": true,
     "tag_kind": "annotated",
     "publication_source_sha": "must_equal_exact_tag_target_sha",
+    "immutable_releases_enabled_before_tag_creation": true,
     "immutable_releases_enabled_before_release_creation": true,
     "product_release_environment": "product-release",
-    "immutable_settings_token_permission": "repository_administration_read",
+    "settings_token_permissions": [
+      "repository_administration_read",
+      "repository_environments_read"
+    ],
+    "exact_environment_secret_name_contract_required": true,
+    "protected_environment_required": true,
     "signed_android_release_required": true
   },
   "ordering": {
     "product_source_acceptance": "exact_protected_main_sha_plus_exact_successful_main_quality",
-    "final_v_tag": "after_product_source_acceptance_and_before_any_release_deployment",
+    "release_configuration_readiness": "exact_same_main_sha_read_only_readiness_before_product_tag",
+    "final_v_tag": "after_product_source_and_release_configuration_acceptance_and_before_any_release_deployment",
     "release_build": "public_product_repository_builds_linux_and_exact_signed_android_from_final_tag_target",
     "release_publication": "draft_first_attach_exact_v2_bundle_then_publish_immutable",
     "deployment_admission": "private_controller_only_after_exact_immutable_product_release_v2_exists",
@@ -67,6 +82,9 @@
     "physical_acceptance_required_before_product_tag",
     "phone_signing_gate_required_before_product_tag",
     "item20_final_accepted_candidate_required_before_product_tag",
+    "product_tag_without_exact_same_sha_release_readiness",
+    "release_readiness_reading_signing_secret_values",
+    "release_readiness_mutating_product_or_target",
     "public_release_workflow_accessing_phone",
     "public_release_workflow_mutating_provider",
     "public_release_workflow_executing_private_deployment_controller",
