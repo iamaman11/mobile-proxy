@@ -13,8 +13,9 @@ SPEC.loader.exec_module(MODULE)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COPIES = (
     "contracts/governance/vm-ownership-v1.json",
-    "contracts/operations/production-topology-v1.json",
-    "contracts/operations/github-control-plane-v1.json",
+    "contracts/operations/historical-public-acceptance-retirement-v1.json",
+    "contracts/operations/project-authority-v2.json",
+    "contracts/operations/production-topology-v2.json",
     "docs/architecture/vm-ownership-boundary.md",
     "docs/architecture/acceptance-vm-binding-store.md",
     "crates/proxy-core/src/provider_lifecycle.rs",
@@ -81,75 +82,56 @@ class VmOwnershipContractTests(unittest.TestCase):
         )
         self.assertTrue(any("replace must advance" in error for error in errors))
 
-    def test_item18_live_provider_mutation_cannot_be_enabled(self):
+    def test_contract_cannot_gain_runtime_execution_authority(self):
         errors = self.validate_contract_changed(
-            lambda contract: contract["item_18_execution"].update(
-                {"live_provider_mutation": True}
+            lambda contract: contract["current_authority"].update(
+                {"execution_authority": True}
             )
         )
-        self.assertTrue(any("item 18 execution boundary" in error for error in errors))
+        self.assertTrue(any("current authority binding differs" in error for error in errors))
 
-    def test_item18_production_authority_cannot_be_enabled(self):
+    def test_contract_cannot_move_runtime_authority_back_public(self):
         errors = self.validate_contract_changed(
-            lambda contract: contract["item_18_execution"].update(
-                {"production_vultr_authority": True}
+            lambda contract: contract["current_authority"].update(
+                {"runtime_deployment_controller": "iamaman11/mobile-proxy"}
             )
         )
-        self.assertTrue(any("item 18 execution boundary" in error for error in errors))
+        self.assertTrue(any("current authority binding differs" in error for error in errors))
 
-    def test_topology_cannot_regress_item18_adapter(self):
+    def test_historical_item18_item19_chronology_cannot_become_current(self):
+        errors = self.validate_contract_changed(
+            lambda contract: contract["historical_execution_context"].update(
+                {"item18_item19_public_acceptance_chronology": "current_runtime_authority"}
+            )
+        )
+        self.assertTrue(any("historical execution chronology" in error for error in errors))
+
+    def test_vm_target_must_keep_shared_private_controller_kernel(self):
         errors = self.validate_json_changed(
-            "contracts/operations/production-topology-v1.json",
-            lambda topology: topology["migration_status"].update(
-                {"vultr_adapter": "not_implemented"}
+            "contracts/operations/production-topology-v2.json",
+            lambda topology: topology["targets"]["vm-production"].update(
+                {"reuses_same_controller_kernel": False}
             ),
         )
-        self.assertTrue(any("keep item 18 typed Vultr adapter" in error for error in errors))
+        self.assertTrue(any("fail-closed private controller kernel" in error for error in errors))
 
-    def test_topology_cannot_forge_item19_terminal_live_proof(self):
+    def test_item19_binding_store_doc_must_remain_historical(self):
         errors = self.validate_json_changed(
-            "contracts/operations/production-topology-v1.json",
-            lambda topology: topology["migration_status"].update(
-                {"vultr_live_lifecycle": "enabled"}
+            "contracts/operations/historical-public-acceptance-retirement-v1.json",
+            lambda retirement: retirement["historical_execution_docs"].remove(
+                "docs/architecture/acceptance-vm-binding-store.md"
             ),
         )
-        self.assertTrue(any("historical-only evidence" in error for error in errors))
+        self.assertTrue(any("classified as historical-only" in error for error in errors))
 
-    def test_topology_cannot_reuse_terminal_item19_intent_for_item20(self):
+    def test_vm_doc_must_separate_current_safety_from_historical_chronology(self):
         errors = self.validate_json_changed(
-            "contracts/operations/production-topology-v1.json",
-            lambda topology: topology["migration_status"].update(
-                {"next_acceptance_lifecycle": "reuse_item_19_intent"}
+            "contracts/operations/historical-public-acceptance-retirement-v1.json",
+            lambda retirement: retirement["mixed_context_docs"].pop(
+                "docs/architecture/vm-ownership-boundary.md"
             ),
         )
-        self.assertTrue(any("fresh Item20 lifecycle intent" in error for error in errors))
-
-    def test_control_plane_cannot_enable_item19_live_execution_early(self):
-        errors = self.validate_json_changed(
-            "contracts/operations/github-control-plane-v1.json",
-            lambda control: control["vultr_lifecycle_adapter"].update(
-                {"live_execution": "enabled"}
-            ),
-        )
-        self.assertTrue(any("live_execution" in error for error in errors))
-
-    def test_control_plane_cannot_gain_production_authority(self):
-        errors = self.validate_json_changed(
-            "contracts/operations/github-control-plane-v1.json",
-            lambda control: control["vultr_lifecycle_adapter"].update(
-                {"production_vultr_authority": True}
-            ),
-        )
-        self.assertTrue(any("production_vultr_authority" in error for error in errors))
-
-    def test_control_plane_cannot_relax_full_provider_enumeration(self):
-        errors = self.validate_json_changed(
-            "contracts/operations/github-control-plane-v1.json",
-            lambda control: control["vultr_lifecycle_adapter"].update(
-                {"full_provider_enumeration": "first_page_only"}
-            ),
-        )
-        self.assertTrue(any("full_provider_enumeration" in error for error in errors))
+        self.assertTrue(any("separate current safety" in error for error in errors))
 
 
 if __name__ == "__main__":
