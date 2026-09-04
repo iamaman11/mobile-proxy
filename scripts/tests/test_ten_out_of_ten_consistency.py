@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -20,20 +19,16 @@ SURFACES = (
     "TEN_OUT_OF_TEN_VALIDATION_PLAN.md",
     "README.md",
     "RUNTIME_LAYOUT.md",
-    "docs/PRODUCTION_BASELINE_PLAN.md",
-    "docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md",
     "docs/operations/project-authority.md",
     "docs/operations/phone-gitops-runtime.md",
     "docs/operations/final-release-authority-order.md",
     "docs/operations/item19-provider-proof-closeout.md",
-    "contracts/operations/item20-acceptance-v1.json",
-    "contracts/operations/item20-admission-readiness-v1.json",
-    "contracts/operations/item20-private-handoff-v1.json",
-    "contracts/operations/final-release-authority-v1.json",
-    "contracts/operations/production-topology-v1.json",
+    "contracts/operations/project-authority-v2.json",
+    "contracts/operations/production-topology-v2.json",
+    "contracts/operations/github-control-plane-v2.json",
+    "contracts/operations/product-release-authority-v2.json",
     ".github/workflows/release-tag.yml",
     ".github/workflows/release.yml",
-    ".github/workflows/item20-admission-readiness.yml",
 )
 
 
@@ -49,107 +44,160 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
     def test_repository_passes(self) -> None:
         self.assertEqual(MODULE.check_repository(ROOT), [])
 
-    def test_distinct_item20_candidate_and_control_plane_fail_closed(self) -> None:
+    def test_private_repository_must_remain_deployment_controller(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
-            path = root / "contracts/operations/item20-acceptance-v1.json"
+            path = root / "contracts/operations/project-authority-v2.json"
             contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["identity"]["exact_equality_required"] = False
+            contract["private_deployment_authority"]["authority"] = "execution_satellite"
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("one-SHA acceptance model" in error for error in errors))
+        self.assertTrue(any("private Deployment Controller authority" in error for error in errors))
 
-    def test_release_marker_cannot_revert_to_control_plane_identity(self) -> None:
+    def test_runtime_identity_requires_product_release_plus_controller_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
-            path = root / "contracts/operations/final-release-authority-v1.json"
+            path = root / "contracts/operations/project-authority-v2.json"
             contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["preconditions"]["item20_release_sha_marker"] = "final_release_control_plane_sha"
+            contract["runtime_identity"]["identity"] = "public_main_sha"
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("final release authority" in error or "retired two-SHA" in error for error in errors))
+        self.assertTrue(any("runtime identity is not Product Release + controller revision" in error for error in errors))
 
-    def test_release_workflow_cannot_accept_stale_protected_main(self) -> None:
+    def test_product_release_must_exist_before_physical_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "contracts/operations/production-topology-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["release_link"]["physical_acceptance_before_product_release"] = True
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("Product Release before deployment" in error for error in errors))
+
+    def test_vm_target_remains_fail_closed_until_proven(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "contracts/operations/production-topology-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["targets"]["vm-production"]["destructive_dispatch"] = "allowed"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("VM target is not fail-closed" in error for error in errors))
+
+    def test_blind_retry_after_dispatch_cannot_be_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "contracts/operations/production-topology-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["execution_rules"]["blind_retry_after_dispatch_boundary"] = True
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("transaction/recovery semantics differ" in error for error in errors))
+
+    def test_private_ingress_must_remain_deploy_target_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "contracts/operations/github-control-plane-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["private_deployment_controller"]["command"] = "/deploy-latest"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("private deployment ingress" in error for error in errors))
+
+    def test_release_asset_set_cannot_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "contracts/operations/product-release-authority-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["required_release_assets"] = ["release-manifest.json"]
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("exact asset set differs" in error for error in errors))
+
+    def test_release_digest_domain_cannot_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "contracts/operations/product-release-authority-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["manifest"]["content_digest_domain"] = "mobile-proxy/wrong/v1"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("typed digest identity differs" in error for error in errors))
+
+    def test_release_tag_cannot_restore_item20_authority(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
             path = root / ".github/workflows/release-tag.yml"
-            body = path.read_text(encoding="utf-8").replace(
-                "protected main advanced or differs from the accepted candidate; acceptance is stale",
-                "ancestor accepted",
-            )
-            path.write_text(body, encoding="utf-8")
+            path.write_text(path.read_text(encoding="utf-8") + "\n# ITEM20_ISSUE\n", encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("release-tag.yml" in error for error in errors))
+        self.assertTrue(any("old physical-before-product authority" in error for error in errors))
 
-    def test_android_role_cannot_claim_production_apk_is_globally_absent(self) -> None:
+    def test_release_workflow_requires_exact_draft_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
-            path = root / "TEN_OUT_OF_TEN_VALIDATION_PLAN.md"
-            body = path.read_text(encoding="utf-8") + "\nThe optional Android app is not installed by the production stack.\n"
+            path = root / ".github/workflows/release.yml"
+            body = path.read_text(encoding="utf-8").replace("cmp -s --", "test -e")
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("globally never installed" in error for error in errors))
+        self.assertTrue(any("release.yml is missing controller-v2 invariant 'cmp -s --'" in error for error in errors))
 
-    def test_android_managed_auxiliary_role_is_required(self) -> None:
+    def test_active_release_doc_cannot_restore_item20_before_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "docs/operations/final-release-authority-order.md"
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\nOnly after Item 20 physical acceptance may release proceed.\n",
+                encoding="utf-8",
+            )
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("superseded active authority wording" in error for error in errors))
+
+    def test_phone_doc_must_keep_private_controller_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "docs/operations/phone-gitops-runtime.md"
+            body = path.read_text(encoding="utf-8").replace(
+                "private repository is therefore **not** merely a thin execution satellite",
+                "private repository is an execution satellite",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("phone-gitops-runtime.md is missing controller-v2 invariant" in error for error in errors))
+
+    def test_android_auxiliary_role_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
             path = root / "RUNTIME_LAYOUT.md"
             body = path.read_text(encoding="utf-8").replace(
-                "managed production auxiliary component",
-                "optional development helper",
+                "not the primary reverse-tunnel owner",
+                "the primary reverse-tunnel owner",
             )
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("RUNTIME_LAYOUT.md" in error for error in errors))
+        self.assertTrue(any("RUNTIME_LAYOUT.md lost Android auxiliary-role invariant" in error for error in errors))
 
-    def test_private_repository_cannot_become_policy_authority(self) -> None:
+    def test_historical_item19_proof_sha_remains_audit_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
-            path = root / "contracts/operations/production-topology-v1.json"
-            contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["control_planes"]["phone"]["authority"] = "canonical"
-            path.write_text(json.dumps(contract), encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("execution-only" in error for error in errors))
-
-    def test_future_roadmap_cannot_gain_stale_current_candidate(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md"
-            body = path.read_text(encoding="utf-8") + f"\nCurrent SHA = {MODULE.STALE_FUTURE_SHA}\n"
+            path = root / "docs/operations/item19-provider-proof-closeout.md"
+            body = path.read_text(encoding="utf-8").replace(MODULE.HISTORICAL_ITEM19_SHA, "0" * 40)
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("stale operational candidate" in error for error in errors))
-
-    def test_historical_item19_sha_cannot_be_active_item20_candidate(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "contracts/operations/item20-acceptance-v1.json"
-            contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["identity"]["candidate_sha"] = MODULE.HISTORICAL_ITEM19_SHA
-            path.write_text(json.dumps(contract), encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("historical Item 19 SHA" in error or "one-SHA acceptance model" in error for error in errors))
-
-    def test_retired_two_sha_semantic_fails_on_active_surface(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "docs/operations/project-authority.md"
-            path.write_text(
-                path.read_text(encoding="utf-8") + "\ncontrol_plane_may_advance_without_redefining_candidate\n",
-                encoding="utf-8",
-            )
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("retired two-SHA semantic" in error for error in errors))
+        self.assertTrue(any("historical Item 19 closeout lost its immutable proof SHA" in error for error in errors))
 
 
 if __name__ == "__main__":
