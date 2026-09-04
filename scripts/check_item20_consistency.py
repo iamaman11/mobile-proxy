@@ -65,22 +65,27 @@ def check_retirement_contract(retirement: dict[str, object]) -> list[str]:
     if not isinstance(historical_docs, list) or not required_docs.issubset(set(historical_docs)):
         errors.append("legacy Item19/Item20 execution documents are not classified historical-only")
 
-    execution = retirement.get("execution")
-    if not isinstance(execution, dict):
-        errors.append("legacy authority retirement execution block is missing")
-    else:
-        for key in (
-            "issue_comment_execution",
-            "workflow_dispatch_execution",
-            "provider_api_execution",
-            "provider_mutation",
-            "phone_execution",
-            "private_controller_mutation",
-            "legacy_public_item20_execution_authority",
-            "legacy_final_release_v1_authority",
-        ):
-            if execution.get(key) is not False:
-                errors.append(f"legacy retirement unexpectedly enables {key}")
+    expected_execution = {
+        "workflow_files_must_be_absent": True,
+        "issue_comment_execution": False,
+        "workflow_dispatch_execution": False,
+        "provider_api_execution": False,
+        "provider_mutation": False,
+        "phone_execution": False,
+        "private_controller_mutation": False,
+        "product_release_authority_changed": False,
+    }
+    if retirement.get("execution") != expected_execution:
+        errors.append("legacy retirement Stage 2E execution boundary differs")
+
+    classification = retirement.get("residual_authority_classification")
+    if classification != {
+        "legacy_public_item20_execution_authority": "historical_only_non_executable",
+        "legacy_final_release_v1_authority": "historical_only_non_executable",
+        "current_product_release_authority": "contracts/operations/product-release-authority-v2.json",
+        "current_runtime_deployment_authority": "iamaman11/mobile-proxy-production",
+    }:
+        errors.append("residual legacy authority classification differs")
 
     superseded = retirement.get("superseded_by")
     if not isinstance(superseded, dict) or superseded.get("product_release") != (
