@@ -57,6 +57,8 @@ The controller-v2 migration supersedes the old **release ordering**, but it does
 - The historical Item 19 proof SHA remains historical evidence; that SHA is not active Item 20 release authority.
 - Under the historical Item 20 handoff, private Item 20 phone execution must not call Vultr APIs.
 
+Historical Item 20 also retained these exact admission semantics: The physical item-20 window opens only after the Item 19 provider proof is complete, the mutable-phone gate is satisfied, and a distinct Item 20 ownership intent is used. These are preserved as historical acceptance-safety semantics only; they do not define Product Release v2 ordering or current runtime ingress.
+
 These statements preserve the old provider-isolation boundary only. They do **not** restore Item 20, signing-generation #115 or `final_accepted_candidate_sha` as prerequisites for an annotated Product tag or immutable Product Release v2. Current product/deployment ordering is defined by the v2 authority contracts at the top of this document.
 
 ## Registered-device boundary
