@@ -36,9 +36,10 @@ REQUIRED_COLUMNS = [
     "expires_on",
 ]
 # Source P may be explicitly semantic-re-audited while retaining the existing
-# invariant catalog. PR #204 preserves the protected production/release/security
-# invariants while making reproducible physical-device State Machine control the
-# blocking development foundation and strengthening simplicity constraints.
+# invariant catalog. PR #229 corrects the active repository authority model to
+# PRODUCT / DEPLOYMENT CONTROLLER v2 while explicitly retaining the audited
+# PRODUCT compatibility, architecture, persistence, security and delivery
+# invariants plus immutable historical Item19/Item20 evidence boundaries.
 # This narrow transition is fail-closed: it is accepted only from the exact
 # matrix pin to the exact current re-audited Production Baseline blob. Any
 # subsequent edit fails until another explicit re-audit updates governance.
@@ -47,9 +48,9 @@ RECONCILED_SOURCE_BLOB_TRANSITIONS = {
     "P": {
         "path": "docs/PRODUCTION_BASELINE_PLAN.md",
         "previous_blob_sha": "65a88761e6bf840638d828f218db4b2ffeccccd4",
-        "supersedes_audited_blob_sha": "422e2a6ebbb87d461468e9ca724e86c022ad05ea",
-        "audited_blob_sha": "8ef318680ff15d7954cf1783a9053e93aed68f8f",
-        "issue": 204,
+        "supersedes_audited_blob_sha": "8ef318680ff15d7954cf1783a9053e93aed68f8f",
+        "audited_blob_sha": "2b9f72627c5e07d4ade1ba941deb8d68e623c42d",
+        "issue": 229,
     }
 }
 EXPECTED_INVARIANT_IDS = {

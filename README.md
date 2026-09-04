@@ -4,32 +4,41 @@ Rust-first mobile relay for exposing authenticated proxy services through a root
 
 ## Project authority
 
-`https://github.com/iamaman11/mobile-proxy` is the **only canonical repository for project
-information**: source, product behavior, architecture, roadmap/scope, contracts, desired state,
-release identity, workflow logic and acceptance policy.
+Mobile Proxy has one product and two authoritative planes:
 
-The private `iamaman11/mobile-proxy-production` repository is not a second project. It is an
-execution satellite used only to keep the physical `android-production` self-hosted runner outside
-the public fork/PR trust boundary. If satellite state, chat history, workstation state or provider
-state conflicts with this repository, production fails closed and the canonical repository is
-reconciled first. See [project authority](docs/operations/project-authority.md).
+| Plane | Repository | Owns |
+| --- | --- | --- |
+| PRODUCT | `iamaman11/mobile-proxy` | application/runtime source, shared product/domain architecture, Quality, Linux/Android product build, Android signing verification, annotated product tags, immutable Product Releases and product documentation |
+| DEPLOYMENT CONTROLLER | `iamaman11/mobile-proxy-production` | deployment ingress, deployment State Machine / Transaction Kernel, target admission/serialization/observation, target adapters, durable mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine, private bindings/secrets and canonical runtime execution evidence |
+
+The public repository is the canonical PRODUCT source. The private repository is the canonical deployment controller. It is not a second product source and must not independently build, sign, tag or publish Mobile Proxy.
+
+The normative boundary is defined by:
+
+- [Project authority](docs/operations/project-authority.md)
+- [`project-authority-v2.json`](contracts/operations/project-authority-v2.json)
+- [`github-control-plane-v2.json`](contracts/operations/github-control-plane-v2.json)
+- [`production-topology-v2.json`](contracts/operations/production-topology-v2.json)
+- [`product-release-authority-v2.json`](contracts/operations/product-release-authority-v2.json)
+
+Older v1 authority/topology/control-plane wording is historical when it conflicts with these v2 contracts.
 
 ## Start here after context loss
 
-A developer, operator or agent opening the repository without prior chat/context should not reconstruct intent from Git history or guess from individual source files. Read in this order:
+Read in this order:
 
-1. [Quick Reference](QUICK_REFERENCE.md) — two-minute orientation and current control boundary;
-2. [Agent operating contract](AGENTS.md) — required repository workflow and sources of truth when making changes;
-3. [Implementation Plan](IMPLEMENTATION_PLAN.md) — the temporary current execution checkpoint and pointer to the sole active roadmap;
-4. [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md) — active scope, delivery order, invariants, stop conditions and context-loss recovery protocol;
-5. [Repository Map](REPOSITORY_MAP.md) and [Runtime Layout](RUNTIME_LAYOUT.md) — ownership, module placement and runtime topology;
-6. [Git delivery](docs/GIT_DELIVERY.md) — protected merge, release and production-control path.
+1. [Quick Reference](QUICK_REFERENCE.md) — current authority and navigation;
+2. [Agent operating contract](AGENTS.md) — repository workflow and safety boundaries;
+3. [Implementation Plan](IMPLEMENTATION_PLAN.md) — concise current development sequence;
+4. [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md) — the active 10/10 roadmap;
+5. [Repository Map](REPOSITORY_MAP.md) and [Runtime Layout](RUNTIME_LAYOUT.md) — code placement and runtime topology;
+6. [Git delivery](docs/GIT_DELIVERY.md) — product release and deployment-controller handoff.
 
-The short-term execution focus is intentionally stored only in `IMPLEMENTATION_PLAN.md` and is temporary. It does not replace the Production Baseline Plan and must be deleted after the software-complete release-candidate checkpoint is reached. Architecture, state ownership and exact module rules remain long-lived normative controls under `docs/architecture/` and `contracts/governance/`.
+Public Issue #179 is the authoritative migration/development checkpoint stream and authorizes one bounded next engineering item at a time. Public Issue #228 is the 10/10 PRODUCT-hardening backlog only. Private Issue #1 is the Deployment Controller command surface and canonical runtime ledger.
 
 ## Production architecture
 
-The normal device runtime does **not** use Android `VpnService`.
+The normal rooted runtime does **not** require Android `VpnService`.
 
 ```text
 root/Magisk boot service
@@ -41,11 +50,11 @@ root/Magisk boot service
               -> relay VM public proxy ports
 ```
 
-The default tunnel owner is `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. The rooted runtime also supports explicit carrier and rollback owners. Unknown, missing or contradictory tunnel ownership fails closed.
+The default tunnel owner is `first_party_reverse_tunnel`. It uses no `tun0` and requires no active Android VPN. Unknown, missing or contradictory tunnel ownership fails closed.
 
-On carriers that do not route root-owned sockets through the validated INTERNET data network, use `first_party_android_egress`. The authenticated reverse tunnel and server control plane remain authoritative, while both proxy upstream sockets and the pinned TLS reserve are created through the app's `Network.bindSocket()` cellular egress. This mode does not create an Android VPN.
+On carriers that do not route root-owned sockets through the validated INTERNET data network, `first_party_android_egress` uses Android `Network.bindSocket()` for cellular egress while the authenticated reverse tunnel and server control plane remain authoritative. This mode does not create an Android VPN.
 
-The Android project under `apps/android-app` remains optional for the primary rooted runtime, but it is now the supported owner for the app-owned WireGuard compatibility path. Normal native reverse-tunnel packaging, installation and verification still do not require an active Android VPN.
+The Android project under `apps/android-app` is a managed product component for Android-owned capabilities, including cellular egress and the app-owned WireGuard compatibility path. Whether it must be installed is a deployment-controller decision derived from the exact Product Release and observed target state.
 
 ## Public compatibility surface
 
@@ -59,57 +68,41 @@ The relay preserves:
 - explicit stock WireGuard rollback;
 - app-owned WireGuard compatibility path.
 
-All public proxy paths require authentication. The reverse-tunnel control frame carries the selected proxy protocol, so SOCKS5 streams terminate at the phone's dedicated `1081` inbound and HTTP/CONNECT streams at `3128`; the mixed public port is detected before forwarding. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
+All public proxy paths require authentication. When no fresh authenticated device session is available, the relay fails closed rather than routing to an arbitrary device or silently downgrading to plaintext.
 
-Use the dedicated `3128` endpoint for production HTTP/HTTPS clients. Port `1080` remains a mixed SOCKS5/HTTP compatibility endpoint and should not be selected when the consumer can choose a dedicated protocol port.
+Use the dedicated `3128` endpoint for production HTTP/HTTPS clients. Port `1080` remains a mixed compatibility endpoint.
 
 ## Repository layout
 
-- `crates/foundation` — bounded identifiers and the typed internal BLAKE3 contract;
-- `crates/application` — transport-independent application ports;
-- `crates/control-plane-sqlite` — canonical durable SQLite state and migrations;
-- `crates/reverse-tunnel` — QUIC/TLS transport and proxy forwarding;
-- `apps/operator-cli` — packaging, deployment, verification, rotation and rollback primitives;
-- `services/runtime-supervisor` — rooted phone process and recovery owner;
-- `services/host-daemon` — phone-local health, rotation and control-plane synchronization;
-- `services/control-plane` — durable device/command control plane;
+- `crates/foundation` — bounded identifiers and typed internal BLAKE3 contracts;
+- `crates/application` — transport-independent product/application ports;
+- `crates/control-plane-sqlite` — product control-plane durable SQLite state and migrations;
+- `crates/reverse-tunnel` — reverse-tunnel protocol, QUIC/TLS transport and proxy forwarding;
+- `apps/operator-cli` — product/operator primitives; not a workstation production-deployment authority;
+- `apps/android-app` — Android product component;
+- `services/runtime-supervisor` — rooted phone process/recovery product component;
+- `services/host-daemon` — phone-local health, rotation and runtime integration;
+- `services/control-plane` — durable product control plane;
 - `services/reverse-tunnel-server` — relay-side reverse-tunnel endpoint;
 - `services/relay-gate` — relay readiness gate;
-- `deploy` — reproducible runtime templates and manifests;
-- `contracts` — compatibility, governance, project-authority and production-control invariants;
-- `scripts` — permanent architecture, digest and acceptance gates.
+- `deploy` — product runtime templates/manifests and packaging inputs;
+- `contracts` — product, governance and cross-plane authority contracts;
+- `scripts` — product build/verification tooling plus legacy physical-control surfaces pending v2 ownership cleanup;
+- `.github/workflows` — public PRODUCT CI/build/release workflows plus historical/development acceptance surfaces pending cleanup.
 
-The private execution satellite is intentionally not another source tree and must not duplicate this
-layout.
+Existing public physical transaction/controller files are not runtime deployment authority merely because they still exist in the tree. Their final disposition is handled by the bounded source-ownership migration through Issue #179.
 
 ## Cryptographic policy
 
-Project-owned internal content and fingerprint digests use typed BLAKE3-256:
+Project-owned internal content/fingerprint digests use typed BLAKE3-256:
 
 ```text
 b3:<64 lowercase hexadecimal characters>
 ```
 
-They are derived through `mobile-proxy-foundation::ContentDigest` with a versioned static domain and length framing for every input part. Direct untyped BLAKE3 and new first-party SHA-256 contracts are rejected across production Rust, Python, shell and Kotlin source.
+SHA-256 remains only where an external standard requires it, such as TLS/certificate fingerprints, Cargo registry checksums, GitHub artifact digests, OCI/SBOM/signature formats or other interoperability contracts.
 
-SHA-256 remains only where an external standard requires it, such as TLS/certificate fingerprints, Cargo registry checksums, GitHub artifact digests, OCI/SBOM/signature formats or other interoperability contracts. Passwords are not content-hashed; protocol KDF/MAC/signature/encryption algorithms are not replaced with BLAKE3.
-
-Release roots contain a sorted `integrity-manifest.json` covering every packaged file with typed BLAKE3 and exact sizes. Deployment acceptance first verifies that manifest, then compares active phone and VM files byte-for-byte with the immutable package.
-
-## Prerequisites
-
-For the primary device runtime:
-
-- rooted Android device;
-- architecture-correct `runtime-supervisor`, `host-daemon` and `sing-box` binaries prepared under `deploy/device-runtime/bin`;
-- device and relay manifests;
-- required secrets supplied only through their permitted protected runtime boundaries;
-- generated reverse-tunnel certificate identity and phone certificate pin.
-
-The Android APK and stock WireGuard are not primary-runtime prerequisites. Stock WireGuard is needed only to exercise the documented rollback gate.
-
-Physical root/ADB prerequisites are verified by the private production runner once the canonical
-phone workflow is implemented. Raw/manual ADB is not the standard production control path.
+Release roots contain a sorted integrity manifest covering packaged files with typed BLAKE3 and exact sizes. Product Release provenance is public PRODUCT evidence; deployment runtime truth remains private-controller evidence.
 
 ## Build and quality
 
@@ -121,205 +114,59 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-For the exact local gate, use:
+For the repository gate:
 
 ```bash
 scripts/quality-gate.sh       # full code and Android gate
-scripts/quality-gate.sh fast  # architecture, Python tests, formatting and diff hygiene
+scripts/quality-gate.sh fast  # docs/policy-sized changes
 ```
 
-GitHub runs one aggregate required check named `Quality Gate`. It executes policy, Rust,
-supply-chain and Android checks in parallel and publishes a compact
-`quality-summary-<git-sha>` artifact. Agents should read that summary before loading large
-job logs. The pinned toolchain is defined in `rust-toolchain.toml`.
+GitHub exposes one aggregate required check named `Quality Gate`. Agents should read the compact quality-summary artifact before loading detailed logs.
 
-The mandatory GitHub quality workflows additionally run:
+## Product Release and deployment
 
-- RustSec advisories, dependency licenses, bans and sources through pinned cargo-deny;
-- Android scaffold unit tests;
-- Android lint with warnings as errors;
-- Android debug assembly;
-- process-level liveness/readiness tests;
-- SQLite migration, backup and clean restore drills;
-- forced QUIC failure, pinned TLS/TCP reserve and QUIC recovery;
-- mixed `1080`, SOCKS5 `1081`, HTTP and CONNECT proxy coverage.
+The authority order is:
 
-## Git delivery
-
-Code reaches production only through an annotated semantic-version tag that passed `Quality Gate`
-and resolved to one immutable canonical SHA and verified release artifacts/provenance.
-
-The public canonical repository has no self-hosted runner. Vultr lifecycle work belongs on
-GitHub-hosted infrastructure through tag-only `production-vultr`. Physical-phone execution belongs
-to the private `iamaman11/mobile-proxy-production` satellite, but canonical phone workflow logic,
-release contracts and desired state remain in this repository.
-
-Both VM and phone use the same immutable release tuple: tag, full SHA, artifact name/digest,
-provenance identity and deployment ID `mobile-proxy-<tag>-<first12sha>`. There is no production
-meaning for `latest` or a mutable branch.
-
-The legacy deployment workflow is fail-closed while this split is implemented. See:
-
-- [Project authority](docs/operations/project-authority.md)
-- [Git delivery and production control](docs/GIT_DELIVERY.md)
-- [GitHub bootstrap](docs/operations/github-bootstrap.md)
-- [Secret boundaries](docs/operations/secret-boundaries.md)
-
-## Prepare runtime binaries
-
-```bash
-cargo run -p operator-cli -- prepare-runtime-binaries
+```text
+protected public main + exact successful Quality
+  -> annotated semantic product tag
+  -> public signed PRODUCT build
+  -> immutable Product Release v2
+  -> private /deploy <target> <tag>
+  -> private controller admission / observation / possible mutation / verification / recovery
 ```
 
-Generated runtime binaries are intentionally not committed. The packaging command verifies the expected Android ARM ELF architecture before creating a release.
+A Product Release is an immutable input to deployment. Physical acceptance is **not** a prerequisite for creating the Product Release under v2.
 
-The sing-box version, upstream GitHub asset SHA-256 provenance and typed BLAKE3 content
-digests are pinned in `deploy/sing-box-artifacts.lock.json`. Preparation fails closed when
-the requested version, archive size, content digest, executable version or rendered
-production configuration does not match. A successfully validated candidate is installed
-atomically and the previous local binary is retained as `sing-box.rollback` in the ignored
-binary directory.
+Runtime deployment identity combines:
 
-## Generate reverse-tunnel identity
-
-```bash
-cargo run -p operator-cli -- generate-reverse-tunnel-identity \
-  --output-env-file .secrets/reverse-tunnel.env
+```text
+exact immutable Product Release
++ exact admitted private controller revision
 ```
 
-`.secrets/` is ignored by Git. This command is a development/bootstrap primitive, not an
-authorised substitute for the protected production secret path.
+`latest`, a mutable branch, a public GitHub Deployment record or Issue #179 narrative are never sufficient runtime identity.
 
-## Package and install primitives
+The public PRODUCT repository has no production self-hosted runner and performs no production phone/ADB mutation. The private Deployment Controller owns target access and mutation. `vm-production` remains fail-closed until its private target adapter is proven end-to-end.
 
-The following `operator-cli` commands are reusable implementation/diagnostic primitives. During the
-current GitOps migration they are **not** an authorised workstation-driven production path. The
-final production workflow must invoke the required behavior through the canonical tagged/release
-control plane.
+Manual SSH, raw/manual ADB, workstation deployment commands and provider CLI are not normal production control paths.
 
-`first_party_reverse_tunnel` is the default:
+## Product and deployment safety
 
-```bash
-cargo run --release -p operator-cli -- package-device-release \
-  --manifest-path deploy/manifests/devices/example-device.json \
-  --release-id candidate-native \
-  --tunnel-owner first_party_reverse_tunnel
+The Deployment Controller must preserve:
 
-cargo run --release -p operator-cli -- install-device-stack \
-  --manifest-path deploy/manifests/devices/example-device.json \
-  --release-id candidate-native \
-  --device-serial <adb-serial> \
-  --tunnel-owner first_party_reverse_tunnel
+```text
+state -> guard -> operation -> effect -> independent observation -> resulting state
 ```
 
-Packaging requires a clean Git worktree, validates and JSON-escapes all template values, rejects unresolved placeholders, writes exact Git SHA metadata and verifies the finished BLAKE3 manifest. Installation validates root-shell inputs, copies the release, restarts the rooted runtime and compares deployed files byte-for-byte.
+Before destructive dispatch it persists durable mutation intent. A durable intent admits at most one destructive dispatch. Ambiguous post-dispatch outcome enters read-only recovery; there is no blind destructive retry and `RECOVERED != ACCEPTED`.
 
-## Verify the primary runtime primitive
+The public GitHub Deployment API is a bounded status/history projection only. Canonical runtime execution truth is the private controller ledger.
 
-```bash
-cargo run --release -p operator-cli -- verify-device \
-  --manifest-path deploy/manifests/devices/example-device.json \
-  --device-serial <adb-serial> \
-  --required-tunnel-owner first_party_reverse_tunnel
-```
+## 10/10 status terminology
 
-Verification requires healthy serving state, the exact native owner, no active Android VPN and a successful authenticated public proxy smoke test unless explicitly skipped for a bounded diagnostic reason. Production verification will call the equivalent behavior only through the private runner boundary once enabled.
+- **PRODUCT 10/10-ready**: public source-controlled security, behavior, Quality, build, release-gate and provenance requirements are satisfied on exact reviewed source identities.
+- **Deployment Controller accepted**: exactly-once mutation, target observation, canonical terminal evidence and recovery/quarantine invariants are independently proven in the private controller.
+- **Full production 10/10 accepted**: PRODUCT and Deployment Controller evidence are both complete and the explicitly authorized live target acceptance/soak sequence has passed without unresolved P0/P1 defects.
 
-## Legacy VM provisioning primitive
-
-```bash
-cargo run --release -p operator-cli -- provision-vm \
-  --manifest-path deploy/manifests/vms/example-gcp-relay.json \
-  --release-id candidate-vm \
-  --ssh-user <vm-user> \
-  --ssh-key <absolute-key-path>
-```
-
-This documents the legacy GCP/workstation implementation primitive only. It is not the new
-production deployment path and must not be used to bypass the fail-closed migration gate. The
-target production provider is Vultr through GitHub-hosted Actions and the typed ownership contract.
-
-The VM hosts the control plane, reverse-tunnel server, readiness gate, authenticated public proxy and the optional WireGuard compatibility backend used by both the stock rollback path and the app-owned VPN path.
-
-### VM ownership boundary
-
-A cloud account may contain neighbouring infrastructure. Any shared-account VM provider adapter
-must bind its provider-assigned immutable VM UUID in durable owner-controlled state, require the
-exact `project=mobile-proxy` and `managed-by=mobile-proxy` tags before every management, snapshot or
-deletion operation, and fail closed on an absent binding, UUID mismatch or tag mismatch. Recreate
-verifies a tagged replacement and atomically advances the UUID binding generation. See
-[`contracts/governance/vm-ownership-v1.json`](contracts/governance/vm-ownership-v1.json) and
-[`docs/architecture/vm-ownership-boundary.md`](docs/architecture/vm-ownership-boundary.md).
-
-The production `optimized-hybrid` route keeps public `1080`, `1081` and `3128` on the proven phone
-mixed-proxy path through the pinned TLS reverse tunnel to Android cellular egress. The port numbers
-and client protocols remain unchanged. VM sing-box termination remains an explicit comparison and
-rollback mode, but is not in the production data path.
-The TLS fallback maintains 32 authenticated idle data streams per phone session, so a burst
-of five consumers reuses established cellular connections instead of starting five simultaneous
-TCP and TLS handshakes. Capacity remains bounded and the legacy on-demand stream remains a
-compatible overflow path. Activated streams are replenished immediately instead of waiting for the
-proxied request to finish, and bounded reserve backpressure absorbs slower handshakes after a
-mobile-operator change.
-
-## Rotate cellular identity
-
-For agents and remote operators, `scripts/mobile-proxy-ip` is the existing authenticated rotation
-client. Its current operator-host configuration is legacy operational infrastructure; canonical
-contracts and application behavior live in this repository, while credential values remain outside
-Git.
-
-```bash
-mobile-proxy-ip
-```
-
-For programs, select JSON output. Exit code zero means the IP changed and the public proxy plus
-fresh reverse tunnel recovered. The result contains bounded status fields:
-
-```bash
-mobile-proxy-ip --format json
-```
-
-The client talks only to `/api/v1/rotation/devices/{id}` with a dedicated rotation token. It
-generates an idempotency key, safely retries transient command submission, waits for the server and
-requires a different IP, healthy readiness, public serving and a fresh reverse tunnel before
-reporting success. The server's atomic command response supplies the old IP, avoiding a redundant
-preflight request. Submission uses bounded exponential-backoff attempts with the same idempotency
-key. JSON mode returns a parseable failure object while preserving a non-zero exit code. A local
-non-blocking lock rejects concurrent callers rather than performing an unexpected second rotation.
-
-The older `rotate` command targets the phone-local operator API and is intended for maintenance and
-diagnostics, not as a replacement for the GitHub production deployment control plane:
-
-```bash
-cargo run --release -p operator-cli -- rotate \
-  --strategy airplane_bounce \
-  --require-public-ip-change true
-```
-
-A rotation is successful only when the public IP changes as required and the native reverse tunnel returns fresh and serving. A healthy phone-local process alone is insufficient.
-
-## Rollback primitive
-
-```bash
-cargo run --release -p operator-cli -- rollback-device \
-  --manifest-path deploy/manifests/devices/example-device.json \
-  --device-serial <adb-serial> \
-  --release-id <installed-release-id>
-```
-
-The command remains an implementation primitive. Normal production rollback must be initiated and
-evidenced through the canonical release/private-execution workflow once that path is enabled.
-
-Stock WireGuard rollback is exercised only through the immutable physical acceptance policy. After that stage, the same already-installed native release must be reactivated without rebuilding, `tun0` must disappear and fresh QUIC service must return.
-
-## Release status terminology
-
-- **Software 10/10-ready** means every source-controlled, process-testable, dependency, Android build and immutable-SHA acceptance gate has passed on one exact commit.
-- **Baseline complete / 10/10 accepted** additionally requires the real-phone sequence, repeated recovery drills and soak thresholds in `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`.
-
-Software evidence must never claim the baseline is complete. A source change invalidates the candidate and requires all software evidence to be regenerated before physical testing.
-
-The canonical implementation scope is `docs/PRODUCTION_BASELINE_PLAN.md`. The physical acceptance
-policy/runbook remains canonical in this repository and must ultimately be executed through the
-private phone runner rather than a workstation shortcut.
+The active ordered roadmap is [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md). The latest authoritative #179 checkpoint always controls what may happen next.

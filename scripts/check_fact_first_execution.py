@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Protect the unique physical-device control foundation invariants.
+"""Protect the accepted PRODUCT / Deployment Controller v2 foundation invariants.
 
-This is intentionally a small cross-document semantic guard. It does not test other
-checks, does not validate test invocation, and does not encode a long Markdown
-step-by-step roadmap. Behavioral State Machine semantics belong in direct reducer/
-operation tests and real-phone acceptance.
+This remains intentionally small. It protects the real cross-repository authority
+and exactly-once safety boundary; it does not encode a Markdown roadmap, test
+another checker, or keep superseded Item19/Item20 development ordering alive.
+Behavioral controller semantics belong in the private controller tests and
+separately authorized target acceptance.
 """
 
 from __future__ import annotations
@@ -15,42 +16,44 @@ from pathlib import Path
 IMPLEMENTATION = Path("IMPLEMENTATION_PLAN.md")
 BASELINE = Path("docs/PRODUCTION_BASELINE_PLAN.md")
 ARCHITECTURE = Path("docs/architecture/ARCHITECTURE_STANDARD.md")
-OPERATION = Path("docs/operation-state-machine-v1.md")
+AUTHORITY = Path("docs/operations/project-authority.md")
+GITHUB_V2 = Path("contracts/operations/github-control-plane-v2.json")
 
 REQUIRED: dict[Path, tuple[str, ...]] = {
     IMPLEMENTATION: (
-        "The sole canonical roadmap for current development is:",
-        "There is one sequential development direction",
-        "blocking prerequisite for further application growth",
-        "explicit ambiguous execution outcome",
-        "re-observation",
-        "protect boundaries, not the current instance",
-        "do not add a checker only to verify another checker/test exists or ran",
+        "PUBLIC PRODUCT",
+        "PRIVATE DEPLOYMENT CONTROLLER",
+        "No new framework is justified merely to reconcile old public/private duplication.",
+        "No code for code.",
+        "No verification of verification.",
+        "No old failed GitHub run is manually rerun to perform a deployment.",
     ),
     BASELINE: (
-        "sole canonical implementation roadmap for current development",
-        "Blocking foundation gate: reproducible physical-device control first",
-        "one sequential development direction",
-        "Operation execution result, independent postcondition verification and evidence persistence are separate dimensions.",
-        "controller failure MUST NOT be collapsed into target-operation failure",
-        "Do not verify verification.",
-        "protect boundaries, not bootstrap state",
+        "The accepted v2 split is normative:",
+        "Public PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.",
+        "durable mutation intent exists before destructive dispatch",
+        "UNKNOWN continuation is read-only observation/reconciliation",
+        "No verification of verification.",
+        "Do not preserve disposable bootstrap state",
     ),
     ARCHITECTURE: (
         "one primary developer",
         "No code for code",
         "adding a checker whose only purpose is to confirm that another checker/test exists or ran",
-        "Physical-device-control foundation",
         "Protect boundaries, not bootstrap state",
     ),
-    OPERATION: (
-        "operation_execution_result",
-        "postcondition_verification_result",
-        "evidence_persistence_result",
-        "UNKNOWN_EXECUTION_OUTCOME",
-        "non-idempotent mutation is never retried merely because the controller did not receive its result",
-        "Protect boundaries, not bootstrap state",
-        "Only then grow application behavior through this engine.",
+    AUTHORITY: (
+        "The public repository is the canonical PRODUCT source.",
+        "The private repository is the canonical deployment-execution controller.",
+        "durable mutation intent before destructive dispatch",
+        "A public GitHub Deployment is not the execution ledger",
+        "`RECOVERED` never retroactively converts the original deployment attempt into `ACCEPTED`.",
+    ),
+    GITHUB_V2: (
+        '"authority": "deployment_controller"',
+        '"product_source_copy": "forbidden"',
+        '"public_self_hosted_runner": "forbidden"',
+        '"public_github_deployment_as_canonical_execution_ledger"',
     ),
 }
 
@@ -69,7 +72,7 @@ def check_repository(root: Path) -> list[str]:
         body = _read(root, path, errors)
         for token in tokens:
             if token not in body:
-                errors.append(f"{path} is missing device-control foundation invariant {token!r}")
+                errors.append(f"{path} is missing controller-v2 foundation invariant {token!r}")
     return errors
 
 
@@ -77,11 +80,11 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     errors = check_repository(root)
     if errors:
-        print("device-control foundation consistency validation failed:")
+        print("controller-v2 foundation consistency validation failed:")
         for error in errors:
             print(f"- {error}")
         return 1
-    print("device-control foundation consistency validation passed")
+    print("controller-v2 foundation consistency validation passed")
     return 0
 
 
