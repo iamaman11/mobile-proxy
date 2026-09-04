@@ -1,189 +1,170 @@
 # Git delivery and production control
 
-`iamaman11/mobile-proxy` is the only canonical repository for project information: desired
-configuration, source, dependency locks, release versions, quality evidence, contracts, workflow
-logic, architecture decisions and acceptance policy. Credential values, private keys, mutable
-provider bindings and sensitive physical-device state remain outside Git.
+Mobile Proxy uses one product with two authoritative planes.
 
-See [project authority](operations/project-authority.md) for the rule that satellite repositories,
-chat history, provider consoles and workstation state are non-authoritative when they conflict with
-this repository.
+- `iamaman11/mobile-proxy` is the public **PRODUCT** authority for source, Quality, build/signing verification, annotated product tags, immutable Product Releases and product documentation.
+- `iamaman11/mobile-proxy-production` is the private **DEPLOYMENT CONTROLLER** authority for deployment ingress, runtime State Machine / Transaction Kernel, target admission/serialization/observation, target adapters, durable mutation intent, exactly-once destructive dispatch, recovery/quarantine and canonical runtime execution evidence.
 
-Current delivery status is owned by [`PRODUCTION_BASELINE_PLAN.md`](PRODUCTION_BASELINE_PLAN.md).
-Exact machine-readable execution/control-plane state is owned by
-[`github-control-plane-v1.json`](../contracts/operations/github-control-plane-v1.json) and
-[`production-topology-v1.json`](../contracts/operations/production-topology-v1.json). Status
-summaries in this document are orientation only and must not become a parallel roadmap.
+See:
 
-## Control-plane split
+- [`project-authority-v2.json`](../contracts/operations/project-authority-v2.json)
+- [`github-control-plane-v2.json`](../contracts/operations/github-control-plane-v2.json)
+- [`production-topology-v2.json`](../contracts/operations/production-topology-v2.json)
+- [`product-release-authority-v2.json`](../contracts/operations/product-release-authority-v2.json)
+- [Project authority](operations/project-authority.md)
 
-| Boundary | Required responsibility |
+Older v1 control-plane/topology language is historical when it conflicts with v2.
+
+## Trust boundaries
+
+| Boundary | Responsibility |
 | --- | --- |
-| `iamaman11/mobile-proxy` | Canonical public project repository; CI, release source, reusable workflow logic, safe evidence index and GitHub-hosted Vultr orchestration. It has zero self-hosted runners. |
-| Vultr pre-release acceptance authority | Exact full candidate SHA plus successful canonical `Quality` push evidence and matching release-candidate artifact. GitHub-hosted only; it is not final production authority and does not use `production-vultr` merely to authorize acceptance. |
-| `production-vultr` | Final-production GitHub Environment that admits only protected tag `v*`; no reviewer, wait timer or administrator bypass. It provides encrypted provider credentials only to GitHub-hosted jobs after final release authority exists. |
-| `iamaman11/mobile-proxy-production` | Private execution satellite only; thin phone caller/shim, private runner access, bounded private execution evidence and command/audit transport. It is not a source of project truth. |
-| `android-production` | The private-repository runner for the registered physical phone. It has no Vultr credential and no administrative OS privilege for normal jobs. |
+| public `iamaman11/mobile-proxy` | PRODUCT source, public CI/Quality, product build/signing verification, product tags/releases; zero production self-hosted runners and no production phone/ADB mutation |
+| public `product-release` environment | protected PRODUCT signing/release inputs; no target access/provider mutation |
+| private `iamaman11/mobile-proxy-production` | Deployment Controller code/policy, private Issue #1 ingress, target bindings/secrets, canonical runtime execution evidence |
+| private `android-production` runner | registered production-phone execution under controller admission; no public fork/PR trust exposure |
+| `vm-production` | fail-closed until a private controller-owned VM adapter is proven end-to-end |
 
-The exact machine-readable desired state is:
+The private controller must not copy application source or independently build/sign/tag/release the product. The public PRODUCT plane must not own runtime target mutation or exactly-once dispatch authority.
 
-- [`project-authority-v1.json`](../contracts/operations/project-authority-v1.json)
-- [`github-control-plane-v1.json`](../contracts/operations/github-control-plane-v1.json)
-- [`acceptance-authority-v1.json`](../contracts/operations/acceptance-authority-v1.json)
-- [`production-topology-v1.json`](../contracts/operations/production-topology-v1.json)
+## Public Git governance
 
-Bootstrap and recovery guidance is [GitHub bootstrap](operations/github-bootstrap.md).
+- `main` changes through pull request and required `Quality Gate`.
+- Protected `v*` product tags are immutable identifiers; never move/reuse them.
+- Public Actions use least privilege and never expose production phone secrets/runner access to forked PRs.
+- Public PRODUCT workflows do not run production ADB or mutate production targets.
+- Secret values, raw device identifiers and private runtime evidence do not belong in public evidence.
 
-## One project across two repositories
+## Product Release chain
 
-The private repository exists solely to keep the physical self-hosted runner outside the public
-fork/PR trust boundary. It must not duplicate application source, manifests, architecture,
-roadmaps, release policy or acceptance rules.
+The current v2 release order is:
 
-The preferred phone architecture is a thin private caller invoking canonical workflow logic from
-`iamaman11/mobile-proxy` at an immutable ref, or executing a verified immutable artifact produced by
-this repository. GitHub supports a private caller invoking a reusable workflow from a public
-repository; self-hosted runner assignment is then evaluated in the caller's context.
+```text
+topic branch
+  -> pull request
+  -> exact PR-head Quality
+  -> protected main
+  -> exact successful main Quality
+  -> Product Release prerequisite proof
+  -> annotated semantic product tag
+  -> signed/verified PRODUCT build
+  -> immutable Product Release v2
+```
 
-Final production uses one immutable release tuple:
+A Product Release is public PRODUCT authority and exists **before** normal deployment admission. Physical target acceptance is not a prerequisite for creating that Product Release under v2.
 
-- repository `iamaman11/mobile-proxy`;
-- annotated semantic tag `vMAJOR.MINOR.PATCH`;
-- full Git SHA;
-- artifact name and digest;
-- provenance/attestation identity;
-- deployment ID `mobile-proxy-<tag>-<first12sha>`.
+Product release identity is exact and immutable. `latest`, a mutable branch, short SHA or unverified artifact is never equivalent.
 
-Pre-release acceptance deliberately has a different authority: one exact full candidate SHA plus
-its successful canonical Quality/release-candidate evidence. Acceptance never upgrades a candidate
-to final production authority by creating a semantic release tag early or by entering
-`production-vultr` simply to make testing convenient.
+## Deployment handoff
 
-There is no production or acceptance meaning for `latest`. Mutable branches, branch names, short
-SHAs, approximate versions, unverified artifacts or conflicting satellite state fail closed.
+Deployment consumes:
 
-`iamaman11/mobile-proxy#90` is the canonical GitOps architecture/status tracker.
-`iamaman11/mobile-proxy-production#1` is only the private command/audit transport. Meaningful safe
-results are referenced back to the canonical project; private raw evidence is supporting evidence,
-not an independent decision record.
+```text
+exact immutable Product Release v2
++ exact admitted private controller revision
+```
 
-## Public GitHub governance
+Normal runtime ingress is private Issue #1:
 
-- `main` requires a pull request, current successful `Quality Gate`, review-thread resolution and
-  an up-to-date branch. It rejects deletion and non-fast-forward updates, with no bypass actor.
-- `v*` release tags reject deletion and movement, with no bypass actor.
-- Public Actions default to read-only repository/package permissions, cannot approve pull
-  requests, and require approval for every external fork contributor. Fork workflows receive no
-  write token or secret.
-- Secret scanning, push protection, Dependabot alerts and Dependabot security updates are enabled
-  where GitHub provides them for public repositories.
-- Public workflows do not target self-hosted runners or execute ADB.
+```text
+/deploy <target> <vX.Y.Z>
+```
 
-## Delivery chain
+The private controller owns:
 
-    topic branch
-      -> pull request
-      -> Quality Gate
-      -> protected main
-      -> exact immutable candidate SHA
-      -> successful canonical Quality push + release-candidate artifact
-      -> /accept-candidate <full_sha> on canonical Issue #90
-      -> GitHub-hosted pre-release acceptance authority
-      -> read-only Vultr preflight
-      -> typed Vultr ownership adapter
-      -> just-in-time acceptance VM
-      -> physical acceptance of the exact candidate
-      -> protected annotated vMAJOR.MINOR.PATCH tag
-      -> verified GitHub Release + checksum/SBOM/provenance
-      -> production-vultr promotion from final release authority
-      -> bounded safe evidence back to canonical tracking
+1. semantic request identity;
+2. exact Product Release resolution;
+3. controller revision binding;
+4. target-global serialization;
+5. target observation and admission;
+6. durable mutation intent before destructive dispatch;
+7. at most one destructive dispatch for one durable intent;
+8. independent postcondition observation;
+9. canonical terminal evidence;
+10. read-only recovery/quarantine after ambiguous dispatch.
 
-The command `/accept-candidate <full_sha>` accepts exactly one lowercase 40-character candidate SHA.
-The gate uses the default branch's protected canonical workflow logic, finds the successful
-`Quality` push on `main` for that exact SHA, verifies the exact
-`software-release-candidate-<sha>` artifact, and emits a bounded
-`vultr-acceptance-authority-<sha>` artifact. The evidence explicitly records that final production
-authority, Vultr API access, VM mutation, phone mutation and final release-tag creation are false
-at this authority-only stage.
+A public GitHub Deployment is status/history projection only. It is not the canonical execution ledger and cannot authorize a second destructive dispatch.
 
-## Current migration state
+## Failure/re-entry semantics
 
-Production deployment remains **blocked fail-closed** until the later Production Baseline gates are
-completed. The historical public deployment route combined a workstation runner with a GCP adapter
-and is not the target architecture. The checked-in migration-gate workflow intentionally refuses
-deployment.
+Before destructive dispatch, ambiguity fails closed with no target mutation.
 
-Production Baseline Items 15–19 are **COMPLETE**. Item 20 is the first unfinished delivery item.
-The following pre-release foundations are already protected and proven:
+After durable destructive dispatch may have occurred:
 
-- the private Linux `android-production` runner and registered-device binding passed a bounded
-  read-only Actions preflight with `mutation_performed=false`;
-- immutable pre-release acceptance authority is implemented and proven for exact candidate
-  identities;
-- the GitHub-hosted Vultr read-only account/key preflight is implemented and proven;
-- provider-neutral lifecycle policy plus the typed Vultr UUID/exact-tags/ownership/generation-CAS
-  adapter is implemented;
-- Item 19 lifecycle run `33342000338` deployed and verified immutable candidate
-  `d151dbdd156279e32a5361d304c90f996bd2d565` on one controlled proof VM, deterministically deleted
-  that VM, confirmed provider absence and reached durable terminal state. The terminal Item 19
-  ownership intent is not reusable;
-- Item 20 has protected non-live orchestration/readiness foundations. The bounded readiness result
-  is exact-matched by the pure admission core, and a pure readiness-artifact selector/verifier is
-  present. Session-workflow wiring remains explicitly incomplete and grants no live authority.
+```text
+UNKNOWN
+  -> read-only observation/reconciliation
+  -> RECOVERED | QUARANTINED | separately proven terminal
+```
 
-The remaining baseline work is bounded to the first unfinished item and its successors:
+Rules:
 
-1. finish the protected non-live Item 20 session/workflow composition without weakening admission;
-2. satisfy #115 by recovering and independently verifying the existing Android signing identity,
-   delivering it only through the private execution boundary, and protecting signed immutable APK
-   update/verify/rollback logic with certificate continuity and retained rollback artifacts;
-3. when #115 and the same-window private phone preflight permit a mutable physical window, run one
-   fresh Item 20 JIT acceptance session and the normative physical A–F sequence on the exact
-   immutable candidate, followed by deterministic provider cleanup and bounded evidence;
-4. only after successful physical acceptance, create the final draft -> assets ->
-   checksum/SBOM/attestation -> publish sequence and protected annotated `vMAJOR.MINOR.PATCH` tag;
-5. only from that accepted final release tuple, perform `production-vultr` promotion and prove the
-   bounded deterministic production rollback/fix-forward path.
+- no blind destructive retry;
+- `RECOVERED != ACCEPTED`;
+- GitHub run/comment/attempt identity does not redefine semantic request identity;
+- evidence transport retry is never physical-effect retry;
+- old failed workflow runs are not manually rerun as the deployment mechanism.
 
-Until the relevant target path is implemented and verified, no release event, manual dispatch,
-SSH, raw ADB, provider CLI or workstation command is an authorised production shortcut. Do not
-create an Item 20 VM or mutate the phone merely to keep work moving while #115 remains OPEN.
+Re-entry eligibility is determined only from the canonical private ledger under current controller semantics.
 
-## Normal development and release
+## Control issues
 
-1. Create a topic branch from current protected `main`.
-2. Commit a bounded change with tests and open a pull request.
-3. Merge only after the aggregate `Quality Gate` succeeds.
-4. For a release candidate, use the exact protected-main SHA and its successful canonical Quality
-   release-candidate evidence; never substitute `main`, `latest`, a branch name or a short SHA.
-5. Execute the acceptance path under the distinct pre-release authority and complete physical
-   acceptance before creating a final semantic tag.
-6. For a final release, change the workspace version in a reviewed pull request as required, then
-   create exactly one annotated protected tag matching that version through the canonical release
-   control path only after physical acceptance succeeds.
-7. Build immutable artifacts, checksums, SBOM and provenance/attestation before publication.
-8. Never move or reuse a release tag; fix forward with a new patch release.
+- public Issue #179: migration/development checkpoint authority only; not the normal runtime ledger;
+- public Issue #228: 10/10 PRODUCT-hardening backlog only;
+- public Issue #90: product tag/release command surface where the accepted Product Release contract requires it;
+- private Issue #1: Deployment Controller ingress and canonical runtime ledger.
 
-Release immutability remains disabled until the release workflow implements draft -> asset ->
-checksum/SBOM/attestation -> publish ordering.
+The newest authoritative #179 checkpoint decides which engineering/production action is currently permitted.
+
+## Existing legacy public execution surfaces
+
+Public Item19/Item20/phone/deployment workflows and public physical-controller scripts remain in the repository during source-ownership migration. They are not current runtime deployment authority.
+
+Their disposition is bounded by #179:
+
+- PRODUCT/shared-domain behavior stays public;
+- deployment-only controller/target mutation behavior moves to or is deleted in favor of the private controller;
+- historical development/acceptance surfaces are retired or clearly marked historical.
+
+Do not create a third shared controller framework to keep duplicated authority alive.
+
+## Normal development
+
+1. Create a topic branch from exact current protected `main`.
+2. Make the smallest bounded change with direct verification.
+3. Open a pull request.
+4. Merge only after required Quality succeeds and the PR remains based on the expected state.
+5. Revalidate exact post-merge `main`/Quality when the next authority decision depends on it.
+6. For production release/deployment work, follow the v2 authority order above and the newest #179 checkpoint.
 
 ## Secret and evidence policy
 
-See [secret boundaries](operations/secret-boundaries.md). A workflow may report safe metadata such
-as tag, SHA, workflow run identity and bounded pass/fail checks. It must never report a secret value,
-length, hash, prefix/suffix, SSH material or unverified provider resource identifier.
+Secret values never belong in Git or public logs/evidence. Safe public evidence may contain exact public SHA/tag/run/release identities and bounded booleans required by contract.
 
-If secret scanning reports a genuine credential, treat it as disclosed: revoke or rotate at the
-provider first, then remove it from source/history and record only the safe remediation result.
+Private target bindings, credentials, raw device identifiers and sensitive runtime logs remain inside the private Deployment Controller boundary.
 
-Exact live secrets, runner online/busy state, physical USB/ADB state and unsafe-to-publish provider
-bindings are external runtime values. The canonical repository remains authoritative for their
-schema, required names, allowed locations, invariants and safe evidence format.
+## Prohibited shortcuts
 
-## Token and time economy
+- raw/manual ADB as normal production control;
+- workstation SSH/provider CLI deployment;
+- public PRODUCT workflow target mutation;
+- private controller independent product build/sign/tag/release;
+- deployment from mutable/`latest` identity;
+- public Deployment projection as canonical ledger;
+- blind destructive retry after ambiguous dispatch.
 
-- `AGENTS.md` and `repository_context.py` replace repeated repository discovery.
-- One aggregate Quality Gate avoids duplicate test work and exposes a compact summary artifact.
-- Versioned contracts prevent agents from rediscovering repository, runner and secret boundaries.
-- Raw physical acceptance logs remain outside public Git; publish only bounded non-secret evidence.
-- Private satellite content stays minimal so context recovery always starts from this repository.
+## Quality
+
+For docs/policy work:
+
+```bash
+scripts/quality-gate.sh fast
+```
+
+For code/release work:
+
+```bash
+scripts/quality-gate.sh
+```
+
+A green PRODUCT Quality result proves source-controlled PRODUCT coherence. It does not by itself prove current target state or grant deployment authority.
