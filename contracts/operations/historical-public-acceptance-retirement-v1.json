@@ -1,0 +1,66 @@
+{
+  "contract_version": 1,
+  "status": "protected_historical_non_executable",
+  "canonical_repository": "iamaman11/mobile-proxy",
+  "superseded_by": {
+    "project_authority": "contracts/operations/project-authority-v2.json",
+    "github_control_plane": "contracts/operations/github-control-plane-v2.json",
+    "production_topology": "contracts/operations/production-topology-v2.json",
+    "product_release": "contracts/operations/product-release-authority-v2.json",
+    "runtime_deployment_authority": "iamaman11/mobile-proxy-production"
+  },
+  "retired_workflows": [
+    ".github/workflows/item19-acceptance-lifecycle.yml",
+    ".github/workflows/vultr-readonly-preflight.yml",
+    ".github/workflows/item20-admission-readiness.yml",
+    ".github/workflows/item20-session-orchestration.yml"
+  ],
+  "retired_upstream_workflow": ".github/workflows/acceptance-authority.yml",
+  "historical_contract_snapshots": [
+    "contracts/operations/github-control-plane-v1.json",
+    "contracts/operations/vultr-readonly-preflight-v1.json",
+    "contracts/operations/item20-admission-readiness-v1.json",
+    "contracts/operations/item20-acceptance-v1.json",
+    "contracts/operations/production-topology-v1.json"
+  ],
+  "execution": {
+    "workflow_files_must_be_absent": true,
+    "issue_comment_execution": false,
+    "workflow_dispatch_execution": false,
+    "provider_api_execution": false,
+    "provider_mutation": false,
+    "phone_execution": false,
+    "private_controller_mutation": false,
+    "product_release_authority_changed": false
+  },
+  "immutable_historical_item19_evidence": {
+    "candidate_sha": "d151dbdd156279e32a5361d304c90f996bd2d565",
+    "quality_run_id": 33341602485,
+    "acceptance_authority_run_id": 33341737260,
+    "vultr_readonly_preflight_run_id": 33341760002,
+    "item19_lifecycle_run_id": 33342000338,
+    "closeout_record": "docs/operations/item19-provider-proof-closeout.md"
+  },
+  "retained_reusable_surfaces": [
+    "apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs",
+    "apps/operator-cli/src/github_vm_binding_store.rs",
+    "apps/operator-cli/src/item20_acceptance.rs",
+    "apps/operator-cli/src/item20_session_lifecycle.rs",
+    "scripts/verify_item19_acceptance_lifecycle.py",
+    "scripts/verify_vultr_readonly_preflight.py",
+    "scripts/select_item20_candidate_evidence.py",
+    "scripts/verify_item20_candidate_evidence.py",
+    "scripts/verify_item20_admission.py",
+    "scripts/verify_item20_orchestration.py",
+    "scripts/verify_item20_readiness_artifact.py",
+    "scripts/item20_private_handoff.py"
+  ],
+  "forbidden": [
+    "restore_retired_public_acceptance_workflow_execution",
+    "treat_historical_v1_contract_snapshot_as_current_runtime_authority",
+    "rewrite_immutable_historical_item19_evidence",
+    "remove_reusable_pure_or_shared_domain_logic_as_part_of_workflow_retirement",
+    "move_runtime_deployment_authority_back_to_public_repository",
+    "require_historical_public_acceptance_before_product_release_v2"
+  ]
+}
