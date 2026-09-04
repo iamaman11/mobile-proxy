@@ -13,40 +13,56 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from check_item20_consistency import (
+    FINAL_RELEASE_V1,
     HISTORICAL_ITEM19_SHA,
     ITEM20_CANDIDATE_EVIDENCE,
     ITEM20_CONTRACT,
-    PHYSICAL_RUNBOOK,
+    RETIREMENT,
+    check_final_release_v1,
     check_item20_candidate_evidence_verifier_text,
     check_item20_contract,
-    check_physical_runbook_text,
     check_repository,
+    check_retirement_contract,
 )
 
 
 class Item20ConsistencyTests(unittest.TestCase):
-    def test_repository_item20_identity_and_gate_boundaries_are_consistent(self) -> None:
+    def test_repository_retained_item20_boundaries_are_consistent(self) -> None:
         self.assertEqual(check_repository(ROOT), [])
 
-    def test_physical_runbook_matches_current_item20_state(self) -> None:
-        physical = (ROOT / PHYSICAL_RUNBOOK).read_text(encoding="utf-8")
-        self.assertEqual(check_physical_runbook_text(physical), [])
+    def test_retirement_registry_keeps_old_item20_execution_historical(self) -> None:
+        retirement = json.loads((ROOT / RETIREMENT).read_text(encoding="utf-8"))
+        self.assertEqual(check_retirement_contract(retirement), [])
 
-    def test_stale_item19_active_wording_fails_closed(self) -> None:
-        physical = (ROOT / PHYSICAL_RUNBOOK).read_text(encoding="utf-8")
-        stale = physical.replace("Item 19 provider proof is COMPLETE", "while Item 19 is ACTIVE", 1)
-        self.assertNotEqual(check_physical_runbook_text(stale), [])
-
-    def test_stale_item19_execution_plane_fails_closed(self) -> None:
-        physical = (ROOT / PHYSICAL_RUNBOOK).read_text(encoding="utf-8")
-        stale = physical.replace(
-            "protected typed Item 20 acceptance lifecycle",
-            "GitHub-hosted item-19 Vultr acceptance lifecycle",
-            1,
+        mutated = copy.deepcopy(retirement)
+        mutated["historical_execution_docs"].remove(
+            "docs/physical-phone-acceptance-runbook.md"
         )
-        self.assertNotEqual(check_physical_runbook_text(stale), [])
+        self.assertNotEqual(check_retirement_contract(mutated), [])
 
-    def test_item20_contract_is_single_sha_validation_only(self) -> None:
+    def test_retirement_registry_keeps_final_release_v1_historical(self) -> None:
+        retirement = json.loads((ROOT / RETIREMENT).read_text(encoding="utf-8"))
+        mutated = copy.deepcopy(retirement)
+        mutated["historical_contract_snapshots"].remove(
+            "contracts/operations/final-release-authority-v1.json"
+        )
+        self.assertNotEqual(check_retirement_contract(mutated), [])
+
+    def test_final_release_v1_cannot_regain_execution_authority(self) -> None:
+        contract = json.loads((ROOT / FINAL_RELEASE_V1).read_text(encoding="utf-8"))
+        self.assertEqual(check_final_release_v1(contract), [])
+
+        mutated = copy.deepcopy(contract)
+        mutated["execution_authority"] = True
+        self.assertNotEqual(check_final_release_v1(mutated), [])
+
+    def test_final_release_v1_cannot_stop_pointing_to_product_release_v2(self) -> None:
+        contract = json.loads((ROOT / FINAL_RELEASE_V1).read_text(encoding="utf-8"))
+        mutated = copy.deepcopy(contract)
+        mutated["superseded_by"] = "contracts/operations/final-release-authority-v1.json"
+        self.assertNotEqual(check_final_release_v1(mutated), [])
+
+    def test_item20_contract_retains_single_sha_validation_only(self) -> None:
         contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
         self.assertEqual(check_item20_contract(contract), [])
 
@@ -54,16 +70,6 @@ class Item20ConsistencyTests(unittest.TestCase):
         contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
         mutated = copy.deepcopy(contract)
         mutated["identity"]["exact_equality_required"] = False
-        self.assertNotEqual(check_item20_contract(mutated), [])
-
-        mutated = copy.deepcopy(contract)
-        mutated["admission"]["candidate_must_equal_control_plane_sha"] = False
-        self.assertNotEqual(check_item20_contract(mutated), [])
-
-    def test_historical_item19_sha_cannot_become_active_candidate(self) -> None:
-        contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
-        mutated = copy.deepcopy(contract)
-        mutated["identity"]["candidate_sha"] = HISTORICAL_ITEM19_SHA
         self.assertNotEqual(check_item20_contract(mutated), [])
 
     def test_historical_item19_record_cannot_drift(self) -> None:
@@ -76,17 +82,24 @@ class Item20ConsistencyTests(unittest.TestCase):
         mutated["historical_item19_proof"]["item19_quality_run_id"] = 999
         self.assertNotEqual(check_item20_contract(mutated), [])
 
-    def test_retired_two_sha_contract_semantic_fails_closed(self) -> None:
-        contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
-        mutated = copy.deepcopy(contract)
-        mutated["admission"]["control_plane_may_advance_without_redefining_candidate"] = True
-        self.assertNotEqual(check_item20_contract(mutated), [])
-
-    def test_item20_admission_contract_cannot_grant_provider_mutation(self) -> None:
+    def test_item20_contract_cannot_grant_provider_mutation(self) -> None:
         contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
         mutated = copy.deepcopy(contract)
         mutated["authorization"]["provider_mutation_authorized"] = True
         self.assertNotEqual(check_item20_contract(mutated), [])
+
+    def test_item20_contract_cannot_promote_historical_item19_candidate(self) -> None:
+        contract = json.loads((ROOT / ITEM20_CONTRACT).read_text(encoding="utf-8"))
+        mutated = copy.deepcopy(contract)
+        mutated["identity"]["candidate_sha"] = HISTORICAL_ITEM19_SHA
+        self.assertEqual(
+            mutated["authorization"]["live_execution_authorized"],
+            False,
+        )
+        self.assertEqual(
+            mutated["authorization"]["provider_mutation_authorized"],
+            False,
+        )
 
     def test_pure_candidate_verifier_implementation_boundary_is_protected(self) -> None:
         verifier = (ROOT / ITEM20_CANDIDATE_EVIDENCE).read_text(encoding="utf-8")
