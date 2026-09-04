@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prevent Production Baseline Item 20 identity and gate drift."""
+"""Protect retained Item20 pure invariants while legacy execution authority stays historical."""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ from pathlib import Path
 
 
 HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
-PLAN = Path("docs/PRODUCTION_BASELINE_PLAN.md")
+RETIREMENT = Path("contracts/operations/historical-public-acceptance-retirement-v1.json")
+FINAL_RELEASE_V1 = Path("contracts/operations/final-release-authority-v1.json")
 PHYSICAL_RUNBOOK = Path("docs/physical-phone-acceptance-runbook.md")
-PHONE_RUNTIME = Path("docs/operations/phone-gitops-runtime.md")
+ITEM19_STATE_DOC = Path("docs/architecture/acceptance-vm-binding-store.md")
 ITEM19_CLOSEOUT = Path("docs/operations/item19-provider-proof-closeout.md")
 ITEM19_LIFECYCLE = Path("apps/operator-cli/src/bin/item19-acceptance-lifecycle.rs")
 BINDING_STORE = Path("apps/operator-cli/src/github_vm_binding_store.rs")
@@ -42,30 +43,65 @@ def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
     return value
 
 
-def check_physical_runbook_text(physical: str) -> list[str]:
+def check_retirement_contract(retirement: dict[str, object]) -> list[str]:
     errors: list[str] = []
-    for required in (
-        "Item 19 provider proof is COMPLETE",
-        "protected typed Item 20 acceptance lifecycle",
-        "distinct Item 20 ownership intent",
-        "terminal Item 19 proof intent is never reused",
-        "private Item 20 phone execution must not call Vultr APIs",
-        "Fresh immutable `/accept-candidate <sha>` authority",
-        "Fresh `/vultr-readonly-preflight <sha>` evidence",
-    ):
-        if required not in physical:
-            errors.append(f"physical acceptance runbook is missing Item 20 boundary {required!r}")
+    if retirement.get("status") != "protected_historical_non_executable":
+        errors.append("legacy public authority retirement status differs")
 
-    lowered = physical.lower()
-    for forbidden in (
-        "while item 19 and the mutable-phone gate remain incomplete",
-        "github-hosted item-19 vultr acceptance lifecycle",
-        "provider mutation is performed only through the item-19 typed vultr lifecycle",
-        "while item 19 is active",
-        "already verified item-19 acceptance target",
-    ):
-        if forbidden in lowered:
-            errors.append(f"physical acceptance runbook contains stale Item 19 state {forbidden!r}")
+    snapshots = retirement.get("historical_contract_snapshots")
+    required_snapshots = {
+        "contracts/operations/github-control-plane-v1.json",
+        "contracts/operations/vultr-readonly-preflight-v1.json",
+        "contracts/operations/item20-admission-readiness-v1.json",
+        "contracts/operations/item20-acceptance-v1.json",
+        "contracts/operations/production-topology-v1.json",
+        "contracts/operations/final-release-authority-v1.json",
+    }
+    if not isinstance(snapshots, list) or not required_snapshots.issubset(set(snapshots)):
+        errors.append("legacy authority retirement registry lost required historical contract snapshots")
+
+    historical_docs = retirement.get("historical_execution_docs")
+    required_docs = {str(PHYSICAL_RUNBOOK), str(ITEM19_STATE_DOC)}
+    if not isinstance(historical_docs, list) or not required_docs.issubset(set(historical_docs)):
+        errors.append("legacy Item19/Item20 execution documents are not classified historical-only")
+
+    execution = retirement.get("execution")
+    if not isinstance(execution, dict):
+        errors.append("legacy authority retirement execution block is missing")
+    else:
+        for key in (
+            "issue_comment_execution",
+            "workflow_dispatch_execution",
+            "provider_api_execution",
+            "provider_mutation",
+            "phone_execution",
+            "private_controller_mutation",
+            "legacy_public_item20_execution_authority",
+            "legacy_final_release_v1_authority",
+        ):
+            if execution.get(key) is not False:
+                errors.append(f"legacy retirement unexpectedly enables {key}")
+
+    superseded = retirement.get("superseded_by")
+    if not isinstance(superseded, dict) or superseded.get("product_release") != (
+        "contracts/operations/product-release-authority-v2.json"
+    ) or superseded.get("runtime_deployment_authority") != "iamaman11/mobile-proxy-production":
+        errors.append("legacy authority retirement no longer binds Product Release v2 and private deployment authority")
+    return errors
+
+
+def check_final_release_v1(contract: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    if contract.get("contract_version") != 1:
+        errors.append("historical final-release contract version differs")
+    if contract.get("status") != "protected_historical_non_executable":
+        errors.append("final-release v1 must remain explicitly historical and non-executable")
+    if contract.get("historical_snapshot") is not True:
+        errors.append("final-release v1 lost historical snapshot classification")
+    if contract.get("superseded_by") != "contracts/operations/product-release-authority-v2.json":
+        errors.append("final-release v1 no longer points to Product Release v2")
+    if contract.get("execution_authority") is not False:
+        errors.append("final-release v1 cannot regain execution authority")
     return errors
 
 
@@ -78,26 +114,15 @@ def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
         "def verify_control_plane(",
         "def verify_workflow_run(",
         "def verify_artifact_metadata(",
-        "def verify_acceptance_evidence(",
-        "def verify_preflight_evidence(",
-        "def verify_fresh_order(",
         "def verify_candidate_chain(",
-        '"candidate_control_plane_exact_equality_required": True',
-        '"selection": "exact_current_protected_main_single_sha_then_fresh_candidate_evidence"',
         "candidate_sha != control_plane_sha",
         "candidate/control-plane SHA mismatch violates 10/10 single-SHA acceptance",
-        'expected_name_prefix="vultr-acceptance-authority"',
-        'expected_name_prefix="vultr-readonly-preflight"',
     ):
         if required not in verifier:
-            errors.append(f"Item 20 pure candidate evidence verifier is missing {required!r}")
+            errors.append(f"retained Item20 pure verifier is missing {required!r}")
 
     for forbidden in (
         f'_IMMUTABLE_CANDIDATE = "{HISTORICAL_ITEM19_SHA}"',
-        '"candidate_control_plane_separation_required": True',
-        '"candidate_control_plane_value_inequality_required": False',
-        '"selection": "candidate_specific_artifact_then_exact_control_plane_run"',
-        "identities to remain distinct",
         "VULTR_API_KEY",
         "VULTR_SSH_PRIVATE_KEY",
         "production-vultr",
@@ -115,106 +140,38 @@ def check_item20_candidate_evidence_verifier_text(verifier: str) -> list[str]:
         "secrets.set",
     ):
         if forbidden in verifier:
-            errors.append(f"Item 20 pure candidate evidence verifier contains forbidden token {forbidden!r}")
+            errors.append(f"retained Item20 pure verifier contains forbidden live token {forbidden!r}")
     return errors
 
 
 def check_item20_contract(contract: dict[str, object]) -> list[str]:
     errors: list[str] = []
-    expected_top = {
-        "contract_version": 1,
-        "status": "protected_non_live_admission_core",
-        "canonical_repository": "iamaman11/mobile-proxy",
-        "tracker_issue": 135,
-        "completed_provider_proof_issue": 124,
-        "phone_signing_gate_issue": 115,
-    }
-    for key, value in expected_top.items():
-        if contract.get(key) != value:
-            errors.append(f"Item 20 admission contract {key!r} differs from protected value")
+    if contract.get("contract_version") != 1:
+        errors.append("retained Item20 historical contract version differs")
 
     historical = contract.get("historical_item19_proof")
     if not isinstance(historical, dict) or historical.get("candidate_sha") != HISTORICAL_ITEM19_SHA:
-        errors.append("Item 20 contract lost the immutable historical Item 19 proof SHA")
+        errors.append("Item20 contract lost the immutable historical Item19 proof SHA")
     if not isinstance(historical, dict) or historical.get("item19_quality_run_id") != 33341602485:
-        errors.append("Item 20 contract historical Item 19 Quality run differs")
+        errors.append("Item20 contract historical Item19 Quality run differs")
     if not isinstance(historical, dict) or historical.get("role") != (
         "historical_provider_lifecycle_proof_only_not_item20_final_candidate"
     ):
-        errors.append("Item 20 contract does not label Item 19 evidence as historical-only")
+        errors.append("Item20 contract does not label Item19 evidence as historical-only")
 
     identity = contract.get("identity")
-    expected_identity = {
-        "candidate_sha": "exact_current_protected_main_revision_selected_for_10_of_10_window",
-        "control_plane_sha": "same_exact_current_protected_main_revision",
-        "exact_equality_required": True,
-        "final_release_tag_target": "candidate_sha",
-        "source_freeze_after_selection": True,
-    }
-    if not isinstance(identity, dict) or identity != expected_identity:
-        errors.append("Item 20 single-SHA identity contract differs")
-
-    admission = contract.get("admission")
-    if not isinstance(admission, dict):
-        errors.append("Item 20 admission block is missing")
-    else:
-        for key in (
-            "candidate_must_equal_control_plane_sha",
-            "candidate_must_be_exact_current_protected_main",
-            "control_plane_must_be_exact_current_protected_main",
-            "fresh_candidate_evidence_required",
-            "fresh_exact_candidate_provider_proof_required_before_live_window",
-            "historical_item19_closeout_is_prior_evidence_not_current_candidate_authority",
-            "source_freeze_after_candidate_evidence",
-        ):
-            if admission.get(key) is not True:
-                errors.append(f"Item 20 admission must require {key}")
-        if admission.get("required_issue_states") != {
-            "item19_tracker_124": "closed_completed_historical_provider_proof",
-            "item20_tracker_135": "open",
-            "phone_signing_gate_115": "closed_completed_before_live_window",
-        }:
-            errors.append("Item 20 admission issue gates differ")
-
-    verifier = contract.get("future_live_candidate_verifier")
-    if not isinstance(verifier, dict) or verifier != {
-        "candidate_control_plane_exact_equality_required": True,
-        "candidate_quality_run_attempt": 1,
-        "grants_live_authority": False,
-        "performs_external_io": False,
-        "selection": "exact_current_protected_main_single_sha_then_fresh_candidate_evidence",
-        "status": "protected_pure_verifier_consumed_by_admission_core",
-        "verifier": "scripts/verify_item20_candidate_evidence.py",
-        "workflow_wiring": "implemented_exact_readiness_artifact_consumption",
-    }:
-        errors.append("Item 20 pure candidate evidence verifier contract differs")
-
-    future_live = contract.get("future_live_candidate_evidence")
-    if not isinstance(future_live, dict) or future_live != {
-        "acceptance_authority": "fresh_for_exact_candidate",
-        "current_core_verification": "protected_pure_verifier_consumed_by_admission_core",
-        "fresh_provider_lifecycle_proof": "required_for_exact_candidate_before_live_item20",
-        "same_candidate_required": True,
-        "software_release_candidate": "fresh_for_exact_candidate",
-        "vultr_readonly_preflight": "fresh_for_exact_candidate",
-    }:
-        errors.append("Item 20 fresh candidate evidence requirements differ")
-
-    orchestration = contract.get("orchestration")
-    if not isinstance(orchestration, dict) or orchestration.get("candidate_source") != (
-        "same_exact_current_protected_main_as_control_plane"
-    ) or orchestration.get("control_plane_source") != "exact_current_protected_main":
-        errors.append("Item 20 orchestration does not select one exact protected-main SHA")
+    if not isinstance(identity, dict) or identity.get("exact_equality_required") is not True:
+        errors.append("retained Item20 identity lost exact candidate/control-plane equality")
 
     authorization = contract.get("authorization")
-    if not isinstance(authorization, dict) or authorization != {
+    if authorization != {
         "endpoint_handoff_authorized": False,
         "final_production_authority": False,
         "live_execution_authorized": False,
         "phone_mutation_authorized": False,
         "provider_mutation_authorized": False,
     }:
-        errors.append("Item 20 admission contract must remain validation-only")
+        errors.append("retained Item20 contract grants live, mutation or production authority")
 
     serialized = json.dumps(contract, sort_keys=True)
     for forbidden in (
@@ -226,15 +183,14 @@ def check_item20_contract(contract: dict[str, object]) -> list[str]:
         "control_plane_may_advance_without_redefining_candidate",
     ):
         if forbidden in serialized:
-            errors.append(f"Item 20 contract contains retired two-SHA semantic {forbidden!r}")
+            errors.append(f"Item20 contract contains retired two-SHA semantic {forbidden!r}")
     return errors
 
 
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
-    plan = _read(root, PLAN, errors)
-    physical = _read(root, PHYSICAL_RUNBOOK, errors)
-    phone = _read(root, PHONE_RUNTIME, errors)
+    retirement = _load(root, RETIREMENT, errors)
+    final_release_v1 = _load(root, FINAL_RELEASE_V1, errors)
     closeout = _read(root, ITEM19_CLOSEOUT, errors)
     item19 = _read(root, ITEM19_LIFECYCLE, errors)
     binding_store = _read(root, BINDING_STORE, errors)
@@ -245,30 +201,26 @@ def check_repository(root: Path) -> list[str]:
     contract = _load(root, ITEM20_CONTRACT, errors)
     lib = _read(root, LIB, errors)
 
-    for required in (
-        "Item 20 is the first unfinished delivery item",
-        "Item 20 remains blocked by the signing-continuity gate",
-        "distinct ownership intent rather than reuse Item 19's terminal proof intent",
-    ):
-        if required not in plan:
-            errors.append(f"canonical baseline plan is missing Item 20 boundary {required!r}")
+    if retirement:
+        errors.extend(check_retirement_contract(retirement))
+    if final_release_v1:
+        errors.extend(check_final_release_v1(final_release_v1))
 
-    errors.extend(check_physical_runbook_text(physical))
-    for required in (
-        "The physical item-20 window opens only after the Item 19 provider proof is complete",
-        "mutable-phone gate is satisfied",
-        "distinct Item 20 ownership intent",
-    ):
-        if required not in phone:
-            errors.append(f"phone runtime is missing Item 20 gate token {required!r}")
+    for historical_path in (PHYSICAL_RUNBOOK, ITEM19_STATE_DOC):
+        if not (root / historical_path).is_file():
+            errors.append(f"historical execution record is missing: {historical_path}")
 
-    for required in ("Candidate SHA:", HISTORICAL_ITEM19_SHA, "terminal; that intent is not reusable by Item 20"):
+    for required in (
+        "Candidate SHA:",
+        HISTORICAL_ITEM19_SHA,
+        "terminal; that intent is not reusable by Item 20",
+    ):
         if required not in closeout:
-            errors.append(f"Item 19 closeout is missing immutable historical token {required!r}")
+            errors.append(f"Item19 closeout is missing immutable historical token {required!r}")
 
     legacy_item19_intent = 'format!("candidate:{candidate_sha}")'
     if legacy_item19_intent not in item19:
-        errors.append("Item 19 historical ownership intent semantics changed")
+        errors.append("Item19 historical ownership intent semantics changed")
 
     for required in (
         "pub enum AcceptanceVmIntentNamespace",
@@ -282,7 +234,7 @@ def check_repository(root: Path) -> list[str]:
         "unknown_namespace_record_poisoning_fails_closed",
     ):
         if required not in binding_store:
-            errors.append(f"durable acceptance store is missing Item 20 namespace guard {required!r}")
+            errors.append(f"retained durable acceptance store is missing pure namespace guard {required!r}")
 
     for required in (
         'const ITEM20_INTENT_PREFIX: &str = "item20:candidate:";',
@@ -294,7 +246,7 @@ def check_repository(root: Path) -> list[str]:
         "pub fn desired_vm",
     ):
         if required not in item20:
-            errors.append(f"typed Item 20 identity is missing {required!r}")
+            errors.append(f"retained typed Item20 identity is missing {required!r}")
 
     for forbidden in (
         legacy_item19_intent,
@@ -306,7 +258,7 @@ def check_repository(root: Path) -> list[str]:
         "adb ",
     ):
         if forbidden in item20:
-            errors.append(f"typed Item 20 identity contains forbidden boundary token {forbidden!r}")
+            errors.append(f"retained typed Item20 identity contains forbidden authority token {forbidden!r}")
 
     for required in (
         "pub trait Item20LifecycleStore",
@@ -318,14 +270,12 @@ def check_repository(root: Path) -> list[str]:
         "terminal Item 20 acceptance intent cannot be reused",
     ):
         if required not in item20_lifecycle:
-            errors.append(f"typed Item 20 session lifecycle is missing {required!r}")
+            errors.append(f"retained typed Item20 session lifecycle is missing {required!r}")
 
     for required in (
         "from verify_item20_candidate_evidence import verify_candidate_chain",
         "def verify_contract",
         "def verify_control_plane",
-        "def verify_issue_gates",
-        "def verify_phone_preflight",
         "def verify_admission",
         "candidate_sha != control_plane_sha",
         '"provider_mutation_authorized": False',
@@ -334,7 +284,7 @@ def check_repository(root: Path) -> list[str]:
         '"live_execution_authorized": False',
     ):
         if required not in admission:
-            errors.append(f"Item 20 non-live admission verifier is missing {required!r}")
+            errors.append(f"retained Item20 admission verifier is missing pure/non-live token {required!r}")
 
     for forbidden in (
         f'_IMMUTABLE_CANDIDATE = "{HISTORICAL_ITEM19_SHA}"',
@@ -349,16 +299,16 @@ def check_repository(root: Path) -> list[str]:
         "adb ",
     ):
         if forbidden in admission:
-            errors.append(f"Item 20 admission verifier contains forbidden live/two-SHA token {forbidden!r}")
+            errors.append(f"retained Item20 admission verifier contains forbidden live token {forbidden!r}")
 
     errors.extend(check_item20_candidate_evidence_verifier_text(candidate_evidence))
     if contract:
         errors.extend(check_item20_contract(contract))
 
     if "pub mod item20_acceptance;" not in lib:
-        errors.append("operator-cli does not export the typed Item 20 acceptance identity")
+        errors.append("operator-cli does not export the retained typed Item20 acceptance identity")
     if "pub mod item20_session_lifecycle;" not in lib:
-        errors.append("operator-cli does not export the typed Item 20 session lifecycle")
+        errors.append("operator-cli does not export the retained typed Item20 session lifecycle")
     return errors
 
 
