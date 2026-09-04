@@ -36,13 +36,26 @@
     "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
     "release-manifest.json",
     "provenance.json",
-    "SHA256SUMS"
+    "artifact-digests.json"
   ],
   "manifest": {
     "format_version": 2,
     "android_package": "com.example.mobileproxy",
     "source_sha": "exact_final_tag_target_sha",
-    "artifact_sha256_required": true
+    "content_digest_algorithm": "blake3-256",
+    "content_digest_domain": "mobile-proxy/product-release-asset/v2"
+  },
+  "digest_set": {
+    "format_version": 1,
+    "algorithm": "blake3-256",
+    "domain": "mobile-proxy/product-release-asset/v2",
+    "covers": [
+      "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
+      "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
+      "release-manifest.json",
+      "provenance.json"
+    ],
+    "self_digest_forbidden": true
   },
   "tag": {
     "kind": "annotated",
@@ -63,6 +76,7 @@
     "overwrite_or_replace_existing_release_assets",
     "accept_mutable_published_release_as_deployable",
     "deployment_from_latest_or_moving_release_alias",
-    "deployment_before_exact_immutable_product_release_v2"
+    "deployment_before_exact_immutable_product_release_v2",
+    "first_party_direct_cryptographic_digest_primitive"
   ]
 }
