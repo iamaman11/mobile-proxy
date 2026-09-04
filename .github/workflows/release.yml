@@ -210,6 +210,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/create_release_bundle_v2.py \
+            --repository-root . \
             --release-dir release \
             --tag "$RELEASE_TAG" \
             --source-sha "$RELEASE_SHA" \
@@ -219,7 +220,7 @@ jobs:
             --github-native-attestation "$NATIVE_ATTESTATION"
           python3 -m json.tool release/release-manifest.json >/dev/null
           python3 -m json.tool release/provenance.json >/dev/null
-          sha256sum --check release/SHA256SUMS
+          python3 -m json.tool release/artifact-digests.json >/dev/null
 
       - name: Attest Product Release v2 bundle
         if: steps.provenance.outputs.native == 'true'
@@ -230,7 +231,7 @@ jobs:
             release/mobile-proxy-android-${{ steps.tag.outputs.name }}.apk
             release/release-manifest.json
             release/provenance.json
-            release/SHA256SUMS
+            release/artifact-digests.json
 
       - name: Record fallback provenance mode
         if: steps.provenance.outputs.native != 'true'
@@ -238,7 +239,7 @@ jobs:
           {
             echo '## Provenance mode'
             echo 'GitHub-native build attestations are unavailable for this repository context.'
-            echo 'The exact Product Release v2 bundle remains covered by provenance.json and SHA256SUMS.'
+            echo 'The exact Product Release v2 bundle remains covered by provenance.json and typed artifact-digests.json.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Inspect existing exact Release state
@@ -286,11 +287,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/verify_published_release_v2.py \
+            --repository-root . \
             --release-json existing-release.json \
             --release-dir release \
             --tag "$RELEASE_TAG"
 
-      - name: Verify an existing draft is exact before recovery publish
+      - name: Verify an existing draft contract before recovery publish
         if: steps.existing.outputs.state == 'draft'
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
@@ -298,6 +300,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/verify_published_release_v2.py \
+            --repository-root . \
             --release-json existing-release.json \
             --release-dir release \
             --tag "$RELEASE_TAG" \
@@ -319,9 +322,9 @@ jobs:
             "release/mobile-proxy-android-$RELEASE_TAG.apk" \
             release/release-manifest.json \
             release/provenance.json \
-            release/SHA256SUMS
+            release/artifact-digests.json
 
-      - name: Resolve and verify exact draft before first publication
+      - name: Resolve and verify exact draft contract before first publication
         id: draft
         if: steps.existing.outputs.state == 'none'
         env:
@@ -356,10 +359,45 @@ jobs:
               handle.write(f"release_id={ident}\n")
           PY
           python3 scripts/verify_published_release_v2.py \
+            --repository-root . \
             --release-json created-draft-release.json \
             --release-dir release \
             --tag "$RELEASE_TAG" \
             --allow-draft
+
+      - name: Compare exact draft asset bytes before publication
+        if: steps.existing.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_json=existing-release.json
+          if [[ "${{ steps.existing.outputs.state }}" = none ]]; then
+            source_json=created-draft-release.json
+          fi
+          mkdir -p "$RUNNER_TEMP/exact-draft-assets"
+          python3 - "$source_json" > "$RUNNER_TEMP/draft-assets.tsv" <<'PY'
+          import json
+          import sys
+
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          assets = release.get("assets", [])
+          for asset in sorted(assets, key=lambda item: item["name"]):
+              print(f"{asset['id']}\t{asset['name']}")
+          PY
+          while IFS=$'\t' read -r asset_id asset_name; do
+            [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
+            [[ "$asset_name" != *$'\n'* && "$asset_name" != *$'\t'* && "$asset_name" != */* ]]
+            gh api \
+              -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              > "$RUNNER_TEMP/exact-draft-assets/$asset_name"
+            cmp -s -- "release/$asset_name" "$RUNNER_TEMP/exact-draft-assets/$asset_name" || {
+              echo "draft asset bytes differ: $asset_name" >&2
+              exit 1
+            }
+          done < "$RUNNER_TEMP/draft-assets.tsv"
 
       - name: Publish exact verified draft
         if: steps.existing.outputs.state != 'published'
@@ -395,6 +433,7 @@ jobs:
             "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
             > published-release.json
           verification=$(python3 scripts/verify_published_release_v2.py \
+            --repository-root . \
             --release-json published-release.json \
             --release-dir release \
             --tag "$RELEASE_TAG")
@@ -415,7 +454,7 @@ jobs:
           gh release verify-asset "$RELEASE_TAG" "release/mobile-proxy-android-$RELEASE_TAG.apk"
           gh release verify-asset "$RELEASE_TAG" release/release-manifest.json
           gh release verify-asset "$RELEASE_TAG" release/provenance.json
-          gh release verify-asset "$RELEASE_TAG" release/SHA256SUMS
+          gh release verify-asset "$RELEASE_TAG" release/artifact-digests.json
 
       - name: Record bounded Product Release v2 result
         shell: bash
@@ -430,6 +469,8 @@ jobs:
             echo '- Exact signed Android APK included: true'
             echo '- Release manifest format: 2'
             echo '- Provenance format: 2'
+            echo '- Typed Product Release digest set: true'
+            echo '- Exact draft bytes verified before publication: true'
             echo '- GitHub Release immutable: true'
             echo '- Draft-first publication: true'
             echo '- Phone access performed: false'
