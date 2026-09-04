@@ -38,6 +38,8 @@
   "product_release_environment": {
     "name": "product-release",
     "executor": "github-hosted",
+    "readiness_workflow": ".github/workflows/product-release-readiness.yml",
+    "readiness_command": "/release-readiness",
     "required_secret_names": [
       "PRODUCT_RELEASE_SETTINGS_TOKEN",
       "ANDROID_RELEASE_KEYSTORE_B64",
@@ -45,6 +47,13 @@
       "ANDROID_RELEASE_KEY_ALIAS",
       "ANDROID_RELEASE_KEY_PASSWORD"
     ],
+    "settings_token_permissions": [
+      "repository_administration_read",
+      "repository_environments_read"
+    ],
+    "protection_required": true,
+    "exact_secret_name_set_required": true,
+    "signing_secret_values_read_by_readiness": false,
     "phone_or_target_access": "forbidden",
     "provider_mutation": "forbidden"
   },
@@ -79,6 +88,9 @@
     "public_release_workflow_adb_or_phone_access",
     "public_release_workflow_provider_mutation",
     "public_release_workflow_private_controller_dispatch",
+    "product_release_readiness_signing_secret_value_access",
+    "product_release_readiness_mutation_authority",
+    "product_tag_without_exact_same_sha_release_readiness",
     "private_controller_independent_product_release",
     "mutable_release_deployment",
     "latest_release_deployment",
