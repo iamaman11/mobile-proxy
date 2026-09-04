@@ -1,0 +1,99 @@
+{
+  "contract_version": 2,
+  "status": "protected",
+  "authority_contract": "contracts/operations/project-authority-v2.json",
+  "product_release_contract": "contracts/operations/product-release-authority-v2.json",
+  "planes": {
+    "product": {
+      "repository": "iamaman11/mobile-proxy",
+      "authority": "product",
+      "owns": [
+        "source",
+        "quality",
+        "linux_build",
+        "android_build_and_signing_verification",
+        "annotated_product_tag",
+        "immutable_product_release_v2"
+      ]
+    },
+    "deployment_controller": {
+      "repository": "iamaman11/mobile-proxy-production",
+      "authority": "deployment_controller",
+      "control_issue": 1,
+      "command": "/deploy <target> <vX.Y.Z>",
+      "owns": [
+        "deployment_admission",
+        "target_global_serialization",
+        "target_observation",
+        "target_adapter",
+        "transaction_kernel",
+        "durable_mutation_intent",
+        "exactly_once_destructive_dispatch",
+        "postcondition_observation",
+        "read_only_recovery",
+        "quarantine",
+        "canonical_runtime_evidence"
+      ]
+    }
+  },
+  "runtime_identity": {
+    "product_release": "exact_semantic_tag_plus_exact_immutable_release_v2",
+    "controller_revision": "exact_private_main_or_other_explicitly_admitted_controller_revision",
+    "combined_identity_required": true,
+    "latest_forbidden": true,
+    "public_main_sha_as_deployment_identity_forbidden": true
+  },
+  "targets": {
+    "phone-production": {
+      "status": "controller_path_implemented_requires_exact_product_release_before_live_deploy",
+      "runner": "private_self_hosted_android_production",
+      "registered_device_binding": "private",
+      "destructive_dispatch": "exactly_once_after_durable_intent",
+      "recovery": "read_only_after_ambiguous_dispatch_boundary"
+    },
+    "vm-production": {
+      "status": "fail_closed_until_target_adapter_is_proven_end_to_end",
+      "destructive_dispatch": "forbidden_until_proven",
+      "reuses_same_controller_kernel": true
+    }
+  },
+  "release_link": {
+    "source_repository": "iamaman11/mobile-proxy",
+    "required_identity": [
+      "exact_annotated_release_tag",
+      "exact_tag_target_git_sha",
+      "immutable_github_release",
+      "release_manifest_v2",
+      "provenance_v2",
+      "typed_artifact_digest_set"
+    ],
+    "mutable_or_latest_release": "forbidden",
+    "product_release_must_exist_before_deployment_admission": true,
+    "physical_acceptance_before_product_release": false
+  },
+  "execution_rules": {
+    "mutation_intent_before_destructive_dispatch": true,
+    "blind_retry_after_dispatch_boundary": false,
+    "independent_postcondition_observation": true,
+    "unknown_continuation": "read_only_recovery_only",
+    "recovered_retroactively_equals_original_success": false,
+    "duplicate_semantic_request_second_mutation": "forbidden",
+    "recovery_mode_reconciled_after_target_lock": true
+  },
+  "evidence": {
+    "canonical_runtime_terminal_classification": "private_issue_1_namespaced_v2_ledger",
+    "public_github_deployment": "bounded_projection_only",
+    "historical_public_item19_item20_evidence": "history_only_not_runtime_authority"
+  },
+  "forbidden": [
+    "public_product_workflow_phone_access",
+    "public_product_workflow_target_mutation",
+    "private_controller_product_source_copy",
+    "private_controller_product_build_or_signing",
+    "deployment_from_mutable_release",
+    "deployment_from_latest_alias",
+    "deployment_before_immutable_product_release_v2",
+    "blind_retry_after_destructive_dispatch",
+    "public_issue_179_as_normal_runtime_execution_cursor"
+  ]
+}
