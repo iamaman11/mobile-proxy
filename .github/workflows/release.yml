@@ -215,8 +215,8 @@ jobs:
             --tag "$RELEASE_TAG" \
             --source-sha "$RELEASE_SHA" \
             --android-evidence release/android-release-evidence.json \
-            --builder "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --builder "github-actions:iamaman11/mobile-proxy/.github/workflows/release.yml" \
+            --workflow-ref "iamaman11/mobile-proxy/.github/workflows/release.yml@refs/tags/$RELEASE_TAG" \
             --github-native-attestation "$NATIVE_ATTESTATION"
           python3 -m json.tool release/release-manifest.json >/dev/null
           python3 -m json.tool release/provenance.json >/dev/null
@@ -469,6 +469,7 @@ jobs:
             echo '- Exact signed Android APK included: true'
             echo '- Release manifest format: 2'
             echo '- Provenance format: 2'
+            echo '- Provenance identity retry-stable: true'
             echo '- Typed Product Release digest set: true'
             echo '- Exact draft bytes verified before publication: true'
             echo '- GitHub Release immutable: true'
