@@ -112,7 +112,7 @@ class ProductReleaseAuthorityOrderTests(unittest.TestCase):
             path = root / ".github/workflows/release.yml"
             path.write_text(path.read_text(encoding="utf-8") + "\n# $GITHUB_RUN_ID\n", encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("retry-stable" in error for error in errors))
+        self.assertTrue(any("GITHUB_RUN_ID" in error for error in errors))
 
     def test_release_exact_asset_set_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
