@@ -21,8 +21,16 @@
     "contracts/operations/vultr-readonly-preflight-v1.json",
     "contracts/operations/item20-admission-readiness-v1.json",
     "contracts/operations/item20-acceptance-v1.json",
-    "contracts/operations/production-topology-v1.json"
+    "contracts/operations/production-topology-v1.json",
+    "contracts/operations/final-release-authority-v1.json"
   ],
+  "historical_execution_docs": [
+    "docs/physical-phone-acceptance-runbook.md",
+    "docs/architecture/acceptance-vm-binding-store.md"
+  ],
+  "mixed_context_docs": {
+    "docs/architecture/vm-ownership-boundary.md": "provider_neutral_ownership_safety_is_current_but_item18_item19_execution_chronology_is_historical_only"
+  },
   "execution": {
     "workflow_files_must_be_absent": true,
     "issue_comment_execution": false,
@@ -31,7 +39,9 @@
     "provider_mutation": false,
     "phone_execution": false,
     "private_controller_mutation": false,
-    "product_release_authority_changed": false
+    "product_release_authority_changed": false,
+    "legacy_public_item20_execution_authority": false,
+    "legacy_final_release_v1_authority": false
   },
   "immutable_historical_item19_evidence": {
     "candidate_sha": "d151dbdd156279e32a5361d304c90f996bd2d565",
@@ -58,6 +68,8 @@
   "forbidden": [
     "restore_retired_public_acceptance_workflow_execution",
     "treat_historical_v1_contract_snapshot_as_current_runtime_authority",
+    "treat_historical_item19_item20_execution_doc_as_current_runtime_authority",
+    "treat_final_release_v1_as_current_product_release_authority",
     "rewrite_immutable_historical_item19_evidence",
     "remove_reusable_pure_or_shared_domain_logic_as_part_of_workflow_retirement",
     "move_runtime_deployment_authority_back_to_public_repository",
