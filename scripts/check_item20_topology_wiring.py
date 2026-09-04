@@ -1,170 +1,24 @@
 #!/usr/bin/env python3
-"""Keep protected Item 20 non-live surfaces wired into canonical control-plane contracts."""
+"""Protect Item 20 reusable boundaries after public orchestration workflow retirement."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
+RETIREMENT = Path("contracts/operations/historical-public-acceptance-retirement-v1.json")
+ITEM20 = Path("contracts/operations/item20-acceptance-v1.json")
+HANDOFF = Path("contracts/operations/item20-private-handoff-v1.json")
+HANDOFF_PRIMITIVE = Path("scripts/item20_private_handoff.py")
+GITHUB_V2 = Path("contracts/operations/github-control-plane-v2.json")
+TOPOLOGY_V2 = Path("contracts/operations/production-topology-v2.json")
 
-ITEM20_CONTRACT = Path("contracts/operations/item20-acceptance-v1.json")
-ITEM20_READINESS_CONTRACT = Path("contracts/operations/item20-admission-readiness-v1.json")
-ITEM20_HANDOFF_CONTRACT = Path("contracts/operations/item20-private-handoff-v1.json")
-ITEM20_HANDOFF_PRIMITIVE = Path("scripts/item20_private_handoff.py")
-GITHUB_CONTRACT = Path("contracts/operations/github-control-plane-v1.json")
-TOPOLOGY_CONTRACT = Path("contracts/operations/production-topology-v1.json")
-ITEM20_WORKFLOW = Path(".github/workflows/item20-session-orchestration.yml")
-
-EXPECTED_SURFACE = {
-    "contract": "contracts/operations/item20-acceptance-v1.json",
-    "status": "protected_validation_and_candidate_build_only",
-    "workflow": ".github/workflows/item20-session-orchestration.yml",
-    "executor": "github-hosted",
-    "environment": "none",
-    "provider_credentials": "forbidden",
-    "provider_mutation": False,
-    "phone_execution": False,
-    "endpoint_handoff": "not_implemented",
-    "live_execution": False,
-    "final_production_authority": False,
+EXPECTED_RETIRED = {
+    ".github/workflows/item19-acceptance-lifecycle.yml",
+    ".github/workflows/vultr-readonly-preflight.yml",
+    ".github/workflows/item20-admission-readiness.yml",
+    ".github/workflows/item20-session-orchestration.yml",
 }
-EXPECTED_READINESS_SURFACE = {
-    "contract": "contracts/operations/item20-admission-readiness-v1.json",
-    "status": "protected_read_only_foundation_not_live_authority",
-    "workflow": ".github/workflows/item20-admission-readiness.yml",
-    "executor": "github-hosted",
-    "environment": "none",
-    "permissions": ["actions:read", "contents:read"],
-    "provider_credentials": "forbidden",
-    "provider_api_execution": False,
-    "provider_mutation": False,
-    "phone_execution": False,
-    "endpoint_handoff": False,
-    "live_execution": False,
-    "final_production_authority": False,
-    "admission_core_wiring": "implemented_exact_result_match",
-    "session_workflow_wiring": "implemented_exact_readiness_artifact_consumption",
-}
-EXPECTED_TOPOLOGY_EXECUTION = (
-    "GitHub-hosted exact-current protected-main validation and exact same-SHA candidate build only; "
-    "candidate_sha equals control_plane_sha; no acceptance-vultr environment, provider credentials, provider "
-    "mutation, phone execution or endpoint handoff"
-)
-EXPECTED_READINESS_TOPOLOGY_EXECUTION = (
-    "GitHub-hosted read-only validation of candidate-specific acceptance/preflight evidence for the same exact "
-    "current protected-main SHA; bounded result is matched exactly by the pure admission core and consumed as an "
-    "exact verified readiness artifact by the non-live session workflow before candidate build; actions:read plus "
-    "contents:read only; no provider credentials/API execution, provider mutation, phone execution or endpoint handoff"
-)
-EXPECTED_MIGRATION = "protected_non_live_validation_and_exact_same_sha_candidate_build_only_no_provider_or_phone_authority"
-EXPECTED_READINESS_MIGRATION = (
-    "protected_read_only_same_sha_candidate_evidence_validation_admission_core_exact_result_match_and_session_exact_"
-    "readiness_artifact_consumption_implemented_no_provider_or_phone_authority"
-)
-EXPECTED_NEXT_LIFECYCLE = (
-    "item_20_must_select_exact_current_protected_main_as_candidate_and_control_plane_then_open_fresh_jit_"
-    "acceptance_session_with_distinct_item_20_ownership_intent_and_never_reuse_terminal_item_19_intent"
-)
-EXPECTED_HANDOFF_IMPLEMENTATION = {
-    "sealed_envelope_primitive": "scripts/item20_private_handoff.py",
-    "sealed_envelope_primitive_implemented": True,
-    "public_handoff_enabled": False,
-    "private_phone_workflow_enabled": False,
-    "private_secret_write_enabled": False,
-    "workflow_dispatch_enabled": False,
-    "live_execution_authorized": False,
-}
-EXPECTED_HANDOFF_PRECONDITIONS = {
-    "phone_signing_gate": "closed_completed",
-    "candidate_sha": "same_exact_current_protected_main_as_control_plane",
-    "candidate_control_plane_exact_equality_required": True,
-    "exact_control_plane_protected_quality": True,
-    "fresh_software_candidate_evidence": True,
-    "fresh_acceptance_authority": True,
-    "fresh_vultr_readonly_preflight": True,
-    "fresh_exact_candidate_provider_proof": True,
-    "verified_item20_target_before_endpoint": True,
-    "same_window_private_phone_preflight": True,
-}
-EXPECTED_HANDOFF_IDENTITY = {
-    "candidate_sha": "exact_current_protected_main_selected_for_10_of_10_window",
-    "control_plane_sha": "same_exact_current_protected_main",
-    "exact_equality_required": True,
-    "session_nonce": "fresh_exact_128_bit_lowercase_hex_generated_with_os_csprng",
-    "transport_endpoint": "derived_only_after_exact_verified_target_resolution_never_authority",
-}
-EXPECTED_HANDOFF_TRANSPORT = {
-    "mechanism": "application_level_sealed_envelope_in_private_workflow_dispatch",
-    "public_dispatch_credential_secret_name": "ITEM20_PHONE_HANDOFF_TOKEN",
-    "public_dispatch_credential_scope": "private_repository_only",
-    "required_private_repository_permissions": ["Actions: write"],
-    "private_dispatch_inputs": ["candidate_sha", "control_plane_sha", "session_nonce", "sealed_session_envelope"],
-    "plaintext_endpoint_in_dispatch_inputs": False,
-    "sealed_ciphertext_in_dispatch_inputs": True,
-    "public_persistence": "forbidden",
-    "encryption": "libsodium_crypto_box_seal_to_dedicated_private_execution_recipient_key",
-    "encryption_implementation": "system_libsodium_via_python_ctypes_fail_closed_if_unavailable",
-    "recipient_public_key": "future_protected_canonical_public_value_not_secret",
-    "recipient_private_key_secret_name": "ITEM20_HANDOFF_PRIVATE_KEY_B64",
-    "recipient_private_key_location": "private_repository_actions_secret_only",
-    "public_job_private_secret_write": "forbidden",
-    "dispatch_run_correlation": "fresh_session_nonce_without_plaintext_endpoint_or_provider_identity",
-}
-EXPECTED_HANDOFF_ENVELOPE = {
-    "format_version": 1,
-    "canonical_json": "sorted_keys_compact_utf8",
-    "plaintext_fields_before_sealing": ["candidate_sha", "control_plane_sha", "session_nonce", "transport_endpoint"],
-    "plaintext_endpoint_cli_argument": "forbidden_file_only",
-    "provider_uuid": "forbidden",
-    "provider_credentials": "forbidden",
-    "phone_credentials": "forbidden",
-}
-EXPECTED_HANDOFF_CRASH_RECOVERY = {
-    "serialized_public_lifecycle": True,
-    "serialized_private_session": True,
-    "stale_envelope_must_fail_tuple_match": True,
-    "ciphertext_single_use_by_session_nonce": True,
-    "private_decryption_key_not_mutated_by_public_job": True,
-    "provider_cleanup_runs_even_if_dispatch_or_private_execution_fails": True,
-    "acceptance_success_requires_terminal_private_result": True,
-    "acceptance_success_requires_provider_terminal_cleanup": True,
-}
-EXPECTED_HANDOFF_EVIDENCE = {
-    "public_endpoint_recording": False,
-    "public_provider_uuid_recording": False,
-    "public_secret_or_token_recording": False,
-    "private_plaintext_endpoint_evidence_recording": False,
-    "public_dispatch_payload_may_record": ["candidate_sha", "control_plane_sha"],
-    "private_dispatch_may_retain_only_sealed_ciphertext": True,
-    "public_terminal_evidence_may_record": [
-        "private_workflow_run_id",
-        "private_workflow_conclusion",
-        "provider_terminal_cleanup_confirmed",
-    ],
-}
-EXPECTED_HANDOFF_FORBIDDEN = [
-    "candidate_control_plane_sha_mismatch",
-    "endpoint_in_public_issue",
-    "endpoint_in_public_artifact",
-    "endpoint_in_public_output",
-    "endpoint_in_public_summary",
-    "endpoint_in_public_log",
-    "plaintext_endpoint_in_workflow_dispatch_input",
-    "provider_uuid_in_handoff_envelope_or_dispatch",
-    "vultr_credentials_on_private_phone_runner",
-    "handoff_token_on_private_phone_runner",
-    "private_handoff_decryption_key_on_public_runner",
-    "public_handoff_job_with_private_repository_secrets_write",
-    "handoff_while_issue_115_open",
-    "handoff_without_fresh_exact_candidate_software_evidence",
-    "handoff_without_fresh_exact_candidate_acceptance_authority",
-    "handoff_without_fresh_exact_candidate_vultr_readonly_preflight",
-    "handoff_without_fresh_exact_candidate_provider_proof",
-    "handoff_before_exact_verified_item20_target",
-    "live_execution_from_this_design_contract",
-    "plaintext_public_handoff_envelope",
-    "gcp_or_manual_provider_fallback",
-]
 
 
 def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
@@ -179,155 +33,107 @@ def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
     return value
 
 
-def _check_handoff_contract(handoff: dict[str, object]) -> list[str]:
-    errors: list[str] = []
-    expected_top = {
-        "contract_version": 1,
-        "status": "protected_sealed_primitive_not_enabled",
-        "canonical_repository": "iamaman11/mobile-proxy",
-        "private_execution_repository": "iamaman11/mobile-proxy-production",
-        "tracker_issue": 135,
-        "phone_signing_gate_issue": 115,
-    }
-    for key, value in expected_top.items():
-        if handoff.get(key) != value:
-            errors.append(f"Item 20 handoff contract {key!r} differs from protected design")
-    for key, value in {
-        "implementation": EXPECTED_HANDOFF_IMPLEMENTATION,
-        "future_live_preconditions": EXPECTED_HANDOFF_PRECONDITIONS,
-        "identity": EXPECTED_HANDOFF_IDENTITY,
-        "transport": EXPECTED_HANDOFF_TRANSPORT,
-        "envelope": EXPECTED_HANDOFF_ENVELOPE,
-        "crash_recovery": EXPECTED_HANDOFF_CRASH_RECOVERY,
-        "evidence": EXPECTED_HANDOFF_EVIDENCE,
-        "forbidden": EXPECTED_HANDOFF_FORBIDDEN,
-    }.items():
-        if handoff.get(key) != value:
-            errors.append(f"Item 20 handoff contract section {key!r} differs from protected design")
-    return errors
-
-
-def _check_handoff_primitive(root: Path) -> list[str]:
-    path = root / ITEM20_HANDOFF_PRIMITIVE
-    if not path.is_file():
-        return ["protected Item 20 sealed handoff primitive is missing"]
-    source = path.read_text(encoding="utf-8")
-    errors: list[str] = []
-    for required in (
-        'find_library("sodium")', "crypto_box_seal", "crypto_box_seal_open", "crypto_scalarmult_base",
-        "secrets.token_hex(16)", 'seal.add_argument("--endpoint-file"', 'unseal.add_argument("--endpoint-output"',
-    ):
-        if required not in source:
-            errors.append(f"Item 20 sealed handoff primitive is missing boundary token {required!r}")
-    lowered = source.lower()
-    for forbidden in (
-        "subprocess.", "urllib.request", "requests.", "http.client", "socket.", "vultr_api_key",
-        "vultr_ssh_private_key", "gh workflow run", "adb ", 'add_argument("--endpoint"', "print(",
-    ):
-        if forbidden in lowered:
-            errors.append(f"Item 20 sealed handoff primitive contains forbidden live token {forbidden!r}")
-    return errors
+def _read(root: Path, path: Path, errors: list[str]) -> str:
+    try:
+        return (root / path).read_text(encoding="utf-8")
+    except OSError as error:
+        errors.append(f"cannot read {path}: {error}")
+        return ""
 
 
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
-    item20 = _load(root, ITEM20_CONTRACT, errors)
-    readiness = _load(root, ITEM20_READINESS_CONTRACT, errors)
-    handoff = _load(root, ITEM20_HANDOFF_CONTRACT, errors)
-    github = _load(root, GITHUB_CONTRACT, errors)
-    topology = _load(root, TOPOLOGY_CONTRACT, errors)
+    retirement = _load(root, RETIREMENT, errors)
+    item20 = _load(root, ITEM20, errors)
+    handoff = _load(root, HANDOFF, errors)
+    github_v2 = _load(root, GITHUB_V2, errors)
+    topology_v2 = _load(root, TOPOLOGY_V2, errors)
 
-    if github.get("item20_acceptance_contract") != str(ITEM20_CONTRACT):
-        errors.append("GitHub control plane does not bind the protected Item 20 contract")
-    if github.get("item20_admission_readiness_contract") != str(ITEM20_READINESS_CONTRACT):
-        errors.append("GitHub control plane does not bind the protected Item 20 admission-readiness contract")
-    if github.get("item20_private_handoff_contract") != str(ITEM20_HANDOFF_CONTRACT):
-        errors.append("GitHub control plane does not bind the protected Item 20 private handoff design")
-    if github.get("item20_non_live_orchestration") != EXPECTED_SURFACE:
-        errors.append("GitHub Item 20 non-live orchestration wiring differs from protected value")
-    if github.get("item20_admission_readiness") != EXPECTED_READINESS_SURFACE:
-        errors.append("GitHub Item 20 admission-readiness wiring differs from protected read-only value")
-
-    identity = item20.get("identity")
-    if not isinstance(identity, dict) or identity.get("exact_equality_required") is not True:
-        errors.append("Item 20 topology requires candidate/control-plane exact equality")
-    orchestration = item20.get("orchestration")
-    if not isinstance(orchestration, dict) or orchestration.get("candidate_source") != (
-        "same_exact_current_protected_main_as_control_plane"
-    ):
-        errors.append("Item 20 orchestration is not pinned to the same exact protected-main SHA")
+    retired = retirement.get("retired_workflows")
+    if retirement.get("status") != "protected_historical_non_executable" or not isinstance(retired, list) or set(retired) != EXPECTED_RETIRED:
+        errors.append("historical public acceptance workflow retirement set differs")
+    for workflow in EXPECTED_RETIRED:
+        if (root / workflow).exists():
+            errors.append(f"retired public acceptance workflow is executable again: {workflow}")
 
     authorization = item20.get("authorization")
-    if not isinstance(authorization, dict) or authorization != {
+    if authorization != {
         "endpoint_handoff_authorized": False,
         "final_production_authority": False,
         "live_execution_authorized": False,
         "phone_mutation_authorized": False,
         "provider_mutation_authorized": False,
     }:
-        errors.append("Item 20 protected contract must remain non-live and non-mutating")
+        errors.append("retained Item 20 contract grants live or mutation authority")
+    identity = item20.get("identity")
+    if not isinstance(identity, dict) or identity.get("exact_equality_required") is not True:
+        errors.append("retained Item 20 identity lost exact candidate/control-plane equality")
+    historical = item20.get("historical_item19_proof")
+    if not isinstance(historical, dict) or historical.get("candidate_sha") != "d151dbdd156279e32a5361d304c90f996bd2d565":
+        errors.append("retained Item 20 contract lost immutable Item 19 historical identity")
 
-    if handoff:
-        errors.extend(_check_handoff_contract(handoff))
-    errors.extend(_check_handoff_primitive(root))
-
-    execution = topology.get("execution")
-    if not isinstance(execution, dict):
-        errors.append("production topology execution block is missing")
+    implementation = handoff.get("implementation")
+    if not isinstance(implementation, dict):
+        errors.append("Item 20 sealed handoff implementation contract is missing")
     else:
-        if execution.get("item20_non_live") != EXPECTED_TOPOLOGY_EXECUTION:
-            errors.append("production topology does not expose the protected Item 20 non-live boundary")
-        if execution.get("item20_admission_readiness") != EXPECTED_READINESS_TOPOLOGY_EXECUTION:
-            errors.append("production topology does not expose the protected Item 20 admission-readiness boundary")
-
-    release_link = topology.get("release_link")
-    if not isinstance(release_link, dict) or release_link.get(
-        "accepted_candidate_equals_protected_main_equals_final_tag_target_equals_published_source_sha"
-    ) is not True:
-        errors.append("production topology release link does not preserve one accepted source SHA")
-
-    migration = topology.get("migration_status")
-    if not isinstance(migration, dict):
-        errors.append("production topology migration status is missing")
-    else:
-        if migration.get("item_20_non_live_orchestration") != EXPECTED_MIGRATION:
-            errors.append("production topology Item 20 non-live checkpoint differs")
-        if migration.get("item_20_admission_readiness") != EXPECTED_READINESS_MIGRATION:
-            errors.append("production topology Item 20 admission-readiness checkpoint differs")
-        if migration.get("next_acceptance_lifecycle") != EXPECTED_NEXT_LIFECYCLE:
-            errors.append("production topology Item 20 live-session gate differs")
-        if migration.get("phone_mutation") != "item_20_blocked_by_signing_continuity_gate_issue_115":
-            errors.append("production topology no longer preserves the #115 phone-mutation gate")
-
-    workflow_path = root / ITEM20_WORKFLOW
-    if not workflow_path.is_file():
-        errors.append("protected Item 20 non-live orchestration workflow is missing")
-    else:
-        workflow = workflow_path.read_text(encoding="utf-8")
-        for required in (
-            "runs-on: ubuntu-latest",
-            "Verify build-only Item 20 single-SHA orchestration boundary",
-            "Build exact immutable single-SHA candidate server artifact",
-            "scripts/select_item20_candidate_evidence.py verify-contract",
-            "scripts/verify_item20_readiness_artifact.py select-artifact",
-            "scripts/verify_item20_readiness_artifact.py verify",
-            "Readiness artifact consumed: true",
-            "Provider mutation authorized: false",
-            "Phone mutation authorized: false",
-            "Endpoint handoff authorized: false",
-            "Live execution authorized: false",
+        for key in (
+            "public_handoff_enabled",
+            "private_phone_workflow_enabled",
+            "private_secret_write_enabled",
+            "workflow_dispatch_enabled",
+            "live_execution_authorized",
         ):
-            if required not in workflow:
-                errors.append(f"Item 20 non-live workflow is missing boundary token {required!r}")
-        lowered = workflow.lower()
-        for forbidden in (
-            "environment: acceptance-vultr", "environment: production-vultr", "vultr_api_key",
-            "vultr_ssh_private_key", "item20_phone_handoff_token", "item20_handoff_private_key_b64",
-            "sealed_session_envelope", "self-hosted", "adb ", "/v2/instances", "gh workflow run",
-            "/dispatches", "curl -x post", "curl -x delete", "curl -x patch",
-        ):
-            if forbidden in lowered:
-                errors.append(f"Item 20 non-live workflow contains forbidden live token {forbidden!r}")
+            if implementation.get(key) is not False:
+                errors.append(f"retained Item 20 handoff unexpectedly enables {key}")
+    transport = handoff.get("transport")
+    if not isinstance(transport, dict) or transport.get("plaintext_endpoint_in_dispatch_inputs") is not False or transport.get("sealed_ciphertext_in_dispatch_inputs") is not True:
+        errors.append("retained Item 20 sealed handoff transport boundary differs")
+
+    primitive = _read(root, HANDOFF_PRIMITIVE, errors)
+    for token in (
+        'find_library("sodium")',
+        "crypto_box_seal",
+        "crypto_box_seal_open",
+        "crypto_scalarmult_base",
+        "secrets.token_hex(16)",
+        'seal.add_argument("--endpoint-file"',
+        'unseal.add_argument("--endpoint-output"',
+    ):
+        if token not in primitive:
+            errors.append(f"retained Item 20 sealed primitive is missing {token!r}")
+    lowered = primitive.lower()
+    for forbidden in (
+        "subprocess.",
+        "urllib.request",
+        "requests.",
+        "http.client",
+        "socket.",
+        "vultr_api_key",
+        "vultr_ssh_private_key",
+        "gh workflow run",
+        "adb ",
+        'add_argument("--endpoint"',
+        "print(",
+    ):
+        if forbidden in lowered:
+            errors.append(f"retained Item 20 sealed primitive contains live token {forbidden!r}")
+
+    historical_surfaces = github_v2.get("historical_acceptance_surfaces")
+    if not isinstance(historical_surfaces, dict) or historical_surfaces.get(
+        "public_item19_item20_workflows"
+    ) != "historical_or_development_only_not_product_release_or_runtime_deployment_authority":
+        errors.append("GitHub v2 historical public acceptance classification differs")
+    controller = github_v2.get("private_deployment_controller")
+    if not isinstance(controller, dict) or controller.get("authority") != "deployment_controller":
+        errors.append("private Deployment Controller authority is not preserved")
+
+    evidence = topology_v2.get("evidence")
+    release_link = topology_v2.get("release_link")
+    if not isinstance(evidence, dict) or evidence.get("historical_public_item19_item20_evidence") != "history_only_not_runtime_authority":
+        errors.append("production topology v2 no longer treats public Item19/Item20 evidence as history only")
+    if not isinstance(release_link, dict) or release_link.get("product_release_must_exist_before_deployment_admission") is not True:
+        errors.append("production topology v2 lost Product Release before deployment ordering")
+
     return errors
 
 
