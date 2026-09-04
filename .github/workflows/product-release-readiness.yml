@@ -1,0 +1,177 @@
+name: Product Release Readiness
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: product-release-readiness
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    name: Prove product-release configuration
+    if: >-
+      github.event.issue.number == 90 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/release-readiness'
+    runs-on: ubuntu-latest
+    environment: product-release
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.PRODUCT_RELEASE_SETTINGS_TOKEN }}
+    steps:
+      - name: Require settings token without exposing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "PRODUCT_RELEASE_SETTINGS_TOKEN is unavailable in product-release environment" >&2
+            exit 1
+          fi
+
+      - name: Resolve exact protected main and successful Quality
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/branches/main" \
+            > "$RUNNER_TEMP/protected-main.json"
+          main_sha=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import os
+
+          value = json.loads((Path(os.environ["RUNNER_TEMP"]) / "protected-main.json").read_text(encoding="utf-8"))
+          commit = value.get("commit")
+          if value.get("name") != "main" or value.get("protected") is not True:
+              raise SystemExit("canonical main is not protected")
+          if not isinstance(commit, dict):
+              raise SystemExit("protected main commit is missing")
+          sha = commit.get("sha")
+          if not isinstance(sha, str) or len(sha) != 40:
+              raise SystemExit("protected main SHA is invalid")
+          print(sha)
+          PY
+          )
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$main_sha&event=push&per_page=100" \
+            > "$RUNNER_TEMP/quality-runs.json"
+          MAIN_SHA="$main_sha" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          target = os.environ["MAIN_SHA"]
+          runs = json.loads((Path(os.environ["RUNNER_TEMP"]) / "quality-runs.json").read_text(encoding="utf-8")).get("workflow_runs", [])
+          eligible = [
+              run for run in runs
+              if run.get("name") == "Quality"
+              and run.get("path") == ".github/workflows/quality.yml"
+              and run.get("head_branch") == "main"
+              and run.get("head_sha") == target
+              and run.get("event") == "push"
+              and run.get("status") == "completed"
+              and run.get("conclusion") == "success"
+          ]
+          if not eligible:
+              raise SystemExit("exact protected main has no eligible successful Quality push")
+          PY
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Prove protected environment and exact secret-name contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/environments/product-release" \
+            > "$RUNNER_TEMP/product-release-environment.json"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/environments/product-release/secrets?per_page=100" \
+            > "$RUNNER_TEMP/product-release-secrets.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          environment = json.loads((root / "product-release-environment.json").read_text(encoding="utf-8"))
+          if environment.get("name") != "product-release":
+              raise SystemExit("product-release environment does not resolve exactly")
+          rules = environment.get("protection_rules")
+          if not isinstance(rules, list) or not rules:
+              raise SystemExit("product-release environment has no protection rules")
+          policy = environment.get("deployment_branch_policy")
+          if not isinstance(policy, dict):
+              raise SystemExit("product-release environment has no deployment branch policy")
+          if policy.get("protected_branches") is not True and policy.get("custom_branch_policies") is not True:
+              raise SystemExit("product-release environment deployment branch policy is not restrictive")
+
+          expected = {
+              "PRODUCT_RELEASE_SETTINGS_TOKEN",
+              "ANDROID_RELEASE_KEYSTORE_B64",
+              "ANDROID_RELEASE_KEYSTORE_PASSWORD",
+              "ANDROID_RELEASE_KEY_ALIAS",
+              "ANDROID_RELEASE_KEY_PASSWORD",
+          }
+          payload = json.loads((root / "product-release-secrets.json").read_text(encoding="utf-8"))
+          entries = payload.get("secrets")
+          if not isinstance(entries, list):
+              raise SystemExit("environment secret-name list is unavailable")
+          observed = {entry.get("name") for entry in entries if isinstance(entry, dict)}
+          if observed != expected:
+              missing = sorted(expected - observed)
+              extra = sorted(observed - expected)
+              raise SystemExit(f"product-release secret-name contract differs; missing={missing}; extra={extra}")
+          PY
+
+      - name: Prove repository immutable Releases are enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            > "$RUNNER_TEMP/immutable-releases.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          value = json.loads((Path(os.environ["RUNNER_TEMP"]) / "immutable-releases.json").read_text(encoding="utf-8"))
+          if value.get("enabled") is not True:
+              raise SystemExit("repository immutable Releases are not enabled")
+          PY
+
+      - name: Record bounded readiness evidence
+        shell: bash
+        run: |
+          {
+            echo '## Product Release readiness'
+            echo "- Exact protected main SHA: ${{ steps.source.outputs.main_sha }}"
+            echo '- Exact successful main Quality required: true'
+            echo '- product-release environment resolved: true'
+            echo '- Environment protection required: true'
+            echo '- Exact environment secret-name contract verified without reading signing secret values: true'
+            echo '- PRODUCT_RELEASE_SETTINGS_TOKEN permissions required: Administration read + Environments read'
+            echo '- Repository immutable Releases enabled: true'
+            echo '- Phone access performed: false'
+            echo '- Deployment performed: false'
+            echo '- Product tag created: false'
+            echo '- Product Release published: false'
+          } >> "$GITHUB_STEP_SUMMARY"
