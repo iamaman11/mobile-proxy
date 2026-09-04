@@ -42,13 +42,26 @@ EXPECTED_ASSETS = [
     "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
     "release-manifest.json",
     "provenance.json",
-    "SHA256SUMS",
+    "artifact-digests.json",
 ]
 EXPECTED_MANIFEST = {
     "format_version": 2,
     "android_package": "com.example.mobileproxy",
     "source_sha": "exact_final_tag_target_sha",
-    "artifact_sha256_required": True,
+    "content_digest_algorithm": "blake3-256",
+    "content_digest_domain": "mobile-proxy/product-release-asset/v2",
+}
+EXPECTED_DIGEST_SET = {
+    "format_version": 1,
+    "algorithm": "blake3-256",
+    "domain": "mobile-proxy/product-release-asset/v2",
+    "covers": [
+        "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
+        "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
+        "release-manifest.json",
+        "provenance.json",
+    ],
+    "self_digest_forbidden": True,
 }
 EXPECTED_TAG = {
     "kind": "annotated",
@@ -70,6 +83,7 @@ EXPECTED_FORBIDDEN = [
     "accept_mutable_published_release_as_deployable",
     "deployment_from_latest_or_moving_release_alias",
     "deployment_before_exact_immutable_product_release_v2",
+    "first_party_direct_cryptographic_digest_primitive",
 ]
 
 
@@ -135,6 +149,8 @@ def check_repository(root: Path) -> list[str]:
         errors.append("Product Release v2 exact asset set differs")
     if contract.get("manifest") != EXPECTED_MANIFEST:
         errors.append("Product Release v2 manifest contract differs")
+    if contract.get("digest_set") != EXPECTED_DIGEST_SET:
+        errors.append("Product Release v2 typed digest-set contract differs")
     if contract.get("tag") != EXPECTED_TAG:
         errors.append("Product Release v2 annotated-tag contract differs")
     if contract.get("forbidden") != EXPECTED_FORBIDDEN:
@@ -186,15 +202,18 @@ def check_repository(root: Path) -> list[str]:
             "ANDROID_RELEASE_KEY_ALIAS",
             "ANDROID_RELEASE_KEY_PASSWORD",
             "scripts/create_release_bundle_v2.py",
+            "--repository-root .",
             "mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz",
             "mobile-proxy-android-${{ steps.tag.outputs.name }}.apk",
             "release/release-manifest.json",
             "release/provenance.json",
-            "release/SHA256SUMS",
+            "release/artifact-digests.json",
             "gh release create",
             "--draft",
             "scripts/verify_published_release_v2.py",
             "--allow-draft",
+            "Accept: application/octet-stream",
+            "cmp -s --",
             "-F draft=false",
             "releases/tags/$RELEASE_TAG",
             "gh release verify \"$RELEASE_TAG\"",
@@ -234,6 +253,9 @@ def check_repository(root: Path) -> list[str]:
             "Physical acceptance belongs to deployment/runtime control after the immutable Product Release exists.",
             "PRODUCT_RELEASE_SETTINGS_TOKEN",
             "Administration: read",
+            "artifact-digests.json",
+            "mobile-proxy/product-release-asset/v2",
+            "exact bytes",
             "The private Deployment Controller revision is deliberately **not** part of Product Release identity.",
             "public GitHub Deployment receives bounded status/history projection only",
         ),
