@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed when Product Release v2 and deployment ownership/order drift."""
+"""Fail closed when Product Release v2 readiness, ownership or ordering drift."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 CONTRACT = Path("contracts/operations/product-release-authority-v2.json")
+READINESS_WORKFLOW = Path(".github/workflows/product-release-readiness.yml")
 TAG_WORKFLOW = Path(".github/workflows/release-tag.yml")
 RELEASE_WORKFLOW = Path(".github/workflows/release.yml")
 ORDER_DOC = Path("docs/operations/final-release-authority-order.md")
@@ -16,21 +17,35 @@ EXPECTED_COMMAND = {
     "syntax": "/release-tag vMAJOR.MINOR.PATCH <full_sha>",
     "authorized_actor": "repository_owner",
 }
+EXPECTED_READINESS_COMMAND = {
+    "issue": 90,
+    "syntax": "/release-readiness",
+    "authorized_actor": "repository_owner",
+    "mutation_authority": False,
+}
 EXPECTED_PRECONDITIONS = {
     "target_sha": "exact_full_40_char_sha",
     "protected_main_sha": "must_equal_exact_target_sha",
     "target_main_quality": "at_least_one_completed_successful_push_on_main_for_exact_target_sha",
+    "target_product_release_readiness": "at_least_one_completed_successful_issue_comment_run_for_exact_target_sha",
     "canonical_release_contract_verified": True,
     "tag_kind": "annotated",
     "publication_source_sha": "must_equal_exact_tag_target_sha",
+    "immutable_releases_enabled_before_tag_creation": True,
     "immutable_releases_enabled_before_release_creation": True,
     "product_release_environment": "product-release",
-    "immutable_settings_token_permission": "repository_administration_read",
+    "settings_token_permissions": [
+        "repository_administration_read",
+        "repository_environments_read",
+    ],
+    "exact_environment_secret_name_contract_required": True,
+    "protected_environment_required": True,
     "signed_android_release_required": True,
 }
 EXPECTED_ORDERING = {
     "product_source_acceptance": "exact_protected_main_sha_plus_exact_successful_main_quality",
-    "final_v_tag": "after_product_source_acceptance_and_before_any_release_deployment",
+    "release_configuration_readiness": "exact_same_main_sha_read_only_readiness_before_product_tag",
+    "final_v_tag": "after_product_source_and_release_configuration_acceptance_and_before_any_release_deployment",
     "release_build": "public_product_repository_builds_linux_and_exact_signed_android_from_final_tag_target",
     "release_publication": "draft_first_attach_exact_v2_bundle_then_publish_immutable",
     "deployment_admission": "private_controller_only_after_exact_immutable_product_release_v2_exists",
@@ -73,6 +88,9 @@ EXPECTED_FORBIDDEN = [
     "physical_acceptance_required_before_product_tag",
     "phone_signing_gate_required_before_product_tag",
     "item20_final_accepted_candidate_required_before_product_tag",
+    "product_tag_without_exact_same_sha_release_readiness",
+    "release_readiness_reading_signing_secret_values",
+    "release_readiness_mutating_product_or_target",
     "public_release_workflow_accessing_phone",
     "public_release_workflow_mutating_provider",
     "public_release_workflow_executing_private_deployment_controller",
@@ -125,6 +143,7 @@ def _forbid_tokens(body: str, tokens: tuple[str, ...], label: str, errors: list[
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     contract = _load_contract(root, errors)
+    readiness_workflow = _read(root, READINESS_WORKFLOW, errors)
     tag_workflow = _read(root, TAG_WORKFLOW, errors)
     release_workflow = _read(root, RELEASE_WORKFLOW, errors)
     order_doc = _read(root, ORDER_DOC, errors)
@@ -134,6 +153,7 @@ def check_repository(root: Path) -> list[str]:
         "status": "protected",
         "canonical_repository": "iamaman11/mobile-proxy",
         "deployment_controller_repository": "iamaman11/mobile-proxy-production",
+        "readiness_workflow": str(READINESS_WORKFLOW),
         "tag_workflow": str(TAG_WORKFLOW),
         "publication_workflow": str(RELEASE_WORKFLOW),
     }.items():
@@ -141,10 +161,12 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"Product Release authority contract {key!r} differs from protected value")
     if contract.get("command") != EXPECTED_COMMAND:
         errors.append("Product Release tag command authority must remain on canonical public tracker #90")
+    if contract.get("readiness_command") != EXPECTED_READINESS_COMMAND:
+        errors.append("Product Release readiness command authority differs")
     if contract.get("preconditions") != EXPECTED_PRECONDITIONS:
-        errors.append("Product Release v2 preconditions differ from protected exact-source contract")
+        errors.append("Product Release v2 preconditions differ from protected exact-source/readiness contract")
     if contract.get("ordering") != EXPECTED_ORDERING:
-        errors.append("Product Release v2 ordering no longer precedes private deployment admission")
+        errors.append("Product Release v2 ordering no longer requires same-SHA readiness before tag/deployment")
     if contract.get("required_release_assets") != EXPECTED_ASSETS:
         errors.append("Product Release v2 exact asset set differs")
     if contract.get("manifest") != EXPECTED_MANIFEST:
@@ -157,6 +179,55 @@ def check_repository(root: Path) -> list[str]:
         errors.append("Product Release v2 forbidden ownership/order set differs")
 
     _require_tokens(
+        readiness_workflow,
+        (
+            "name: Product Release Readiness",
+            "github.event.issue.number == 90",
+            "github.event.comment.user.login == github.repository_owner",
+            "github.event.comment.body == '/release-readiness'",
+            "permissions:",
+            "actions: read",
+            "contents: read",
+            "issues: read",
+            "environment: product-release",
+            "PRODUCT_RELEASE_SETTINGS_TOKEN",
+            "repos/$GITHUB_REPOSITORY/environments/product-release",
+            "repos/$GITHUB_REPOSITORY/environments/product-release/secrets?per_page=100",
+            "repos/$GITHUB_REPOSITORY/immutable-releases",
+            "product-release environment has no protection rules",
+            "product-release secret-name contract differs",
+            "repository immutable Releases are not enabled",
+            "Exact protected main SHA:",
+            "Phone access performed: false",
+            "Deployment performed: false",
+            "Product tag created: false",
+            "Product Release published: false",
+        ),
+        "Product Release readiness workflow",
+        errors,
+    )
+    _forbid_tokens(
+        readiness_workflow,
+        (
+            "contents: write",
+            "actions: write",
+            "ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.",
+            "ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.",
+            "ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.",
+            "ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.",
+            "adb ",
+            "phone-production",
+            "/deploy ",
+            "mobile-proxy-production",
+            "vultr",
+            "gh release create",
+            "git tag -a",
+        ),
+        "Product Release readiness workflow",
+        errors,
+    )
+
+    _require_tokens(
         tag_workflow,
         (
             "github.event.issue.number == 90",
@@ -164,10 +235,16 @@ def check_repository(root: Path) -> list[str]:
             r"/release-tag (v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)) ([0-9a-f]{40})",
             "target SHA does not equal exact protected main",
             "exact protected main has no eligible successful Quality push",
+            "Require exact successful Product Release Readiness",
+            "event=issue_comment",
+            'run.get("name") == "Product Release Readiness"',
+            'run.get("path") == ".github/workflows/product-release-readiness.yml"',
+            "exact protected main has no eligible successful Product Release Readiness proof",
             'test "$(git rev-parse origin/main)" = "$TARGET_SHA"',
             "scripts/verify_android_release_contract.py",
             "git tag -a",
             "git cat-file -t",
+            "Exact same-SHA Product Release Readiness required: true",
             "Phone access performed: false",
             "Deployment performed: false",
         ),
@@ -251,13 +328,17 @@ def check_repository(root: Path) -> list[str]:
             "A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.",
             "Machine contract: `contracts/operations/product-release-authority-v2.json`",
             "Runtime deployment command surface: private Issue #1",
+            "/release-readiness",
+            "same exact protected main SHA",
+            "Administration: read",
+            "Environments: read",
+            "secret names without reading signing secret values",
             "public PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA",
             "create GitHub Release as draft",
             "verify GitHub Release immutable == true",
             "only now may private /deploy <target> <tag> consume that Product Release",
             "Physical acceptance belongs to deployment/runtime control after the immutable Product Release exists.",
             "PRODUCT_RELEASE_SETTINGS_TOKEN",
-            "Administration: read",
             "artifact-digests.json",
             "mobile-proxy/product-release-asset/v2",
             "exact bytes",
@@ -289,8 +370,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     failures = check_repository(args.repo_root.resolve())
     if failures:
-        print("Product Release v2 authority ordering validation failed:")
+        print("Product Release v2 readiness/authority validation failed:")
         for failure in failures:
             print(f"- {failure}")
         raise SystemExit(1)
-    print("Product Release v2 authority ordering validation passed")
+    print("Product Release v2 readiness/authority validation passed")
