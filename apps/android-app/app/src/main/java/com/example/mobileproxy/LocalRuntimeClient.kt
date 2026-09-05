@@ -77,7 +77,9 @@ class LocalRuntimeClient private constructor(
     private val executor: ExecutorService,
 ) {
     constructor(context: Context) : this(
-        HttpRuntimeTransport { TunnelState.getLocalControlToken(context) },
+        HttpRuntimeTransport(
+            tokenProvider = { TunnelState.getLocalControlToken(context) },
+        ),
         SystemRuntimeTiming,
         Executors.newFixedThreadPool(2),
     )

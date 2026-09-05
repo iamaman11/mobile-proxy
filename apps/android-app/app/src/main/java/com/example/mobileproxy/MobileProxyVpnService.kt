@@ -128,7 +128,10 @@ internal fun interface TunnelBackend {
     fun setState(state: Tunnel.State, config: Config?): Tunnel.State
 }
 
-private class GoTunnelBackend(context: Context, tunnel: Tunnel) : TunnelBackend {
+private class GoTunnelBackend(
+    context: Context,
+    private val tunnel: Tunnel,
+) : TunnelBackend {
     private val backend = GoBackend(context)
 
     override fun setState(state: Tunnel.State, config: Config?): Tunnel.State =
