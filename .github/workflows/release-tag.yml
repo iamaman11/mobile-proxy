@@ -99,6 +99,39 @@ jobs:
               raise SystemExit("exact protected main has no eligible successful Quality push")
           PY
 
+      - name: Require exact successful Product Release prerequisites
+        env:
+          TARGET_SHA: ${{ steps.command.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&event=push&per_page=100" \
+            > prerequisite-runs.json
+          python3 - <<'PY'
+          import json
+          import os
+
+          target = os.environ["TARGET_SHA"]
+          runs = json.load(open("prerequisite-runs.json", encoding="utf-8")).get("workflow_runs", [])
+          eligible = [
+              run for run in runs
+              if run.get("name") == "Product Release prerequisites"
+              and run.get("path") == ".github/workflows/product-release-prerequisites.yml"
+              and run.get("head_branch") == "main"
+              and run.get("head_sha") == target
+              and run.get("event") == "push"
+              and run.get("status") == "completed"
+              and run.get("conclusion") == "success"
+          ]
+          if not eligible:
+              raise SystemExit(
+                  "exact protected main has no eligible successful Product Release prerequisites push"
+              )
+          PY
+
       - name: Check out exact product source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -157,6 +190,7 @@ jobs:
             echo "- Release tag: ${{ steps.command.outputs.tag }}"
             echo "- Exact protected main SHA: ${{ steps.command.outputs.target_sha }}"
             echo '- Exact successful main Quality required: true'
+            echo '- Exact same-SHA Product Release prerequisites required: true'
             echo '- Android product version contract verified: true'
             echo '- Annotated tag required: true'
             echo '- Physical acceptance required before product tag: false'

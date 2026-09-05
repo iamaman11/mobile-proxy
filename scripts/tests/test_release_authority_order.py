@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 SURFACE = (
     "contracts/operations/product-release-authority-v2.json",
+    ".github/workflows/product-release-prerequisites.yml",
     ".github/workflows/release-tag.yml",
     ".github/workflows/release.yml",
     "docs/operations/final-release-authority-order.md",
@@ -68,6 +69,32 @@ class ProductReleaseAuthorityOrderTests(unittest.TestCase):
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("missing protected Product Release v2 token" in error for error in errors))
+
+    def test_release_tag_requires_same_sha_product_release_prerequisites(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/release-tag.yml"
+            body = path.read_text(encoding="utf-8").replace(
+                "exact protected main has no eligible successful Product Release prerequisites push",
+                "prerequisite proof omitted",
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("Product Release prerequisites" in error for error in errors))
+
+    def test_prerequisite_workflow_cannot_inject_android_signing_secret_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surface(root)
+            path = root / ".github/workflows/product-release-prerequisites.yml"
+            body = path.read_text(encoding="utf-8") + (
+                "\n# forbidden regression\n"
+                "# ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}\n"
+            )
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("wrong-owner token" in error for error in errors))
 
     def test_release_workflow_requires_signed_android_build(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

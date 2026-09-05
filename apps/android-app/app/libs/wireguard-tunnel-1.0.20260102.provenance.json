@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "artifact": {
+    "path": "apps/android-app/app/libs/wireguard-tunnel-1.0.20260102.aar",
+    "size_bytes": 5830762,
+    "sha256": "2b9c16db026496123e4db695d26d03d1958a201096c7c4c89b21077dc70f3119"
+  },
+  "upstream": {
+    "maven_coordinate": "com.wireguard.android:tunnel:1.0.20260102",
+    "packaging": "aar",
+    "name": "WireGuard Tunnel Library",
+    "publisher": "WireGuard",
+    "project_url": "https://www.wireguard.com/",
+    "scm_url": "https://git.zx2c4.com/wireguard-android",
+    "license": "Apache-2.0",
+    "artifact_url": "https://repo1.maven.org/maven2/com/wireguard/android/tunnel/1.0.20260102/tunnel-1.0.20260102.aar"
+  },
+  "verification": {
+    "method": "exact-byte comparison against Maven Central artifact plus SHA-256",
+    "quality_run_id": 33938805227,
+    "source_head_sha": "fd9a4814a722d41de6728089558c7f4c338b5325",
+    "upstream_bytes_equal": true
+  }
+}
