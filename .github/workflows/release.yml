@@ -201,18 +201,18 @@ jobs:
             --output-dir release
           python3 -m json.tool release/android-release-evidence.json >/dev/null
 
-      - name: Prepare exact rooted-phone runtime binaries
+      - name: Prepare exact rooted-phone runtime binaries (phone-only replacement for prepare-runtime-binaries)
         shell: bash
         run: |
           set -euo pipefail
           sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           test -n "$sdk_root"
-          mapfile -t ndks < <(find "$sdk_root/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V)
-          test ${#ndks[@]} -gt 0
-          android_ndk="${ndks[${#ndks[@]}-1]}"
-          cargo run --locked -p operator-cli --bin operator-cli -- \
-            prepare-runtime-binaries \
-            --android-ndk "$android_ndk"
+          python3 scripts/prepare_phone_release_runtime.py \
+            --repository-root . \
+            --android-sdk-root "$sdk_root" \
+            --phone-runtime-contract contracts/operations/phone-production-release-components-v1.json \
+            > release/phone-runtime-build-evidence.json
+          python3 -m json.tool release/phone-runtime-build-evidence.json >/dev/null
 
       - name: Create exact Product Release v2 bundle
         env:
@@ -488,6 +488,8 @@ jobs:
             echo '- Exact signed Android APK included: true'
             echo '- Rooted phone runtime asset included: true'
             echo '- Rooted phone component inventory typed: true'
+            echo '- Rooted phone NDK version pinned by source contract: true'
+            echo '- VM-only runtime artifacts excluded from phone release build: true'
             echo '- Release manifest format: 2'
             echo '- Provenance format: 2'
             echo '- Provenance identity retry-stable: true'
