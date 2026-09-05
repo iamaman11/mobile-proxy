@@ -10,6 +10,11 @@
     "rust_target": "armv7-linux-androideabi",
     "elf_machine": 40
   },
+  "build_toolchain": {
+    "android_ndk_version": "29.0.14206865",
+    "android_api_level": 23,
+    "rust_profile": "release"
+  },
   "components": [
     {
       "name": "runtime-supervisor",
