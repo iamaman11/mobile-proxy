@@ -6,13 +6,13 @@ Deployment Controller repository: `iamaman11/mobile-proxy-production`
 Machine contract: `contracts/operations/product-release-authority-v2.json`  
 Canonical product-tag command surface: public Issue #90  
 Migration/development audit tracker: public Issue #179  
-Runtime deployment command surface: private Issue #1
+Runtime deployment command surface: Deployment Controller Issue #1
 
 ## Purpose
 
-This document defines the corrected ownership boundary accepted by the Deployment Controller v2 migration.
+This document defines the corrected ownership boundary accepted by the Deployment Controller v2 migration. Both repositories are public; sensitive target bindings, secrets and runtime values remain private operational data.
 
-The public repository owns the PRODUCT:
+The PRODUCT repository owns:
 
 - application/runtime source;
 - public Quality;
@@ -21,9 +21,9 @@ The public repository owns the PRODUCT:
 - exact annotated semantic-version product tag;
 - immutable Product Release assets, manifest, provenance and typed content digests.
 
-The private repository owns DEPLOYMENT CONTROL:
+The Deployment Controller repository owns DEPLOYMENT CONTROL:
 
-- `/deploy <target> <vX.Y.Z>` ingress on private Issue #1;
+- `/deploy <target> <vX.Y.Z>` ingress on controller Issue #1;
 - target admission and serialization;
 - target observation;
 - deployment State Machine / Transaction Kernel;
@@ -31,7 +31,7 @@ The private repository owns DEPLOYMENT CONTROL:
 - durable canonical execution result/evidence;
 - bounded public GitHub Deployment status projection.
 
-Public Issue #179 is a development/migration audit tracker. It is not a runtime execution cursor for normal deployments.
+Public Issue #179 is the engineering/migration execution cursor while the hardening program is active. It is not runtime deployment identity for normal deployments.
 
 ## Core ordering rule
 
@@ -40,12 +40,12 @@ A Product Release is an **input to deployment**, not an output of prior physical
 The accepted order is:
 
 ```text
-exact protected public main SHA
+exact protected PRODUCT main SHA
   -> exact successful Quality push on that same main SHA
   -> owner /release-tag command on public #90
   -> exact annotated vMAJOR.MINOR.PATCH tag bound to that SHA
   -> tag Quality succeeds
-  -> public PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA
+  -> PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA
   -> release-manifest.json format v2
   -> provenance.json format v2
   -> artifact-digests.json with typed Product Release content digests
@@ -55,8 +55,8 @@ exact protected public main SHA
   -> publish the verified draft
   -> verify GitHub Release immutable == true
   -> verify GitHub Release/asset integrity with GitHub-native verification
-  -> only now may private /deploy <target> <tag> consume that Product Release
-  -> private controller observes / admits / mutates / verifies / recovers / classifies target
+  -> only now may /deploy <target> <tag> consume that Product Release
+  -> Deployment Controller observes / admits / mutates / verifies / recovers / classifies target
   -> public GitHub Deployment receives bounded status/history projection only
 ```
 
@@ -85,7 +85,7 @@ protected main SHA selected for tagging
   == source SHA recorded in provenance.json
 ```
 
-The private Deployment Controller revision is deliberately **not** part of Product Release identity. Runtime deployment identity is the pair:
+The Deployment Controller revision is deliberately **not** part of Product Release identity. Runtime deployment identity is the pair:
 
 ```text
 product_release + exact controller_revision
@@ -95,13 +95,13 @@ This permits controller fixes and recovery logic to evolve without rebuilding an
 
 ## Product tag authority
 
-The public `.github/workflows/release-tag.yml` is the only automated final product-tag creator.
+The PRODUCT `.github/workflows/release-tag.yml` is the only automated final product-tag creator.
 
 It must require:
 
 1. repository-owner command `/release-tag vX.Y.Z <full_sha>` on public Issue #90;
 2. exact 40-character lowercase SHA;
-3. requested SHA equals the exact current protected public `main` SHA;
+3. requested SHA equals the exact current protected PRODUCT `main` SHA;
 4. at least one completed successful `Quality` push on `main` for that exact SHA;
 5. Cargo/Android version contract matches the requested semantic version;
 6. requested tag does not already exist;
@@ -120,13 +120,13 @@ Creating the product tag authorizes only Product Release publication from that e
 
 ## Product Release v2 publication
 
-The public `.github/workflows/release.yml` owns the Product Release build/publication plane.
+The PRODUCT `.github/workflows/release.yml` owns the Product Release build/publication plane.
 
-The protected public GitHub Environment is `product-release`.
+The protected GitHub Environment is `product-release`.
 
 The workflow must fail closed before Release creation unless repository immutable Releases are enabled. The read-only settings check uses a separately scoped secret `PRODUCT_RELEASE_SETTINGS_TOKEN` that requires only repository **Administration: read**. Normal Release publication continues to use the workflow `GITHUB_TOKEN` with bounded `contents: write` permission.
 
-The public environment also supplies the existing Android product signing secrets:
+The environment also supplies the existing Android product signing secrets:
 
 - `ANDROID_RELEASE_KEYSTORE_B64`;
 - `ANDROID_RELEASE_KEYSTORE_PASSWORD`;
@@ -179,7 +179,7 @@ GitHub immutable Release verification, exact-byte draft comparison and typed con
 
 ## Deployment authority begins after Product Release
 
-The first runtime mutation authority appears only in the private Deployment Controller after it resolves an exact immutable Product Release v2.
+The first runtime mutation authority appears only in the Deployment Controller after it resolves an exact immutable Product Release v2.
 
 The active command surface is:
 
@@ -189,35 +189,39 @@ The active command surface is:
 
 The controller must resolve the exact tag/Release; `latest` or any moving alias is forbidden. The controller also binds the exact controller revision that is executing the request.
 
-A valid Product Release does not imply deployment success. It only supplies immutable product input. Target state, target admission, destructive dispatch, postcondition verification, recovery, `UNKNOWN`, `RECOVERED`, `QUARANTINED` and terminal execution classification remain private controller responsibilities.
+A valid Product Release does not imply deployment success. It only supplies immutable product input. Target state, target admission, destructive dispatch, postcondition verification, recovery, `UNKNOWN`, `RECOVERED`, `QUARANTINED` and terminal execution classification remain Deployment Controller responsibilities.
 
 `RECOVERED` never retroactively means the original deployment was `ACCEPTED`.
 
 ## Public GitHub Deployment projection
 
-A public GitHub Deployment may be created/updated as bounded status/history projection after private controller admission. It is not the canonical transaction ledger and does not authorize execution.
+A public GitHub Deployment may be created/updated as bounded status/history projection after controller admission. It is not the canonical transaction ledger and does not authorize execution.
 
-If public projection is unavailable or delayed, the private durable controller ledger remains canonical. Projection failure must not cause a second physical dispatch.
+If public projection is unavailable or delayed, the durable controller ledger remains canonical. Projection failure must not cause a second physical dispatch.
+
+## Confidentiality boundary
+
+Controller repository visibility does not authorize publishing sensitive operational state. Secret values, target bindings, raw device identifiers, private keys, credentials, sensitive rendered config and unsafe raw production/ADB logs remain private. Public runtime evidence is bounded to the minimum non-sensitive classifications/digests/booleans required by the evidence contract.
 
 ## Forbidden ownership regressions
 
-The public PRODUCT workflows must never:
+The PRODUCT workflows must never:
 
 - access the phone;
 - invoke ADB;
 - acquire target-global deployment locks;
 - perform target mutation or recovery;
 - mutate provider/VM resources;
-- dispatch the private controller;
+- dispatch the controller;
 - derive deployability from a mutable Release;
 - create a directly-published Release before verifying all draft assets;
 - replace assets on an existing Release;
 - bypass the canonical typed digest foundation with a first-party direct digest primitive;
 - use `latest` as deployment identity.
 
-The private controller must never become the canonical source/build/signing owner for PRODUCT artifacts.
+The controller must never become the canonical source/build/signing owner for PRODUCT artifacts.
 
-Historical public physical-kernel work may remain as immutable history, but active deployment-control ownership belongs private. Product code/runtime logic remains public.
+Historical public physical-kernel work remains immutable Git history after source-ownership convergence; active deployment-control ownership belongs to the Deployment Controller. Product code/runtime logic remains in the PRODUCT repository.
 
 ## Failure semantics
 
@@ -226,14 +230,14 @@ Any ambiguity fails closed:
 - requested tag SHA differs from exact protected main -> reject tag creation;
 - exact source SHA lacks successful main Quality -> reject tag creation/publication;
 - tag is lightweight, ambiguous or resolves to a different SHA -> reject;
-- public Android signing verification fails -> no Release creation;
+- PRODUCT Android signing verification fails -> no Release creation;
 - typed Product Release digest contract fails -> no Release creation/publication;
 - immutable Releases setting cannot be positively proven enabled -> no Release creation;
 - draft asset set differs -> do not publish;
 - any downloaded draft asset differs from local exact bytes -> do not publish;
 - published Release is mutable -> not deployable;
 - Release v2 lacks Linux/APK/manifest/provenance/typed-digest set -> not deployable;
-- private controller cannot bind exact Product Release + controller revision -> no target mutation;
+- controller cannot bind exact Product Release + controller revision -> no target mutation;
 - execution outcome becomes ambiguous after destructive boundary -> read-only recovery, never blind retry.
 
-The recovery path for product publication is idempotent verification/reuse of the exact matching draft or immutable Release. The recovery path for deployment remains the private controller State Machine. These are separate trust domains and must not be collapsed.
+The recovery path for product publication is idempotent verification/reuse of the exact matching draft or immutable Release. The recovery path for deployment remains the Deployment Controller State Machine. These are separate trust domains and must not be collapsed.
