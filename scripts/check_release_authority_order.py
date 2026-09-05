@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 CONTRACT = Path("contracts/operations/product-release-authority-v2.json")
+PREREQUISITE_WORKFLOW = Path(".github/workflows/product-release-prerequisites.yml")
 TAG_WORKFLOW = Path(".github/workflows/release-tag.yml")
 RELEASE_WORKFLOW = Path(".github/workflows/release.yml")
 ORDER_DOC = Path("docs/operations/final-release-authority-order.md")
@@ -20,16 +21,18 @@ EXPECTED_PRECONDITIONS = {
     "target_sha": "exact_full_40_char_sha",
     "protected_main_sha": "must_equal_exact_target_sha",
     "target_main_quality": "at_least_one_completed_successful_push_on_main_for_exact_target_sha",
+    "target_product_release_prerequisites": "at_least_one_completed_successful_push_on_main_for_exact_target_sha",
+    "product_release_prerequisite_secret_contract": "exact_environment_secret_names_without_loading_android_signing_secret_values",
     "canonical_release_contract_verified": True,
     "tag_kind": "annotated",
     "publication_source_sha": "must_equal_exact_tag_target_sha",
     "immutable_releases_enabled_before_release_creation": True,
     "product_release_environment": "product-release",
-    "immutable_settings_token_permission": "repository_administration_read",
+    "immutable_settings_token_permission": "repository_administration_read_plus_environments_read",
     "signed_android_release_required": True,
 }
 EXPECTED_ORDERING = {
-    "product_source_acceptance": "exact_protected_main_sha_plus_exact_successful_main_quality",
+    "product_source_acceptance": "exact_protected_main_sha_plus_exact_successful_main_quality_plus_exact_successful_product_release_prerequisites",
     "final_v_tag": "after_product_source_acceptance_and_before_any_release_deployment",
     "release_build": "public_product_repository_builds_linux_and_exact_signed_android_from_final_tag_target",
     "release_publication": "draft_first_attach_exact_v2_bundle_then_publish_immutable",
@@ -125,6 +128,7 @@ def _forbid_tokens(body: str, tokens: tuple[str, ...], label: str, errors: list[
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     contract = _load_contract(root, errors)
+    prerequisite_workflow = _read(root, PREREQUISITE_WORKFLOW, errors)
     tag_workflow = _read(root, TAG_WORKFLOW, errors)
     release_workflow = _read(root, RELEASE_WORKFLOW, errors)
     order_doc = _read(root, ORDER_DOC, errors)
@@ -157,6 +161,37 @@ def check_repository(root: Path) -> list[str]:
         errors.append("Product Release v2 forbidden ownership/order set differs")
 
     _require_tokens(
+        prerequisite_workflow,
+        (
+            "environment: product-release",
+            "PRODUCT_RELEASE_SETTINGS_TOKEN: ${{ secrets.PRODUCT_RELEASE_SETTINGS_TOKEN }}",
+            "environments/product-release/secrets?per_page=100",
+            '"ANDROID_RELEASE_KEYSTORE_B64"',
+            '"ANDROID_RELEASE_KEYSTORE_PASSWORD"',
+            '"ANDROID_RELEASE_KEY_ALIAS"',
+            '"ANDROID_RELEASE_KEY_PASSWORD"',
+            "product-release secret-name contract differs",
+            "repos/$GITHUB_REPOSITORY/immutable-releases",
+            "Android signing secret values loaded: false",
+            "Phone access performed: false",
+            "Deployment performed: false",
+        ),
+        "Product Release prerequisites workflow",
+        errors,
+    )
+    _forbid_tokens(
+        prerequisite_workflow,
+        (
+            "ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}",
+            "ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}",
+            "ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}",
+            "ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}",
+        ),
+        "Product Release prerequisites workflow",
+        errors,
+    )
+
+    _require_tokens(
         tag_workflow,
         (
             "github.event.issue.number == 90",
@@ -164,6 +199,9 @@ def check_repository(root: Path) -> list[str]:
             r"/release-tag (v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)) ([0-9a-f]{40})",
             "target SHA does not equal exact protected main",
             "exact protected main has no eligible successful Quality push",
+            "Product Release prerequisites",
+            ".github/workflows/product-release-prerequisites.yml",
+            "exact protected main has no eligible successful Product Release prerequisites push",
             'test "$(git rev-parse origin/main)" = "$TARGET_SHA"',
             "scripts/verify_android_release_contract.py",
             "git tag -a",
@@ -251,13 +289,15 @@ def check_repository(root: Path) -> list[str]:
             "A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.",
             "Machine contract: `contracts/operations/product-release-authority-v2.json`",
             "Runtime deployment command surface: Deployment Controller Issue #1",
+            "exact successful `Product Release prerequisites` push on that same main SHA",
             "PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA",
             "create GitHub Release as draft",
             "verify GitHub Release immutable == true",
             "only now may /deploy <target> <tag> consume that Product Release",
             "Physical acceptance belongs to deployment/runtime control after the immutable Product Release exists.",
             "PRODUCT_RELEASE_SETTINGS_TOKEN",
-            "Administration: read",
+            "Administration: read + Environments: read",
+            "Android signing secret values are not loaded by the prerequisite proof",
             "artifact-digests.json",
             "mobile-proxy/product-release-asset/v2",
             "exact bytes",
