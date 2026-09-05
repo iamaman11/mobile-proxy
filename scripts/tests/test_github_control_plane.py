@@ -233,6 +233,23 @@ class GithubControlPlaneTests(unittest.TestCase):
             )
         )
 
+    def test_non_release_public_workflow_cannot_gain_phone_production_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_policy_tree(root)
+            path = root / MODULE.QUALITY_WORKFLOW
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\n# phone-production\n",
+                encoding="utf-8",
+            )
+            errors = MODULE.check_repository(root)
+        self.assertTrue(
+            any(
+                "wrong-owner authority token 'phone-production'" in error
+                for error in errors
+            )
+        )
+
     def test_release_workflow_cannot_gain_phone_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -245,6 +262,21 @@ class GithubControlPlaneTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(
             any("wrong-owner authority token 'adb '" in error for error in errors)
+        )
+
+    def test_release_workflow_cannot_gain_deploy_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_policy_tree(root)
+            path = root / ".github/workflows/release.yml"
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "\n# /deploy phone-production v0.1.5\n",
+                encoding="utf-8",
+            )
+            errors = MODULE.check_repository(root)
+        self.assertTrue(
+            any("wrong-owner authority token '/deploy '" in error for error in errors)
         )
 
     def test_release_tag_workflow_cannot_restore_item20_gate(self) -> None:
