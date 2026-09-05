@@ -173,6 +173,24 @@ class ReleaseBundleV2Tests(unittest.TestCase):
             self.assertNotEqual(first_component["content_digest"], second_component["content_digest"])
             self.assertNotEqual(first_digests[phone_name], second_digests[phone_name])
 
+    def test_vm_sing_box_pin_change_does_not_change_phone_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release = root / "release"
+            evidence = self.fixture(root)
+            first_manifest, _, first_digests = self.build(release, evidence)
+            phone_name = f"mobile-proxy-phone-production-runtime-{self.tag}.tar.gz"
+            lock_path = root / "deploy/sing-box-artifacts.lock.json"
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            lock["artifacts"]["linux-amd64-glibc"]["size"] += 1
+            lock["artifacts"]["linux-amd64-glibc"]["content_digest"] = "b3:" + "f" * 64
+            lock_path.write_text(json.dumps(lock), encoding="utf-8")
+            second_manifest, _, second_digests = self.build(release, evidence)
+            first_phone = next(item for item in first_manifest["artifacts"] if item["name"] == phone_name)
+            second_phone = next(item for item in second_manifest["artifacts"] if item["name"] == phone_name)
+            self.assertEqual(first_phone, second_phone)
+            self.assertEqual(first_digests[phone_name], second_digests[phone_name])
+
     def test_wrong_android_version_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             release = Path(raw) / "release"
