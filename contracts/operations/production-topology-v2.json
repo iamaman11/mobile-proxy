@@ -6,6 +6,7 @@
   "planes": {
     "product": {
       "repository": "iamaman11/mobile-proxy",
+      "visibility": "public",
       "authority": "product",
       "owns": [
         "source",
@@ -18,9 +19,11 @@
     },
     "deployment_controller": {
       "repository": "iamaman11/mobile-proxy-production",
+      "visibility": "public",
       "authority": "deployment_controller",
       "control_issue": 1,
       "command": "/deploy <target> <vX.Y.Z>",
+      "confidentiality_boundary": "secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_private",
       "owns": [
         "deployment_admission",
         "target_global_serialization",
@@ -38,7 +41,7 @@
   },
   "runtime_identity": {
     "product_release": "exact_semantic_tag_plus_exact_immutable_release_v2",
-    "controller_revision": "exact_private_main_or_other_explicitly_admitted_controller_revision",
+    "controller_revision": "exact_admitted_deployment_controller_revision",
     "combined_identity_required": true,
     "latest_forbidden": true,
     "public_main_sha_as_deployment_identity_forbidden": true
@@ -46,7 +49,7 @@
   "targets": {
     "phone-production": {
       "status": "controller_path_implemented_requires_exact_product_release_before_live_deploy",
-      "runner": "private_self_hosted_android_production",
+      "runner": "self_hosted_android_production_with_private_target_binding",
       "registered_device_binding": "private",
       "destructive_dispatch": "exactly_once_after_durable_intent",
       "recovery": "read_only_after_ambiguous_dispatch_boundary"
@@ -81,15 +84,16 @@
     "recovery_mode_reconciled_after_target_lock": true
   },
   "evidence": {
-    "canonical_runtime_terminal_classification": "private_issue_1_namespaced_v2_ledger",
+    "canonical_runtime_terminal_classification": "deployment_controller_issue_1_namespaced_v2_ledger_with_sensitive_values_redacted_or_private",
     "public_github_deployment": "bounded_projection_only",
     "historical_public_item19_item20_evidence": "history_only_not_runtime_authority"
   },
   "forbidden": [
-    "public_product_workflow_phone_access",
-    "public_product_workflow_target_mutation",
-    "private_controller_product_source_copy",
-    "private_controller_product_build_or_signing",
+    "product_workflow_phone_access",
+    "product_workflow_target_mutation",
+    "controller_product_source_copy",
+    "controller_product_build_or_signing",
+    "controller_secret_or_raw_device_data_in_public_git_or_issue_evidence",
     "deployment_from_mutable_release",
     "deployment_from_latest_alias",
     "deployment_before_immutable_product_release_v2",
