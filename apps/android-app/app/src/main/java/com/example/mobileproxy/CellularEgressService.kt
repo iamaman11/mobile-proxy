@@ -94,28 +94,46 @@ class CellularEgressService : Service() {
     }
 
     private fun handleClient(client: Socket, config: TunnelState.EgressConfig) {
+        handleClient(client, config) { validatedCellularNetwork() }
+    }
+
+    internal fun handleClient(
+        client: Socket,
+        config: TunnelState.EgressConfig,
+        networkProvider: () -> Network?,
+    ) {
         client.soTimeout = HANDSHAKE_TIMEOUT_MS
         val input = BufferedInputStream(client.getInputStream())
         val output = BufferedOutputStream(client.getOutputStream())
         if (input.read() != SOCKS_VERSION) return
         val methods = input.readExactly(input.read().coerceIn(0, 16)) ?: return
         if (!methods.contains(USERNAME_PASSWORD.toByte())) {
-            output.write(byteArrayOf(SOCKS_VERSION.toByte(), NO_ACCEPTABLE.toByte())); output.flush(); return
+            output.write(byteArrayOf(SOCKS_VERSION.toByte(), NO_ACCEPTABLE.toByte()))
+            output.flush()
+            return
         }
-        output.write(byteArrayOf(SOCKS_VERSION.toByte(), USERNAME_PASSWORD.toByte())); output.flush()
+        output.write(byteArrayOf(SOCKS_VERSION.toByte(), USERNAME_PASSWORD.toByte()))
+        output.flush()
         if (input.read() != AUTH_VERSION) return
         val username = input.readExactly(input.read().coerceIn(0, 255)) ?: return
         val password = input.readExactly(input.read().coerceIn(0, 255)) ?: return
         if (!MessageDigest.isEqual(username, config.username.toByteArray()) ||
-            !MessageDigest.isEqual(password, config.password.toByteArray())) {
-            output.write(byteArrayOf(AUTH_VERSION.toByte(), 1)); output.flush(); return
+            !MessageDigest.isEqual(password, config.password.toByteArray())
+        ) {
+            output.write(byteArrayOf(AUTH_VERSION.toByte(), 1))
+            output.flush()
+            return
         }
-        output.write(byteArrayOf(AUTH_VERSION.toByte(), 0)); output.flush()
+        output.write(byteArrayOf(AUTH_VERSION.toByte(), 0))
+        output.flush()
         if (input.read() != SOCKS_VERSION || input.read() != CONNECT || input.read() != 0) return
         val address = readAddress(input) ?: return
         val port = (input.read() shl 8) or input.read()
         if (port !in 1..65535) return
-        val network = validatedCellularNetwork() ?: run { reply(output, NETWORK_UNREACHABLE); return }
+        val network = networkProvider() ?: run {
+            reply(output, NETWORK_UNREACHABLE)
+            return
+        }
         val targets = resolveTargets(network, address)
         if (targets.isEmpty()) {
             reply(output, HOST_UNREACHABLE)
@@ -180,8 +198,16 @@ class CellularEgressService : Service() {
     }
 
     private fun bridge(left: Socket, right: Socket) {
-        val first = workers.submit { runCatching { left.getInputStream().copyTo(right.getOutputStream()); right.shutdownOutput() } }
-        runCatching { right.getInputStream().copyTo(left.getOutputStream()); left.shutdownOutput() }
+        val first = workers.submit {
+            runCatching {
+                left.getInputStream().copyTo(right.getOutputStream())
+                right.shutdownOutput()
+            }
+        }
+        runCatching {
+            right.getInputStream().copyTo(left.getOutputStream())
+            left.shutdownOutput()
+        }
         first.get()
         right.close()
     }
@@ -213,12 +239,27 @@ class CellularEgressService : Service() {
     private fun notification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHANNEL_ID) == null) {
-            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Mobile Proxy cellular egress", NotificationManager.IMPORTANCE_LOW))
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Mobile Proxy cellular egress",
+                    NotificationManager.IMPORTANCE_LOW,
+                ),
+            )
         }
-        val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(this, CHANNEL_ID).setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle("Mobile Proxy cellular egress").setContentText("Validated cellular data-plane active")
-            .setContentIntent(activity).setOngoing(true).build()
+        val activity = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle("Mobile Proxy cellular egress")
+            .setContentText("Validated cellular data-plane active")
+            .setContentIntent(activity)
+            .setOngoing(true)
+            .build()
     }
 
     companion object {

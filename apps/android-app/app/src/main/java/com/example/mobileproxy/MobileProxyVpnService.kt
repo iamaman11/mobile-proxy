@@ -18,7 +18,7 @@ import java.io.ByteArrayInputStream
 
 class MobileProxyVpnService : Service() {
     private val tunnel = MobileProxyTunnel()
-    private var backend: GoBackend? = null
+    private var session: TunnelSession? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -38,37 +38,41 @@ class MobileProxyVpnService : Service() {
     private fun startTunnel() {
         startForeground(NOTIFICATION_ID, buildNotification())
         if (VpnService.prepare(this) != null) {
-            TunnelState.setLastError(this, "vpn consent is required")
+            recordTransition(TunnelTransition.Failed("vpn consent is required"))
             return
         }
 
         val configText = TunnelState.getConfig(this)
         if (configText.isNullOrBlank()) {
-            TunnelState.setLastError(this, "wireguard config is missing")
+            recordTransition(TunnelTransition.Failed("wireguard config is missing"))
             return
         }
 
-        try {
-            val parsed = Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
-            val currentBackend = backend ?: GoBackend(applicationContext).also { backend = it }
-            val state = currentBackend.setState(tunnel, Tunnel.State.UP, parsed)
-            TunnelState.setLastState(this, state.name)
-            TunnelState.setLastError(this, null)
+        val transition = try {
+            val currentSession = session
+                ?: TunnelSession(GoTunnelBackend(applicationContext, tunnel)).also { session = it }
+            currentSession.start(configText)
         } catch (error: Exception) {
-            TunnelState.setLastError(this, error.message ?: error.javaClass.name)
+            TunnelTransition.Failed(errorMessage(error))
         }
+        recordTransition(transition)
     }
 
     private fun stopTunnel() {
-        try {
-            backend?.setState(tunnel, Tunnel.State.DOWN, null)
-            TunnelState.setLastState(this, Tunnel.State.DOWN.name)
-            TunnelState.setLastError(this, null)
-        } catch (error: Exception) {
-            TunnelState.setLastError(this, error.message ?: error.javaClass.name)
-        }
+        val transition = session?.stop() ?: TunnelTransition.Applied(Tunnel.State.DOWN)
+        recordTransition(transition)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun recordTransition(transition: TunnelTransition) {
+        when (transition) {
+            is TunnelTransition.Applied -> {
+                TunnelState.setLastState(this, transition.state.name)
+                TunnelState.setLastError(this, null)
+            }
+            is TunnelTransition.Failed -> TunnelState.setLastError(this, transition.error)
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -119,6 +123,41 @@ class MobileProxyVpnService : Service() {
             Intent(context, MobileProxyVpnService::class.java).setAction(ACTION_STOP)
     }
 }
+
+internal fun interface TunnelBackend {
+    fun setState(state: Tunnel.State, config: Config?): Tunnel.State
+}
+
+private class GoTunnelBackend(context: Context, tunnel: Tunnel) : TunnelBackend {
+    private val backend = GoBackend(context)
+
+    override fun setState(state: Tunnel.State, config: Config?): Tunnel.State =
+        backend.setState(tunnel, state, config)
+}
+
+internal sealed interface TunnelTransition {
+    data class Applied(val state: Tunnel.State) : TunnelTransition
+    data class Failed(val error: String) : TunnelTransition
+}
+
+internal class TunnelSession(private val backend: TunnelBackend) {
+    fun start(configText: String): TunnelTransition = try {
+        val parsed = Config.parse(ByteArrayInputStream(configText.toByteArray(Charsets.UTF_8)))
+        TunnelTransition.Applied(backend.setState(Tunnel.State.UP, parsed))
+    } catch (error: Exception) {
+        TunnelTransition.Failed(errorMessage(error))
+    }
+
+    fun stop(): TunnelTransition = try {
+        backend.setState(Tunnel.State.DOWN, null)
+        TunnelTransition.Applied(Tunnel.State.DOWN)
+    } catch (error: Exception) {
+        TunnelTransition.Failed(errorMessage(error))
+    }
+}
+
+private fun errorMessage(error: Exception): String =
+    error.message ?: error.javaClass.name
 
 private class MobileProxyTunnel : Tunnel {
     override fun getName(): String = "mobile-proxy"

@@ -69,6 +69,18 @@ android {
         // API 37 is not present in the stable SDK channel used for production builds yet.
         disable += setOf("GradleDependency", "OldTargetApi")
     }
+
+    testOptions {
+        managedDevices {
+            devices {
+                maybeCreate<com.android.build.api.dsl.ManagedVirtualDevice>("pixel2api35").apply {
+                    device = "Pixel 2"
+                    apiLevel = 35
+                    systemImageSource = "aosp"
+                }
+            }
+        }
+    }
 }
 
 dependencies {
@@ -79,4 +91,6 @@ dependencies {
     implementation(files("libs/wireguard-tunnel-1.0.20260102.aar"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.15.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
