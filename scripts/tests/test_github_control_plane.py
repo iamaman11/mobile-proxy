@@ -80,17 +80,33 @@ class GithubControlPlaneTests(unittest.TestCase):
             any("product-release environment boundary differs" in error for error in errors)
         )
 
-    def test_private_repository_must_remain_deployment_controller(self) -> None:
+    def test_public_controller_repository_must_remain_deployment_controller(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_policy_tree(root)
             path = root / "contracts/operations/github-control-plane-v2.json"
             contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["private_deployment_controller"]["authority"] = "execution_satellite"
+            contract["deployment_controller_repository"]["authority"] = "execution_satellite"
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(
-            any("private deployment controller GitHub boundary differs" in error for error in errors)
+            any("deployment controller GitHub boundary differs" in error for error in errors)
+        )
+
+    def test_controller_repository_cannot_publish_sensitive_runtime_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_policy_tree(root)
+            path = root / "contracts/operations/project-authority-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            controller = contract["deployment_controller_authority"]
+            controller["forbidden"].remove(
+                "secret_or_raw_device_data_in_public_git_or_issue_evidence"
+            )
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(
+            any("PRODUCT/confidentiality ownership" in error for error in errors)
         )
 
     def test_runtime_identity_must_bind_product_release_and_controller_revision(self) -> None:
