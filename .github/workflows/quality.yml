@@ -103,6 +103,24 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.CANDIDATE_SHA }}
+      - name: Establish WireGuard AAR upstream byte identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          vendored="apps/android-app/app/libs/wireguard-tunnel-1.0.20260102.aar"
+          upstream="${RUNNER_TEMP}/tunnel-1.0.20260102.aar"
+          curl --fail --silent --show-error --location --retry 3 \
+            --user-agent 'mobile-proxy-quality/1' \
+            'https://repo1.maven.org/maven2/com/wireguard/android/tunnel/1.0.20260102/tunnel-1.0.20260102.aar' \
+            --output "$upstream"
+          echo 'Vendored WireGuard AAR SHA-256:'
+          sha256sum "$vendored"
+          echo 'Maven Central WireGuard AAR SHA-256:'
+          sha256sum "$upstream"
+          cmp --silent "$vendored" "$upstream" || {
+            echo 'vendored WireGuard AAR does not match Maven Central exact bytes' >&2
+            exit 1
+          }
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
       - name: Check RustSec advisories, licenses, bans and sources
