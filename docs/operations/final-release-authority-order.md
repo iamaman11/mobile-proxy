@@ -42,7 +42,7 @@ The accepted order is:
 ```text
 exact protected PRODUCT main SHA
   -> exact successful Quality push on that same main SHA
-  -> exact successful Product Release prerequisites push on that same main SHA
+  -> exact successful `Product Release prerequisites` push on that same main SHA
   -> owner /release-tag command on public #90
   -> exact annotated vMAJOR.MINOR.PATCH tag bound to that SHA
   -> tag Quality succeeds
