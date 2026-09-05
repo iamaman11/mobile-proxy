@@ -47,7 +47,6 @@ WRONG_OWNER_PUBLIC_WORKFLOW_TOKENS = (
     "adb ",
     "ANDROID_PRODUCTION_SERIAL",
     "android-production",
-    "phone-production",
     "/deploy ",
     "mobile-proxy-production",
     "self-hosted",
@@ -138,6 +137,8 @@ def _check_public_workflows(root: Path, errors: list[str]) -> None:
     for path in actual:
         body = _read(root, path, errors)
         _forbid_tokens(body, path, WRONG_OWNER_PUBLIC_WORKFLOW_TOKENS, errors)
+        if path != RELEASE_WORKFLOW:
+            _forbid_tokens(body, path, ("phone-production",), errors)
 
         referenced_secrets = set(SECRET_REFERENCE.findall(body))
         allowed_secrets = ALLOWED_WORKFLOW_SECRETS.get(str(path), set())
@@ -409,7 +410,11 @@ def check_repository(root: Path) -> list[str]:
             "environment: product-release",
             "PRODUCT_RELEASE_SETTINGS_TOKEN",
             "scripts/build_signed_android_release.py",
+            "prepare-runtime-binaries",
+            "contracts/operations/phone-production-release-components-v1.json",
             "scripts/create_release_bundle_v2.py",
+            "--phone-runtime-contract",
+            "mobile-proxy-phone-production-runtime-${{ steps.tag.outputs.name }}.tar.gz",
             "artifact-digests.json",
             "--draft",
             "cmp -s --",
@@ -422,7 +427,7 @@ def check_repository(root: Path) -> list[str]:
     _forbid_tokens(
         release_workflow,
         RELEASE_WORKFLOW,
-        ("adb ", "phone-production", "/deploy ", "mobile-proxy-production", "vultr"),
+        ("adb ", "/deploy ", "mobile-proxy-production", "vultr"),
         errors,
     )
     _require_tokens(
