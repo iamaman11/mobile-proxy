@@ -1,0 +1,178 @@
+{
+  "format_version": 1,
+  "status": "protected",
+  "target": "phone-production",
+  "release_layout": "versioned-release-relative-v1",
+  "absolute_device_root_owner": "deployment-controller",
+  "activation_entrypoint": "service.sh",
+  "component_dispositions": {
+    "runtime-supervisor": {
+      "disposition": "live-copy",
+      "release_path": "bin/runtime-supervisor"
+    },
+    "host-daemon": {
+      "disposition": "live-copy",
+      "release_path": "bin/host-daemon"
+    },
+    "sing-box": {
+      "disposition": "live-copy",
+      "release_path": "bin/sing-box"
+    },
+    "magisk-module-prop": {
+      "disposition": "live-copy",
+      "release_path": "module.prop"
+    },
+    "magisk-service": {
+      "disposition": "live-copy",
+      "release_path": "service.sh"
+    },
+    "profile-a1-by": {
+      "disposition": "render-input",
+      "render_role": "operator-profile",
+      "profile_value": "a1_by"
+    },
+    "profile-default": {
+      "disposition": "render-input",
+      "render_role": "operator-profile",
+      "profile_value": "default"
+    },
+    "profile-mts-by": {
+      "disposition": "render-input",
+      "render_role": "operator-profile",
+      "profile_value": "mts_by"
+    },
+    "app-wireguard-template": {
+      "disposition": "render-input",
+      "render_role": "app-wireguard-config-template"
+    },
+    "host-daemon-template": {
+      "disposition": "render-input",
+      "render_role": "host-daemon-config-template"
+    },
+    "sing-box-template": {
+      "disposition": "render-input",
+      "render_role": "sing-box-config-template"
+    },
+    "runtime-realization-contract": {
+      "disposition": "identity-only",
+      "identity_role": "product-owned-runtime-realization-contract"
+    }
+  },
+  "profile_selection": {
+    "device_manifest_field": "operatorProfile",
+    "default_profile_value": "default",
+    "components_by_value": {
+      "a1_by": "profile-a1-by",
+      "default": "profile-default",
+      "mts_by": "profile-mts-by"
+    }
+  },
+  "derived_runtime_files": [
+    {
+      "name": "host-daemon-config",
+      "release_path": "config/host-daemon.json",
+      "required_for_current_production": true,
+      "sensitive": true,
+      "renderer_contract": "operator-cli-package-device-release/host-daemon-config-v1",
+      "normative_implementation": "apps/operator-cli/src/provision.rs::package_device_release",
+      "product_component_inputs": [
+        "host-daemon-template"
+      ],
+      "profile_selection": "profile_selection",
+      "device_manifest_inputs": [
+        "deviceId",
+        "nodeName",
+        "controlPlaneUrl",
+        "relay.host",
+        "tokens.adminTokenEnv",
+        "tokens.deviceTokenEnv",
+        "tokens.uiTokenEnv",
+        "tokens.relayUserEnv",
+        "tokens.relayPasswordEnv",
+        "tokens.reverseTunnelCertDerB64Env"
+      ],
+      "deployment_inputs": [
+        "tunnel_owner"
+      ],
+      "secret_values_must_not_enter_product_release": true
+    },
+    {
+      "name": "sing-box-config",
+      "release_path": "config/sing-box.json",
+      "required_for_current_production": true,
+      "sensitive": true,
+      "renderer_contract": "operator-cli-package-device-release/sing-box-config-v1",
+      "normative_implementation": "apps/operator-cli/src/provision.rs::package_device_release",
+      "product_component_inputs": [
+        "sing-box-template"
+      ],
+      "profile_selection": null,
+      "device_manifest_inputs": [
+        "tokens.relayUserEnv",
+        "tokens.relayPasswordEnv"
+      ],
+      "deployment_inputs": [
+        "tunnel_owner"
+      ],
+      "secret_values_must_not_enter_product_release": true
+    },
+    {
+      "name": "app-wireguard-config",
+      "release_path": "config/app-wireguard.conf",
+      "required_for_current_production": false,
+      "required_when_tunnel_owner": "first_party_vpn_service",
+      "current_owner_status": "disabled",
+      "sensitive": true,
+      "renderer_contract": "operator-cli-package-device-release/app-wireguard-config-v1",
+      "normative_implementation": "apps/operator-cli/src/provision.rs::package_device_release",
+      "product_component_inputs": [
+        "app-wireguard-template"
+      ],
+      "profile_selection": null,
+      "device_manifest_inputs": [
+        "relay.host"
+      ],
+      "deployment_inputs": [
+        "MOBILE_PROXY_WG_PHONE_PRIVATE_KEY",
+        "MOBILE_PROXY_WG_SERVER_PUBLIC_KEY"
+      ],
+      "secret_values_must_not_enter_product_release": true
+    }
+  ],
+  "required_live_release_paths": [
+    "service.sh",
+    "module.prop",
+    "bin/runtime-supervisor",
+    "bin/host-daemon",
+    "bin/sing-box",
+    "config/host-daemon.json",
+    "config/sing-box.json"
+  ],
+  "legacy_supplemental_files": [
+    {
+      "release_path": "bin/curl",
+      "classification": "deterministic-product-generated-legacy-helper",
+      "normative_source": "apps/operator-cli/src/provision.rs::CURL_SHIM",
+      "runtime_required": false
+    },
+    {
+      "release_path": "release-metadata.json",
+      "classification": "deployment-derived-metadata",
+      "normative_source": "apps/operator-cli/src/provision.rs::write_release_metadata",
+      "runtime_required": false
+    },
+    {
+      "release_path": "integrity-manifest.json",
+      "classification": "deployment-derived-integrity-evidence",
+      "normative_source": "apps/operator-cli/src/release_integrity.rs",
+      "runtime_required": false
+    }
+  ],
+  "boundaries": {
+    "product_release_contains_secret_values": false,
+    "controller_owns_absolute_device_root": true,
+    "controller_owns_atomic_activation_and_process_order": true,
+    "controller_must_not_infer_release_paths_from_archive_filenames": true,
+    "vm_server_components_allowed": false
+  }
+}
