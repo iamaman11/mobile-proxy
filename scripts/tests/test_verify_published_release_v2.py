@@ -22,6 +22,7 @@ class VerifyPublishedReleaseV2Tests(unittest.TestCase):
         covered = [
             f"mobile-proxy-linux-x86_64-{TAG}.tar.gz",
             f"mobile-proxy-android-{TAG}.apk",
+            f"mobile-proxy-phone-production-runtime-{TAG}.tar.gz",
             "release-manifest.json",
             "provenance.json",
         ]

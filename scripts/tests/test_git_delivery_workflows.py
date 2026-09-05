@@ -13,12 +13,19 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn("contents: write", release)
         self.assertIn("environment: product-release", release)
         self.assertIn("scripts/build_signed_android_release.py", release)
+        self.assertIn("scripts/prepare_phone_release_runtime.py", release)
+        self.assertIn(
+            "contracts/operations/phone-production-release-components-v1.json",
+            release,
+        )
+        self.assertIn("mobile-proxy-phone-production-runtime-", release)
         self.assertIn("repos/$GITHUB_REPOSITORY/immutable-releases", release)
         self.assertIn("gh release create", release)
         self.assertIn("--draft", release)
         self.assertNotIn("gh workflow run deploy-production.yml", release)
         self.assertNotIn("/deploy ", release)
-        self.assertNotIn("phone-production", release)
+        self.assertNotIn("adb ", release)
+        self.assertNotIn("runs-on: self-hosted", release)
         self.assertNotIn("mobile-proxy-production", release)
 
     def test_quality_gate_owns_immutable_release_candidate_evidence(self) -> None:

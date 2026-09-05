@@ -175,6 +175,7 @@ def check_repository(root: Path) -> list[str]:
     expected_assets = [
         "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
         "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
+        "mobile-proxy-phone-production-runtime-vMAJOR.MINOR.PATCH.tar.gz",
         "release-manifest.json",
         "provenance.json",
         "artifact-digests.json",
@@ -215,7 +216,10 @@ def check_repository(root: Path) -> list[str]:
             'test "$tag_sha" = "$VERIFIED_SHA"',
             "environment: product-release",
             "scripts/build_signed_android_release.py",
+            "scripts/prepare_phone_release_runtime.py",
+            "contracts/operations/phone-production-release-components-v1.json",
             "scripts/create_release_bundle_v2.py",
+            "mobile-proxy-phone-production-runtime-",
             "artifact-digests.json",
             "cmp -s --",
             "gh release verify",

@@ -1,0 +1,109 @@
+{
+  "contract_version": 1,
+  "status": "protected",
+  "target": "phone-production",
+  "archive_name_pattern": "mobile-proxy-phone-production-runtime-vMAJOR.MINOR.PATCH.tar.gz",
+  "archive_root": "phone-production-runtime",
+  "runtime_abi": {
+    "os": "android",
+    "arch": "arm",
+    "rust_target": "armv7-linux-androideabi",
+    "elf_machine": 40
+  },
+  "build_toolchain": {
+    "android_ndk_version": "29.0.14206865",
+    "android_api_level": 23,
+    "rust_profile": "release"
+  },
+  "components": [
+    {
+      "name": "runtime-supervisor",
+      "kind": "product-native-executable",
+      "source": "deploy/device-runtime/bin/runtime-supervisor",
+      "archive_path": "bin/runtime-supervisor",
+      "executable": true
+    },
+    {
+      "name": "host-daemon",
+      "kind": "product-native-executable",
+      "source": "deploy/device-runtime/bin/host-daemon",
+      "archive_path": "bin/host-daemon",
+      "executable": true
+    },
+    {
+      "name": "sing-box",
+      "kind": "third-party-native-executable",
+      "source": "deploy/device-runtime/bin/sing-box",
+      "archive_path": "bin/sing-box",
+      "executable": true
+    },
+    {
+      "name": "magisk-module-prop",
+      "kind": "runtime-static-file",
+      "source": "deploy/device-runtime/module/module.prop",
+      "archive_path": "module/module.prop",
+      "executable": false
+    },
+    {
+      "name": "magisk-service",
+      "kind": "runtime-static-file",
+      "source": "deploy/device-runtime/module/service.sh",
+      "archive_path": "module/service.sh",
+      "executable": true
+    },
+    {
+      "name": "profile-a1-by",
+      "kind": "runtime-profile",
+      "source": "deploy/device-runtime/profiles/a1_by.json",
+      "archive_path": "profiles/a1_by.json",
+      "executable": false
+    },
+    {
+      "name": "profile-default",
+      "kind": "runtime-profile",
+      "source": "deploy/device-runtime/profiles/default.json",
+      "archive_path": "profiles/default.json",
+      "executable": false
+    },
+    {
+      "name": "profile-mts-by",
+      "kind": "runtime-profile",
+      "source": "deploy/device-runtime/profiles/mts_by.json",
+      "archive_path": "profiles/mts_by.json",
+      "executable": false
+    },
+    {
+      "name": "app-wireguard-template",
+      "kind": "runtime-template",
+      "source": "deploy/device-runtime/templates/app-wireguard.conf",
+      "archive_path": "templates/app-wireguard.conf",
+      "executable": false
+    },
+    {
+      "name": "host-daemon-template",
+      "kind": "runtime-template",
+      "source": "deploy/device-runtime/templates/host-daemon.base.json",
+      "archive_path": "templates/host-daemon.base.json",
+      "executable": false
+    },
+    {
+      "name": "sing-box-template",
+      "kind": "runtime-template",
+      "source": "deploy/device-runtime/templates/sing-box.base.json",
+      "archive_path": "templates/sing-box.base.json",
+      "executable": false
+    }
+  ],
+  "third_party_runtime": {
+    "sing-box": {
+      "lock_file": "deploy/sing-box-artifacts.lock.json",
+      "lock_target": "android-arm"
+    }
+  },
+  "forbidden_source_prefixes": [
+    "deploy/vm-runtime/",
+    "services/control-plane/",
+    "services/relay-gate/",
+    "services/reverse-tunnel-server/"
+  ]
+}

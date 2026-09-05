@@ -27,7 +27,7 @@
   "ordering": {
     "product_source_acceptance": "exact_protected_main_sha_plus_exact_successful_main_quality_plus_exact_successful_product_release_prerequisites",
     "final_v_tag": "after_product_source_acceptance_and_before_any_release_deployment",
-    "release_build": "public_product_repository_builds_linux_and_exact_signed_android_from_final_tag_target",
+    "release_build": "public_product_repository_builds_linux_signed_android_and_rooted_phone_runtime_from_final_tag_target",
     "release_publication": "draft_first_attach_exact_v2_bundle_then_publish_immutable",
     "deployment_admission": "deployment_controller_only_after_exact_immutable_product_release_v2_exists",
     "physical_acceptance": "deployment_controller_observes_executes_recovers_and_classifies_target_after_product_release_exists",
@@ -36,6 +36,7 @@
   "required_release_assets": [
     "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
     "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
+    "mobile-proxy-phone-production-runtime-vMAJOR.MINOR.PATCH.tar.gz",
     "release-manifest.json",
     "provenance.json",
     "artifact-digests.json"
@@ -45,7 +46,8 @@
     "android_package": "com.example.mobileproxy",
     "source_sha": "exact_final_tag_target_sha",
     "content_digest_algorithm": "blake3-256",
-    "content_digest_domain": "mobile-proxy/product-release-asset/v2"
+    "content_digest_domain": "mobile-proxy/product-release-asset/v2",
+    "phone_runtime_component_contract": "contracts/operations/phone-production-release-components-v1.json"
   },
   "digest_set": {
     "format_version": 1,
@@ -54,6 +56,7 @@
     "covers": [
       "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
       "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
+      "mobile-proxy-phone-production-runtime-vMAJOR.MINOR.PATCH.tar.gz",
       "release-manifest.json",
       "provenance.json"
     ],

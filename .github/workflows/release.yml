@@ -201,6 +201,19 @@ jobs:
             --output-dir release
           python3 -m json.tool release/android-release-evidence.json >/dev/null
 
+      - name: Prepare exact rooted-phone runtime binaries (phone-only replacement for prepare-runtime-binaries)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$sdk_root"
+          python3 scripts/prepare_phone_release_runtime.py \
+            --repository-root . \
+            --android-sdk-root "$sdk_root" \
+            --phone-runtime-contract contracts/operations/phone-production-release-components-v1.json \
+            > release/phone-runtime-build-evidence.json
+          python3 -m json.tool release/phone-runtime-build-evidence.json >/dev/null
+
       - name: Create exact Product Release v2 bundle
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
@@ -209,12 +222,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source_date_epoch=$(git show -s --format=%ct HEAD)
           python3 scripts/create_release_bundle_v2.py \
             --repository-root . \
             --release-dir release \
             --tag "$RELEASE_TAG" \
             --source-sha "$RELEASE_SHA" \
             --android-evidence release/android-release-evidence.json \
+            --phone-runtime-contract contracts/operations/phone-production-release-components-v1.json \
+            --source-date-epoch "$source_date_epoch" \
             --builder "github-actions:iamaman11/mobile-proxy/.github/workflows/release.yml" \
             --workflow-ref "iamaman11/mobile-proxy/.github/workflows/release.yml@refs/tags/$RELEASE_TAG" \
             --github-native-attestation "$NATIVE_ATTESTATION"
@@ -229,6 +245,7 @@ jobs:
           subject-path: |
             release/mobile-proxy-linux-x86_64-${{ steps.tag.outputs.name }}.tar.gz
             release/mobile-proxy-android-${{ steps.tag.outputs.name }}.apk
+            release/mobile-proxy-phone-production-runtime-${{ steps.tag.outputs.name }}.tar.gz
             release/release-manifest.json
             release/provenance.json
             release/artifact-digests.json
@@ -320,6 +337,7 @@ jobs:
             --generate-notes \
             "release/mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz" \
             "release/mobile-proxy-android-$RELEASE_TAG.apk" \
+            "release/mobile-proxy-phone-production-runtime-$RELEASE_TAG.tar.gz" \
             release/release-manifest.json \
             release/provenance.json \
             release/artifact-digests.json
@@ -452,6 +470,7 @@ jobs:
           gh release verify "$RELEASE_TAG"
           gh release verify-asset "$RELEASE_TAG" "release/mobile-proxy-linux-x86_64-$RELEASE_TAG.tar.gz"
           gh release verify-asset "$RELEASE_TAG" "release/mobile-proxy-android-$RELEASE_TAG.apk"
+          gh release verify-asset "$RELEASE_TAG" "release/mobile-proxy-phone-production-runtime-$RELEASE_TAG.tar.gz"
           gh release verify-asset "$RELEASE_TAG" release/release-manifest.json
           gh release verify-asset "$RELEASE_TAG" release/provenance.json
           gh release verify-asset "$RELEASE_TAG" release/artifact-digests.json
@@ -467,6 +486,10 @@ jobs:
             echo "- Android package: com.example.mobileproxy"
             echo "- Android version: ${{ steps.tag.outputs.version }}"
             echo '- Exact signed Android APK included: true'
+            echo '- Rooted phone runtime asset included: true'
+            echo '- Rooted phone component inventory typed: true'
+            echo '- Rooted phone NDK version pinned by source contract: true'
+            echo '- VM-only runtime artifacts excluded from phone release build: true'
             echo '- Release manifest format: 2'
             echo '- Provenance format: 2'
             echo '- Provenance identity retry-stable: true'
@@ -477,5 +500,5 @@ jobs:
             echo '- Phone access performed: false'
             echo '- Deployment performed: false'
             echo '- Runtime execution authority created here: false'
-            echo '- Next runtime authority belongs to private deployment controller consuming this exact Product Release.'
+            echo '- Next runtime authority belongs to Deployment Controller consuming this exact Product Release.'
           } >> "$GITHUB_STEP_SUMMARY"
