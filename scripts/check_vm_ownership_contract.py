@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Validate provider-neutral VM ownership safety without legacy execution authority."""
+"""Validate provider-neutral VM ownership safety without granting PRODUCT execution authority."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-
 
 CONTRACT_PATH = Path("contracts/governance/vm-ownership-v1.json")
 RETIREMENT_PATH = Path("contracts/operations/historical-public-acceptance-retirement-v1.json")
@@ -19,44 +18,23 @@ VULTR_CLIENT_PATH = Path("apps/operator-cli/src/vultr_client.rs")
 DURABLE_STATE_PATH = Path("apps/operator-cli/src/github_vm_binding_store.rs")
 
 REQUIRED_STATES = {
-    "empty",
-    "create_prepared",
-    "create_dispatched",
-    "bound",
-    "delete_prepared",
-    "delete_dispatched",
-    "terminal",
+    "empty", "create_prepared", "create_dispatched", "bound",
+    "delete_prepared", "delete_dispatched", "terminal",
 }
 REQUIRED_FAILURES = {
-    "missing_binding",
-    "invalid_binding",
-    "lifecycle_operation_in_progress_presented_as_empty",
-    "create_already_dispatched",
-    "terminal_intent_reuse",
-    "provider_instance_not_found",
-    "provider_identity_mismatch",
-    "missing_ownership_metadata",
-    "ownership_metadata_mismatch",
-    "conflicting_ownership_metadata",
-    "ambiguous_resource_set",
-    "duplicate_ownership_claim",
-    "neighbouring_or_unbound_resource",
-    "stale_generation",
-    "binding_compare_and_swap_conflict",
-    "forked_durable_lifecycle_history",
-    "incomplete_provider_pagination",
+    "missing_binding", "invalid_binding", "lifecycle_operation_in_progress_presented_as_empty",
+    "create_already_dispatched", "terminal_intent_reuse", "provider_instance_not_found",
+    "provider_identity_mismatch", "missing_ownership_metadata", "ownership_metadata_mismatch",
+    "conflicting_ownership_metadata", "ambiguous_resource_set", "duplicate_ownership_claim",
+    "neighbouring_or_unbound_resource", "stale_generation", "binding_compare_and_swap_conflict",
+    "forked_durable_lifecycle_history", "incomplete_provider_pagination",
 }
 REQUIRED_FORBIDDEN = {
-    "arbitrary_instance_uuid_from_operator_input",
-    "first_matching_instance_selection",
-    "label_name_or_ip_as_authority",
-    "fuzzy_or_prefix_ownership_matching",
-    "mutation_without_expected_generation",
-    "operation_after_identity_ownership_or_generation_verification_failure",
-    "unverified_binding_replacement",
-    "blind_create_retry_after_dispatch_fence",
-    "binding_clear_before_provider_confirmed_delete",
-    "terminal_intent_reset_to_generation_one",
+    "arbitrary_instance_uuid_from_operator_input", "first_matching_instance_selection",
+    "label_name_or_ip_as_authority", "fuzzy_or_prefix_ownership_matching",
+    "mutation_without_expected_generation", "operation_after_identity_ownership_or_generation_verification_failure",
+    "unverified_binding_replacement", "blind_create_retry_after_dispatch_fence",
+    "binding_clear_before_provider_confirmed_delete", "terminal_intent_reset_to_generation_one",
     "provider_mutation_without_current_deployment_controller_admission",
     "public_product_repository_runtime_provider_mutation_authority",
 }
@@ -98,7 +76,6 @@ def check_repository(root: Path) -> list[str]:
     if contract.get("owner") != "operator-cli":
         errors.append("VM ownership contract owner must remain operator-cli")
 
-    current_authority = contract.get("current_authority")
     expected_authority = {
         "project_authority": str(PROJECT_V2_PATH),
         "production_topology": str(TOPOLOGY_V2_PATH),
@@ -106,10 +83,9 @@ def check_repository(root: Path) -> list[str]:
         "execution_authority": False,
         "historical_item18_item19_chronology": "context_only_not_current_runtime_authority",
     }
-    if current_authority != expected_authority:
-        errors.append("VM ownership safety contract current authority binding differs from v2/private controller boundary")
+    if contract.get("current_authority") != expected_authority:
+        errors.append("VM ownership safety contract current authority binding differs from v2 Deployment Controller boundary")
 
-    implementation = contract.get("implementation")
     required_implementation = {
         "provider_neutral_policy": str(PROVIDER_POLICY_PATH),
         "vultr_adapter": str(VULTR_ADAPTER_PATH),
@@ -117,20 +93,29 @@ def check_repository(root: Path) -> list[str]:
         "durable_lifecycle_state_model": str(DURABLE_STATE_PATH),
         "execution_authority": False,
     }
-    if implementation != required_implementation:
+    if contract.get("implementation") != required_implementation:
         errors.append("VM ownership implementation boundary differs from provider-neutral safety contract")
 
-    private = project_v2.get("private_deployment_authority")
-    public = project_v2.get("public_product_authority")
-    if not isinstance(private, dict) or private.get("repository") != "iamaman11/mobile-proxy-production" or private.get("authority") != "deployment_controller":
-        errors.append("project v2 no longer binds the private Deployment Controller as runtime authority")
-    if not isinstance(public, dict) or "phone_or_vm_target_mutation" not in public.get("forbidden", []):
-        errors.append("project v2 no longer forbids public PRODUCT VM target mutation")
+    controller = project_v2.get("deployment_controller_authority")
+    product = project_v2.get("public_product_authority")
+    if (
+        not isinstance(controller, dict)
+        or controller.get("repository") != "iamaman11/mobile-proxy-production"
+        or controller.get("visibility") != "public"
+        or controller.get("authority") != "deployment_controller"
+    ):
+        errors.append("project v2 no longer binds the Deployment Controller as runtime authority")
+    if not isinstance(product, dict) or "phone_or_vm_target_mutation" not in product.get("forbidden", []):
+        errors.append("project v2 no longer forbids PRODUCT VM target mutation")
 
     targets = topology_v2.get("targets")
     vm_target = targets.get("vm-production") if isinstance(targets, dict) else None
-    if not isinstance(vm_target, dict) or vm_target.get("destructive_dispatch") != "forbidden_until_proven" or vm_target.get("reuses_same_controller_kernel") is not True:
-        errors.append("production topology v2 VM target no longer reuses the fail-closed private controller kernel")
+    if (
+        not isinstance(vm_target, dict)
+        or vm_target.get("destructive_dispatch") != "forbidden_until_proven"
+        or vm_target.get("reuses_same_controller_kernel") is not True
+    ):
+        errors.append("production topology v2 VM target no longer reuses the fail-closed Deployment Controller kernel")
 
     historical_docs = retirement.get("historical_execution_docs")
     mixed_docs = retirement.get("mixed_context_docs")
@@ -165,15 +150,14 @@ def check_repository(root: Path) -> list[str]:
 
     ownership = contract.get("required_ownership_metadata")
     if not isinstance(ownership, dict) or ownership.get("static") != {
-        "project": "mobile-proxy",
-        "managed-by": "mobile-proxy",
+        "project": "mobile-proxy", "managed-by": "mobile-proxy"
     }:
         errors.append("VM ownership static metadata differs from exact mobile-proxy identity")
     elif ownership.get("binding_fields") != ["scope", "intent", "generation"] or ownership.get("matching") != "exact_only":
         errors.append("VM ownership metadata must be exact scope/intent/generation only")
 
     enumeration = contract.get("provider_enumeration")
-    if not isinstance(enumeration, dict) or enumeration != {
+    if enumeration != {
         "complete_listing_required_before_lifecycle_decision": True,
         "pagination": "bounded_cursor_pagination_until_no_next_cursor",
         "first_page_only": "forbidden",
@@ -192,10 +176,8 @@ def check_repository(root: Path) -> list[str]:
         errors.append("VM ownership create contract is missing")
     else:
         required_true = (
-            "requires_never_started_empty_state",
-            "requires_zero_ownership_compatible_resources",
-            "requires_durable_prepare_before_dispatch",
-            "requires_durable_dispatch_fence_before_provider_post",
+            "requires_never_started_empty_state", "requires_zero_ownership_compatible_resources",
+            "requires_durable_prepare_before_dispatch", "requires_durable_dispatch_fence_before_provider_post",
             "provider_request_must_set_exact_ownership_metadata",
             "provider_response_or_relisted_resource_must_match_exact_ownership_metadata",
             "persist_binding_with_compare_and_swap_before_success",
@@ -212,10 +194,8 @@ def check_repository(root: Path) -> list[str]:
         if not isinstance(rule, dict) or any(
             rule.get(field) is not True
             for field in (
-                "requires_persisted_binding",
-                "requires_exact_provider_identity",
-                "requires_exact_ownership_metadata",
-                "requires_expected_generation",
+                "requires_persisted_binding", "requires_exact_provider_identity",
+                "requires_exact_ownership_metadata", "requires_expected_generation",
             )
         ):
             errors.append(f"VM {operation} must require exact binding/provider/ownership/generation")
@@ -262,96 +242,35 @@ def check_repository(root: Path) -> list[str]:
     }:
         errors.append("VM ownership historical execution chronology is not explicitly non-authoritative")
 
-    _require_tokens(
-        PROVIDER_POLICY_PATH,
-        root,
-        (
-            "ProviderResourceId",
-            "OwnershipIntent",
-            "Generation",
-            "VmBindingStore",
-            "compare_and_swap",
-            "VerifiedMutationTarget",
-            "DuplicateOwnershipClaim",
-            "NeighboringOrUnboundResource",
-            "StaleGeneration",
-        ),
-        errors,
-    )
-    _require_tokens(
-        VULTR_ADAPTER_PATH,
-        root,
-        (
-            "Uuid::parse_str",
-            "mobile-proxy:scope=",
-            "mobile-proxy:intent=",
-            "mobile-proxy:generation=",
-            "VerifiedMutationTarget",
-            "PlannedCreate",
-        ),
-        errors,
-    )
-    _require_tokens(
-        DURABLE_STATE_PATH,
-        root,
-        (
-            "CreatePrepared",
-            "CreateDispatched",
-            "DeletePrepared",
-            "DeleteDispatched",
-            "Terminal",
-            "CreateAlreadyDispatched",
-            "TerminalIntentReuse",
-            "OperationInProgress",
-            "predecessor_deployment_id",
-        ),
-        errors,
-    )
-    _require_tokens(
-        VULTR_CLIENT_PATH,
-        root,
-        (
-            "INSTANCE_PAGE_SIZE: u32 = 500",
-            "MAX_INSTANCE_PAGES",
-            "cursor",
-            "ResponseTooLarge",
-            "AcceptanceScopeRequired",
-            "VerifiedMutationTarget",
-            "PlannedCreate",
-        ),
-        errors,
-    )
-    _require_tokens(
-        ITEM19_STATE_DOC,
-        root,
-        (
-            "CreateDispatched",
-            "blind second POST",
-            "Terminal",
-            "Complete provider enumeration",
-        ),
-        errors,
-    )
-    _require_tokens(
-        DOCUMENT_PATH,
-        root,
-        (
-            "provider-assigned immutable VM UUID/ID",
-            "scope",
-            "intent",
-            "generation",
-            "compare-and-swap",
-            "fail closed",
-        ),
-        errors,
-    )
+    _require_tokens(PROVIDER_POLICY_PATH, root, (
+        "ProviderResourceId", "OwnershipIntent", "Generation", "VmBindingStore",
+        "compare_and_swap", "VerifiedMutationTarget", "DuplicateOwnershipClaim",
+        "NeighboringOrUnboundResource", "StaleGeneration",
+    ), errors)
+    _require_tokens(VULTR_ADAPTER_PATH, root, (
+        "Uuid::parse_str", "mobile-proxy:scope=", "mobile-proxy:intent=",
+        "mobile-proxy:generation=", "VerifiedMutationTarget", "PlannedCreate",
+    ), errors)
+    _require_tokens(DURABLE_STATE_PATH, root, (
+        "CreatePrepared", "CreateDispatched", "DeletePrepared", "DeleteDispatched",
+        "Terminal", "CreateAlreadyDispatched", "TerminalIntentReuse", "OperationInProgress",
+        "predecessor_deployment_id",
+    ), errors)
+    _require_tokens(VULTR_CLIENT_PATH, root, (
+        "INSTANCE_PAGE_SIZE: u32 = 500", "MAX_INSTANCE_PAGES", "cursor", "ResponseTooLarge",
+        "AcceptanceScopeRequired", "VerifiedMutationTarget", "PlannedCreate",
+    ), errors)
+    _require_tokens(ITEM19_STATE_DOC, root, (
+        "CreateDispatched", "blind second POST", "Terminal", "Complete provider enumeration",
+    ), errors)
+    _require_tokens(DOCUMENT_PATH, root, (
+        "provider-assigned immutable VM UUID/ID", "scope", "intent", "generation",
+        "compare-and-swap", "fail closed",
+    ), errors)
 
     client = (root / VULTR_CLIENT_PATH).read_text(encoding="utf-8") if (root / VULTR_CLIENT_PATH).is_file() else ""
     for forbidden_token in (
-        "production-vultr",
-        "LifecycleScope::Production =>",
-        "first().unwrap",
-        "instances[0]",
+        "production-vultr", "LifecycleScope::Production =>", "first().unwrap", "instances[0]",
     ):
         if forbidden_token in client:
             errors.append(f"typed Vultr client contains forbidden authority shortcut {forbidden_token!r}")

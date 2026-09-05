@@ -123,9 +123,13 @@ def check_repository(root: Path) -> list[str]:
         "public_item19_item20_workflows"
     ) != "historical_or_development_only_not_product_release_or_runtime_deployment_authority":
         errors.append("GitHub v2 historical public acceptance classification differs")
-    controller = github_v2.get("private_deployment_controller")
-    if not isinstance(controller, dict) or controller.get("authority") != "deployment_controller":
-        errors.append("private Deployment Controller authority is not preserved")
+    controller = github_v2.get("deployment_controller_repository")
+    if (
+        not isinstance(controller, dict)
+        or controller.get("authority") != "deployment_controller"
+        or controller.get("visibility") != "public"
+    ):
+        errors.append("Deployment Controller authority is not preserved")
 
     evidence = topology_v2.get("evidence")
     release_link = topology_v2.get("release_link")

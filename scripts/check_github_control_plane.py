@@ -179,11 +179,12 @@ def check_repository(root: Path) -> list[str]:
 
     if project.get("contract_version") != 2 or project.get("status") != "protected":
         errors.append("project authority v2 identity differs")
-    public = project.get("public_product_authority")
+
+    product = project.get("public_product_authority")
     if (
-        not isinstance(public, dict)
-        or public.get("repository") != "iamaman11/mobile-proxy"
-        or public.get("visibility") != "public"
+        not isinstance(product, dict)
+        or product.get("repository") != "iamaman11/mobile-proxy"
+        or product.get("visibility") != "public"
     ):
         errors.append("public PRODUCT authority is not exact")
     else:
@@ -198,13 +199,13 @@ def check_repository(root: Path) -> list[str]:
             "product_release_contracts_and_provenance",
         }
         if (
-            not isinstance(public.get("responsibilities"), list)
-            or set(public["responsibilities"]) != expected
+            not isinstance(product.get("responsibilities"), list)
+            or set(product["responsibilities"]) != expected
         ):
             errors.append("public PRODUCT responsibility set differs")
         forbidden = (
-            set(public.get("forbidden", []))
-            if isinstance(public.get("forbidden"), list)
+            set(product.get("forbidden", []))
+            if isinstance(product.get("forbidden"), list)
             else set()
         )
         if not {
@@ -216,21 +217,22 @@ def check_repository(root: Path) -> list[str]:
                 "public PRODUCT plane is not denied target/runtime execution authority"
             )
 
-    private = project.get("private_deployment_authority")
-    if not isinstance(private, dict) or any(
-        private.get(key) != value
+    controller = project.get("deployment_controller_authority")
+    if not isinstance(controller, dict) or any(
+        controller.get(key) != value
         for key, value in {
             "repository": "iamaman11/mobile-proxy-production",
-            "visibility": "private",
+            "visibility": "public",
             "control_issue": 1,
             "authority": "deployment_controller",
+            "confidentiality_boundary": "secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_remain_private",
         }.items()
     ):
-        errors.append("private Deployment Controller authority is not exact")
+        errors.append("Deployment Controller authority is not exact")
     else:
         responsibilities = (
-            set(private.get("responsibilities", []))
-            if isinstance(private.get("responsibilities"), list)
+            set(controller.get("responsibilities", []))
+            if isinstance(controller.get("responsibilities"), list)
             else set()
         )
         if not {
@@ -244,11 +246,11 @@ def check_repository(root: Path) -> list[str]:
             "durable_canonical_runtime_execution_evidence",
         }.issubset(responsibilities):
             errors.append(
-                "private Deployment Controller is missing runtime authority responsibilities"
+                "Deployment Controller is missing runtime authority responsibilities"
             )
         forbidden = (
-            set(private.get("forbidden", []))
-            if isinstance(private.get("forbidden"), list)
+            set(controller.get("forbidden", []))
+            if isinstance(controller.get("forbidden"), list)
             else set()
         )
         if not {
@@ -257,25 +259,27 @@ def check_repository(root: Path) -> list[str]:
             "independent_product_signing_policy",
             "independent_product_release_creation",
             "independent_product_tag_authority",
+            "secret_or_raw_device_data_in_public_git_or_issue_evidence",
         }.issubset(forbidden):
-            errors.append("private Deployment Controller can drift into PRODUCT ownership")
+            errors.append("Deployment Controller can drift into PRODUCT/confidentiality ownership")
 
     runtime_identity = project.get("runtime_identity")
     if runtime_identity != {
         "product_release": "exact_immutable_public_product_release_v2",
-        "controller_revision": "exact_private_controller_git_revision",
+        "controller_revision": "exact_deployment_controller_git_revision",
         "identity": "product_release_plus_controller_revision",
         "public_main_sha_as_runtime_cursor": "forbidden",
         "public_issue_179_as_runtime_cursor": "forbidden",
     }:
         errors.append("runtime identity is not Product Release plus controller revision")
+
     evidence = project.get("evidence_authority")
     if (
         not isinstance(evidence, dict)
-        or evidence.get("runtime_execution_truth")
-        != "private_deployment_controller_durable_ledger"
+        or evidence.get("runtime_execution_truth") != "deployment_controller_durable_ledger"
         or evidence.get("public_github_deployment")
         != "bounded_status_and_history_projection_only"
+        or evidence.get("secret_or_device_sensitive_values_in_public") != "forbidden"
     ):
         errors.append("canonical runtime evidence/public projection boundary differs")
 
@@ -287,16 +291,20 @@ def check_repository(root: Path) -> list[str]:
     ):
         errors.append("production topology does not bind authority/release v2 contracts")
     planes = topology.get("planes")
-    controller = (
+    topology_controller = (
         planes.get("deployment_controller") if isinstance(planes, dict) else None
     )
     if (
-        not isinstance(controller, dict)
-        or controller.get("repository") != "iamaman11/mobile-proxy-production"
-        or controller.get("authority") != "deployment_controller"
-        or controller.get("command") != "/deploy <target> <vX.Y.Z>"
+        not isinstance(topology_controller, dict)
+        or topology_controller.get("repository") != "iamaman11/mobile-proxy-production"
+        or topology_controller.get("visibility") != "public"
+        or topology_controller.get("authority") != "deployment_controller"
+        or topology_controller.get("command") != "/deploy <target> <vX.Y.Z>"
+        or topology_controller.get("confidentiality_boundary")
+        != "secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_private"
     ):
         errors.append("production topology Deployment Controller plane differs")
+
     execution = topology.get("execution_rules")
     if execution != {
         "mutation_intent_before_destructive_dispatch": True,
@@ -329,9 +337,11 @@ def check_repository(root: Path) -> list[str]:
     if (
         not isinstance(product_repository, dict)
         or product_repository.get("name") != "iamaman11/mobile-proxy"
+        or product_repository.get("visibility") != "public"
         or product_repository.get("self_hosted_runners") != "forbidden"
     ):
         errors.append("public PRODUCT repository boundary differs")
+
     environment = github.get("product_release_environment")
     expected_secrets = [
         "PRODUCT_RELEASE_SETTINGS_TOKEN",
@@ -349,22 +359,24 @@ def check_repository(root: Path) -> list[str]:
         or environment.get("provider_mutation") != "forbidden"
     ):
         errors.append("public product-release environment boundary differs")
-    private_control = github.get("private_deployment_controller")
-    if not isinstance(private_control, dict) or any(
-        private_control.get(key) != value
+
+    controller_repository = github.get("deployment_controller_repository")
+    if not isinstance(controller_repository, dict) or any(
+        controller_repository.get(key) != value
         for key, value in {
             "name": "iamaman11/mobile-proxy-production",
-            "visibility": "private",
+            "visibility": "public",
             "authority": "deployment_controller",
             "control_issue": 1,
             "command": "/deploy <target> <vX.Y.Z>",
+            "confidentiality_boundary": "repository_code_public_but_secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_private",
             "product_source_copy": "forbidden",
             "product_build_or_signing": "forbidden",
             "canonical_runtime_evidence": True,
             "bounded_public_deployment_projection": True,
         }.items()
     ):
-        errors.append("private deployment controller GitHub boundary differs")
+        errors.append("deployment controller GitHub boundary differs")
 
     if release.get("contract_version") != 2 or release.get("status") != "protected":
         errors.append("Product Release v2 authority contract identity differs")
@@ -418,7 +430,7 @@ def check_repository(root: Path) -> list[str]:
         RELEASE_DOC,
         (
             "A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.",
-            "private Deployment Controller",
+            "Deployment Controller",
             "product_release + exact controller_revision",
             "artifact-digests.json",
             "exact bytes",

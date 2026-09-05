@@ -21,11 +21,12 @@
       "deployment_exactly_once_dispatch_authority"
     ]
   },
-  "private_deployment_authority": {
+  "deployment_controller_authority": {
     "repository": "iamaman11/mobile-proxy-production",
-    "visibility": "private",
+    "visibility": "public",
     "control_issue": 1,
     "authority": "deployment_controller",
+    "confidentiality_boundary": "secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_remain_private",
     "responsibilities": [
       "deployment_command_ingress",
       "deployment_state_machine_and_transaction_kernel",
@@ -45,12 +46,13 @@
       "independent_product_signing_policy",
       "independent_product_release_creation",
       "independent_product_tag_authority",
-      "product_release_asset_rewrite"
+      "product_release_asset_rewrite",
+      "secret_or_raw_device_data_in_public_git_or_issue_evidence"
     ]
   },
   "runtime_identity": {
     "product_release": "exact_immutable_public_product_release_v2",
-    "controller_revision": "exact_private_controller_git_revision",
+    "controller_revision": "exact_deployment_controller_git_revision",
     "identity": "product_release_plus_controller_revision",
     "public_main_sha_as_runtime_cursor": "forbidden",
     "public_issue_179_as_runtime_cursor": "forbidden"
@@ -63,7 +65,7 @@
     "mutable_or_latest_identity": "forbidden"
   },
   "evidence_authority": {
-    "runtime_execution_truth": "private_deployment_controller_durable_ledger",
+    "runtime_execution_truth": "deployment_controller_durable_ledger",
     "public_github_deployment": "bounded_status_and_history_projection_only",
     "public_migration_tracker": "issue_179_development_audit_only",
     "secret_or_device_sensitive_values_in_public": "forbidden"

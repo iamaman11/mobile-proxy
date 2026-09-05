@@ -90,7 +90,7 @@ class VmOwnershipContractTests(unittest.TestCase):
         )
         self.assertTrue(any("current authority binding differs" in error for error in errors))
 
-    def test_contract_cannot_move_runtime_authority_back_public(self):
+    def test_contract_cannot_move_runtime_authority_back_to_product(self):
         errors = self.validate_contract_changed(
             lambda contract: contract["current_authority"].update(
                 {"runtime_deployment_controller": "iamaman11/mobile-proxy"}
@@ -106,14 +106,14 @@ class VmOwnershipContractTests(unittest.TestCase):
         )
         self.assertTrue(any("historical execution chronology" in error for error in errors))
 
-    def test_vm_target_must_keep_shared_private_controller_kernel(self):
+    def test_vm_target_must_keep_shared_controller_kernel(self):
         errors = self.validate_json_changed(
             "contracts/operations/production-topology-v2.json",
             lambda topology: topology["targets"]["vm-production"].update(
                 {"reuses_same_controller_kernel": False}
             ),
         )
-        self.assertTrue(any("fail-closed private controller kernel" in error for error in errors))
+        self.assertTrue(any("fail-closed Deployment Controller kernel" in error for error in errors))
 
     def test_item19_binding_store_doc_must_remain_historical(self):
         errors = self.validate_json_changed(

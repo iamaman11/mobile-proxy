@@ -4,7 +4,7 @@
 This remains intentionally small. It protects the real cross-repository authority
 and exactly-once safety boundary; it does not encode a Markdown roadmap, test
 another checker, or keep superseded Item19/Item20 development ordering alive.
-Behavioral controller semantics belong in the private controller tests and
+Behavioral controller semantics belong in Deployment Controller tests and
 separately authorized target acceptance.
 """
 
@@ -21,20 +21,22 @@ GITHUB_V2 = Path("contracts/operations/github-control-plane-v2.json")
 
 REQUIRED: dict[Path, tuple[str, ...]] = {
     IMPLEMENTATION: (
-        "PUBLIC PRODUCT",
-        "PRIVATE DEPLOYMENT CONTROLLER",
-        "No new framework is justified merely to reconcile old public/private duplication.",
+        "PRODUCT",
+        "DEPLOYMENT CONTROLLER",
+        "Both repositories are public.",
+        "No new framework is justified merely to reconcile old PRODUCT/controller duplication.",
         "No code for code.",
         "No verification of verification.",
         "No old failed GitHub run is manually rerun to perform a deployment.",
     ),
     BASELINE: (
         "The accepted v2 split is normative:",
-        "Public PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.",
+        "Both repositories are public.",
+        "PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.",
         "durable mutation intent exists before destructive dispatch",
         "UNKNOWN continuation is read-only observation/reconciliation",
-        "No verification of verification.",
-        "Do not preserve disposable bootstrap state",
+        "No code for code. No verification of verification.",
+        "Gate H — real-world acceptance",
     ),
     ARCHITECTURE: (
         "one primary developer",
@@ -43,16 +45,19 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "Protect boundaries, not bootstrap state",
     ),
     AUTHORITY: (
-        "The public repository is the canonical PRODUCT source.",
-        "The private repository is the canonical deployment-execution controller.",
+        "Both repositories are public; repository visibility is not the confidentiality boundary.",
+        "The PRODUCT repository is the canonical source and release plane.",
+        "The Deployment Controller repository is the canonical deployment-execution plane.",
         "durable mutation intent before destructive dispatch",
         "A public GitHub Deployment is not the execution ledger",
         "`RECOVERED` never retroactively converts the original deployment attempt into `ACCEPTED`.",
     ),
     GITHUB_V2: (
         '"authority": "deployment_controller"',
+        '"visibility": "public"',
         '"product_source_copy": "forbidden"',
-        '"public_self_hosted_runner": "forbidden"',
+        '"product_public_self_hosted_runner": "forbidden"',
+        '"controller_secret_or_raw_device_data_in_public_git_or_issue_evidence"',
         '"public_github_deployment_as_canonical_execution_ledger"',
     ),
 }

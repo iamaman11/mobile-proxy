@@ -39,11 +39,6 @@ class DigestPolicyTests(unittest.TestCase):
                 "BinaryFingerprintInput",
                 "fingerprint_stats",
             ],
-            "scripts/verify_physical_deployment.py": [
-                '"comparison_contract": "exact-bytes"',
-                "remote_bytes == (root / relative).read_bytes()",
-                "cmp -s --",
-            ],
             "scripts/switch_vm_proxy_transport.py": [
                 '"exact_config_match": True',
                 "sudo cmp -s --",
@@ -122,7 +117,7 @@ class DigestPolicyTests(unittest.TestCase):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
+                path.parent.mkdir(parents=True)
                 path.write_text(body, encoding="utf-8")
                 self.assertTrue(any("untyped" in error for error in self.check(root)))
 

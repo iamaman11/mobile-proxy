@@ -8,20 +8,20 @@ Product Release authority: `contracts/operations/product-release-authority-v2.js
 
 ## One product, two authoritative planes
 
-`iamaman11/mobile-proxy` and `iamaman11/mobile-proxy-production` are not competing copies of one repository. They have different authority domains.
+`iamaman11/mobile-proxy` and `iamaman11/mobile-proxy-production` are not competing copies of one repository. They have different authority domains. Both repositories are public; repository visibility is not the confidentiality boundary.
 
 | Plane | Repository | Authority |
 | --- | --- | --- |
-| PRODUCT | `iamaman11/mobile-proxy` | source, shared product/domain architecture, Quality, Linux/Android build, Android signing verification, annotated product tags, immutable Product Release v2 |
-| DEPLOYMENT CONTROLLER | `iamaman11/mobile-proxy-production` | deployment ingress, State Machine / Transaction Kernel, target admission/serialization/observation, target adapters, mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine, private bindings/secrets, canonical runtime evidence |
+| PRODUCT | `iamaman11/mobile-proxy` | application/runtime source, shared product/domain architecture, Quality, Linux/Android build, Android signing verification, annotated product tags, immutable Product Release v2 |
+| DEPLOYMENT CONTROLLER | `iamaman11/mobile-proxy-production` | deployment ingress, State Machine / Transaction Kernel, target admission/serialization/observation, target adapters, mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine, target bindings/secrets, canonical runtime execution evidence |
 
-The public repository is the canonical PRODUCT source. The private repository is the canonical deployment-execution controller. Neither plane may silently take over the other's responsibilities.
+The PRODUCT repository is the canonical source and release plane. The Deployment Controller repository is the canonical deployment-execution plane. Neither plane may silently take over the other's responsibilities.
 
-This supersedes the older “private repository is execution-only thin satellite” model. The private repository remains forbidden from copying application source or independently building/signing/publishing the product, but its controller policy and runtime transaction state are authoritative inside the deployment domain.
+This supersedes both the older “private execution-only thin satellite” model and any assumption that controller confidentiality depends on repository visibility. The controller repository remains forbidden from copying application source or independently building/signing/publishing the product. Secrets, target bindings, raw device identifiers, credentials, private keys and sensitive runtime values remain private even though controller source and policy are public.
 
 ## PRODUCT authority
 
-The public repository owns:
+The PRODUCT repository owns:
 
 - application and runtime source;
 - shared product/domain contracts;
@@ -33,7 +33,7 @@ The public repository owns:
 - immutable GitHub Product Release v2;
 - release manifest, provenance and typed content-digest contract.
 
-The public PRODUCT plane must not:
+The PRODUCT plane must not:
 
 - access the production phone;
 - invoke ADB for deployment;
@@ -43,11 +43,11 @@ The public PRODUCT plane must not:
 - perform exactly-once physical dispatch;
 - classify ambiguous physical execution after the destructive boundary.
 
-Public Issue #90 remains the product GitOps command surface for product-tag operations. Public Issue #179 is the architecture/migration audit tracker, not a normal runtime deployment cursor.
+Public Issue #90 remains the product GitOps command surface for product-tag operations. Public Issue #179 is the migration/development execution cursor while the current hardening program is active; it is not normal runtime deployment identity. Public Issue #228 is backlog only and never overrides #179.
 
 ## Deployment Controller authority
 
-The private repository owns the active deployment command surface on private Issue #1:
+The Deployment Controller owns the active deployment command surface on `iamaman11/mobile-proxy-production` Issue #1:
 
 ```text
 /deploy <target> <vX.Y.Z>
@@ -66,17 +66,32 @@ The Deployment Controller owns:
 - independent postcondition observation;
 - read-only recovery when the destructive outcome is ambiguous;
 - quarantine and terminal execution classification;
-- canonical private runtime evidence;
+- canonical runtime execution evidence;
 - bounded public GitHub Deployment status/history projection.
 
-The private controller must not:
+The controller must not:
 
-- copy public application source;
+- copy PRODUCT application/runtime source;
 - independently create product artifacts;
 - own Android product signing policy;
 - create or replace Product Releases;
 - create a competing product tag;
-- rewrite an immutable Product Release asset.
+- rewrite an immutable Product Release asset;
+- commit or publish secrets, raw device identifiers, private target bindings, credentials or sensitive runtime logs.
+
+## Confidentiality boundary
+
+Public controller source does not make production credentials public.
+
+The following remain private operational inputs/state and must never be committed or emitted unredacted to public GitHub surfaces:
+
+- repository/environment secret values;
+- target/device bindings and raw device identifiers;
+- private keys, tokens, passwords and provider credentials;
+- sensitive rendered configuration;
+- unbounded/raw ADB or production logs that can contain confidential material.
+
+Public controller evidence must therefore be bounded and non-sensitive. Where a controller decision depends on a sensitive fact, store only the minimum safe classification/digest/boolean required by the admitted evidence contract.
 
 ## Runtime identity
 
@@ -85,32 +100,33 @@ Product identity and controller identity are intentionally separate.
 ```text
 product_release
   = exact semantic product tag
-  + exact annotated-tag target public source SHA
+  + exact annotated-tag target PRODUCT source SHA
   + exact immutable Product Release v2 asset contract
 
 runtime_deployment_identity
   = product_release
-  + exact controller_revision
+  + exact admitted controller_revision
 ```
 
 A controller repair or recovery-policy change therefore does not require rebuilding an unchanged product. Conversely, a new product release does not silently redefine the controller revision that executed it.
 
-`latest`, a mutable branch, public `main` alone, or public Issue #179 alone are never sufficient runtime deployment identity.
+`latest`, a mutable branch, PRODUCT `main` alone, or Issue #179 alone are never sufficient runtime deployment identity.
 
 ## Product Release precedes deployment
 
 The correct authority order is:
 
 ```text
-protected public main + exact successful Quality
+protected PRODUCT main + exact successful Quality
+  -> Product Release prerequisites
   -> annotated product tag
-  -> public signed PRODUCT build
+  -> signed PRODUCT build
   -> immutable Product Release v2
-  -> private /deploy <target> <tag>
-  -> private controller admission / observation / possible mutation / verification / recovery
+  -> Deployment Controller /deploy <target> <tag>
+  -> controller admission / observation / possible mutation / verification / recovery
 ```
 
-A Product Release is an input to deployment. Physical phone acceptance is therefore not a prerequisite for creating the final Product Release.
+A Product Release is an input to deployment. Physical phone acceptance is therefore not a prerequisite for creating the Product Release; final operational acceptance happens after deployment of that immutable release.
 
 Historical Item 19/Item 20 evidence remains historical acceptance/development evidence. It does not supply normal Product Release or runtime deployment authority under controller v2.
 
@@ -118,34 +134,51 @@ Historical Item 19/Item 20 evidence remains historical acceptance/development ev
 
 The Android app is not the primary reverse-tunnel owner. The native rooted `first_party_reverse_tunnel` path remains primary. The app is a managed production auxiliary component when topology uses Android `Network.bindSocket()` cellular egress or the app-owned WireGuard compatibility path.
 
-The public PRODUCT plane builds and verifies the exact signed Android APK. The private Deployment Controller decides, from target topology and observed target state, whether that immutable APK must be installed/updated and owns any physical mutation transaction.
+The PRODUCT plane builds and verifies the exact signed Android APK. The Deployment Controller decides, from target topology and observed target state, whether that immutable APK must be installed/updated and owns any physical mutation transaction.
 
-Signing secrets used to create the public PRODUCT artifact belong only to the protected public `product-release` environment. Target/device secrets remain private. Signer material or fingerprints are never public Release evidence.
+Signing secrets used to create the PRODUCT artifact belong only to the protected PRODUCT release environment. Target/device secrets belong only to admitted controller execution environments. Signer material or raw fingerprints are never public Release/runtime evidence.
 
 ## Evidence authority
 
 There are three different evidence roles and they must not be conflated:
 
-1. **Product evidence** — public Quality, Product Release v2 manifest/provenance/typed digests and GitHub immutability.
-2. **Runtime execution truth** — private Deployment Controller durable ledger and terminal classification.
+1. **Product evidence** — PRODUCT Quality, Product Release v2 manifest/provenance/typed digests and GitHub immutability.
+2. **Runtime execution truth** — Deployment Controller durable ledger and terminal classification.
 3. **Public deployment projection** — bounded GitHub Deployment status/history for visibility only.
 
-A public GitHub Deployment is not the execution ledger and cannot authorize a second physical dispatch. If public projection fails after a private physical boundary, recovery is based on the private durable ledger and read-only observation.
+A public GitHub Deployment is not the execution ledger and cannot authorize a second physical dispatch. If public projection fails after a physical boundary, recovery is based on the controller durable ledger and read-only observation.
 
-Sensitive runtime values remain private by design, including raw device identifiers, private target bindings, credentials, private keys and sensitive logs.
+Sensitive runtime values remain private by design even though the controller repository is public.
 
 ## Failure semantics
 
 Authority conflicts fail closed by domain:
 
-- PRODUCT source/build/tag/Release ambiguity -> stop in public product plane;
+- PRODUCT source/build/tag/Release ambiguity -> stop in PRODUCT plane;
 - controller revision/request/target-state ambiguity before dispatch -> no mutation;
 - ambiguity after a durable destructive dispatch boundary -> no blind retry, read-only recovery only;
-- Product Release missing or mutable -> private deployment admission rejects it;
+- Product Release missing or mutable -> controller deployment admission rejects it;
 - controller cannot bind exact Product Release + exact controller revision -> no mutation;
 - public projection failure -> never interpreted as permission to redispatch.
 
 `RECOVERED` never retroactively converts the original deployment attempt into `ACCEPTED`.
+
+## Current hardening path
+
+The durable project path to operational acceptance is:
+
+```text
+A  Deployment Controller health
+B  source ownership / authority convergence
+C  Android secret-state and backup/D2D hardening
+D  Android behavior and framework integration tests
+E  supply-chain provenance + Product Release prerequisite hardening
+F  new immutable Product Release
+G  exactly one admitted deployment of that release
+H  real-world phone + tunnel + provider + external-client acceptance
+```
+
+Issue #179 is the only cursor that may authorize the current bounded engineering or physical step. Issue #228 is the implementation backlog. Passing an earlier physical experiment never substitutes for Gate H on the final immutable release.
 
 ## Historical contracts
 

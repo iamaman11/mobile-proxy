@@ -29,9 +29,9 @@ from typing import Any, Sequence
 import zipfile
 
 try:
-    from scripts.run_private_phone_preflight import require_canonical_sha
+    from scripts.android_release_signing import require_canonical_sha
 except ModuleNotFoundError:
-    from run_private_phone_preflight import require_canonical_sha  # type: ignore[no-redef]
+    from android_release_signing import require_canonical_sha  # type: ignore[no-redef]
 
 _KEYSTORE_B64_ENV = "ANDROID_RELEASE_KEYSTORE_B64"
 _KEYSTORE_PASSWORD_ENV = "ANDROID_RELEASE_KEYSTORE_PASSWORD"

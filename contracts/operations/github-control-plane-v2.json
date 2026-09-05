@@ -48,12 +48,13 @@
     "phone_or_target_access": "forbidden",
     "provider_mutation": "forbidden"
   },
-  "private_deployment_controller": {
+  "deployment_controller_repository": {
     "name": "iamaman11/mobile-proxy-production",
-    "visibility": "private",
+    "visibility": "public",
     "authority": "deployment_controller",
     "control_issue": 1,
     "command": "/deploy <target> <vX.Y.Z>",
+    "confidentiality_boundary": "repository_code_public_but_secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_private",
     "product_source_copy": "forbidden",
     "product_build_or_signing": "forbidden",
     "canonical_runtime_evidence": true,
@@ -62,24 +63,26 @@
   "historical_acceptance_surfaces": {
     "public_item19_item20_workflows": "historical_or_development_only_not_product_release_or_runtime_deployment_authority",
     "acceptance_vultr_environment": "historical_acceptance_boundary_not_normal_production_deployment_authority",
-    "public_phone_handoff": "superseded_by_private_deployment_controller_v2"
+    "public_phone_handoff": "superseded_by_deployment_controller_v2"
   },
   "runtime_identity": {
     "product_release": "exact_immutable_product_release_v2",
-    "controller_revision": "exact_private_controller_revision",
+    "controller_revision": "exact_deployment_controller_revision",
     "latest": "forbidden",
     "public_issue_179_cursor": "forbidden_for_normal_runtime"
   },
   "actions_security": {
     "default_workflow_permissions": "read",
     "fork_write_token_or_secrets": "forbidden",
-    "public_self_hosted_runner": "forbidden"
+    "product_public_self_hosted_runner": "forbidden",
+    "controller_self_hosted_runner": "allowed_only_for_explicitly_admitted_target_jobs_with_private_secrets_and_bindings"
   },
   "forbidden": [
-    "public_release_workflow_adb_or_phone_access",
-    "public_release_workflow_provider_mutation",
-    "public_release_workflow_private_controller_dispatch",
-    "private_controller_independent_product_release",
+    "public_product_release_workflow_adb_or_phone_access",
+    "public_product_release_workflow_provider_mutation",
+    "public_product_release_workflow_controller_dispatch",
+    "controller_independent_product_release",
+    "controller_secret_or_raw_device_data_in_public_git_or_issue_evidence",
     "mutable_release_deployment",
     "latest_release_deployment",
     "physical_acceptance_as_product_tag_precondition",

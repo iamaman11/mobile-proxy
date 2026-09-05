@@ -39,6 +39,7 @@ STALE_ACTIVE_TOKENS = (
     "private repository/runner remain execution-only",
     "private phone repository/runner remain execution-only",
     "private `mobile-proxy-production` repository remains execution-only",
+    "private Deployment Controller: `iamaman11/mobile-proxy-production`",
     "final tag remains forbidden until Item 20",
     "Only after Item 20 physical acceptance",
     "completed Item 20 + final_accepted_candidate_sha",
@@ -95,27 +96,49 @@ def check_repository(root: Path) -> list[str]:
     github = _load(root, GITHUB, errors)
     release_authority = _load(root, RELEASE_AUTHORITY, errors)
 
-    # The active authority model is PRODUCT public + Deployment Controller private.
-    public = project.get("public_product_authority")
-    private = project.get("private_deployment_authority")
-    if not isinstance(public, dict) or public.get("repository") != "iamaman11/mobile-proxy":
+    product = project.get("public_product_authority")
+    controller = project.get("deployment_controller_authority")
+    if (
+        not isinstance(product, dict)
+        or product.get("repository") != "iamaman11/mobile-proxy"
+        or product.get("visibility") != "public"
+    ):
         errors.append("project v2 does not bind public PRODUCT authority")
-    if not isinstance(private, dict) or private.get("repository") != "iamaman11/mobile-proxy-production" or private.get("authority") != "deployment_controller":
-        errors.append("project v2 does not bind private Deployment Controller authority")
+    if (
+        not isinstance(controller, dict)
+        or controller.get("repository") != "iamaman11/mobile-proxy-production"
+        or controller.get("visibility") != "public"
+        or controller.get("authority") != "deployment_controller"
+    ):
+        errors.append("project v2 does not bind Deployment Controller authority")
+    elif controller.get("confidentiality_boundary") != (
+        "secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_remain_private"
+    ):
+        errors.append("Deployment Controller confidentiality boundary differs")
+
     runtime_identity = project.get("runtime_identity")
-    if not isinstance(runtime_identity, dict) or runtime_identity.get("identity") != "product_release_plus_controller_revision":
+    if (
+        not isinstance(runtime_identity, dict)
+        or runtime_identity.get("identity") != "product_release_plus_controller_revision"
+    ):
         errors.append("runtime identity is not Product Release + controller revision")
 
-    # Product Release must exist before target deployment/physical acceptance.
     release_link = topology.get("release_link")
-    if not isinstance(release_link, dict) or release_link.get("product_release_must_exist_before_deployment_admission") is not True or release_link.get("physical_acceptance_before_product_release") is not False:
+    if (
+        not isinstance(release_link, dict)
+        or release_link.get("product_release_must_exist_before_deployment_admission") is not True
+        or release_link.get("physical_acceptance_before_product_release") is not False
+    ):
         errors.append("topology does not enforce Product Release before deployment")
     targets = topology.get("targets")
     vm = targets.get("vm-production") if isinstance(targets, dict) else None
-    if not isinstance(vm, dict) or vm.get("destructive_dispatch") != "forbidden_until_proven" or vm.get("reuses_same_controller_kernel") is not True:
+    if (
+        not isinstance(vm, dict)
+        or vm.get("destructive_dispatch") != "forbidden_until_proven"
+        or vm.get("reuses_same_controller_kernel") is not True
+    ):
         errors.append("VM target is not fail-closed on the shared controller kernel")
 
-    # Transaction semantics are stable across target adapters.
     execution = topology.get("execution_rules")
     if not isinstance(execution, dict) or any(
         execution.get(key) != value
@@ -131,18 +154,21 @@ def check_repository(root: Path) -> list[str]:
     ):
         errors.append("controller transaction/recovery semantics differ from accepted v2 model")
 
-    # GitHub separates public product publication from private runtime authority.
     if github.get("project_authority_contract") != str(PROJECT):
         errors.append("GitHub v2 contract does not bind project authority v2")
     if github.get("production_topology_contract") != str(TOPOLOGY):
         errors.append("GitHub v2 contract does not bind production topology v2")
     if github.get("product_release_contract") != str(RELEASE_AUTHORITY):
         errors.append("GitHub v2 contract does not bind Product Release v2")
-    controller = github.get("private_deployment_controller")
-    if not isinstance(controller, dict) or controller.get("authority") != "deployment_controller" or controller.get("command") != "/deploy <target> <vX.Y.Z>":
-        errors.append("GitHub v2 contract does not preserve private deployment ingress")
+    github_controller = github.get("deployment_controller_repository")
+    if (
+        not isinstance(github_controller, dict)
+        or github_controller.get("authority") != "deployment_controller"
+        or github_controller.get("visibility") != "public"
+        or github_controller.get("command") != "/deploy <target> <vX.Y.Z>"
+    ):
+        errors.append("GitHub v2 contract does not preserve Deployment Controller ingress")
 
-    # Product Release v2 uses an exact annotated tag, signed Android product and typed digest set.
     if release_authority.get("contract_version") != 2:
         errors.append("Product Release authority version differs")
     assets = release_authority.get("required_release_assets")
@@ -156,7 +182,11 @@ def check_repository(root: Path) -> list[str]:
     if assets != expected_assets:
         errors.append("Product Release exact asset set differs")
     manifest = release_authority.get("manifest")
-    if not isinstance(manifest, dict) or manifest.get("content_digest_domain") != "mobile-proxy/product-release-asset/v2" or manifest.get("content_digest_algorithm") != "blake3-256":
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("content_digest_domain") != "mobile-proxy/product-release-asset/v2"
+        or manifest.get("content_digest_algorithm") != "blake3-256"
+    ):
         errors.append("Product Release typed digest identity differs")
 
     _require(
@@ -196,13 +226,12 @@ def check_repository(root: Path) -> list[str]:
         errors,
     )
 
-    # Active docs must say release -> deployment, not Item20 -> release.
     _require(
         text[RELEASE_DOC],
         RELEASE_DOC,
         (
             "A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.",
-            "only now may private /deploy <target> <tag> consume that Product Release",
+            "only now may /deploy <target> <tag> consume that Product Release",
             "product_release + exact controller_revision",
             "artifact-digests.json",
             "exact bytes",
@@ -214,7 +243,7 @@ def check_repository(root: Path) -> list[str]:
         PROJECT_DOC,
         (
             "One product, two authoritative planes",
-            "The private repository is the canonical deployment-execution controller.",
+            "Both repositories are public; repository visibility is not the confidentiality boundary.",
             "runtime_deployment_identity",
             "A Product Release is an input to deployment.",
             "public GitHub Deployment is not the execution ledger",
@@ -225,7 +254,7 @@ def check_repository(root: Path) -> list[str]:
         text[PHONE_DOC],
         PHONE_DOC,
         (
-            "private repository is therefore **not** merely a thin execution satellite",
+            "Both repositories are public",
             "/deploy phone-production <vX.Y.Z>",
             "mutation intent exists durably before destructive dispatch",
             "no blind retry occurs after the destructive dispatch boundary",
@@ -235,7 +264,6 @@ def check_repository(root: Path) -> list[str]:
         errors,
     )
 
-    # Android remains an auxiliary product component when topology consumes its capability.
     for path in (TEN_PLAN, RUNTIME, PHONE_DOC):
         body = text[path]
         if "not the primary reverse-tunnel owner" not in body:
@@ -247,7 +275,6 @@ def check_repository(root: Path) -> list[str]:
         errors,
     )
 
-    # Historical Item 19 proof remains historical evidence, not active runtime authority.
     if HISTORICAL_ITEM19_SHA not in text[ITEM19_CLOSEOUT]:
         errors.append("historical Item 19 closeout lost its immutable proof SHA")
 
