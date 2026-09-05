@@ -4,6 +4,7 @@ Status: **normative ownership and execution-order contract**
 Canonical PRODUCT repository: `iamaman11/mobile-proxy`  
 Deployment Controller repository: `iamaman11/mobile-proxy-production`  
 Machine contract: `contracts/operations/product-release-authority-v2.json`  
+Rooted-phone component contract: `contracts/operations/phone-production-release-components-v1.json`  
 Canonical product-tag command surface: public Issue #90  
 Migration/development audit tracker: public Issue #179  
 Runtime deployment command surface: Deployment Controller Issue #1
@@ -16,7 +17,7 @@ The PRODUCT repository owns:
 
 - application/runtime source;
 - public Quality;
-- Android and Linux product build;
+- Android, rooted-phone runtime and Linux product build;
 - Android product signing verification;
 - exact annotated semantic-version product tag;
 - immutable Product Release assets, manifest, provenance and typed content digests.
@@ -46,12 +47,12 @@ exact protected PRODUCT main SHA
   -> owner /release-tag command on public #90
   -> exact annotated vMAJOR.MINOR.PATCH tag bound to that SHA
   -> tag Quality succeeds
-  -> PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA
+  -> PRODUCT workflow builds Linux + exact signed Android APK + rooted-phone runtime from tag target SHA
   -> release-manifest.json format v2
   -> provenance.json format v2
   -> artifact-digests.json with typed Product Release content digests
   -> create GitHub Release as draft
-  -> attach and verify the exact five Release v2 assets
+  -> attach and verify the exact six Release v2 assets
   -> compare every draft asset against local exact bytes
   -> publish the verified draft
   -> verify GitHub Release immutable == true
@@ -85,6 +86,8 @@ protected main SHA selected for tagging
   == source SHA recorded in release-manifest.json
   == source SHA recorded in provenance.json
 ```
+
+For `phone-production`, the Product Release also binds one immutable rooted-phone runtime component set. The machine-verifiable inventory is defined by `phone-production-release-components-v1.json`; it contains only target-applicable phone components and excludes VM/server components. Native runtime executables, device runtime module/templates/profiles and the target-specific pinned `sing-box` upstream identity become part of the Product Release identity alongside the signed APK.
 
 The Deployment Controller revision is deliberately **not** part of Product Release identity. Runtime deployment identity is the pair:
 
@@ -155,19 +158,22 @@ Secret values, signing material and signer fingerprints are never written to pub
 
 ### Required exact Release v2 assets
 
-For tag `vX.Y.Z` the published Release has exactly five assets:
+For tag `vX.Y.Z` the published Release has exactly six assets:
 
 ```text
 mobile-proxy-linux-x86_64-vX.Y.Z.tar.gz
 mobile-proxy-android-vX.Y.Z.apk
+mobile-proxy-phone-production-runtime-vX.Y.Z.tar.gz
 release-manifest.json
 provenance.json
 artifact-digests.json
 ```
 
-`release-manifest.json` format v2 records the exact source SHA and typed content digest for each product artifact. The Android entry also records `com.example.mobileproxy`, `versionName` and `versionCode`.
+`release-manifest.json` format v2 records the exact source SHA and typed content digest for each product artifact. The Android entry also records `com.example.mobileproxy`, `versionName` and `versionCode`. The rooted-phone entry records `target=phone-production`, the exact Android ARM ABI contract, every required runtime component with its stable archive path and typed content digest, the typed `components.json` inventory identity and only the target-applicable `android-arm` pinned `sing-box` upstream identity.
 
-`provenance.json` format v2 records the same exact source/tag identity, builder/workflow identity and typed product-artifact digests without secret/signing/phone fields.
+The rooted-phone archive is deterministic. Changing or removing a required PRODUCT-owned native executable, module file, profile or template changes/fails Product Release identity. VM/server components are deliberately outside this phone component contract and must not be pulled into phone identity merely because they share the repository.
+
+`provenance.json` format v2 records the same exact source/tag identity, builder/workflow identity and typed product-artifact digests without secret/signing/phone-target values.
 
 `artifact-digests.json` uses the canonical first-party digest policy:
 
@@ -176,7 +182,7 @@ algorithm: blake3-256
 domain: mobile-proxy/product-release-asset/v2
 ```
 
-Its typed digests cover the Linux archive, Android APK, `release-manifest.json` and `provenance.json`. The digest-set file does not hash itself. First-party release code must not introduce a separate direct cryptographic primitive; all content identity goes through the typed foundation `ContentDigest` contract with domain separation.
+Its typed digests cover the Linux archive, Android APK, rooted-phone runtime archive, `release-manifest.json` and `provenance.json`. The digest-set file does not hash itself. First-party release code must not introduce a separate direct cryptographic primitive; all content identity goes through the typed foundation `ContentDigest` contract with domain separation.
 
 GitHub may expose its own platform digest for uploaded Release assets. That external field is validated as GitHub metadata, but first-party code does not reimplement GitHub's hashing algorithm. For a draft, remote assets are downloaded through the authenticated asset API and compared to local files as exact bytes before publication. After publication, GitHub-native immutable Release and asset verification supplies the independent platform-integrity postcondition.
 
