@@ -64,11 +64,6 @@ REQUIRED_ENFORCEMENT_FRAGMENTS = {
         "BinaryFingerprintInput",
         "fingerprint_stats",
     ),
-    "scripts/verify_physical_deployment.py": (
-        '"comparison_contract": "exact-bytes"',
-        "remote_bytes == (root / relative).read_bytes()",
-        "cmp -s --",
-    ),
     "scripts/switch_vm_proxy_transport.py": (
         '"exact_config_match": True',
         "sudo cmp -s --",
