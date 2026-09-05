@@ -111,7 +111,7 @@ def resolve_phone_build_inputs(
     )
     require(
         isinstance(upstream_sha256, str) and SHA256.fullmatch(upstream_sha256) is not None,
-        "sing-box android-arm SHA-256 is invalid",
+        "sing-box android-arm upstream checksum metadata is invalid",
     )
     require(
         isinstance(content_digest, str) and TYPED_DIGEST.fullmatch(content_digest) is not None,
@@ -126,7 +126,6 @@ def resolve_phone_build_inputs(
         "sing_box": {
             "archive_content_digest": content_digest,
             "archive_size": size,
-            "archive_upstream_sha256": upstream_sha256,
             "lock_target": PHONE_SING_BOX_TARGET,
             "version": sing_box_version,
         },
@@ -139,30 +138,51 @@ def _run(
     cwd: Path,
     env: Mapping[str, str] | None = None,
     capture: bool = False,
+    timeout: int = 1200,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(
-            command,
-            cwd=cwd,
-            env=dict(env) if env is not None else None,
-            check=True,
-            text=True,
-            capture_output=capture,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
+        kwargs: dict[str, object] = {
+            "cwd": cwd,
+            "env": dict(env) if env is not None else None,
+            "check": True,
+            "text": True,
+            "timeout": timeout,
+        }
+        if capture:
+            kwargs["capture_output"] = True
+        else:
+            kwargs["stdout"] = sys.stderr
+            kwargs["stderr"] = sys.stderr
+        return subprocess.run(command, **kwargs)  # type: ignore[arg-type]
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise PhoneRuntimePreparationError(
             f"command failed: {' '.join(command)}"
         ) from exc
 
 
-def _sha256sum(path: Path, repository_root: Path) -> str:
+def _typed_sing_box_archive_digest(path: Path, repository_root: Path) -> str:
     result = _run(
-        ["sha256sum", "--", str(path)],
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "--release",
+            "-p",
+            "operator-cli",
+            "--bin",
+            "upstream-sing-box-archive-digest",
+            "--",
+            str(path),
+        ],
         cwd=repository_root,
         capture=True,
     )
-    digest = result.stdout.split(maxsplit=1)[0] if result.stdout else ""
-    require(SHA256.fullmatch(digest) is not None, "sha256sum output is invalid")
+    digest = result.stdout.strip()
+    require(
+        TYPED_DIGEST.fullmatch(digest) is not None,
+        "sing-box archive typed digest output is invalid",
+    )
     return digest
 
 
@@ -275,7 +295,7 @@ def _prepare_sing_box(
     version = str(pin["version"])
     target = str(pin["lock_target"])
     expected_size = int(pin["archive_size"])
-    expected_sha256 = str(pin["archive_upstream_sha256"])
+    expected_digest = str(pin["archive_content_digest"])
     cache = repository_root / "target" / "artifacts" / "phone-production" / "sing-box"
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / f"sing-box-{version}-{target}.tar.gz"
@@ -284,7 +304,7 @@ def _prepare_sing_box(
         return (
             archive.is_file()
             and archive.stat().st_size == expected_size
-            and _sha256sum(archive, repository_root) == expected_sha256
+            and _typed_sing_box_archive_digest(archive, repository_root) == expected_digest
         )
 
     if not matches():
@@ -299,8 +319,8 @@ def _prepare_sing_box(
         )
     require(archive.stat().st_size == expected_size, "sing-box android-arm archive size differs")
     require(
-        _sha256sum(archive, repository_root) == expected_sha256,
-        "sing-box android-arm archive SHA-256 differs",
+        _typed_sing_box_archive_digest(archive, repository_root) == expected_digest,
+        "sing-box android-arm typed archive digest differs",
     )
     _safe_archive_members(archive, repository_root)
 

@@ -7,6 +7,10 @@ import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "prepare_phone_release_runtime.py"
+DIGEST_HELPER = (
+    Path(__file__).resolve().parents[2]
+    / "apps/operator-cli/src/bin/upstream-sing-box-archive-digest.rs"
+)
 SPEC = importlib.util.spec_from_file_location("prepare_phone_release_runtime", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -80,6 +84,14 @@ class PhoneReleaseRuntimePreparationTests(unittest.TestCase):
         body = SCRIPT.read_text(encoding="utf-8")
         self.assertNotIn("deploy/vm-runtime", body)
         self.assertNotIn("linux-amd64-glibc", body)
+
+    def test_release_builder_uses_only_typed_foundation_digest_verification(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+        helper = DIGEST_HELPER.read_text(encoding="utf-8")
+        self.assertIn("upstream-sing-box-archive-digest", body)
+        self.assertNotIn("sha256sum", body)
+        self.assertIn("ContentDigest::derive", helper)
+        self.assertIn("mobile-proxy/upstream-sing-box-archive/v1", helper)
 
 
 if __name__ == "__main__":
