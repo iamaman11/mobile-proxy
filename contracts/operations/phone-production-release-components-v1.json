@@ -15,6 +15,11 @@
     "android_api_level": 23,
     "rust_profile": "release"
   },
+  "realization_contract": {
+    "component_name": "runtime-realization-contract",
+    "source": "contracts/operations/phone-production-runtime-realization-v1.json",
+    "archive_path": "realization/phone-production-runtime-realization-v1.json"
+  },
   "components": [
     {
       "name": "runtime-supervisor",
@@ -91,6 +96,13 @@
       "kind": "runtime-template",
       "source": "deploy/device-runtime/templates/sing-box.base.json",
       "archive_path": "templates/sing-box.base.json",
+      "executable": false
+    },
+    {
+      "name": "runtime-realization-contract",
+      "kind": "runtime-realization-contract",
+      "source": "contracts/operations/phone-production-runtime-realization-v1.json",
+      "archive_path": "realization/phone-production-runtime-realization-v1.json",
       "executable": false
     }
   ],

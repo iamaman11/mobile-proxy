@@ -9,6 +9,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1]
 REPOSITORY = SCRIPTS.parent
 PHONE_CONTRACT = REPOSITORY / "contracts/operations/phone-production-release-components-v1.json"
+REALIZATION_CONTRACT = REPOSITORY / "contracts/operations/phone-production-runtime-realization-v1.json"
 sys.path.insert(0, str(SCRIPTS))
 
 from create_release_bundle_v2 import ReleaseBundleError, create_bundle
@@ -29,7 +30,10 @@ class ReleaseBundleV2Tests(unittest.TestCase):
         for component in contract["components"]:
             path = root / component["source"]
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(f"phone-runtime:{component['name']}\n".encode("utf-8"))
+            if component["name"] == "runtime-realization-contract":
+                path.write_bytes(REALIZATION_CONTRACT.read_bytes())
+            else:
+                path.write_bytes(f"phone-runtime:{component['name']}\n".encode("utf-8"))
         lock = {
             "schema_version": 1,
             "version": "1.13.12",
@@ -130,7 +134,16 @@ class ReleaseBundleV2Tests(unittest.TestCase):
                     "app-wireguard-template",
                     "host-daemon-template",
                     "sing-box-template",
+                    "runtime-realization-contract",
                 },
+            )
+            realization = next(
+                item for item in artifacts[phone_name]["components"]
+                if item["name"] == "runtime-realization-contract"
+            )
+            self.assertEqual(
+                realization["archive_path"],
+                "realization/phone-production-runtime-realization-v1.json",
             )
             serialized_phone = json.dumps(artifacts[phone_name], sort_keys=True)
             self.assertIn("android-arm", serialized_phone)
@@ -171,6 +184,29 @@ class ReleaseBundleV2Tests(unittest.TestCase):
             second_phone = next(item for item in second_manifest["artifacts"] if item["name"] == phone_name)
             second_component = next(item for item in second_phone["components"] if item["name"] == "runtime-supervisor")
             self.assertNotEqual(first_component["content_digest"], second_component["content_digest"])
+            self.assertNotEqual(first_digests[phone_name], second_digests[phone_name])
+
+    def test_realization_contract_change_changes_phone_release_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release = root / "release"
+            evidence = self.fixture(root)
+            first_manifest, _, first_digests = self.build(release, evidence)
+            phone_name = f"mobile-proxy-phone-production-runtime-{self.tag}.tar.gz"
+            first_phone = next(item for item in first_manifest["artifacts"] if item["name"] == phone_name)
+            first_realization = next(
+                item for item in first_phone["components"]
+                if item["name"] == "runtime-realization-contract"
+            )
+            realization_path = root / "contracts/operations/phone-production-runtime-realization-v1.json"
+            realization_path.write_bytes(realization_path.read_bytes() + b"\n")
+            second_manifest, _, second_digests = self.build(release, evidence)
+            second_phone = next(item for item in second_manifest["artifacts"] if item["name"] == phone_name)
+            second_realization = next(
+                item for item in second_phone["components"]
+                if item["name"] == "runtime-realization-contract"
+            )
+            self.assertNotEqual(first_realization["content_digest"], second_realization["content_digest"])
             self.assertNotEqual(first_digests[phone_name], second_digests[phone_name])
 
     def test_vm_sing_box_pin_change_does_not_change_phone_identity(self) -> None:
