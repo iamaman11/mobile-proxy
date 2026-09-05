@@ -22,8 +22,8 @@ android {
         applicationId = "com.example.mobileproxy"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1004
-        versionName = "0.1.4"
+        versionCode = 1005
+        versionName = "0.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
