@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Sequence
 
 try:
-    from scripts.run_private_phone_preflight import require_canonical_sha
-    from scripts.verify_android_installed_signer import (
+    from scripts.android_release_signing import (
         parse_single_apksigner_fingerprint,
         read_keystore_fingerprint,
+        require_canonical_sha,
     )
     from scripts.verify_android_release_contract import verify_contract
     from scripts.verify_android_release_keystore import (
@@ -28,10 +28,10 @@ try:
         verify_release_keystore,
     )
 except ModuleNotFoundError:
-    from run_private_phone_preflight import require_canonical_sha  # type: ignore[no-redef]
-    from verify_android_installed_signer import (  # type: ignore[no-redef]
+    from android_release_signing import (  # type: ignore[no-redef]
         parse_single_apksigner_fingerprint,
         read_keystore_fingerprint,
+        require_canonical_sha,
     )
     from verify_android_release_contract import verify_contract  # type: ignore[no-redef]
     from verify_android_release_keystore import (  # type: ignore[no-redef]
