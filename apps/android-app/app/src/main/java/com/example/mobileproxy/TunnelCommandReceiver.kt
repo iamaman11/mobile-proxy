@@ -14,7 +14,13 @@ class TunnelCommandReceiver : BroadcastReceiver() {
                 val config = intent.getStringExtra(EXTRA_CONFIG)
                     ?: intent.getStringExtra(EXTRA_CONFIG_B64)?.let(::decodeConfig)
                 if (!config.isNullOrBlank()) {
-                    TunnelState.setConfig(context, config)
+                    runCatching { TunnelState.setConfig(context, config) }
+                        .onFailure {
+                            TunnelState.setLastError(
+                                context,
+                                "secure wireguard config storage is unavailable",
+                            )
+                        }
                 }
             }
             ACTION_START -> startTunnel(context)

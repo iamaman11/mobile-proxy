@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="device_sharedpref" path="mobile_proxy_tunnel.xml" />
+    <exclude domain="device_file" path="cellular-egress.json" />
+    <exclude domain="sharedpref" path="mobile_proxy_tunnel.xml" />
+    <exclude domain="file" path="cellular-egress.json" />
+</full-backup-content>
