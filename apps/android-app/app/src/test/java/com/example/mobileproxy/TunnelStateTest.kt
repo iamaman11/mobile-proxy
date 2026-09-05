@@ -42,7 +42,7 @@ class TunnelStateTest {
             Address = 10.0.0.2/32
         """.trimIndent()
 
-        TunnelState.setConfig(context, config, key)
+        TunnelState.setConfig(context, config) { key }
 
         val storage = context.createDeviceProtectedStorageContext()
         assertTrue(storage.isDeviceProtectedStorage)
@@ -59,7 +59,7 @@ class TunnelStateTest {
     @Test
     fun corruptEncryptedStateNeverFallsBackToLegacyPlaintext() {
         val config = "[Interface]\nPrivateKey = legacy-private-key"
-        TunnelState.setConfig(context, config, key)
+        TunnelState.setConfig(context, config) { key }
         devicePrefs().edit()
             .putString("config", config)
             .putString("config_ciphertext", "not-valid-base64")
@@ -71,7 +71,7 @@ class TunnelStateTest {
 
     @Test
     fun unavailableKeyFailsClosedAndLockedBootKeySpecNeedsNoUnlock() {
-        TunnelState.setConfig(context, "[Interface]\nPrivateKey = encrypted", key)
+        TunnelState.setConfig(context, "[Interface]\nPrivateKey = encrypted") { key }
 
         assertNull(
             TunnelState.getConfig(context) {
@@ -82,6 +82,25 @@ class TunnelStateTest {
         val spec = TunnelState.secretKeySpec("mobile_proxy_test_direct_boot")
         assertFalse(spec.isUnlockedDeviceRequired)
         assertFalse(spec.isUserAuthenticationRequired)
+    }
+
+    @Test
+    fun legacyPlaintextIsPurgedBeforeKeystoreFailureCanAbortWrite() {
+        val store = devicePrefs()
+        store.edit()
+            .putString("config", "[Interface]\nPrivateKey = old-plaintext")
+            .commit()
+
+        val failure = runCatching {
+            TunnelState.setConfig(context, "[Interface]\nPrivateKey = replacement") {
+                throw IllegalStateException("keystore unavailable")
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertFalse(store.contains("config"))
+        assertFalse(store.contains("config_ciphertext"))
+        assertFalse(store.contains("config_iv"))
     }
 
     private fun devicePrefs() =

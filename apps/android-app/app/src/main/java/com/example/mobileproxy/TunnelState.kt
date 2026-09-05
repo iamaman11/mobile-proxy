@@ -1,6 +1,7 @@
 package com.example.mobileproxy
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -41,13 +42,14 @@ object TunnelState {
             .getBoolean(DESIRED, false)
 
     fun setConfig(context: Context, config: String) {
-        setConfig(context, config, localControlKey())
+        setConfig(context, config) { localControlKey() }
     }
 
-    internal fun setConfig(context: Context, config: String, key: SecretKey) {
-        val encrypted = AesGcmSecretCodec.encrypt(config, key)
-        prefs(context).edit(commit = true) {
-            remove(LEGACY_CONFIG)
+    internal fun setConfig(context: Context, config: String, keyProvider: () -> SecretKey) {
+        val store = prefs(context)
+        purgeLegacyConfig(store)
+        val encrypted = AesGcmSecretCodec.encrypt(config, keyProvider())
+        store.edit(commit = true) {
             putString(CONFIG_CIPHERTEXT, encrypted.ciphertext)
             putString(CONFIG_IV, encrypted.iv)
         }
@@ -58,15 +60,19 @@ object TunnelState {
 
     internal fun getConfig(context: Context, keyProvider: () -> SecretKey): String? {
         val store = prefs(context)
+        purgeLegacyConfig(store)
+        val ciphertext = store.getString(CONFIG_CIPHERTEXT, null) ?: return null
+        val iv = store.getString(CONFIG_IV, null) ?: return null
+        val key = runCatching { keyProvider() }.getOrNull() ?: return null
+        return AesGcmSecretCodec.decrypt(ciphertext, iv, key)
+    }
+
+    private fun purgeLegacyConfig(store: SharedPreferences) {
         if (store.contains(LEGACY_CONFIG)) {
             store.edit(commit = true) {
                 remove(LEGACY_CONFIG)
             }
         }
-        val ciphertext = store.getString(CONFIG_CIPHERTEXT, null) ?: return null
-        val iv = store.getString(CONFIG_IV, null) ?: return null
-        val key = runCatching { keyProvider() }.getOrNull() ?: return null
-        return AesGcmSecretCodec.decrypt(ciphertext, iv, key)
     }
 
     fun setLastState(context: Context, state: String) {
