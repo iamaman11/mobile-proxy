@@ -44,16 +44,27 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
     def test_repository_passes(self) -> None:
         self.assertEqual(MODULE.check_repository(ROOT), [])
 
-    def test_private_repository_must_remain_deployment_controller(self) -> None:
+    def test_controller_repository_must_remain_deployment_controller(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
             path = root / "contracts/operations/project-authority-v2.json"
             contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["private_deployment_authority"]["authority"] = "execution_satellite"
+            contract["deployment_controller_authority"]["authority"] = "execution_satellite"
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("private Deployment Controller authority" in error for error in errors))
+        self.assertTrue(any("Deployment Controller authority" in error for error in errors))
+
+    def test_controller_confidentiality_boundary_cannot_disappear(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "contracts/operations/project-authority-v2.json"
+            contract = json.loads(path.read_text(encoding="utf-8"))
+            contract["deployment_controller_authority"]["confidentiality_boundary"] = "repository_visibility"
+            path.write_text(json.dumps(contract), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("confidentiality boundary differs" in error for error in errors))
 
     def test_runtime_identity_requires_product_release_plus_controller_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -99,16 +110,16 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("transaction/recovery semantics differ" in error for error in errors))
 
-    def test_private_ingress_must_remain_deploy_target_tag(self) -> None:
+    def test_controller_ingress_must_remain_deploy_target_tag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
             path = root / "contracts/operations/github-control-plane-v2.json"
             contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["private_deployment_controller"]["command"] = "/deploy-latest"
+            contract["deployment_controller_repository"]["command"] = "/deploy-latest"
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("private deployment ingress" in error for error in errors))
+        self.assertTrue(any("Deployment Controller ingress" in error for error in errors))
 
     def test_release_asset_set_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -163,14 +174,14 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("superseded active authority wording" in error for error in errors))
 
-    def test_phone_doc_must_keep_private_controller_authority(self) -> None:
+    def test_phone_doc_must_keep_controller_authority(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
             path = root / "docs/operations/phone-gitops-runtime.md"
             body = path.read_text(encoding="utf-8").replace(
-                "private repository is therefore **not** merely a thin execution satellite",
-                "private repository is an execution satellite",
+                "Both repositories are public",
+                "The controller is only a thin execution satellite",
             )
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)

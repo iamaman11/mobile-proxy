@@ -27,8 +27,8 @@
     "final_v_tag": "after_product_source_acceptance_and_before_any_release_deployment",
     "release_build": "public_product_repository_builds_linux_and_exact_signed_android_from_final_tag_target",
     "release_publication": "draft_first_attach_exact_v2_bundle_then_publish_immutable",
-    "deployment_admission": "private_controller_only_after_exact_immutable_product_release_v2_exists",
-    "physical_acceptance": "private_controller_observes_executes_recovers_and_classifies_target_after_product_release_exists",
+    "deployment_admission": "deployment_controller_only_after_exact_immutable_product_release_v2_exists",
+    "physical_acceptance": "deployment_controller_observes_executes_recovers_and_classifies_target_after_product_release_exists",
     "public_deployment_projection": "bounded_status_history_only_not_execution_authority"
   },
   "required_release_assets": [
@@ -69,7 +69,7 @@
     "item20_final_accepted_candidate_required_before_product_tag",
     "public_release_workflow_accessing_phone",
     "public_release_workflow_mutating_provider",
-    "public_release_workflow_executing_private_deployment_controller",
+    "public_release_workflow_executing_deployment_controller",
     "release_publication_without_exact_signed_android_apk",
     "release_publication_without_immutable_releases_enabled",
     "direct_published_release_creation_before_assets_are_verified",

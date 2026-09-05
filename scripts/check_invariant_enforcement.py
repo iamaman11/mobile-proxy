@@ -35,22 +35,19 @@ REQUIRED_COLUMNS = [
     "evidence_note",
     "expires_on",
 ]
-# Source P may be explicitly semantic-re-audited while retaining the existing
-# invariant catalog. PR #229 corrects the active repository authority model to
-# PRODUCT / DEPLOYMENT CONTROLLER v2 while explicitly retaining the audited
-# PRODUCT compatibility, architecture, persistence, security and delivery
-# invariants plus immutable historical Item19/Item20 evidence boundaries.
-# This narrow transition is fail-closed: it is accepted only from the exact
-# matrix pin to the exact current re-audited Production Baseline blob. Any
-# subsequent edit fails until another explicit re-audit updates governance.
-# Git history retains the superseded audited blobs for the full audit chain.
+# Source P may be semantic-re-audited while retaining the existing invariant
+# catalog. Gate B PR #241 removes duplicate deployment-controller ownership and
+# updates the active roadmap for the two-public-repository v2 authority model,
+# while retaining the audited PRODUCT compatibility, architecture, persistence,
+# security and delivery invariants. The transition remains fail-closed: only the
+# exact matrix pin may resolve to this exact re-audited baseline blob.
 RECONCILED_SOURCE_BLOB_TRANSITIONS = {
     "P": {
         "path": "docs/PRODUCTION_BASELINE_PLAN.md",
         "previous_blob_sha": "65a88761e6bf840638d828f218db4b2ffeccccd4",
-        "supersedes_audited_blob_sha": "8ef318680ff15d7954cf1783a9053e93aed68f8f",
-        "audited_blob_sha": "2b9f72627c5e07d4ade1ba941deb8d68e623c42d",
-        "issue": 229,
+        "supersedes_audited_blob_sha": "2b9f72627c5e07d4ade1ba941deb8d68e623c42d",
+        "audited_blob_sha": "10cbf5fa78af9c3b4faeba6dfbbc31b27e21b2a4",
+        "issue": 241,
     }
 }
 EXPECTED_INVARIANT_IDS = {
@@ -157,7 +154,6 @@ def _validate_external_verification(
     if not isinstance(verification, dict):
         errors.append(f"{control_id}: verification must be an object")
         return
-
     if verification.get("kind") != "external_snapshot":
         errors.append(f"{control_id}: verification kind must be external_snapshot")
 
@@ -206,8 +202,6 @@ def _effective_source_blob_sha(
         errors.append(f"source {source_id} reconciliation path differs from audited transition")
         return matrix_expected_sha
     if matrix_expected_sha != transition["previous_blob_sha"]:
-        # Once the canonical matrix itself is repinned, the transition no longer
-        # substitutes for it; use the matrix value normally.
         return matrix_expected_sha
     return transition["audited_blob_sha"]
 

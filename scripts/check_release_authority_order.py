@@ -33,8 +33,8 @@ EXPECTED_ORDERING = {
     "final_v_tag": "after_product_source_acceptance_and_before_any_release_deployment",
     "release_build": "public_product_repository_builds_linux_and_exact_signed_android_from_final_tag_target",
     "release_publication": "draft_first_attach_exact_v2_bundle_then_publish_immutable",
-    "deployment_admission": "private_controller_only_after_exact_immutable_product_release_v2_exists",
-    "physical_acceptance": "private_controller_observes_executes_recovers_and_classifies_target_after_product_release_exists",
+    "deployment_admission": "deployment_controller_only_after_exact_immutable_product_release_v2_exists",
+    "physical_acceptance": "deployment_controller_observes_executes_recovers_and_classifies_target_after_product_release_exists",
     "public_deployment_projection": "bounded_status_history_only_not_execution_authority",
 }
 EXPECTED_ASSETS = [
@@ -75,7 +75,7 @@ EXPECTED_FORBIDDEN = [
     "item20_final_accepted_candidate_required_before_product_tag",
     "public_release_workflow_accessing_phone",
     "public_release_workflow_mutating_provider",
-    "public_release_workflow_executing_private_deployment_controller",
+    "public_release_workflow_executing_deployment_controller",
     "release_publication_without_exact_signed_android_apk",
     "release_publication_without_immutable_releases_enabled",
     "direct_published_release_creation_before_assets_are_verified",
@@ -144,7 +144,7 @@ def check_repository(root: Path) -> list[str]:
     if contract.get("preconditions") != EXPECTED_PRECONDITIONS:
         errors.append("Product Release v2 preconditions differ from protected exact-source contract")
     if contract.get("ordering") != EXPECTED_ORDERING:
-        errors.append("Product Release v2 ordering no longer precedes private deployment admission")
+        errors.append("Product Release v2 ordering no longer precedes Deployment Controller admission")
     if contract.get("required_release_assets") != EXPECTED_ASSETS:
         errors.append("Product Release v2 exact asset set differs")
     if contract.get("manifest") != EXPECTED_MANIFEST:
@@ -250,18 +250,18 @@ def check_repository(root: Path) -> list[str]:
         (
             "A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.",
             "Machine contract: `contracts/operations/product-release-authority-v2.json`",
-            "Runtime deployment command surface: private Issue #1",
-            "public PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA",
+            "Runtime deployment command surface: Deployment Controller Issue #1",
+            "PRODUCT workflow builds Linux + exact signed Android APK from tag target SHA",
             "create GitHub Release as draft",
             "verify GitHub Release immutable == true",
-            "only now may private /deploy <target> <tag> consume that Product Release",
+            "only now may /deploy <target> <tag> consume that Product Release",
             "Physical acceptance belongs to deployment/runtime control after the immutable Product Release exists.",
             "PRODUCT_RELEASE_SETTINGS_TOKEN",
             "Administration: read",
             "artifact-digests.json",
             "mobile-proxy/product-release-asset/v2",
             "exact bytes",
-            "The private Deployment Controller revision is deliberately **not** part of Product Release identity.",
+            "The Deployment Controller revision is deliberately **not** part of Product Release identity.",
             "public GitHub Deployment receives bounded status/history projection only",
         ),
         "Product Release authority document",
@@ -274,6 +274,7 @@ def check_repository(root: Path) -> list[str]:
             "#135 must be closed",
             "#115 closed `completed`",
             "private `mobile-proxy-production` repository remains execution-only",
+            "Runtime deployment command surface: private Issue #1",
         ),
         "Product Release authority document",
         errors,
