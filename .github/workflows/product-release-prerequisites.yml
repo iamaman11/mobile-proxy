@@ -76,7 +76,7 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/environments/product-release/secrets?per_page=100" \
-            > environment-secrets.json
+            > environment-secret-names.json
           python3 - <<'PY'
           import json
 
@@ -87,7 +87,7 @@ jobs:
               "ANDROID_RELEASE_KEY_ALIAS",
               "ANDROID_RELEASE_KEY_PASSWORD",
           }
-          payload = json.load(open("environment-secrets.json", encoding="utf-8"))
+          payload = json.load(open("environment-secret-names.json", encoding="utf-8"))
           entries = payload.get("secrets")
           if not isinstance(entries, list):
               raise SystemExit("product-release environment secret-name list is unavailable")
