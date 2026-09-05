@@ -51,12 +51,7 @@ class TunnelCommandReceiver : BroadcastReceiver() {
             return
         }
         TunnelState.setDesired(context, true)
-        val serviceIntent = MobileProxyVpnService.startIntent(context)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
-        }
+        startTunnelService(context)
     }
 
     private fun startEgress(context: Context) {
