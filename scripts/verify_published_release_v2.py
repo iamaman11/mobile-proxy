@@ -40,6 +40,7 @@ def _expected_names(tag: str) -> set[str]:
     return {
         f"mobile-proxy-linux-x86_64-{tag}.tar.gz",
         f"mobile-proxy-android-{tag}.apk",
+        f"mobile-proxy-phone-production-runtime-{tag}.tar.gz",
         *_REQUIRED_CONTRACTS,
     }
 
