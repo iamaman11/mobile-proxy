@@ -42,6 +42,7 @@ The accepted order is:
 ```text
 exact protected PRODUCT main SHA
   -> exact successful Quality push on that same main SHA
+  -> exact successful Product Release prerequisites push on that same main SHA
   -> owner /release-tag command on public #90
   -> exact annotated vMAJOR.MINOR.PATCH tag bound to that SHA
   -> tag Quality succeeds
@@ -103,9 +104,10 @@ It must require:
 2. exact 40-character lowercase SHA;
 3. requested SHA equals the exact current protected PRODUCT `main` SHA;
 4. at least one completed successful `Quality` push on `main` for that exact SHA;
-5. Cargo/Android version contract matches the requested semantic version;
-6. requested tag does not already exist;
-7. created tag object is annotated and resolves exactly to the requested SHA.
+5. at least one completed successful `Product Release prerequisites` push on `main` for that exact SHA;
+6. Cargo/Android version contract matches the requested semantic version;
+7. requested tag does not already exist;
+8. created tag object is annotated and resolves exactly to the requested SHA.
 
 It must **not** require:
 
@@ -118,13 +120,29 @@ It must **not** require:
 
 Creating the product tag authorizes only Product Release publication from that exact source. It does not authorize target mutation.
 
+## Product Release prerequisite proof
+
+The single PRODUCT `.github/workflows/product-release-prerequisites.yml` is the hosted configuration/admission proof that runs for protected `main`.
+
+It must prove that the `product-release` environment exists with the accepted deployment-ref policy, that repository immutable Releases are enabled, and that the environment exposes exactly these required secret **names**:
+
+- `PRODUCT_RELEASE_SETTINGS_TOKEN`;
+- `ANDROID_RELEASE_KEYSTORE_B64`;
+- `ANDROID_RELEASE_KEYSTORE_PASSWORD`;
+- `ANDROID_RELEASE_KEY_ALIAS`;
+- `ANDROID_RELEASE_KEY_PASSWORD`.
+
+The prerequisite proof uses only `PRODUCT_RELEASE_SETTINGS_TOKEN` for read-only GitHub API access. That token requires repository **Administration: read + Environments: read**. Android signing secret values are not loaded by the prerequisite proof; the signing values remain available only to the actual signed Product Release build/publication path.
+
+A prerequisite run is tag-admissible only when it is a completed successful `push` run on `main` whose `head_sha` exactly equals the requested product-tag target SHA. Advancing `main` therefore invalidates older prerequisite evidence automatically.
+
 ## Product Release v2 publication
 
 The PRODUCT `.github/workflows/release.yml` owns the Product Release build/publication plane.
 
 The protected GitHub Environment is `product-release`.
 
-The workflow must fail closed before Release creation unless repository immutable Releases are enabled. The read-only settings check uses a separately scoped secret `PRODUCT_RELEASE_SETTINGS_TOKEN` that requires only repository **Administration: read**. Normal Release publication continues to use the workflow `GITHUB_TOKEN` with bounded `contents: write` permission.
+The workflow must fail closed before Release creation unless repository immutable Releases are enabled. The read-only settings check uses a separately scoped secret `PRODUCT_RELEASE_SETTINGS_TOKEN` requiring repository **Administration: read + Environments: read**. Normal Release publication continues to use the workflow `GITHUB_TOKEN` with bounded `contents: write` permission.
 
 The environment also supplies the existing Android product signing secrets:
 
@@ -218,26 +236,3 @@ The PRODUCT workflows must never:
 - replace assets on an existing Release;
 - bypass the canonical typed digest foundation with a first-party direct digest primitive;
 - use `latest` as deployment identity.
-
-The controller must never become the canonical source/build/signing owner for PRODUCT artifacts.
-
-Historical public physical-kernel work remains immutable Git history after source-ownership convergence; active deployment-control ownership belongs to the Deployment Controller. Product code/runtime logic remains in the PRODUCT repository.
-
-## Failure semantics
-
-Any ambiguity fails closed:
-
-- requested tag SHA differs from exact protected main -> reject tag creation;
-- exact source SHA lacks successful main Quality -> reject tag creation/publication;
-- tag is lightweight, ambiguous or resolves to a different SHA -> reject;
-- PRODUCT Android signing verification fails -> no Release creation;
-- typed Product Release digest contract fails -> no Release creation/publication;
-- immutable Releases setting cannot be positively proven enabled -> no Release creation;
-- draft asset set differs -> do not publish;
-- any downloaded draft asset differs from local exact bytes -> do not publish;
-- published Release is mutable -> not deployable;
-- Release v2 lacks Linux/APK/manifest/provenance/typed-digest set -> not deployable;
-- controller cannot bind exact Product Release + controller revision -> no target mutation;
-- execution outcome becomes ambiguous after destructive boundary -> read-only recovery, never blind retry.
-
-The recovery path for product publication is idempotent verification/reuse of the exact matching draft or immutable Release. The recovery path for deployment remains the Deployment Controller State Machine. These are separate trust domains and must not be collapsed.
