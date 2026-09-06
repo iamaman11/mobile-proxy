@@ -24,14 +24,21 @@ DEPLOYMENT CONTROLLER — iamaman11/mobile-proxy-production
   exactly-once destructive dispatch / postcondition / recovery / evidence
 ```
 
-Neither plane may silently take over the other's responsibility.
+Both repositories are public. Neither plane may silently take over the other's responsibility.
+
+## Foundation invariants
+
+- No code for code.
+- No verification of verification.
+- No new framework is justified merely to reconcile old PRODUCT/controller duplication.
+- No old failed GitHub run is manually rerun to perform a deployment.
+
+These are durable controller-v2 foundation constraints, not optional style guidance.
 
 ## Engineering doctrine
 
 Build the smallest understandable industrial system that satisfies the real production topology.
 
-- no code for code;
-- no verification of verification;
 - one owner per state/decision;
 - add a layer only for an independent responsibility/lifecycle/failure mode;
 - generalize only after two real implementations need the same abstraction, or another concrete present-day need exists;
