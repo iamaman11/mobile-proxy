@@ -198,7 +198,7 @@ jobs:
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"
           git push origin "refs/tags/$RELEASE_TAG"
 
-      - name: Dispatch exact Product Release publication or recovery
+      - name: Dispatch exact Product Release publication from tagged tree
         env:
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
         shell: bash
@@ -206,7 +206,7 @@ jobs:
           set -euo pipefail
           gh workflow run release.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref "$RELEASE_TAG" \
             -f "release_tag=$RELEASE_TAG"
 
       - name: Record bounded product release authority result
@@ -224,6 +224,7 @@ jobs:
             echo '- Android product version contract verified: true'
             echo '- Existing tag recovery requires exact annotated tag identity: true'
             echo '- New tag creation requires target to equal current protected main: true'
+            echo '- Product Release workflow ref equals exact release tag: true'
             echo '- Product Release publication explicitly dispatched: true'
             echo '- Physical acceptance required before product tag: false'
             echo '- Phone signing-generation gate required before product tag: false'
