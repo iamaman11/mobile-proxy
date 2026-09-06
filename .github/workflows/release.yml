@@ -219,14 +219,75 @@ jobs:
             > release/phone-runtime-build-evidence.json
           python3 -m json.tool release/phone-runtime-build-evidence.json >/dev/null
 
+      - name: Verify manual publication recovery tooling authority
+        id: recovery_tooling
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLICATION_TOOLING_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PUBLICATION_TOOLING_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          git fetch origin main --force
+          git cat-file -e "$PUBLICATION_TOOLING_SHA^{commit}"
+          git merge-base --is-ancestor "$PUBLICATION_TOOLING_SHA" origin/main
+          git cat-file -e "$PUBLICATION_TOOLING_SHA:apps/operator-cli/src/bin/product-release-asset-digest.rs"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$PUBLICATION_TOOLING_SHA&event=push&per_page=100" \
+            > recovery-tooling-quality-runs.json
+          python3 - <<'PY'
+          import json
+          import os
+
+          target = os.environ["PUBLICATION_TOOLING_SHA"]
+          runs = json.load(open("recovery-tooling-quality-runs.json", encoding="utf-8")).get(
+              "workflow_runs", []
+          )
+          eligible = [
+              run for run in runs
+              if run.get("name") == "Quality"
+              and run.get("path") == ".github/workflows/quality.yml"
+              and run.get("head_branch") == "main"
+              and run.get("head_sha") == target
+              and run.get("event") == "push"
+              and run.get("status") == "completed"
+              and run.get("conclusion") == "success"
+          ]
+          if not eligible:
+              raise SystemExit(
+                  "manual publication recovery tooling has no eligible successful Quality push on main"
+              )
+          PY
+          echo "sha=$PUBLICATION_TOOLING_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Create exact Product Release v2 bundle
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
           RELEASE_SHA: ${{ steps.tag.outputs.sha }}
           NATIVE_ATTESTATION: ${{ steps.provenance.outputs.native }}
+          RECOVERY_TOOLING_SHA: ${{ steps.recovery_tooling.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
+          digest_helper=apps/operator-cli/src/bin/product-release-asset-digest.rs
+          tagged_digest_helper="$RUNNER_TEMP/product-release-asset-digest.rs.tagged"
+          helper_overlaid=false
+          restore_digest_helper() {
+            if [[ "$helper_overlaid" = true ]]; then
+              cp "$tagged_digest_helper" "$digest_helper"
+            fi
+          }
+          trap restore_digest_helper EXIT
+          if [[ -n "$RECOVERY_TOOLING_SHA" ]]; then
+            cp "$digest_helper" "$tagged_digest_helper"
+            helper_overlaid=true
+            git show "$RECOVERY_TOOLING_SHA:$digest_helper" > "$digest_helper"
+            test "$(git hash-object "$digest_helper")" = "$(git rev-parse "$RECOVERY_TOOLING_SHA:$digest_helper")"
+            cargo test --locked -p operator-cli --bin product-release-asset-digest
+          fi
           source_date_epoch=$(git show -s --format=%ct HEAD)
           python3 scripts/create_release_bundle_v2.py \
             --repository-root . \
@@ -239,6 +300,9 @@ jobs:
             --builder "github-actions:iamaman11/mobile-proxy/.github/workflows/release.yml" \
             --workflow-ref "iamaman11/mobile-proxy/.github/workflows/release.yml@refs/tags/$RELEASE_TAG" \
             --github-native-attestation "$NATIVE_ATTESTATION"
+          restore_digest_helper
+          trap - EXIT
+          test -z "$(git status --porcelain --untracked-files=no)"
           python3 -m json.tool release/release-manifest.json >/dev/null
           python3 -m json.tool release/provenance.json >/dev/null
           python3 -m json.tool release/artifact-digests.json >/dev/null
