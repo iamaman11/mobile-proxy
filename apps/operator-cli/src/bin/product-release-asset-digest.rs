@@ -69,7 +69,10 @@ mod tests {
             "phone-production-runtime/bin/sing-box",
             "phone-production-runtime/components.json",
         ] {
-            assert!(validate_asset_name(name).is_ok(), "expected valid name: {name}");
+            assert!(
+                validate_asset_name(name).is_ok(),
+                "expected valid name: {name}"
+            );
         }
     }
 
@@ -85,7 +88,10 @@ mod tests {
             "phone-production-runtime\\bin\\runtime-supervisor",
             "phone-production-runtime/bin/runtime-supervisor\nother",
         ] {
-            assert!(validate_asset_name(name).is_err(), "expected invalid name: {name:?}");
+            assert!(
+                validate_asset_name(name).is_err(),
+                "expected invalid name: {name:?}"
+            );
         }
     }
 }
