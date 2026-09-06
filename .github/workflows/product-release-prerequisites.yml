@@ -48,10 +48,11 @@ jobs:
               for item in policies.get("branch_policies", [])
               if isinstance(item, dict)
           }
-          expected = {("branch", "main")}
+          expected = {("branch", "main"), ("tag", "v*.*.*")}
           if resolved != expected:
               raise SystemExit(
-                  "product-release environment deployment policy must be exactly branch:main; "
+                  "product-release environment deployment policy must be exactly "
+                  "branch:main plus tag:v*.*.*; "
                   f"resolved={sorted(resolved)!r}"
               )
           PY
@@ -126,7 +127,7 @@ jobs:
           {
             echo '## Product Release prerequisite evidence'
             echo '- Environment: product-release'
-            echo '- Environment deployment ref policy: branch main only'
+            echo '- Environment deployment ref policy: branch main + tag v*.*.* only'
             echo '- Exact required environment secret names present: true'
             echo '- Android signing secret values loaded: false'
             echo '- Immutable Releases enabled: true'

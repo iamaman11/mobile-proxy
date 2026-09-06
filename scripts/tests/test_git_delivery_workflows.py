@@ -39,6 +39,26 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn("export PATH", release)
         self.assertIn('test "$(command -v sdkmanager)" = "$sdkmanager"', release)
 
+    def test_product_release_environment_admits_main_and_semver_tags_only(self) -> None:
+        prerequisites = (
+            ROOT / ".github/workflows/product-release-prerequisites.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'expected = {("branch", "main"), ("tag", "v*.*.*")}',
+            prerequisites,
+        )
+        self.assertIn(
+            "product-release environment deployment policy must be exactly ",
+            prerequisites,
+        )
+        self.assertIn("branch:main plus tag:v*.*.*", prerequisites)
+        self.assertIn(
+            "Environment deployment ref policy: branch main + tag v*.*.* only",
+            prerequisites,
+        )
+        self.assertNotIn('expected = {("branch", "main")}', prerequisites)
+
     def test_release_tag_dispatches_publication_from_exact_tag_tree(self) -> None:
         release_tag = (ROOT / ".github/workflows/release-tag.yml").read_text(
             encoding="utf-8"
