@@ -58,7 +58,9 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn('test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"', release_tag)
         self.assertIn("state=existing", release_tag)
         self.assertIn("if: steps.tag_state.outputs.state == 'absent'", release_tag)
-        self.assertIn('test "$TARGET_SHA" = "$CURRENT_MAIN_SHA"', release_tag)
+        self.assertIn('if [[ "$TARGET_SHA" != "$CURRENT_MAIN_SHA" ]]; then', release_tag)
+        self.assertIn("target SHA does not equal exact protected main", release_tag)
+        self.assertIn('test "$(git rev-parse origin/main)" = "$TARGET_SHA"', release_tag)
         self.assertNotIn("Require absent product tag", release_tag)
 
     def test_quality_gate_owns_immutable_release_candidate_evidence(self) -> None:
