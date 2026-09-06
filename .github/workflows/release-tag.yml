@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   create-tag:
-    name: Bind product tag to exact protected main
+    name: Bind or recover product tag on exact protected main history
     if: >-
       github.event.issue.number == 90 &&
       github.event.comment.user.login == github.repository_owner &&
@@ -49,9 +49,8 @@ jobs:
               handle.write(f"target_sha={target_sha}\n")
           PY
 
-      - name: Require exact protected main
-        env:
-          TARGET_SHA: ${{ steps.command.outputs.target_sha }}
+      - name: Require protected main
+        id: main
         shell: bash
         run: |
           set -euo pipefail
@@ -60,16 +59,17 @@ jobs:
           import json
           import os
 
-          target_sha = os.environ["TARGET_SHA"]
           protected_main = json.load(open("protected-main.json", encoding="utf-8"))
           main_commit = protected_main.get("commit")
           if protected_main.get("name") != "main" or protected_main.get("protected") is not True:
               raise SystemExit("canonical main is not protected")
-          if not isinstance(main_commit, dict) or main_commit.get("sha") != target_sha:
-              raise SystemExit("target SHA does not equal exact protected main")
+          if not isinstance(main_commit, dict) or not isinstance(main_commit.get("sha"), str):
+              raise SystemExit("canonical protected main SHA is unavailable")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"sha={main_commit['sha']}\n")
           PY
 
-      - name: Require exact successful main Quality
+      - name: Require exact successful main Quality for target source
         env:
           TARGET_SHA: ${{ steps.command.outputs.target_sha }}
         shell: bash
@@ -99,7 +99,7 @@ jobs:
               raise SystemExit("exact protected main has no eligible successful Quality push")
           PY
 
-      - name: Require exact successful Product Release prerequisites
+      - name: Require exact successful Product Release prerequisites for target source
         env:
           TARGET_SHA: ${{ steps.command.outputs.target_sha }}
         shell: bash
@@ -138,36 +138,52 @@ jobs:
           ref: ${{ steps.command.outputs.target_sha }}
           fetch-depth: 0
 
-      - name: Verify exact source and release-version contract
+      - name: Verify exact source lineage and release-version contract
         env:
           TARGET_SHA: ${{ steps.command.outputs.target_sha }}
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
+          CURRENT_MAIN_SHA: ${{ steps.main.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
           test -z "$(git status --porcelain --untracked-files=no)"
           git fetch origin main --tags --force
-          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+          test "$(git rev-parse origin/main)" = "$CURRENT_MAIN_SHA"
+          git merge-base --is-ancestor "$TARGET_SHA" origin/main
           version="${RELEASE_TAG#v}"
           python3 scripts/verify_android_release_contract.py \
             --root . \
             --expected-version "$version" \
             --output "${RUNNER_TEMP}/release-contract.json"
 
-      - name: Require absent product tag
+      - name: Classify exact product tag state
+        id: tag_state
         env:
+          TARGET_SHA: ${{ steps.command.outputs.target_sha }}
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
+          CURRENT_MAIN_SHA: ${{ steps.main.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
+          state=absent
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG" || \
              git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "product release tag already exists" >&2
-            exit 1
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" --force
+            test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"
+            state=existing
+          else
+            if [[ "$TARGET_SHA" != "$CURRENT_MAIN_SHA" ]]; then
+              echo "target SHA does not equal exact protected main" >&2
+              exit 1
+            fi
+            test "$(git rev-parse origin/main)" = "$TARGET_SHA"
           fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
 
       - name: Create and push exact annotated product tag
+        if: steps.tag_state.outputs.state == 'absent'
         env:
           TARGET_SHA: ${{ steps.command.outputs.target_sha }}
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
@@ -182,7 +198,7 @@ jobs:
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"
           git push origin "refs/tags/$RELEASE_TAG"
 
-      - name: Dispatch exact Product Release publication
+      - name: Dispatch exact Product Release publication or recovery
         env:
           RELEASE_TAG: ${{ steps.command.outputs.tag }}
         shell: bash
@@ -199,11 +215,15 @@ jobs:
           {
             echo '## Product release tag authority v2'
             echo "- Release tag: ${{ steps.command.outputs.tag }}"
-            echo "- Exact protected main SHA: ${{ steps.command.outputs.target_sha }}"
-            echo '- Exact successful main Quality required: true'
-            echo '- Exact same-SHA Product Release prerequisites required: true'
+            echo "- Exact source SHA: ${{ steps.command.outputs.target_sha }}"
+            echo "- Current protected main SHA: ${{ steps.main.outputs.sha }}"
+            echo "- Tag state before command: ${{ steps.tag_state.outputs.state }}"
+            echo '- Target source must be in current protected main history: true'
+            echo '- Exact successful target-source main Quality required: true'
+            echo '- Exact target-source Product Release prerequisites required: true'
             echo '- Android product version contract verified: true'
-            echo '- Annotated tag required: true'
+            echo '- Existing tag recovery requires exact annotated tag identity: true'
+            echo '- New tag creation requires target to equal current protected main: true'
             echo '- Product Release publication explicitly dispatched: true'
             echo '- Physical acceptance required before product tag: false'
             echo '- Phone signing-generation gate required before product tag: false'

@@ -207,6 +207,11 @@ jobs:
           set -euo pipefail
           sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           test -n "$sdk_root"
+          sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager"
+          PATH="$sdk_root/cmdline-tools/latest/bin:$PATH"
+          export PATH
+          test "$(command -v sdkmanager)" = "$sdkmanager"
           python3 scripts/prepare_phone_release_runtime.py \
             --repository-root . \
             --android-sdk-root "$sdk_root" \
