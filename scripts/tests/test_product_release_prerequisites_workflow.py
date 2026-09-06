@@ -21,9 +21,9 @@ class ProductReleasePrerequisiteWorkflowTests(unittest.TestCase):
             "environments/product-release",
             "deployment-branch-policies?per_page=100",
             "environments/product-release/secrets?per_page=100",
-            'expected = {("branch", "main")}',
+            'expected = {("branch", "main"), ("tag", "v*.*.*")}',
             "if resolved != expected:",
-            "Environment deployment ref policy: branch main only",
+            "Environment deployment ref policy: branch main + tag v*.*.* only",
             "repos/$GITHUB_REPOSITORY/immutable-releases",
             'value.get("enabled") is not True',
             "Exact required environment secret names present: true",
@@ -49,6 +49,8 @@ class ProductReleasePrerequisiteWorkflowTests(unittest.TestCase):
             "ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}",
             "gh release create",
             "git tag -a",
+            'expected = {("branch", "main")}',
+            "Environment deployment ref policy: branch main only",
         ):
             self.assertNotIn(forbidden, body)
 
