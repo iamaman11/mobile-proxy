@@ -37,6 +37,47 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn("export PATH", release)
         self.assertIn('test "$(command -v sdkmanager)" = "$sdkmanager"', release)
 
+    def test_release_manual_recovery_uses_quality_approved_digest_tooling_only(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Verify manual publication recovery tooling authority", release)
+        self.assertIn("if: github.event_name == 'workflow_dispatch'", release)
+        self.assertIn("PUBLICATION_TOOLING_SHA: ${{ github.sha }}", release)
+        self.assertIn('test "$GITHUB_REF" = refs/heads/main', release)
+        self.assertIn(
+            'git merge-base --is-ancestor "$PUBLICATION_TOOLING_SHA" origin/main',
+            release,
+        )
+        self.assertIn(
+            "manual publication recovery tooling has no eligible successful Quality push on main",
+            release,
+        )
+        self.assertIn(
+            'git cat-file -e "$PUBLICATION_TOOLING_SHA:apps/operator-cli/src/bin/product-release-asset-digest.rs"',
+            release,
+        )
+        self.assertIn(
+            'git show "$RECOVERY_TOOLING_SHA:$digest_helper" > "$digest_helper"',
+            release,
+        )
+        self.assertIn(
+            "cargo test --locked -p operator-cli --bin product-release-asset-digest",
+            release,
+        )
+        self.assertIn("restore_digest_helper", release)
+        self.assertIn('test -z "$(git status --porcelain --untracked-files=no)"', release)
+        self.assertEqual(
+            release.count('git show "$RECOVERY_TOOLING_SHA:$digest_helper"'), 1
+        )
+        self.assertLess(
+            release.index("Prepare exact rooted-phone runtime binaries"),
+            release.index("Verify manual publication recovery tooling authority"),
+        )
+        self.assertLess(
+            release.index("Verify manual publication recovery tooling authority"),
+            release.index("Create exact Product Release v2 bundle"),
+        )
+
     def test_release_tag_explicitly_dispatches_publication(self) -> None:
         release_tag = (ROOT / ".github/workflows/release-tag.yml").read_text(
             encoding="utf-8"
