@@ -5,7 +5,7 @@ on:
     types: [created]
 
 permissions:
-  actions: read
+  actions: write
   contents: write
   issues: read
 
@@ -182,6 +182,17 @@ jobs:
           test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"
           git push origin "refs/tags/$RELEASE_TAG"
 
+      - name: Dispatch exact Product Release publication
+        env:
+          RELEASE_TAG: ${{ steps.command.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "release_tag=$RELEASE_TAG"
+
       - name: Record bounded product release authority result
         shell: bash
         run: |
@@ -193,6 +204,7 @@ jobs:
             echo '- Exact same-SHA Product Release prerequisites required: true'
             echo '- Android product version contract verified: true'
             echo '- Annotated tag required: true'
+            echo '- Product Release publication explicitly dispatched: true'
             echo '- Physical acceptance required before product tag: false'
             echo '- Phone signing-generation gate required before product tag: false'
             echo '- Phone access performed: false'
