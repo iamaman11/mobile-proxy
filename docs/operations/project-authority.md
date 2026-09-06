@@ -51,7 +51,10 @@ The Deployment Controller owns the active deployment command surface on `iamaman
 
 ```text
 /deploy <target> <vX.Y.Z>
+/retry-deploy phone-production <vX.Y.Z> <prior-semantic-request-id>
 ```
+
+Ordinary `/deploy` remains the normal deployment command and keeps its existing semantic request identity. `/retry-deploy` is not a generic replay mechanism: it creates a distinct semantic request bound to the exact prior semantic request id and is admitted only for an exact matching `phone-production` request whose trusted canonical history proves exactly one pre-mutation `REFUSED` terminal with `mutation_performed=false`, `recovery_required=false`, and no durable mutation intent. GitHub run/comment provenance never supplies retry identity. `UNKNOWN`, `RECOVERED`, `QUARANTINED`, mutation-bearing, intent-bearing, mismatched, malformed or non-terminal history is not eligible for this retry path. Retry is always explicit; it is never automatic.
 
 The Deployment Controller owns:
 
@@ -126,6 +129,8 @@ protected PRODUCT main + exact successful Quality
   -> controller admission / observation / possible mutation / verification / recovery
 ```
 
+An explicitly admitted pre-mutation `REFUSED` retry remains inside the same Deployment Controller transaction authority and consumes the same immutable Product Release. It does not create or alter PRODUCT release authority and does not permit a second destructive effect for any request that reached mutation intent or an ambiguous physical boundary.
+
 A Product Release is an input to deployment. Physical phone acceptance is therefore not a prerequisite for creating the Product Release; final operational acceptance happens after deployment of that immutable release.
 
 Historical Item 19/Item 20 evidence remains historical acceptance/development evidence. It does not supply normal Product Release or runtime deployment authority under controller v2.
@@ -156,6 +161,7 @@ Authority conflicts fail closed by domain:
 
 - PRODUCT source/build/tag/Release ambiguity -> stop in PRODUCT plane;
 - controller revision/request/target-state ambiguity before dispatch -> no mutation;
+- a new explicit retry may be admitted only from trusted durable proof of an exact matching pre-mutation `REFUSED` terminal with no mutation intent;
 - ambiguity after a durable destructive dispatch boundary -> no blind retry, read-only recovery only;
 - Product Release missing or mutable -> controller deployment admission rejects it;
 - controller cannot bind exact Product Release + exact controller revision -> no mutation;
