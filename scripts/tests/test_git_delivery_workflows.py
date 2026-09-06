@@ -28,6 +28,14 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertNotIn("runs-on: self-hosted", release)
         self.assertNotIn("mobile-proxy-production", release)
 
+    def test_release_exposes_hosted_sdkmanager_to_phone_runtime_builder(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+        self.assertIn('sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"', release)
+        self.assertIn('test -x "$sdkmanager"', release)
+        self.assertIn('export PATH="$(dirname "$sdkmanager"):$PATH"', release)
+        self.assertIn('test "$(command -v sdkmanager)" = "$sdkmanager"', release)
+
     def test_release_tag_explicitly_dispatches_publication(self) -> None:
         release_tag = (ROOT / ".github/workflows/release-tag.yml").read_text(
             encoding="utf-8"
@@ -38,6 +46,19 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn('--repo "$GITHUB_REPOSITORY"', release_tag)
         self.assertIn("--ref main", release_tag)
         self.assertIn('-f "release_tag=$RELEASE_TAG"', release_tag)
+
+    def test_release_tag_recovery_never_moves_existing_tag(self) -> None:
+        release_tag = (ROOT / ".github/workflows/release-tag.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('git merge-base --is-ancestor "$TARGET_SHA" origin/main', release_tag)
+        self.assertIn('test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag', release_tag)
+        self.assertIn('test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"', release_tag)
+        self.assertIn("state=existing", release_tag)
+        self.assertIn("if: steps.tag_state.outputs.state == 'absent'", release_tag)
+        self.assertIn('test "$TARGET_SHA" = "$CURRENT_MAIN_SHA"', release_tag)
+        self.assertNotIn("Require absent product tag", release_tag)
 
     def test_quality_gate_owns_immutable_release_candidate_evidence(self) -> None:
         quality = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
