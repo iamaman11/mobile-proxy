@@ -1,170 +1,92 @@
 # Mobile Proxy Implementation Plan
 
-The sole active repository roadmap is:
+The sole active repository roadmap is [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md).
 
-- [Production Baseline Plan](docs/PRODUCTION_BASELINE_PLAN.md)
+The normative acceptance matrix is `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`. PRODUCT Issue #249 is the stage-mapped planning backlog. PRODUCT Issue #179 is the only authoritative stage/operations cursor and overrides stale roadmap prose.
 
-The normative final acceptance matrix is `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`. Public Issue #228 carries detailed backlog context. The newest authoritative checkpoint in public Issue #179 decides the exact next bounded action and overrides stale roadmap prose.
+The canonical working method is `STAGE_WORKFLOW.md`.
 
 ## Authority
 
-The accepted v2 split is:
-
 ```text
-PRODUCT
-  iamaman11/mobile-proxy
-  -> application/runtime source
-  -> shared product/domain architecture
-  -> Quality
-  -> product build + signing verification
-  -> annotated product tag
-  -> immutable Product Release
+PRODUCT — iamaman11/mobile-proxy
+  source / build / Quality / tags / immutable Product Release
 
-DEPLOYMENT CONTROLLER
-  iamaman11/mobile-proxy-production
-  -> /deploy ingress on Controller Issue #1
-  -> deployment State Machine / Transaction Kernel
-  -> target admission + serialization + observation/adapters
-  -> durable mutation intent
-  -> exactly-once destructive dispatch
-  -> postcondition / recovery / quarantine
-  -> canonical runtime execution classification
+DEPLOYMENT CONTROLLER — iamaman11/mobile-proxy-production
+  /deploy ingress / admission / durable intent / target adapters
+  exactly-once destructive dispatch / postcondition / recovery / evidence
 ```
 
-Both repositories are public. Repository visibility is not the confidentiality boundary. Secrets, target bindings, raw target/device identifiers, credentials, private keys, sensitive rendered configuration and unsafe raw runtime/ADB logs remain private.
-
-Normative authority contracts:
-
-- `docs/operations/project-authority.md`
-- `contracts/operations/project-authority-v2.json`
-- `contracts/operations/github-control-plane-v2.json`
-- `contracts/operations/production-topology-v2.json`
-- `contracts/operations/product-release-authority-v2.json`
-
-Issue #179 is the single current engineering/migration/execution cursor. Issue #228 is backlog only. Deployment Controller Issue #1 is runtime command/ledger surface. This file never grants `/deploy`, phone/ADB access, provider/VM mutation, signing authority, tag authority or Release mutation.
+Neither plane may take over the other's responsibility. Secrets, target bindings, credentials, private keys, sensitive rendered configuration and unsafe raw runtime logs never belong in public evidence.
 
 ## Engineering doctrine
 
-The project targets a small, understandable industrial system.
+Build the smallest understandable industrial system that satisfies the real production topology.
 
-- No code for code.
-- No verification of verification.
-- Prefer deletion and consolidation over new abstraction layers.
-- One owner per state/decision.
-- Keep normal flow understandable as `state -> guard -> operation -> effect -> independent observation -> resulting state`.
-- Do not preserve disposable bootstrap phone state through complicated compatibility machinery unless continuity becomes an explicit production requirement.
-- No new framework is justified merely to reconcile old PRODUCT/controller duplication.
+- no code for code;
+- no verification of verification;
+- one owner per state/decision;
+- add a layer only for an independent responsibility/lifecycle/failure mode;
+- generalize only after two real implementations need the same abstraction, or another concrete present-day need exists;
+- prefer explicit contracts, small pure functions and thin adapters;
+- tests protect real behavior/failure/authority boundaries;
+- prefer deletion/consolidation over speculative frameworks.
 
-## Durable A-H path
+## Seven-stage roadmap
 
-### Gate A — Deployment Controller health
+Stage numbering is execution planning, not authority. The newest #179 checkpoint decides what is currently allowed.
 
-Required controller policies must execute on real runners against the exact current controller revision and finish terminal green. Tree-equivalence alone is insufficient.
+1. **Deployment Controller v2 composite phone transaction — COMPLETE.** One durable phone transaction owns APK + rooted runtime, with one destructive authority and read-only UNKNOWN recovery.
+2. **Immutable Product Release `v0.1.6` — CURRENT.** Close only live release blockers, restore the normal release-tag happy path, publish the six-asset immutable Release and prove Controller admission.
+3. **First real phone deployment.** Execute exactly one admitted `/deploy phone-production v0.1.6`, prove APK + rooted-runtime local postcondition and durable terminal evidence.
+4. **Phone industrial operational validation.** Prove real data path, resource bounds, reboot/restart, degraded states, recovery, causal re-observation, tamper detection and soak for the accepted phone topology.
+5. **Phone production baseline acceptance / simplification.** Close the phone baseline, remove/isolate redundant legacy surfaces, converge docs and ownership, and leave one understandable phone production path. This is not yet full PHONE+VM project acceptance.
+6. **VM production transaction + first real deployment.** Add `vm-production` as the second real Controller target using the immutable Linux Release asset, a concrete VM lifecycle/binding and exactly-once deployment semantics; deploy one real production VM and prove its local postcondition.
+7. **Combined PHONE + VM operational acceptance.** Prove the complete production topology end-to-end with exact identities on both targets, cross-target data path, restart/recovery/failure behavior, bounded load and soak. Stage 7 is the final full-system 10/10 acceptance.
 
-### Gate B — source ownership / authority convergence
+## VM design boundary
 
-Remove active duplicate deployment-control ownership from PRODUCT. Keep PRODUCT/shared-domain/build/release code in `mobile-proxy`; keep ingress, target mutation State Machine, durable intent, exactly-once dispatch, recovery/quarantine and canonical runtime execution truth in `mobile-proxy-production`.
+VM work is intentionally deferred until Stage 6. Do not pre-generalize phone code for a hypothetical VM during Stages 2–5.
 
-Do not create a third shared controller framework. Historical public controller code remains in Git history rather than as a second maintained implementation.
+When Stage 6 starts:
 
-### Gate C — Android secret-state and backup/D2D hardening
+- reuse the existing Controller State Machine, durable intent, request identity, serialization and recovery semantics;
+- add only the VM-specific target binding/adapter/materialization/observation needed by the chosen real VM topology;
+- use the immutable Linux Product Release artifact; phone runtime identity fields must not leak into VM admission;
+- keep provider credentials and provider mutation out of the phone runner;
+- if VM provisioning/replacement is required, make that lifecycle explicit and Controller-owned rather than hiding it inside deployment shell code;
+- extract shared phone/VM abstractions only after real duplication is visible and materially simpler than two thin adapters.
 
-- eliminate plaintext persistent WireGuard/private tunnel configuration;
-- use the existing AndroidKeyStore/AES-GCM pattern;
-- explicitly exclude secret-bearing state from backup/device transfer;
-- preserve required direct-boot behavior;
-- corrupt/missing ciphertext or key material fails closed;
-- no plaintext fallback.
+Stage 6 exits only when one real `vm-production` deployment is ACCEPTED with immutable Release identity, exact Controller revision, durable intent and independent local postcondition evidence.
 
-### Gate D — Android behavior and framework integration tests
+## Combined-system acceptance boundary
 
-Protect independent production contracts with a small number of strong tests:
-
-- secure state and corruption refusal;
-- boot restoration / desired-state behavior;
-- tunnel lifecycle/backend failure;
-- cellular-egress authentication and network refusal;
-- local-control authentication and bounded retry/timeout behavior;
-- one instrumentation/emulator smoke path for actual Android framework/Keystore/service integration.
-
-### Gate E — supply-chain provenance + Product Release prerequisite hardening
-
-- bind the vendored WireGuard AAR to authoritative upstream identity/version/license/digest;
-- do not load Android signing secret values merely to prove prerequisite configuration;
-- require exact same-SHA successful Quality and Product Release prerequisite proof before product tag creation.
-
-### Gate F — new immutable Product Release
-
-Create the next semantic Product Release only from the hardened exact PRODUCT revision. Do not rewrite historical `v0.1.4`. Require exact annotated tag -> exact source -> exact signed artifacts -> manifest/provenance/digests -> immutable GitHub Release.
-
-### Gate G — exactly one admitted deployment
-
-Only when #179 explicitly authorizes it, submit exactly one semantic:
+Stage 7 validates the product as one operating system, not two independent successful deployments. It must cover the real intended path, for example:
 
 ```text
-/deploy <target> <new-release>
+external client
+  <-> VM / relay / serving edge
+  <-> reverse-tunnel path
+  <-> registered phone runtime
+  <-> selected mobile/cellular egress
 ```
 
-The Deployment Controller must bind exact immutable Product Release + exact controller revision, serialize the target, persist intent before destructive dispatch, perform at most one effect, independently observe postconditions and fail closed into read-only recovery after an ambiguous physical boundary.
+The exact topology is bound from current production contracts when Stage 7 opens; this roadmap does not invent provider details in advance.
 
-No old failed GitHub run is manually rerun to perform a deployment. Re-entry comes only from the canonical controller ledger.
+Stage 7 must prove only concrete operational failure domains that exist in that topology: target restart/reboot, link loss/reconnect, partial target unavailability, allowed version skew if any, resource exhaustion/overload, recovery without blind destructive retry, and end-to-end soak. Do not build a generic multi-target orchestration or chaos framework merely for coverage.
 
-### Gate H — real-world acceptance
+## Durable progress
 
-Prove the deployed immutable release on the registered phone through reverse tunnel, relay/provider, external client, cellular egress/IP rotation, reboot/fallback/recovery and reliability/soak criteria in `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`.
-
-Historical phone experiments prove parts of the path but never substitute for Gate H on the final immutable Product Release.
-
-## Runtime identity
-
-```text
-product_release
-  = exact semantic tag
-  + exact PRODUCT source SHA
-  + immutable Product Release asset/provenance set
-
-runtime_deployment_identity
-  = product_release
-  + exact admitted controller revision
-```
-
-The PRODUCT and controller revisions belong to different repositories and are intentionally not required to be equal.
-
-## Deployment-controller invariants PRODUCT work must not break
-
-- semantic request identity is independent of GitHub comment/run/attempt provenance;
-- public GitHub Deployment is projection only;
-- durable mutation intent precedes destructive dispatch;
-- one durable intent admits at most one destructive dispatch;
-- ambiguous post-dispatch state never causes blind destructive retry;
-- UNKNOWN continuation is read-only observation/reconciliation;
-- `RECOVERED != ACCEPTED`;
-- target serialization is controller-owned;
-- controller durable terminal classification is runtime truth;
-- sensitive target/secret data remains private even though controller source/policy is public.
-
-## Quality
-
-For docs/policy-sized work:
-
-```bash
-scripts/quality-gate.sh fast
-```
-
-For code/release work:
-
-```bash
-scripts/quality-gate.sh
-```
-
-GitHub `Quality Gate` is aggregate PRODUCT software/policy evidence. It does not manufacture current target state or authorize deployment.
+For each stage: one subordinate Stage Issue in the owning repository; implementation progress in the stage branch/PR; significant non-code findings in the Stage Issue; #179 only for authority/stage boundaries. PR-ready and routine CI fixes are not stop points.
 
 ## Definition of done
 
-Full production 10/10 requires all three evidence domains:
+Full production operation is complete only after Stage 7:
 
-1. PRODUCT security, behavior, Quality, release-gate and dependency provenance are proven.
-2. Deployment Controller exactly-once mutation, target observation, recovery/quarantine and terminal evidence are proven.
-3. The separately authorized real target acceptance/recovery/soak sequence passes with no unresolved P0/P1 defect.
+1. PRODUCT release/security/provenance properties are accepted.
+2. Deployment Controller exactly-once/recovery invariants are accepted for both real targets.
+3. Phone and VM each have direct local postcondition evidence.
+4. The combined production topology passes agreed functional, recovery, bounded-load and soak acceptance.
+5. No unresolved P0/P1 contradicts the production acceptance definition.
 
-The newest #179 checkpoint remains the only authority for the exact next bounded step.
+Until Stage 6 explicitly opens, `vm-production` remains fail-closed and no provider/VM mutation is implied by this plan.

@@ -3,210 +3,210 @@
 Status: **active canonical implementation roadmap**  
 PRODUCT repository: `iamaman11/mobile-proxy`  
 Deployment Controller repository: `iamaman11/mobile-proxy-production`  
-Acceptance backlog: public Issue #228  
-Authoritative next-step cursor: newest authoritative checkpoint in public Issue #179
+Planning / acceptance backlog: PRODUCT Issue #249  
+Authoritative stage cursor: newest authoritative checkpoint in PRODUCT Issue #179  
+Working method: `STAGE_WORKFLOW.md`
 
-This file defines durable ordering and acceptance criteria. Issue #179 alone decides the exact current bounded action. Passing a roadmap stage never grants phone/ADB/provider/VM/tag/Release authority by itself.
+This file defines durable ordering and acceptance intent. It never grants `/deploy`, phone/ADB, provider/VM, tag or Product Release authority by itself; #179 does.
 
 ## 1. Goal
 
-Reach a simple, understandable industrial Mobile Proxy baseline with:
+Reach one understandable industrial Mobile Proxy system with:
 
-- secure, behavior-tested PRODUCT code;
-- deterministic Quality and immutable Product Release evidence;
-- one Deployment Controller owning deployment execution;
-- exactly-once destructive target semantics;
-- independent target postcondition observation;
-- deterministic recovery/quarantine after ambiguous execution;
-- auditable dependency provenance;
-- separately authorized real-target acceptance and soak evidence;
+- deterministic PRODUCT build/Quality and immutable Product Release identity;
+- one Deployment Controller owning all physical deployment authority;
+- exactly-once destructive semantics per durable intent;
+- independent postcondition observation and fail-closed recovery;
+- one accepted phone-production target;
+- one accepted vm-production target;
+- one proven end-to-end PHONE + VM production topology;
 - no unresolved P0/P1 defect.
 
-No code for code. No verification of verification. Prefer deletion/consolidation over new framework layers.
+No code for code. No verification of verification. Prefer deletion, explicit contracts, small pure functions and thin adapters over speculative framework layers.
 
 ## 2. Authority model
 
-The accepted v2 split is normative:
-
 | Plane | Repository | Authority |
 | --- | --- | --- |
-| PRODUCT | `iamaman11/mobile-proxy` | application/runtime source, shared product/domain architecture, Quality, product build, Android signing verification, annotated tags, immutable Product Releases |
-| DEPLOYMENT CONTROLLER | `iamaman11/mobile-proxy-production` | deployment ingress, State Machine / Transaction Kernel, target admission/serialization/observation/adapters, durable mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine, canonical runtime execution classification |
+| PRODUCT | `iamaman11/mobile-proxy` | application/runtime source, shared product/domain architecture, Quality, product build, signing verification, annotated tags, immutable Product Releases |
+| DEPLOYMENT CONTROLLER | `iamaman11/mobile-proxy-production` | deployment ingress, admission, target serialization/observation/adapters, durable mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine and canonical deployment evidence |
 
-Both repositories are public. Secrets, private keys, target bindings, raw target identifiers, credentials, sensitive rendered configuration and unsafe raw production/ADB logs remain private. Repository visibility is never an authorization or confidentiality mechanism.
+Both repositories are public. Secrets, private keys, target bindings, raw target identifiers, credentials, sensitive rendered configuration and unsafe raw production logs remain private.
 
-Normative contracts:
+One state/decision has one owner. PRODUCT never becomes deployment transaction authority; Controller never becomes canonical PRODUCT source/build/tag/Release authority.
 
-- `docs/operations/project-authority.md`
-- `contracts/operations/project-authority-v2.json`
-- `contracts/operations/github-control-plane-v2.json`
-- `contracts/operations/production-topology-v2.json`
-- `contracts/operations/product-release-authority-v2.json`
-
-The old “thin execution satellite / public physical State Machine owner” model is superseded.
-
-## 3. Retained PRODUCT invariants
-
-Gate B changes deployment ownership, not product behavior.
-
-### Compatibility
-
-- mixed SOCKS5/HTTP compatibility remains on port `1080`;
-- SOCKS5 remains on `1081`;
-- HTTP including CONNECT remains on `3128`;
-- QUIC remains primary reverse-tunnel transport;
-- certificate-pinned TLS/TCP reserve remains available;
-- plaintext downgrade is forbidden;
-- WireGuard remains a controlled compatibility/rollback path until an explicit accepted deprecation;
-- operator CLI/admin API compatibility changes only through reviewed versioned migration.
-
-### Architecture and state ownership
-
-Inside PRODUCT, dependency direction remains foundation/domain -> application -> infrastructure/adapters -> composition/delivery. Pure/domain modules do not own transport, persistence, Android, filesystem, process, environment or provider responsibilities.
-
-Every registered PRODUCT mutable-state group has one authoritative owner. Deployment admission, target mutation, exactly-once dispatch and recovery are not PRODUCT mutable-state ownership; they belong to the Deployment Controller.
-
-### Durable PRODUCT state
-
-- canonical mutable PRODUCT control-plane state is durable rather than memory-only;
-- SQLite retains WAL, foreign keys, bounded busy timeout, single-writer/short-transaction discipline, integrity checks, backup and clean restore behavior;
-- related product-state transitions commit atomically where the persistence contract requires it;
-- legacy JSON migration remains bounded compatibility, not an alternate canonical store.
-
-### Security and bounded operation
-
-Typed identifier/status/error/protocol/tunnel/strategy contracts and typed content/fingerprint digest policy remain in force. Secret values do not enter public Git/evidence. PRODUCT Actions remain least-privilege, fork-safe and free of production phone/ADB execution.
-
-Requests, idempotency, queues/retries, liveness/readiness, authentication and fail-closed proxy/session behavior remain governed by their PRODUCT contracts/tests.
-
-### Delivery integrity
-
-PRODUCT delivery requires reviewed exact source, exact successful Quality where required, deterministic build/signing verification, typed digests/provenance and immutable Product Release evidence. `latest`, mutable branches or approximate artifact identity are forbidden production deployment identity.
-
-## 4. Product Release precedes deployment
+## 3. Product Release and deployment identity
 
 ```text
 protected PRODUCT main + exact successful Quality
-  -> Product Release prerequisite proof
+  -> Product Release prerequisites
   -> annotated product tag
-  -> signed PRODUCT build
-  -> immutable Product Release v2
+  -> immutable Product Release
+  -> Controller admission
   -> /deploy <target> <tag>
-  -> Deployment Controller admission / observation / possible mutation / verification / recovery
+  -> durable intent
+  -> at most one destructive target dispatch
+  -> independent postcondition
+  -> terminal classification / read-only recovery
 ```
 
-Physical phone acceptance is not a prerequisite for Product Release creation. Runtime identity combines the exact immutable Product Release and exact admitted controller revision.
+Production deployment identity is the exact immutable Product Release plus the exact admitted Controller revision. `latest`, mutable branches and approximate artifact identity are forbidden.
 
-## 5. Deployment execution invariants
+Ambiguous post-dispatch state is `UNKNOWN`; it never authorizes blind destructive retry.
+
+## 4. Universal stage workflow
+
+The canonical workflow is `STAGE_WORKFLOW.md`:
+
+- one subordinate Stage Issue in the repository that owns the stage;
+- one stage branch/PR per touched repository when implementation begins;
+- finished functional/docs slice + direct tests -> commit;
+- important non-code decision/finding/blocker/evidence -> Stage Issue comment;
+- ordinary implementation/CI fixes -> commit in the same PR;
+- #179 checkpoint only at stage exit, authority/stage-boundary change, genuine cross-stage blocker, physical UNKNOWN, or explicit owner plan change.
+
+A PR becoming green is not a stage boundary by itself.
+
+## 5. Seven-stage production roadmap
+
+### Stage 1 — Deployment Controller v2 composite phone transaction — COMPLETE
+
+One protected Controller transaction owns the whole phone Product Release: APK + rooted runtime. The accepted path has one durable mutation intent, one destructive authority, independent composite postcondition and read-only UNKNOWN recovery.
+
+### Stage 2 — Immutable Product Release `v0.1.6` — CURRENT
+
+Goal: publish the first immutable Release using the complete six-asset phone identity + realization model through the normal reproducible release path.
+
+Work only on current blockers that materially affect `v0.1.6`: release-tag transport, exact Quality/prerequisites, demonstrated P0/P1 release safety/provenance defects, six-asset publication and exact Controller admission.
+
+Exit: immutable `v0.1.6` exists with exact source/run/release evidence and Controller admission proof. No physical deployment belongs here.
+
+### Stage 3 — First real phone deployment
+
+Goal: execute exactly one admitted `/deploy phone-production v0.1.6` and prove the full local phone Product Release state.
+
+Required: fresh release/controller/target/phone revalidation, real production renderer inputs, one durable composite APK+runtime transaction, atomic activation, complete local postcondition and durable terminal evidence. `UNKNOWN` continues read-only.
+
+Exit: `v0.1.6` is physically ACCEPTED on the registered production phone.
+
+### Stage 4 — Phone industrial operational validation
+
+Goal: prove the accepted phone deployment remains correct under real operation, failures and bounded load.
+
+Validate only real failure domains of the chosen phone topology: serving/data path, runtime processes, rendered config, restart/reboot, partial/degraded states, causal re-observation, resource/overload behavior, tamper/mismatch and soak.
+
+Exit: phone-production is functionally healthy, resource-bounded and recoverable across the agreed matrix.
+
+### Stage 5 — Phone production baseline acceptance / simplification
+
+Goal: make the accepted phone architecture singular, understandable and maintainable before adding the second real target.
+
+Work: converge active docs/entry points, resolve remaining demonstrated phone P0/P1 and evidence-trust gaps, remove or isolate redundant v1/reconstruction paths, and confirm PRODUCT <-> Controller ownership.
+
+Stage 5 should primarily reduce active surface area. It closes the **phone-production baseline**, not final PHONE+VM system acceptance.
+
+Exit: one protected, documented and directly evidenced phone production path remains, with no known P0/P1 contradicting the phone baseline.
+
+### Stage 6 — VM production transaction + first real deployment
+
+Goal: add `vm-production` as the second real Deployment Controller target and deploy one real production VM without weakening the proven phone path.
+
+Required work:
+
+- bind one concrete production VM lifecycle and target identity; do not design for hypothetical providers/VM types;
+- consume the immutable Product Release Linux artifact and exact provenance/digest identity;
+- keep phone-runtime-only identity fields out of VM admission/materialization;
+- add the smallest VM-specific Controller adapter for materialization, activation/service lifecycle and independent observation;
+- reuse the existing semantic request identity, durable intent, target serialization, exactly-once dispatch and read-only UNKNOWN recovery model;
+- keep provider credentials/provider mutation off the phone runner;
+- if VM creation/replacement is required, model that lifecycle explicitly in the Controller instead of hiding provider mutation inside deployment shell code;
+- prove failure modes that actually exist: wrong artifact/digest, target binding mismatch, partial materialization, activation/service failure, ambiguous dispatch and recovery;
+- perform one separately authorized real `vm-production` deployment.
+
+**Generalization rule:** Stage 6 is the first point where phone + VM are two real implementations. Extract shared target abstractions only when concrete duplication exists and the resulting boundary is simpler than two thin adapters. Do not introduce a generic multi-target orchestration framework.
+
+Exit: one real production VM is ACCEPTED with exact immutable Product Release identity, exact Controller revision, durable intent and independent local postcondition evidence; phone-production remains accepted and unaffected.
+
+### Stage 7 — Combined PHONE + VM operational acceptance
+
+Goal: prove the complete production topology as one system, not merely two independently successful target deployments.
+
+The exact topology is bound from current production contracts when Stage 7 opens. Expected proof areas include the real chain such as:
 
 ```text
-semantic request
-  -> admission
-  -> target-global serialization
-  -> target observation
-  -> durable mutation intent
-  -> at most one destructive dispatch for that intent
-  -> independent postcondition observation
-  -> canonical terminal classification
+external client
+  <-> VM / relay / serving edge
+  <-> reverse-tunnel path
+  <-> registered phone runtime
+  <-> selected mobile/cellular egress
 ```
 
-Required:
+Required work:
 
-1. durable mutation intent exists before destructive dispatch;
-2. one intent admits at most one destructive target dispatch;
-3. GitHub comment/run/attempt provenance does not redefine semantic request identity;
-4. ambiguous post-dispatch outcome never causes blind destructive retry;
-5. UNKNOWN continuation is read-only observation/reconciliation;
-6. `RECOVERED != ACCEPTED`;
-7. evidence-write retry never repeats a physical effect;
-8. public GitHub Deployment is bounded projection only;
-9. target-global serialization is Deployment Controller authority;
-10. workflow success is not an independent target postcondition.
+- record exact accepted identities of both targets and their intended compatibility relationship;
+- prove end-to-end serving/data path through PHONE + VM;
+- test target restart/reboot and reconnect behavior;
+- test partial target unavailability and deterministic degraded-state classification;
+- prove recovery does not trigger blind destructive retry on either target;
+- validate bounded load/resource behavior across the real path;
+- validate only version-skew/rolling behavior that the actual production policy permits;
+- run the agreed end-to-end soak/leak/reliability window;
+- converge final operational docs/evidence and close any remaining demonstrated cross-target P0/P1.
 
-PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.
+Do not build a generic distributed orchestrator, service mesh abstraction or chaos framework merely for coverage. Every combined test must name the real failure it protects against.
 
-## 6. Historical evidence boundary
+Exit: PHONE + VM production topology passes final full-system 10/10 acceptance with singular authority, direct local target proofs, end-to-end functional/recovery evidence and no unresolved P0/P1.
 
-Historical Item 19 candidate `d151dbdd156279e32a5361d304c90f996bd2d565` remains immutable provider-lifecycle evidence only. Historical Item 20/signing/reconstruction records remain audit history and do not restore old release ordering or runtime authority.
+## 6. Complexity gate
 
-Old failed workflow runs are never rerun merely to obtain a second physical effect. Re-entry follows current controller durable state and read-only recovery rules.
+A new module/layer/framework/registry/check is justified only if at least one is concrete now:
 
-## 7. Durable A-H implementation order
+- independent responsibility/lifecycle/failure mode;
+- demonstrated defect or trust boundary;
+- real duplication being removed;
+- two real implementations requiring the shared abstraction;
+- direct test of a real failure that otherwise escapes acceptance.
 
-### Gate A — Deployment Controller health
+Future VM needs do not justify abstractions during Stages 2–5. Stage 6 permits only evidence-driven extraction from two real target implementations.
 
-Required current-controller policies execute on real hosted runners and finish terminal green.
+## 7. Acceptance evidence model
 
-### Gate B — source ownership / authority convergence
+The historical A–H gates remain useful as evidence categories, not as the current execution-stage numbering:
 
-Remove duplicate active deployment-controller/physical-operation implementation from PRODUCT. Keep genuine PRODUCT/shared-domain/build/release code. Deployment Controller remains the single owner of ingress, target mutation State Machine, durable intent, exactly-once dispatch, recovery/quarantine and canonical runtime classification.
+- A/B: Controller health and PRODUCT/Controller authority convergence;
+- C/D/E: PRODUCT security, behavior and supply-chain/release hardening;
+- F: immutable Product Release;
+- G: admitted physical deployment;
+- H: real-world operational acceptance.
 
-### Gate C — Android secret-state and backup/D2D hardening
+For the seven-stage roadmap, Gate H is complete only after Stage 7. Stage 5 closes the phone-only production baseline; Stage 6 proves the VM target; Stage 7 closes the combined system.
 
-- no plaintext persistent WireGuard/private tunnel configuration;
-- reuse AndroidKeyStore/AES-GCM;
-- explicit backup/device-transfer exclusions for secret-bearing state;
-- preserve direct-boot requirements;
-- missing/corrupt ciphertext/key material fails closed;
-- no plaintext fallback.
+## 8. Target invariants
 
-### Gate D — Android behavior and framework tests
+### phone-production
 
-Protect secure state, boot restoration, tunnel lifecycle, cellular egress authentication/network refusal, local-control authentication/retry semantics and one Android framework/Keystore/service instrumentation smoke path.
+Uses the immutable APK + rooted-phone runtime identity and the accepted composite phone transaction. Phone-specific runtime realization/configuration remains phone-specific.
 
-### Gate E — supply-chain + Product Release prerequisite hardening
+### vm-production
 
-Bind vendored WireGuard AAR to official upstream identity/version/license/digest. Product tag creation requires exact same-SHA successful Quality plus Product Release prerequisite proof; prerequisite readiness must not unnecessarily load signing secret values.
+Remains fail-closed until Stage 6 explicitly opens and its Controller-owned adapter/lifecycle is proven end-to-end. VM deployment consumes the immutable Linux Release artifact and must not inherit phone runtime identity fields or phone-specific realization rules.
 
-### Gate F — new immutable Product Release
+### cross-target
 
-Create a new semantic Product Release from the hardened exact PRODUCT revision. Never rewrite historical `v0.1.4`. Require annotated tag -> exact source -> signed artifacts -> manifest/provenance/digests -> immutable Release.
+Phone and VM share only proven Controller semantics: immutable Release admission, semantic request identity, durable intent, target serialization, exactly-once destructive boundary, independent observation and read-only UNKNOWN recovery. Target-specific materialization/activation stays inside thin target adapters unless real duplication justifies extraction.
 
-### Gate G — exactly one admitted deployment
+## 9. Full production definition of done
 
-Only when #179 authorizes it, issue one semantic `/deploy <target> <new-release>` through Controller Issue #1. Bind exact immutable Product Release + exact controller revision, persist intent before destructive dispatch, execute at most once and independently verify postconditions.
+Full production operation is complete only after Stage 7 and requires all of the following:
 
-### Gate H — real-world acceptance
+1. PRODUCT acceptance: exact source/Quality/release/provenance and no unresolved PRODUCT P0/P1.
+2. Controller acceptance: exactly-once mutation/recovery invariants proven for both real targets.
+3. Direct local acceptance: phone-production and vm-production each have independent postcondition evidence.
+4. Combined acceptance: real PHONE + VM data path, recovery, bounded load and soak pass under the agreed topology.
+5. Architecture acceptance: one authority per state/decision, no active duplicate deployment path and no unnecessary generic framework.
 
-On the final deployed release prove registered phone, reverse tunnel, relay/provider, external client, cellular egress/IP rotation, reboot/fallback/recovery and reliability/soak criteria from `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`.
-
-Historical phone experiments prove components only; they never substitute for Gate H on the final immutable release.
-
-## 8. PRODUCT acceptance
-
-PRODUCT 10/10-ready requires:
-
-- coherent v2 authority docs/contracts and no active duplicate controller owner;
-- retained compatibility/architecture/persistence/security invariants;
-- Android secret persistence/backup boundary fail-closed;
-- strong Android behavior coverage;
-- exact Quality success;
-- deterministic build/signing verification;
-- release prerequisite/tag gates bound to exact source;
-- immutable Product Release v2;
-- complete provenance for vendored production binaries;
-- no unresolved P0/P1 PRODUCT defect.
-
-Quality proves PRODUCT software/policy; it does not manufacture target state.
-
-## 9. Deployment Controller acceptance
-
-Controller acceptance requires exact Product Release admission, exact controller-revision binding, semantic dedup independent of GitHub provenance, target-global serialization, observation before decision, durable intent before dispatch, exactly-once destructive dispatch per intent, independent postcondition observation, canonical terminal evidence, read-only UNKNOWN recovery, deterministic quarantine and `RECOVERED != ACCEPTED`.
-
-`vm-production` remains fail-closed until its controller-owned adapter is proven end-to-end.
-
-## 10. Full production 10/10
-
-Full production 10/10 requires all three:
-
-1. PRODUCT acceptance complete.
-2. Deployment Controller invariants proven.
-3. Separately authorized live target acceptance/recovery/restart/soak succeeds with no unresolved P0/P1 defect.
-
-Do not collapse these evidence domains into one green workflow.
-
-## 11. Change discipline
+## 10. Change discipline
 
 For docs/policy-sized changes use `scripts/quality-gate.sh fast`; for code/release changes use `scripts/quality-gate.sh`.
 
-After each accepted merge or separately authorized production operation, record a bounded #179 checkpoint with exact identities, mutation status and exactly one `NEXT ALLOWED ITEM`. The newest #179 checkpoint supersedes stale wording elsewhere.
+The newest #179 checkpoint supersedes stale prose. Do not create #179 checkpoints for ordinary commits, PR-ready state, routine CI failures/fixes or merge boundaries already included in the current stage. Record one checkpoint at stage exit or the exceptional boundaries defined by `STAGE_WORKFLOW.md`.
