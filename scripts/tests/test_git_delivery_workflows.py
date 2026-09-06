@@ -27,6 +27,8 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertNotIn("adb ", release)
         self.assertNotIn("runs-on: self-hosted", release)
         self.assertNotIn("mobile-proxy-production", release)
+        self.assertNotIn("PUBLICATION_TOOLING_SHA", release)
+        self.assertNotIn("RECOVERY_TOOLING_SHA", release)
 
     def test_release_exposes_hosted_sdkmanager_to_phone_runtime_builder(self) -> None:
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -37,7 +39,7 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn("export PATH", release)
         self.assertIn('test "$(command -v sdkmanager)" = "$sdkmanager"', release)
 
-    def test_release_tag_explicitly_dispatches_publication(self) -> None:
+    def test_release_tag_dispatches_publication_from_exact_tag_tree(self) -> None:
         release_tag = (ROOT / ".github/workflows/release-tag.yml").read_text(
             encoding="utf-8"
         )
@@ -45,7 +47,8 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertIn("actions: write", release_tag)
         self.assertIn("gh workflow run release.yml", release_tag)
         self.assertIn('--repo "$GITHUB_REPOSITORY"', release_tag)
-        self.assertIn("--ref main", release_tag)
+        self.assertIn('--ref "$RELEASE_TAG"', release_tag)
+        self.assertNotIn("--ref main", release_tag)
         self.assertIn('-f "release_tag=$RELEASE_TAG"', release_tag)
 
     def test_release_tag_recovery_never_moves_existing_tag(self) -> None:
