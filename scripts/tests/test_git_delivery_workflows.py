@@ -33,7 +33,8 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
 
         self.assertIn('sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"', release)
         self.assertIn('test -x "$sdkmanager"', release)
-        self.assertIn('export PATH="$(dirname "$sdkmanager"):$PATH"', release)
+        self.assertIn('PATH="$sdk_root/cmdline-tools/latest/bin:$PATH"', release)
+        self.assertIn("export PATH", release)
         self.assertIn('test "$(command -v sdkmanager)" = "$sdkmanager"', release)
 
     def test_release_tag_explicitly_dispatches_publication(self) -> None:
