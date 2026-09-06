@@ -107,6 +107,8 @@ exit 1
 
 const UI_CONTROL_TOKEN_DOMAIN: DigestDomain =
     DigestDomain::new("mobile-proxy/local-ui-control-token/v1");
+const REPOSITORY_ROOT_ENV: &str = "MOBILE_PROXY_REPOSITORY_ROOT";
+const MAX_REPOSITORY_ROOT_LEN: usize = 4096;
 
 #[derive(Debug, Deserialize)]
 struct DeviceManifest {
@@ -640,10 +642,40 @@ fn uses_reverse_tunnel(tunnel_owner: &str) -> bool {
 }
 
 fn repo_root() -> Result<PathBuf> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
+    let runtime_override = match env::var(REPOSITORY_ROOT_ENV) {
+        Ok(value) => Some(value),
+        Err(env::VarError::NotPresent) => None,
+        Err(env::VarError::NotUnicode(_)) => bail!("{REPOSITORY_ROOT_ENV} is invalid"),
+    };
+    let candidate = repo_root_candidate(
+        runtime_override.as_deref(),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )?;
+    let root = candidate
         .canonicalize()
-        .context("failed to resolve repo root")
+        .context("failed to resolve repo root")?;
+    if !root.join("Cargo.toml").is_file()
+        || !root.join("apps/operator-cli/Cargo.toml").is_file()
+        || !root.join("deploy/device-runtime").is_dir()
+    {
+        bail!("resolved repository root is missing required canonical markers")
+    }
+    Ok(root)
+}
+
+fn repo_root_candidate(
+    runtime_override: Option<&str>,
+    compiled_manifest_dir: &Path,
+) -> Result<PathBuf> {
+    if let Some(raw) = runtime_override {
+        validate_bounded_text(REPOSITORY_ROOT_ENV, raw, MAX_REPOSITORY_ROOT_LEN)?;
+        let path = Path::new(raw);
+        if !path.is_absolute() {
+            bail!("{REPOSITORY_ROOT_ENV} must be an absolute path")
+        }
+        return Ok(path.to_path_buf());
+    }
+    Ok(compiled_manifest_dir.join("../.."))
 }
 
 fn resolve_path(root: &Path, raw: &str) -> PathBuf {
@@ -719,10 +751,12 @@ fn is_android_arm_elf_header(header: &[u8; 20]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
     use super::{
         binary_contains_marker, is_android_arm_elf_header, proxy_listen_address,
-        render_json_template, sing_box_final_outbound, sing_box_listen_host, sing_box_outbound,
-        validate_host_config, validate_profile_name,
+        render_json_template, repo_root_candidate, sing_box_final_outbound, sing_box_listen_host,
+        sing_box_outbound, validate_host_config, validate_profile_name,
     };
 
     #[test]
@@ -756,6 +790,28 @@ mod tests {
     fn profile_name_rejects_path_traversal() {
         assert!(validate_profile_name("mts_by").is_ok());
         assert!(validate_profile_name("../mts_by").is_err());
+    }
+
+    #[test]
+    fn repo_root_override_is_absolute_bounded_and_preferred() {
+        let compiled = Path::new("/compiled/apps/operator-cli");
+        assert_eq!(
+            repo_root_candidate(Some("/runtime/canonical"), compiled).unwrap(),
+            PathBuf::from("/runtime/canonical")
+        );
+        assert!(repo_root_candidate(Some("relative/canonical"), compiled).is_err());
+        assert!(repo_root_candidate(Some("/runtime/invalid\nroot"), compiled).is_err());
+        let oversized = format!("/{}", "x".repeat(4096));
+        assert!(repo_root_candidate(Some(&oversized), compiled).is_err());
+    }
+
+    #[test]
+    fn repo_root_falls_back_to_compiled_manifest_directory() {
+        let compiled = Path::new("/compiled/apps/operator-cli");
+        assert_eq!(
+            repo_root_candidate(None, compiled).unwrap(),
+            PathBuf::from("/compiled/apps/operator-cli/../..")
+        );
     }
 
     #[test]
