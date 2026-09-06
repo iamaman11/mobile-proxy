@@ -28,6 +28,17 @@ class GitDeliveryWorkflowTests(unittest.TestCase):
         self.assertNotIn("runs-on: self-hosted", release)
         self.assertNotIn("mobile-proxy-production", release)
 
+    def test_release_tag_explicitly_dispatches_publication(self) -> None:
+        release_tag = (ROOT / ".github/workflows/release-tag.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("actions: write", release_tag)
+        self.assertIn("gh workflow run release.yml", release_tag)
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', release_tag)
+        self.assertIn("--ref main", release_tag)
+        self.assertIn('-f "release_tag=$RELEASE_TAG"', release_tag)
+
     def test_quality_gate_owns_immutable_release_candidate_evidence(self) -> None:
         quality = (ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
 
