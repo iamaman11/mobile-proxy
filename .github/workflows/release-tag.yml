@@ -96,7 +96,7 @@ jobs:
               and run.get("conclusion") == "success"
           ]
           if not eligible:
-              raise SystemExit("target source has no eligible successful Quality push on main")
+              raise SystemExit("exact protected main has no eligible successful Quality push")
           PY
 
       - name: Require exact successful Product Release prerequisites for target source
@@ -128,7 +128,7 @@ jobs:
           ]
           if not eligible:
               raise SystemExit(
-                  "target source has no eligible successful Product Release prerequisites push on main"
+                  "exact protected main has no eligible successful Product Release prerequisites push"
               )
           PY
 
@@ -174,7 +174,11 @@ jobs:
             test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$TARGET_SHA"
             state=existing
           else
-            test "$TARGET_SHA" = "$CURRENT_MAIN_SHA"
+            if [[ "$TARGET_SHA" != "$CURRENT_MAIN_SHA" ]]; then
+              echo "target SHA does not equal exact protected main" >&2
+              exit 1
+            fi
+            test "$(git rev-parse origin/main)" = "$TARGET_SHA"
           fi
           echo "state=$state" >> "$GITHUB_OUTPUT"
 
