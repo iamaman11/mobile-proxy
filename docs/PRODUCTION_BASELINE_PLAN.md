@@ -117,6 +117,40 @@ Required:
 
 PRODUCT must not reintroduce a second deployment State Machine or mutation ledger.
 
+### 5.1 One exact phone Release state semantics
+
+For the production phone, operations that need the same Release-bound target truth must not independently reimplement desired-state interpretation.
+
+The stable conceptual path is:
+
+```text
+exact immutable Product Release
+  -> prepare/verify expected phone Release state
+  -> observe exact APK + rooted runtime state
+  -> bounded exact / degraded / unknown classification
+  -> operation-specific decision
+```
+
+Normal observation, deployment pre/postcondition and target-read-only reconciliation may have different orchestration and evidence envelopes, but the underlying exact phone Release state semantics have one Controller owner. Workflow-specific scripts must not become independent state machines by defining conflicting drift/current/desired truth.
+
+This is a concrete phone boundary. Do not generalize it into a speculative multi-target framework before a second real target demonstrates the shared responsibility.
+
+### 5.2 Target-read-only reconciliation versus mutation identity
+
+A target-read-only reconciliation operation is not a second deployment attempt.
+
+When current target state is independently proven exact, reconciliation may update an already-admitted visibility projection under a separate semantic identity, subject to all of the following:
+
+- no durable mutation intent is created;
+- no APK/runtime/package/filesystem destructive dispatch occurs;
+- historical Controller terminals remain immutable historical transaction truth;
+- reconciliation never retroactively converts an earlier `REFUSED`, `UNKNOWN`, `RECOVERED` or other terminal into a different canonical terminal;
+- GitHub Deployment projection remains visibility only and cannot authorize a target effect;
+- missing or ambiguous projection identity fails closed rather than creating deployment history from observation alone;
+- repeating the same reconciliation when projection is already correct is a no-op at the projection layer.
+
+A projection write is a Controller control-plane side effect, not a phone mutation. Its permission/serialization/evidence contract must reflect that distinction rather than incorrectly treating projection truth as target truth.
+
 ## 6. Physical facts and observation capability
 
 Git/GitHub is authoritative for reviewed source, contracts, Quality, release identity and durable transaction evidence. It is not a global clock for physical target state.
@@ -144,7 +178,7 @@ A repeatable/decision-critical `controller_capability_gap` should be closed with
 - no generic multi-target orchestration platform;
 - physical operations must expose observable boundaries rather than hide unrelated effects behind one opaque success/timeout result.
 
-Architecture work is stage-mapped, not a parallel roadmap. Stage 5 is the dedicated phone simplification/convergence stage. Stage 6 is the first normal point for extracting shared phone/VM target abstractions from two real implementations.
+Architecture work is stage-mapped, not a parallel roadmap. Stage 4 may introduce only the smallest concrete phone capability required to remove a demonstrated validation/reconciliation ambiguity. Stage 5 is the dedicated phone simplification/convergence stage and should primarily consolidate/delete the temporary surfaces exposed by Stage 4. Stage 6 is the first normal point for extracting shared phone/VM target abstractions from two real implementations.
 
 ## 8. Historical evidence boundary
 
@@ -169,7 +203,7 @@ Quality proves PRODUCT software/policy; it does not manufacture target state.
 
 ## 10. Deployment Controller acceptance
 
-Controller acceptance requires exact Product Release admission, exact Controller-revision binding, semantic dedup independent of GitHub provenance, target-global serialization, observation before decision, durable intent before dispatch, exactly-once destructive dispatch per intent, independent postcondition observation, canonical terminal evidence, read-only UNKNOWN reconciliation and deterministic recovery/quarantine.
+Controller acceptance requires exact Product Release admission, exact Controller-revision binding, semantic dedup independent of GitHub provenance, target-global serialization, one authoritative target-state interpretation per concrete target, observation before decision, durable intent before dispatch, exactly-once destructive dispatch per intent, independent postcondition observation, canonical terminal evidence, target-read-only reconciliation that cannot mutate or rewrite historical transaction truth, and deterministic recovery/quarantine.
 
 `vm-production` remains fail-closed until Stage 6 explicitly opens and proves its real target adapter/lifecycle end-to-end.
 
