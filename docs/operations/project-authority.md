@@ -43,7 +43,7 @@ The PRODUCT plane must not:
 - perform exactly-once physical dispatch;
 - classify ambiguous physical execution after the destructive boundary.
 
-Public Issue #90 remains the product GitOps command surface for product-tag operations. Public Issue #179 is the migration/development execution cursor while the current hardening program is active; it is not normal runtime deployment identity. Public Issue #228 is backlog only and never overrides #179.
+PRODUCT Issue #90 remains the product tag command surface where the active Product Release contract requires it. PRODUCT Issue #179 is the sole dynamic stage/operations cursor while the staged production program is active. PRODUCT Issue #249 is planning/acceptance backlog only and never overrides #179.
 
 ## Deployment Controller authority
 
@@ -67,7 +67,7 @@ The Deployment Controller owns:
 - durable mutation intent before destructive dispatch;
 - exactly-once destructive dispatch;
 - independent postcondition observation;
-- read-only recovery when the destructive outcome is ambiguous;
+- target-read-only reconciliation when current physical truth must be re-established without a new destructive attempt;
 - quarantine and terminal execution classification;
 - canonical runtime execution evidence;
 - bounded public GitHub Deployment status/history projection.
@@ -155,6 +155,26 @@ A public GitHub Deployment is not the execution ledger and cannot authorize a se
 
 Sensitive runtime values remain private by design even though the controller repository is public.
 
+## Target-read-only reconciliation and projection
+
+Controller reconciliation must keep physical target truth, historical transaction truth and public visibility projection separate.
+
+A reconciliation operation that is read-only with respect to the target may perform a bounded public projection write only after it has independently established the exact current target state under the admitted immutable Product Release and Controller revision.
+
+Such reconciliation:
+
+- has semantic identity separate from deployment mutation identity;
+- creates no durable mutation intent;
+- performs no APK/runtime/package/filesystem destructive dispatch;
+- cannot rewrite or delete a prior canonical Controller terminal;
+- cannot reinterpret an earlier terminal as a successful deployment merely because the target is exact now;
+- cannot use GitHub Deployment state as evidence that the target is exact;
+- may update only a uniquely identified already-admitted visibility projection compatible with durable Controller evidence;
+- fails closed when the projection is missing, ambiguous or conflicts with durable identity rather than manufacturing deployment history from observation alone;
+- is idempotent at the projection layer when the visible state is already correct.
+
+A projection write is therefore a Controller control-plane side effect, but it is not phone mutation authority and never creates permission for a second target dispatch.
+
 ## Failure semantics
 
 Authority conflicts fail closed by domain:
@@ -165,26 +185,22 @@ Authority conflicts fail closed by domain:
 - ambiguity after a durable destructive dispatch boundary -> no blind retry, read-only recovery only;
 - Product Release missing or mutable -> controller deployment admission rejects it;
 - controller cannot bind exact Product Release + exact controller revision -> no mutation;
-- public projection failure -> never interpreted as permission to redispatch.
+- public projection failure -> never interpreted as permission to redispatch;
+- reconciliation cannot establish one exact current target/projection identity -> no projection repair and no target mutation.
 
 `RECOVERED` never retroactively converts the original deployment attempt into `ACCEPTED`.
 
-## Current hardening path
+## Stage and planning model
 
-The durable project path to operational acceptance is:
+Dynamic work is governed only by the seven-stage model selected by the newest authoritative PRODUCT #179 checkpoint.
 
-```text
-A  Deployment Controller health
-B  source ownership / authority convergence
-C  Android secret-state and backup/D2D hardening
-D  Android behavior and framework integration tests
-E  supply-chain provenance + Product Release prerequisite hardening
-F  new immutable Product Release
-G  exactly one admitted deployment of that release
-H  real-world phone + tunnel + provider + external-client acceptance
-```
+- `STAGE_WORKFLOW.md` defines the working method and checkpoint/local-agent rules;
+- `docs/PRODUCTION_STAGE_ROADMAP.md` defines static stage scope/exit;
+- PRODUCT #249 is planning/acceptance backlog only;
+- the current subordinate Stage Issue owns working evidence/decisions for the open stage;
+- historical A-H, Item15-23 and Item19/Item20 sequences are audit/reference only and are not an active execution path.
 
-Issue #179 is the only cursor that may authorize the current bounded engineering or physical step. Issue #228 is the implementation backlog. Passing an earlier physical experiment never substitutes for Gate H on the final immutable release.
+Stage 5 is the dedicated phone-baseline simplification/convergence stage. Stage 6 is the first normal point where a real VM target may motivate shared phone/VM abstractions.
 
 ## Historical contracts
 
