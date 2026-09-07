@@ -136,7 +136,57 @@ A successful workflow alone is not Stage 3 acceptance.
 
 Stage 4 is **phone-only**. It does not authorize VM/provider creation, VM restart matrices or combined topology acceptance.
 
-The current Stage 4 Issue binds the exact concrete matrix. Candidate categories are:
+The current Stage 4 Issue binds the exact concrete matrix. Passing a control-plane subplan alone is insufficient: the full phone serving/recovery/resource/soak exit must be evidenced.
+
+### Controller exact-state convergence
+
+Stage 4 must prove that normal phone observation, deployment postcondition and target-read-only reconciliation do not carry independent definitions of desired phone state.
+
+Required properties:
+
+- exact immutable Product Release admission precedes Release-bound expected-state preparation;
+- APK + rooted-runtime current state is observed through one consistent Controller-owned phone Release state semantics;
+- bounded result distinguishes exact, degraded and unknown without leaking raw identifiers/config/secrets;
+- workflow/job success is not a second target truth;
+- a Controller-only change to observation/reconciliation semantics does not force a new Product Release when product bytes/behavior are unchanged;
+- no generic phone/VM target framework is introduced merely to share one phone capability; cross-target abstraction waits for Stage 6 unless another present-day requirement proves it necessary.
+
+### Target-read-only reconciliation
+
+Where the durable mutation ledger contains historical terminal state but the current phone is independently proven exact, Stage 4 may require a separately admitted reconciliation operation.
+
+Acceptance for that operation includes:
+
+- semantic identity is separate from `/deploy` and `/retry-deploy` mutation identity;
+- exact current target observation occurs before any projection write;
+- no mutation intent is created;
+- no APK/runtime dispatch or phone filesystem/package mutation occurs;
+- the historical Controller terminal is not rewritten or retroactively converted;
+- public GitHub Deployment remains visibility projection only;
+- only one uniquely matching already-admitted projection may be repaired; missing or ambiguous projection fails closed rather than manufacturing history;
+- a second identical reconcile is idempotent/no-op at the projection layer when no correction is required.
+
+### Transport, observation efficiency and evidence
+
+- independent phone transport preflight proves runner assignment, exact registered-device ADB state and required root capability without Release materialization;
+- Release observation records separate admission/materialization/phone-probe timings rather than only one total;
+- immutable/static cache entries are content-addressed, verified on every reuse, atomically published, bounded and disposable;
+- cache hits never skip immutable Release admission or integrity verification;
+- secret-derived rendered trees and mutable phone observations are never retained as static cache truth;
+- mandatory decision-grade evidence is durable; required evidence upload failure cannot produce a green acceptance result;
+- recurring Broker/runner errors are represented by bounded non-secret counters/classification without publishing raw listener logs or credentials.
+
+### Runner / host / USB recovery
+
+The exact Stage Issue selects the required host drills. Evidence should distinguish at least the recovery layers it exercises:
+
+- existing runner-service session recovery without re-registration;
+- WSL restart/cold-start recovery;
+- Windows restart followed by the accepted owner-logon bridge path where that is the chosen USB ownership model;
+- USB detach/re-attach recovery of only the registered/allowlisted phone path;
+- transient GitHub Actions Broker/RunServer transport recovery.
+
+Acceptance requires runner identity/labels remain unchanged, no unrelated USB/network target is modified, and the registered phone returns to an observable state before target claims resume.
 
 ### Serving and process health
 
@@ -144,6 +194,8 @@ The current Stage 4 Issue binds the exact concrete matrix. Candidate categories 
 - `runtime-supervisor`, `host-daemon` and `sing-box` health/readiness is correct where used;
 - rendered runtime configuration matches admitted topology without exposing secrets;
 - no false success when service is not actually usable.
+
+A failure in actual PRODUCT/runtime serving, lifecycle, resource or boot behavior is a PRODUCT defect. A failure in Controller admission/observation/target adapter/evidence/projection/runner control is a Controller defect. Fix the owning plane rather than moving responsibility across the PRODUCT/Controller boundary.
 
 ### Restart and reboot
 
@@ -164,6 +216,7 @@ The current Stage 4 Issue binds the exact concrete matrix. Candidate categories 
 ### Tamper/mismatch
 
 - detect relevant runtime/config/current mismatch;
+- classify the bounded mismatch sufficiently to select safe recovery without exposing secret-derived data;
 - fail closed rather than report accepted/healthy state from stale evidence;
 - recovery or reconciliation does not blindly repeat destructive mutation.
 
@@ -185,6 +238,21 @@ The Stage 4 Issue may bind repetitions from the historical reliability model whe
 - a production-like phone-side soak, historically 24 hours, with periodic serving/resource checks.
 
 These numbers are acceptance targets/catalog values, **not automatic authorization for destructive operations**. The current Stage Issue must bind the exact agreed matrix, and #179 must authorize any mutation/physical-test boundary involved.
+
+### Controlled successor deployment and rollback
+
+Stage 4 may consume a legitimate successor Product Release created through normal PRODUCT authority when Stage 4 product/runtime fixes or normal release progression produce one. Do not create a fake/repacked Product Release solely to satisfy a drill.
+
+When a successor deployment/rollback drill is part of the Stage Issue matrix, evidence must prove:
+
+- one durable mutation intent before the first possible destructive effect;
+- at most one destructive dispatch for the intent;
+- atomic activation/materialization properties required by the phone target;
+- exact independent postcondition;
+- duplicate/retry handling cannot create a second mutation;
+- rollback selects a retained immutable prior APK/runtime Release with compatible signing lineage;
+- ambiguous rollback is `UNKNOWN` and fail-closed;
+- the approved final target is restored and independently verified.
 
 ### Local-agent evidence and Controller feedback
 
@@ -209,20 +277,56 @@ For the concrete repeated categories selected by the Stage Issue, use bounded th
 
 With small fixed samples, one unexplained failure blocks acceptance rather than being hidden by percentages.
 
+### Stage 4 handoff evidence
+
+Before Stage 4 closes, retain one bounded handoff matrix mapping every accepted category above to exact evidence and classifying every active phone control surface as `retain`, `consolidate`, `isolate/deprecate`, or `remove` for Stage 5. Stage 5 must not begin by rediscovering which Stage 4 paths were temporary.
+
 ## 8. Stage 5 — phone baseline acceptance / simplification
 
-Stage 5 is not another broad physical test program. It consumes Stage 4 evidence and leaves one long-term phone path.
+Stage 5 is not another broad physical test program. It consumes the completed Stage 4 evidence/handoff and leaves one long-term phone path.
 
 Acceptance includes:
 
-- close remaining demonstrated phone P0/P1 and evidence-trust gaps;
-- remove/isolate redundant v1/reconstruction/temporary recovery surfaces;
-- converge normative phone/Controller docs and ownership;
-- ensure local-agent observations that revealed reusable Controller gaps are either implemented where required or explicitly deferred with stage mapping;
-- reduce active workflows/policies/code where independent invariants do not justify them;
-- preserve exact Release/deployment/recovery safety while simplifying cognitive surface.
+### One canonical phone control path
 
-Exit requires one singular, protected, documented phone baseline.
+- one concrete Controller-owned exact phone Release state semantics remains for normal observation, deployment postcondition and reconciliation where applicable;
+- workflow/script-specific duplicate desired-state/drift classification is removed;
+- Stage-4-only release/version bindings are removed from long-term operation unless a real compatibility contract requires them;
+- GitHub Actions, shell, ADB and GitHub Deployment remain adapters/projection, not parallel state owners.
+
+### One mutation/recovery model
+
+- preserve semantic deployment identity, target serialization, durable mutation intent, exactly-once destructive dispatch, independent postcondition and `UNKNOWN` read-only recovery;
+- projection reconciliation remains separate from deployment mutation identity and cannot rewrite private canonical terminal history;
+- redundant v1/reconstruction/quarantine/migration/temporary-recovery paths are removed or isolated once their retained evidence/rollback obligations no longer require them.
+
+### Minimal command/workflow surface
+
+- every active Issue #1 route and production workflow has one current operator purpose;
+- preflight/diagnostic routes remain separate only when they own an independent operational concern;
+- routes/workflows that exist only because of Stage 4 implementation history are consolidated or removed;
+- declarative command/target registries describe the actual supported production surface, with no dormant competing authority paths.
+
+### Stable materialization/cache/evidence ownership
+
+- stable phone Release preparation/observation logic sits under the narrowest real Controller owner rather than being imported from workflow-private helpers by multiple consumers;
+- immutable cache optimizations remain bounded, verified, disposable and free of secret-derived rendered state;
+- evidence schemas let one developer trace exact Release -> observed state -> decision -> possible effect -> postcondition without joining contradictory status systems;
+- local-agent observations that revealed reusable Controller gaps are either implemented where required or explicitly dispositioned with stage mapping.
+
+### Documentation, authority and code deletion
+
+- converge normative phone/Controller docs and ownership on the real path;
+- remove active stale A-H/Item15-23/Item19-20 execution language and stale backlog/cursor roles while retaining historical audit evidence as historical;
+- reduce active workflows/policies/code/cognitive surface wherever an independent invariant does not require separation;
+- remove redundant wiring/meta-verification checks that only prove other tests/checks exist;
+- verify PRODUCT remains application/runtime/build/Release authority and Controller remains deployment/target execution authority.
+
+### Generalization boundary
+
+Stage 5 may make phone-specific ownership coherent, but it must not build a speculative generic phone/VM target framework. Stage 6 is the first normal point for shared target abstractions from two real implementations.
+
+Exit requires one singular, protected, documented phone baseline with no unresolved phone P0/P1 or evidence-trust gap and no active Stage-4-only scaffolding lacking a long-term justification.
 
 ## 9. Stage 6 — VM-local transaction and first real VM deployment
 
