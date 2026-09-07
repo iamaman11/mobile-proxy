@@ -10,6 +10,13 @@ HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
 
 TEN_PLAN = Path("TEN_OUT_OF_TEN_VALIDATION_PLAN.md")
 README = Path("README.md")
+QUICK = Path("QUICK_REFERENCE.md")
+AGENTS = Path("AGENTS.md")
+STAGE_WORKFLOW = Path("STAGE_WORKFLOW.md")
+IMPLEMENTATION_PLAN = Path("IMPLEMENTATION_PLAN.md")
+STAGE_ROADMAP = Path("docs/PRODUCTION_STAGE_ROADMAP.md")
+BASELINE = Path("docs/PRODUCTION_BASELINE_PLAN.md")
+REPOSITORY_CONTEXT = Path("scripts/repository_context.py")
 RUNTIME = Path("RUNTIME_LAYOUT.md")
 PROJECT_DOC = Path("docs/operations/project-authority.md")
 PHONE_DOC = Path("docs/operations/phone-gitops-runtime.md")
@@ -45,6 +52,32 @@ STALE_ACTIVE_TOKENS = (
     "completed Item 20 + final_accepted_candidate_sha",
 )
 
+ENTRYPOINTS = (
+    README,
+    QUICK,
+    AGENTS,
+    STAGE_WORKFLOW,
+    IMPLEMENTATION_PLAN,
+    STAGE_ROADMAP,
+    BASELINE,
+    REPOSITORY_CONTEXT,
+)
+
+STALE_EXECUTION_SPINE_TOKENS = (
+    "public Issue #228 = 10/10 PRODUCT hardening backlog",
+    "Issue #228 is the backlog",
+    "canonical_gitops_issue",
+    "temporary_checkpoint",
+    '"active_roadmap"',
+    "private execution satellite only",
+    "private repository is the canonical deployment controller",
+    "one bounded next engineering item at a time",
+    "authorizes one bounded next engineering item at a time",
+    "Stage 2 — Immutable Product Release `v0.1.6` — CURRENT",
+    "Status: **active canonical implementation roadmap**",
+    "After each accepted merge or separately authorized production operation, record a bounded #179 checkpoint",
+)
+
 
 def _read(root: Path, path: Path, errors: list[str]) -> str:
     try:
@@ -75,22 +108,123 @@ def _require(body: str, path: Path, tokens: tuple[str, ...], errors: list[str]) 
             errors.append(f"{path} is missing controller-v2 invariant {token!r}")
 
 
+def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
+    _require(
+        text[STAGE_WORKFLOW],
+        STAGE_WORKFLOW,
+        (
+            "newest authoritative checkpoint in PRODUCT Issue #179",
+            "Context recovery: one execution spine",
+            "current subordinate Stage Issue",
+            "controller_capability_gap",
+            "human_only_physical_observation",
+            "one_off_observation",
+            "Architecture work is stage-mapped",
+        ),
+        errors,
+    )
+    _require(
+        text[AGENTS],
+        AGENTS,
+        (
+            "PRODUCT Issue #179 is the **only dynamic development/operations stage cursor**",
+            "PRODUCT Issue #249 = stage-mapped planning/acceptance backlog only",
+            "Document roles",
+            "controller_capability_gap",
+            "A `controller_capability_gap` is not automatic permission",
+        ),
+        errors,
+    )
+    _require(
+        text[QUICK],
+        QUICK,
+        (
+            "Use exactly this execution spine",
+            "PRODUCT Issue **#179** — sole dynamic stage/operations cursor",
+            "PRODUCT Issue **#249** — stage-mapped planning/acceptance backlog only",
+            "Static seven-stage sequence",
+            "controller_capability_gap",
+        ),
+        errors,
+    )
+    _require(
+        text[IMPLEMENTATION_PLAN],
+        IMPLEMENTATION_PLAN,
+        (
+            "static context and sequencing entrypoint",
+            "newest authoritative checkpoint in PRODUCT Issue #179",
+            "Static seven-stage sequence",
+            "Architecture improvement belongs inside stages",
+        ),
+        errors,
+    )
+    _require(
+        text[STAGE_ROADMAP],
+        STAGE_ROADMAP,
+        (
+            "static seven-stage sequencing and scope model",
+            "does not declare a current stage",
+            "Architecture improvement is not a parallel lane",
+            "Stage 4 — Phone industrial operational validation",
+            "Stage 6 — VM production transaction + first real deployment",
+        ),
+        errors,
+    )
+    _require(
+        text[BASELINE],
+        BASELINE,
+        (
+            "not an execution roadmap",
+            "Historical A-H implementation ordering is superseded",
+            "Physical facts and observation capability",
+            "Architecture work is stage-mapped, not a parallel roadmap",
+        ),
+        errors,
+    )
+    _require(
+        text[REPOSITORY_CONTEXT],
+        REPOSITORY_CONTEXT,
+        (
+            '"format_version": 2',
+            '"stage_cursor": "iamaman11/mobile-proxy#179"',
+            '"planning_backlog": "iamaman11/mobile-proxy#249"',
+            '"dynamic_state_embedded_here": False',
+            '"deployment_controller_repository": "iamaman11/mobile-proxy-production"',
+        ),
+        errors,
+    )
+
+    for path in ENTRYPOINTS:
+        body = text[path]
+        for token in STALE_EXECUTION_SPINE_TOKENS:
+            if token in body:
+                errors.append(f"{path} contains superseded execution-spine wording {token!r}")
+
+    if "— CURRENT" in text[STAGE_ROADMAP] or "**CURRENT**" in text[STAGE_ROADMAP]:
+        errors.append("static Stage Roadmap must not embed dynamic CURRENT state")
+
+
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
-    text = {
-        path: _read(root, path, errors)
-        for path in (
-            TEN_PLAN,
-            README,
-            RUNTIME,
-            PROJECT_DOC,
-            PHONE_DOC,
-            RELEASE_DOC,
-            ITEM19_CLOSEOUT,
-            RELEASE_TAG,
-            RELEASE,
-        )
-    }
+    text_paths = (
+        TEN_PLAN,
+        README,
+        QUICK,
+        AGENTS,
+        STAGE_WORKFLOW,
+        IMPLEMENTATION_PLAN,
+        STAGE_ROADMAP,
+        BASELINE,
+        REPOSITORY_CONTEXT,
+        RUNTIME,
+        PROJECT_DOC,
+        PHONE_DOC,
+        RELEASE_DOC,
+        ITEM19_CLOSEOUT,
+        RELEASE_TAG,
+        RELEASE,
+    )
+    text = {path: _read(root, path, errors) for path in text_paths}
     project = _load(root, PROJECT, errors)
     topology = _load(root, TOPOLOGY, errors)
     github = _load(root, GITHUB, errors)
@@ -278,6 +412,22 @@ def check_repository(root: Path) -> list[str]:
         ("first_party_android_egress", "Network.bindSocket()", "app-owned WireGuard compatibility path"),
         errors,
     )
+
+    _require(
+        text[TEN_PLAN],
+        TEN_PLAN,
+        (
+            "normative acceptance catalog; not execution authority",
+            "Stage 4 — phone industrial operational validation",
+            "Stage 4 is **phone-only**",
+            "Stage 6 — VM-local transaction and first real VM deployment",
+            "Stage 7 — combined PHONE + VM operational acceptance",
+            "controller_capability_gap",
+        ),
+        errors,
+    )
+
+    _check_execution_spine(text, errors)
 
     if HISTORICAL_ITEM19_SHA not in text[ITEM19_CLOSEOUT]:
         errors.append("historical Item 19 closeout lost its immutable proof SHA")
