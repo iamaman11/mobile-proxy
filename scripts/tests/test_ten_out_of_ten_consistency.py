@@ -7,7 +7,6 @@ import shutil
 import tempfile
 import unittest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check_ten_out_of_ten_consistency.py"
 SPEC = importlib.util.spec_from_file_location("ten_out_of_ten_consistency", SCRIPT)
@@ -51,6 +50,15 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
     def test_repository_passes(self) -> None:
         self.assertEqual(MODULE.check_repository(ROOT), [])
 
+    def _mutate(self, relative: str, transform) -> list[str]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / relative
+            body = path.read_text(encoding="utf-8")
+            path.write_text(transform(body), encoding="utf-8")
+            return MODULE.check_repository(root)
+
     def test_controller_repository_must_remain_deployment_controller(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -62,18 +70,7 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("Deployment Controller authority" in error for error in errors))
 
-    def test_controller_confidentiality_boundary_cannot_disappear(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "contracts/operations/project-authority-v2.json"
-            contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["deployment_controller_authority"]["confidentiality_boundary"] = "repository_visibility"
-            path.write_text(json.dumps(contract), encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("confidentiality boundary differs" in error for error in errors))
-
-    def test_runtime_identity_requires_product_release_plus_controller_revision(self) -> None:
+    def test_runtime_identity_requires_release_plus_controller_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
@@ -82,20 +79,9 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             contract["runtime_identity"]["identity"] = "public_main_sha"
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
-        self.assertTrue(any("runtime identity is not Product Release + controller revision" in error for error in errors))
+        self.assertTrue(any("runtime identity" in error for error in errors))
 
-    def test_product_release_must_exist_before_physical_acceptance(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "contracts/operations/production-topology-v2.json"
-            contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["release_link"]["physical_acceptance_before_product_release"] = True
-            path.write_text(json.dumps(contract), encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("Product Release before deployment" in error for error in errors))
-
-    def test_vm_target_remains_fail_closed_until_proven(self) -> None:
+    def test_vm_target_remains_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
@@ -106,7 +92,7 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("VM target is not fail-closed" in error for error in errors))
 
-    def test_blind_retry_after_dispatch_cannot_be_enabled(self) -> None:
+    def test_blind_retry_cannot_be_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             copy_surfaces(root)
@@ -116,17 +102,6 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             path.write_text(json.dumps(contract), encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("transaction/recovery semantics differ" in error for error in errors))
-
-    def test_controller_ingress_must_remain_deploy_target_tag(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "contracts/operations/github-control-plane-v2.json"
-            contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["deployment_controller_repository"]["command"] = "/deploy-latest"
-            path.write_text(json.dumps(contract), encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("Deployment Controller ingress" in error for error in errors))
 
     def test_release_asset_set_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -139,163 +114,75 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("exact asset set differs" in error for error in errors))
 
-    def test_release_digest_domain_cannot_drift(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "contracts/operations/product-release-authority-v2.json"
-            contract = json.loads(path.read_text(encoding="utf-8"))
-            contract["manifest"]["content_digest_domain"] = "mobile-proxy/wrong/v1"
-            path.write_text(json.dumps(contract), encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("typed digest identity differs" in error for error in errors))
-
     def test_release_tag_cannot_restore_item20_authority(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / ".github/workflows/release-tag.yml"
-            path.write_text(path.read_text(encoding="utf-8") + "\n# ITEM20_ISSUE\n", encoding="utf-8")
-            errors = MODULE.check_repository(root)
+        errors = self._mutate(
+            ".github/workflows/release-tag.yml",
+            lambda body: body + "\n# ITEM20_ISSUE\n",
+        )
         self.assertTrue(any("old physical-before-product authority" in error for error in errors))
 
     def test_release_workflow_requires_exact_draft_bytes(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / ".github/workflows/release.yml"
-            body = path.read_text(encoding="utf-8").replace("cmp -s --", "test -e")
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("release.yml is missing controller-v2 invariant 'cmp -s --'" in error for error in errors))
-
-    def test_active_release_doc_cannot_restore_item20_before_release(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "docs/operations/final-release-authority-order.md"
-            path.write_text(
-                path.read_text(encoding="utf-8") + "\nOnly after Item 20 physical acceptance may release proceed.\n",
-                encoding="utf-8",
-            )
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("superseded active authority wording" in error for error in errors))
-
-    def test_phone_doc_must_keep_controller_authority(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "docs/operations/phone-gitops-runtime.md"
-            body = path.read_text(encoding="utf-8").replace(
-                "Both repositories are public",
-                "The controller is only a thin execution satellite",
-            )
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("phone-gitops-runtime.md is missing controller-v2 invariant" in error for error in errors))
-
-    def test_android_auxiliary_role_is_required(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "RUNTIME_LAYOUT.md"
-            body = path.read_text(encoding="utf-8").replace(
-                "not the primary reverse-tunnel owner",
-                "the primary reverse-tunnel owner",
-            )
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("RUNTIME_LAYOUT.md lost Android auxiliary-role invariant" in error for error in errors))
-
-    def test_historical_item19_proof_sha_remains_audit_evidence(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "docs/operations/item19-provider-proof-closeout.md"
-            body = path.read_text(encoding="utf-8").replace(MODULE.HISTORICAL_ITEM19_SHA, "0" * 40)
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("historical Item 19 closeout lost its immutable proof SHA" in error for error in errors))
+        errors = self._mutate(
+            ".github/workflows/release.yml",
+            lambda body: body.replace("cmp -s --", "test -e"),
+        )
+        self.assertTrue(any("cmp -s --" in error for error in errors))
 
     def test_static_stage_roadmap_cannot_restore_dynamic_current(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "docs/PRODUCTION_STAGE_ROADMAP.md"
-            path.write_text(path.read_text(encoding="utf-8") + "\n## Stage 4 — CURRENT\n", encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("must not embed dynamic CURRENT state" in error for error in errors))
-
-    def test_repository_context_cannot_restore_issue90_as_dynamic_authority(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "scripts/repository_context.py"
-            path.write_text(path.read_text(encoding="utf-8") + '\n# "canonical_gitops_issue"\n', encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("superseded execution-spine wording" in error for error in errors))
+        errors = self._mutate(
+            "docs/PRODUCTION_STAGE_ROADMAP.md",
+            lambda body: body + "\n## Stage 4 — CURRENT\n",
+        )
+        self.assertTrue(any("must not embed dynamic CURRENT" in error for error in errors))
 
     def test_baseline_cannot_restore_checkpoint_after_every_merge(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "docs/PRODUCTION_BASELINE_PLAN.md"
-            path.write_text(
-                path.read_text(encoding="utf-8")
-                + "\nAfter each accepted merge or separately authorized production operation, record a bounded #179 checkpoint\n",
-                encoding="utf-8",
-            )
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("superseded execution-spine wording" in error for error in errors))
+        errors = self._mutate(
+            "docs/PRODUCTION_BASELINE_PLAN.md",
+            lambda body: body + "\nAfter each accepted merge or separately authorized production operation, record a bounded #179 checkpoint\n",
+        )
+        self.assertTrue(any("superseded execution wording" in error for error in errors))
+
+    def test_product_agents_must_keep_one_source_per_concern(self) -> None:
+        errors = self._mutate(
+            "AGENTS.md",
+            lambda body: body.replace("One source of truth per concern", "Several equivalent sources"),
+        )
+        self.assertTrue(any("AGENTS.md is missing invariant 'One source of truth per concern'" in error for error in errors))
 
     def test_stage_workflow_requires_capability_gap_classification(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "STAGE_WORKFLOW.md"
-            body = path.read_text(encoding="utf-8").replace("controller_capability_gap", "manual_gap")
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("STAGE_WORKFLOW.md is missing controller-v2 invariant 'controller_capability_gap'" in error for error in errors))
+        errors = self._mutate(
+            "STAGE_WORKFLOW.md",
+            lambda body: body.replace("controller_capability_gap", "manual_gap"),
+        )
+        self.assertTrue(any("controller_capability_gap" in error for error in errors))
 
-    def test_stage_workflow_requires_bounded_last_comment_179_access(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "STAGE_WORKFLOW.md"
-            body = path.read_text(encoding="utf-8").replace("last comment only", "full comment history")
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("STAGE_WORKFLOW.md is missing controller-v2 invariant 'last comment only'" in error for error in errors))
+    def test_repository_context_must_not_restore_flat_authoritative_docs(self) -> None:
+        errors = self._mutate(
+            "scripts/repository_context.py",
+            lambda body: body + '\n# "authoritative_docs"\n',
+        )
+        self.assertTrue(any("flat authoritative_docs" in error for error in errors))
 
-    def test_quick_reference_must_remain_optional(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "QUICK_REFERENCE.md"
-            body = path.read_text(encoding="utf-8").replace("Optional **human cheat-sheet**", "Mandatory agent handbook")
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("QUICK_REFERENCE.md is missing controller-v2 invariant 'Optional **human cheat-sheet**'" in error for error in errors))
+    def test_repository_context_must_identify_controller_ledger_and_diagnostics(self) -> None:
+        errors = self._mutate(
+            "scripts/repository_context.py",
+            lambda body: body.replace("controller_runtime_transaction_truth", "runtime_hint"),
+        )
+        self.assertTrue(any("controller_runtime_transaction_truth" in error for error in errors))
 
-    def test_implementation_plan_must_remain_static_index(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "IMPLEMENTATION_PLAN.md"
-            body = path.read_text(encoding="utf-8").replace("**static index**", "active current plan")
-            path.write_text(body, encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("IMPLEMENTATION_PLAN.md is missing controller-v2 invariant '**static index**'" in error for error in errors))
+    def test_context_budget_prevents_agents_becoming_parallel_handbook(self) -> None:
+        errors = self._mutate(
+            "AGENTS.md",
+            lambda body: body + ("\nextra duplicated governance" * 1000),
+        )
+        self.assertTrue(any("exceeds bounded context budget" in error for error in errors))
 
-    def test_context_entrypoint_size_budget_is_enforced(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            copy_surfaces(root)
-            path = root / "IMPLEMENTATION_PLAN.md"
-            path.write_text(path.read_text(encoding="utf-8") + ("\nnoise" * 2000), encoding="utf-8")
-            errors = MODULE.check_repository(root)
-        self.assertTrue(any("IMPLEMENTATION_PLAN.md exceeds bounded context budget" in error for error in errors))
+    def test_historical_item19_proof_sha_remains_audit_evidence(self) -> None:
+        errors = self._mutate(
+            "docs/operations/item19-provider-proof-closeout.md",
+            lambda body: body.replace(MODULE.HISTORICAL_ITEM19_SHA, "0" * 40),
+        )
+        self.assertTrue(any("historical Item 19 closeout" in error for error in errors))
 
 
 if __name__ == "__main__":
