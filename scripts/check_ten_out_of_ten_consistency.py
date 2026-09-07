@@ -10,6 +10,13 @@ HISTORICAL_ITEM19_SHA = "d151dbdd156279e32a5361d304c90f996bd2d565"
 
 TEN_PLAN = Path("TEN_OUT_OF_TEN_VALIDATION_PLAN.md")
 README = Path("README.md")
+QUICK = Path("QUICK_REFERENCE.md")
+AGENTS = Path("AGENTS.md")
+STAGE_WORKFLOW = Path("STAGE_WORKFLOW.md")
+IMPLEMENTATION_PLAN = Path("IMPLEMENTATION_PLAN.md")
+STAGE_ROADMAP = Path("docs/PRODUCTION_STAGE_ROADMAP.md")
+BASELINE = Path("docs/PRODUCTION_BASELINE_PLAN.md")
+REPOSITORY_CONTEXT = Path("scripts/repository_context.py")
 RUNTIME = Path("RUNTIME_LAYOUT.md")
 PROJECT_DOC = Path("docs/operations/project-authority.md")
 PHONE_DOC = Path("docs/operations/phone-gitops-runtime.md")
@@ -22,19 +29,25 @@ RELEASE_AUTHORITY = Path("contracts/operations/product-release-authority-v2.json
 RELEASE_TAG = Path(".github/workflows/release-tag.yml")
 RELEASE = Path(".github/workflows/release.yml")
 
-ACTIVE_NO_V1_AUTHORITY = (
-    PROJECT_DOC,
-    PHONE_DOC,
-    RELEASE_DOC,
-    PROJECT,
-    TOPOLOGY,
-    GITHUB,
-    RELEASE_AUTHORITY,
-    RELEASE_TAG,
-    RELEASE,
+ENTRYPOINTS = (README, QUICK, AGENTS, STAGE_WORKFLOW, IMPLEMENTATION_PLAN, STAGE_ROADMAP, BASELINE, REPOSITORY_CONTEXT)
+ACTIVE_NO_V1_AUTHORITY = (PROJECT_DOC, PHONE_DOC, RELEASE_DOC, PROJECT, TOPOLOGY, GITHUB, RELEASE_AUTHORITY, RELEASE_TAG, RELEASE)
+
+STALE_EXECUTION_TOKENS = (
+    "public Issue #228 = 10/10 PRODUCT hardening backlog",
+    "Issue #228 is the backlog",
+    "canonical_gitops_issue",
+    "temporary_checkpoint",
+    '"active_roadmap"',
+    "private execution satellite only",
+    "private repository is the canonical deployment controller",
+    "one bounded next engineering item at a time",
+    "authorizes one bounded next engineering item at a time",
+    "Stage 2 — Immutable Product Release `v0.1.6` — CURRENT",
+    "Status: **active canonical implementation roadmap**",
+    "After each accepted merge or separately authorized production operation, record a bounded #179 checkpoint",
 )
 
-STALE_ACTIVE_TOKENS = (
+STALE_ACTIVE_AUTHORITY_TOKENS = (
     "contracts/operations/final-release-authority-v1.json",
     "private repository/runner remain execution-only",
     "private phone repository/runner remain execution-only",
@@ -44,6 +57,13 @@ STALE_ACTIVE_TOKENS = (
     "Only after Item 20 physical acceptance",
     "completed Item 20 + final_accepted_candidate_sha",
 )
+
+CONTEXT_BUDGET_MAX_CHARS = {
+    IMPLEMENTATION_PLAN: 4_500,
+    QUICK: 7_500,
+    AGENTS: 8_000,
+    STAGE_WORKFLOW: 11_000,
+}
 
 
 def _read(root: Path, path: Path, errors: list[str]) -> str:
@@ -72,25 +92,127 @@ def _load(root: Path, path: Path, errors: list[str]) -> dict[str, object]:
 def _require(body: str, path: Path, tokens: tuple[str, ...], errors: list[str]) -> None:
     for token in tokens:
         if token not in body:
-            errors.append(f"{path} is missing controller-v2 invariant {token!r}")
+            errors.append(f"{path} is missing invariant {token!r}")
+
+
+def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
+    _require(
+        text[AGENTS],
+        AGENTS,
+        (
+            "One source of truth per concern",
+            "dynamic stage/operations authority",
+            "cross-project working method/checkpoint/local-agent rules",
+            "Controller `AGENTS.md` is a repo-local overlay",
+            "last owner-authored authoritative checkpoint comment only",
+            "Controller #1: exact causal",
+            "Controller #97: optional reusable",
+        ),
+        errors,
+    )
+    _require(
+        text[STAGE_WORKFLOW],
+        STAGE_WORKFLOW,
+        (
+            "Context recovery: one execution spine",
+            "Context-budget protocol",
+            "last comment only",
+            "Controller #1: never use the full ledger as context",
+            "Controller #97: optional reusable rooted-phone diagnostic/probe reference only",
+            "controller_capability_gap",
+            "human_only_physical_observation",
+            "one_off_observation",
+            "Evidence routing",
+            "Architecture work is stage-mapped",
+        ),
+        errors,
+    )
+    _require(
+        text[QUICK],
+        QUICK,
+        (
+            "Optional **human cheat-sheet**",
+            "last owner-authored authoritative checkpoint comment only",
+            "Controller #1",
+            "Controller #97",
+            "IMPLEMENTATION_PLAN.md` — static index only",
+        ),
+        errors,
+    )
+    _require(
+        text[IMPLEMENTATION_PLAN],
+        IMPLEMENTATION_PLAN,
+        (
+            "**static index**",
+            "Do **not** start here after context loss",
+            "last #179 checkpoint comment",
+            "Controller #1 only by exact causal ledger comment IDs",
+            "architecture changes are stage-mapped",
+        ),
+        errors,
+    )
+    _require(
+        text[STAGE_ROADMAP],
+        STAGE_ROADMAP,
+        (
+            "static seven-stage sequencing and scope model",
+            "does not declare a current stage",
+            "Architecture improvement is not a parallel lane",
+            "Stage 4 — Phone industrial operational validation",
+            "Stage 6 — VM production transaction + first real deployment",
+        ),
+        errors,
+    )
+    _require(
+        text[BASELINE],
+        BASELINE,
+        (
+            "not an execution roadmap",
+            "Historical A-H implementation ordering is superseded",
+            "Physical facts and observation capability",
+            "Architecture work is stage-mapped, not a parallel roadmap",
+        ),
+        errors,
+    )
+    _require(
+        text[REPOSITORY_CONTEXT],
+        REPOSITORY_CONTEXT,
+        (
+            '"format_version": 3',
+            '"source_of_truth_by_concern"',
+            '"stage_cursor": "iamaman11/mobile-proxy#179"',
+            '"planning_backlog": "iamaman11/mobile-proxy#249"',
+            '"controller_runtime_transaction_truth"',
+            '"reusable_phone_diagnostic_mechanics"',
+            '"dynamic_state_embedded_here": False',
+        ),
+        errors,
+    )
+    if '"authoritative_docs"' in text[REPOSITORY_CONTEXT]:
+        errors.append("repository_context.py must not expose a flat authoritative_docs list")
+
+    for path in ENTRYPOINTS:
+        for token in STALE_EXECUTION_TOKENS:
+            if token in text[path]:
+                errors.append(f"{path} contains superseded execution wording {token!r}")
+
+    for path, limit in CONTEXT_BUDGET_MAX_CHARS.items():
+        size = len(text[path])
+        if size > limit:
+            errors.append(f"{path} exceeds bounded context budget: {size} > {limit} chars")
+
+    if "— CURRENT" in text[STAGE_ROADMAP] or "**CURRENT**" in text[STAGE_ROADMAP]:
+        errors.append("static Stage Roadmap must not embed dynamic CURRENT state")
 
 
 def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
-    text = {
-        path: _read(root, path, errors)
-        for path in (
-            TEN_PLAN,
-            README,
-            RUNTIME,
-            PROJECT_DOC,
-            PHONE_DOC,
-            RELEASE_DOC,
-            ITEM19_CLOSEOUT,
-            RELEASE_TAG,
-            RELEASE,
-        )
-    }
+    text_paths = (
+        TEN_PLAN, README, QUICK, AGENTS, STAGE_WORKFLOW, IMPLEMENTATION_PLAN,
+        STAGE_ROADMAP, BASELINE, REPOSITORY_CONTEXT, RUNTIME, PROJECT_DOC,
+        PHONE_DOC, RELEASE_DOC, ITEM19_CLOSEOUT, RELEASE_TAG, RELEASE,
+    )
+    text = {path: _read(root, path, errors) for path in text_paths}
     project = _load(root, PROJECT, errors)
     topology = _load(root, TOPOLOGY, errors)
     github = _load(root, GITHUB, errors)
@@ -98,60 +220,37 @@ def check_repository(root: Path) -> list[str]:
 
     product = project.get("public_product_authority")
     controller = project.get("deployment_controller_authority")
-    if (
-        not isinstance(product, dict)
-        or product.get("repository") != "iamaman11/mobile-proxy"
-        or product.get("visibility") != "public"
-    ):
+    if not isinstance(product, dict) or product.get("repository") != "iamaman11/mobile-proxy" or product.get("visibility") != "public":
         errors.append("project v2 does not bind public PRODUCT authority")
-    if (
-        not isinstance(controller, dict)
-        or controller.get("repository") != "iamaman11/mobile-proxy-production"
-        or controller.get("visibility") != "public"
-        or controller.get("authority") != "deployment_controller"
-    ):
+    if not isinstance(controller, dict) or controller.get("repository") != "iamaman11/mobile-proxy-production" or controller.get("visibility") != "public" or controller.get("authority") != "deployment_controller":
         errors.append("project v2 does not bind Deployment Controller authority")
-    elif controller.get("confidentiality_boundary") != (
-        "secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_remain_private"
-    ):
+    elif controller.get("confidentiality_boundary") != "secrets_bindings_raw_target_identifiers_and_sensitive_runtime_values_remain_private":
         errors.append("Deployment Controller confidentiality boundary differs")
 
     runtime_identity = project.get("runtime_identity")
-    if (
-        not isinstance(runtime_identity, dict)
-        or runtime_identity.get("identity") != "product_release_plus_controller_revision"
-    ):
+    if not isinstance(runtime_identity, dict) or runtime_identity.get("identity") != "product_release_plus_controller_revision":
         errors.append("runtime identity is not Product Release + controller revision")
 
     release_link = topology.get("release_link")
-    if (
-        not isinstance(release_link, dict)
-        or release_link.get("product_release_must_exist_before_deployment_admission") is not True
-        or release_link.get("physical_acceptance_before_product_release") is not False
-    ):
+    if not isinstance(release_link, dict) or release_link.get("product_release_must_exist_before_deployment_admission") is not True or release_link.get("physical_acceptance_before_product_release") is not False:
         errors.append("topology does not enforce Product Release before deployment")
+
     targets = topology.get("targets")
     vm = targets.get("vm-production") if isinstance(targets, dict) else None
-    if (
-        not isinstance(vm, dict)
-        or vm.get("destructive_dispatch") != "forbidden_until_proven"
-        or vm.get("reuses_same_controller_kernel") is not True
-    ):
+    if not isinstance(vm, dict) or vm.get("destructive_dispatch") != "forbidden_until_proven" or vm.get("reuses_same_controller_kernel") is not True:
         errors.append("VM target is not fail-closed on the shared controller kernel")
 
     execution = topology.get("execution_rules")
-    if not isinstance(execution, dict) or any(
-        execution.get(key) != value
-        for key, value in {
-            "mutation_intent_before_destructive_dispatch": True,
-            "blind_retry_after_dispatch_boundary": False,
-            "independent_postcondition_observation": True,
-            "unknown_continuation": "read_only_recovery_only",
-            "recovered_retroactively_equals_original_success": False,
-            "duplicate_semantic_request_second_mutation": "forbidden",
-            "recovery_mode_reconciled_after_target_lock": True,
-        }.items()
-    ):
+    expected_execution = {
+        "mutation_intent_before_destructive_dispatch": True,
+        "blind_retry_after_dispatch_boundary": False,
+        "independent_postcondition_observation": True,
+        "unknown_continuation": "read_only_recovery_only",
+        "recovered_retroactively_equals_original_success": False,
+        "duplicate_semantic_request_second_mutation": "forbidden",
+        "recovery_mode_reconciled_after_target_lock": True,
+    }
+    if not isinstance(execution, dict) or any(execution.get(key) != value for key, value in expected_execution.items()):
         errors.append("controller transaction/recovery semantics differ from accepted v2 model")
 
     if github.get("project_authority_contract") != str(PROJECT):
@@ -161,17 +260,9 @@ def check_repository(root: Path) -> list[str]:
     if github.get("product_release_contract") != str(RELEASE_AUTHORITY):
         errors.append("GitHub v2 contract does not bind Product Release v2")
     github_controller = github.get("deployment_controller_repository")
-    if (
-        not isinstance(github_controller, dict)
-        or github_controller.get("authority") != "deployment_controller"
-        or github_controller.get("visibility") != "public"
-        or github_controller.get("command") != "/deploy <target> <vX.Y.Z>"
-    ):
+    if not isinstance(github_controller, dict) or github_controller.get("authority") != "deployment_controller" or github_controller.get("visibility") != "public" or github_controller.get("command") != "/deploy <target> <vX.Y.Z>":
         errors.append("GitHub v2 contract does not preserve Deployment Controller ingress")
 
-    if release_authority.get("contract_version") != 2:
-        errors.append("Product Release authority version differs")
-    assets = release_authority.get("required_release_assets")
     expected_assets = [
         "mobile-proxy-linux-x86_64-vMAJOR.MINOR.PATCH.tar.gz",
         "mobile-proxy-android-vMAJOR.MINOR.PATCH.apk",
@@ -180,111 +271,88 @@ def check_repository(root: Path) -> list[str]:
         "provenance.json",
         "artifact-digests.json",
     ]
-    if assets != expected_assets:
+    if release_authority.get("contract_version") != 2:
+        errors.append("Product Release authority version differs")
+    if release_authority.get("required_release_assets") != expected_assets:
         errors.append("Product Release exact asset set differs")
     manifest = release_authority.get("manifest")
-    if (
-        not isinstance(manifest, dict)
-        or manifest.get("content_digest_domain") != "mobile-proxy/product-release-asset/v2"
-        or manifest.get("content_digest_algorithm") != "blake3-256"
-    ):
+    if not isinstance(manifest, dict) or manifest.get("content_digest_domain") != "mobile-proxy/product-release-asset/v2" or manifest.get("content_digest_algorithm") != "blake3-256":
         errors.append("Product Release typed digest identity differs")
 
-    _require(
-        text[RELEASE_TAG],
-        RELEASE_TAG,
-        (
-            "target SHA does not equal exact protected main",
-            "exact protected main has no eligible successful Quality push",
-            'test "$(git rev-parse origin/main)" = "$TARGET_SHA"',
-            "git tag -a",
-            "Physical acceptance required before product tag: false",
-            "Phone access performed: false",
-            "Deployment performed: false",
-        ),
-        errors,
-    )
+    _require(text[RELEASE_TAG], RELEASE_TAG, (
+        "target SHA does not equal exact protected main",
+        "exact protected main has no eligible successful Quality push",
+        'test "$(git rev-parse origin/main)" = "$TARGET_SHA"',
+        "git tag -a",
+        "Physical acceptance required before product tag: false",
+        "Phone access performed: false",
+        "Deployment performed: false",
+    ), errors)
     for token in ("ITEM20_ISSUE", "PHONE_SIGNING_ISSUE", "final_accepted_candidate_sha"):
         if token in text[RELEASE_TAG]:
             errors.append(f"release-tag workflow still carries old physical-before-product authority {token!r}")
 
-    _require(
-        text[RELEASE],
-        RELEASE,
-        (
-            'tag_sha=$(git rev-list -n 1 "$VERIFIED_TAG")',
-            'test "$tag_sha" = "$VERIFIED_SHA"',
-            "environment: product-release",
-            "scripts/build_signed_android_release.py",
-            "scripts/prepare_phone_release_runtime.py",
-            "contracts/operations/phone-production-release-components-v1.json",
-            "scripts/create_release_bundle_v2.py",
-            "mobile-proxy-phone-production-runtime-",
-            "artifact-digests.json",
-            "cmp -s --",
-            "gh release verify",
-            "GitHub Release immutable: true",
-            "Phone access performed: false",
-            "Deployment performed: false",
-        ),
-        errors,
-    )
+    _require(text[RELEASE], RELEASE, (
+        'tag_sha=$(git rev-list -n 1 "$VERIFIED_TAG")',
+        'test "$tag_sha" = "$VERIFIED_SHA"',
+        "environment: product-release",
+        "scripts/build_signed_android_release.py",
+        "scripts/prepare_phone_release_runtime.py",
+        "contracts/operations/phone-production-release-components-v1.json",
+        "scripts/create_release_bundle_v2.py",
+        "mobile-proxy-phone-production-runtime-",
+        "artifact-digests.json",
+        "cmp -s --",
+        "gh release verify",
+        "GitHub Release immutable: true",
+        "Phone access performed: false",
+        "Deployment performed: false",
+    ), errors)
 
-    _require(
-        text[RELEASE_DOC],
-        RELEASE_DOC,
-        (
-            "A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.",
-            "only now may /deploy <target> <tag> consume that Product Release",
-            "product_release + exact controller_revision",
-            "artifact-digests.json",
-            "exact bytes",
-        ),
-        errors,
-    )
-    _require(
-        text[PROJECT_DOC],
-        PROJECT_DOC,
-        (
-            "One product, two authoritative planes",
-            "Both repositories are public; repository visibility is not the confidentiality boundary.",
-            "runtime_deployment_identity",
-            "A Product Release is an input to deployment.",
-            "public GitHub Deployment is not the execution ledger",
-        ),
-        errors,
-    )
-    _require(
-        text[PHONE_DOC],
-        PHONE_DOC,
-        (
-            "Both repositories are public",
-            "/deploy phone-production <vX.Y.Z>",
-            "mutation intent exists durably before destructive dispatch",
-            "no blind retry occurs after the destructive dispatch boundary",
-            "RECOVERED` never retroactively converts the original deployment into `ACCEPTED",
-            "re-observe only required dependencies",
-        ),
-        errors,
-    )
+    _require(text[RELEASE_DOC], RELEASE_DOC, (
+        "A Product Release is an **input to deployment**, not an output of prior physical phone acceptance.",
+        "only now may /deploy <target> <tag> consume that Product Release",
+        "product_release + exact controller_revision",
+        "artifact-digests.json",
+        "exact bytes",
+    ), errors)
+    _require(text[PROJECT_DOC], PROJECT_DOC, (
+        "One product, two authoritative planes",
+        "Both repositories are public; repository visibility is not the confidentiality boundary.",
+        "runtime_deployment_identity",
+        "A Product Release is an input to deployment.",
+        "public GitHub Deployment is not the execution ledger",
+    ), errors)
+    _require(text[PHONE_DOC], PHONE_DOC, (
+        "Both repositories are public",
+        "/deploy phone-production <vX.Y.Z>",
+        "mutation intent exists durably before destructive dispatch",
+        "no blind retry occurs after the destructive dispatch boundary",
+        "RECOVERED` never retroactively converts the original deployment into `ACCEPTED",
+        "re-observe only required dependencies",
+    ), errors)
 
     for path in (TEN_PLAN, RUNTIME, PHONE_DOC):
-        body = text[path]
-        if "not the primary reverse-tunnel owner" not in body:
+        if "not the primary reverse-tunnel owner" not in text[path]:
             errors.append(f"{path} lost Android auxiliary-role invariant")
-    _require(
-        text[README],
-        README,
-        ("first_party_android_egress", "Network.bindSocket()", "app-owned WireGuard compatibility path"),
-        errors,
-    )
+    _require(text[README], README, ("first_party_android_egress", "Network.bindSocket()", "app-owned WireGuard compatibility path"), errors)
+    _require(text[TEN_PLAN], TEN_PLAN, (
+        "normative acceptance catalog; not execution authority",
+        "Stage 4 — phone industrial operational validation",
+        "Stage 4 is **phone-only**",
+        "Stage 6 — VM-local transaction and first real VM deployment",
+        "Stage 7 — combined PHONE + VM operational acceptance",
+        "controller_capability_gap",
+    ), errors)
+
+    _check_execution_spine(text, errors)
 
     if HISTORICAL_ITEM19_SHA not in text[ITEM19_CLOSEOUT]:
         errors.append("historical Item 19 closeout lost its immutable proof SHA")
 
     for path in ACTIVE_NO_V1_AUTHORITY:
         body = _read(root, path, errors)
-        for token in STALE_ACTIVE_TOKENS:
+        for token in STALE_ACTIVE_AUTHORITY_TOKENS:
             if token in body:
                 errors.append(f"{path} contains superseded active authority wording {token!r}")
 
