@@ -6,6 +6,28 @@ Canonical runtime authority is the newest authoritative checkpoint in PRODUCT Is
 
 **Analyze only enough to act. Save every meaningful result durably. One stage has one subordinate Stage Issue in its owning repository; implementation progress lives in the stage branch/PR, working decisions/evidence live in the Stage Issue, and #179 carries only authority/stage boundaries. A stage checkpoint authorizes the whole named stage within its scope and hard boundaries: continue until the real exit criteria are satisfied.**
 
+## Context recovery: one execution spine
+
+After losing chat or local context, recover current work in exactly this order:
+
+1. repository `AGENTS.md`;
+2. this `STAGE_WORKFLOW.md`;
+3. the **newest authoritative checkpoint** in PRODUCT Issue #179;
+4. the one current subordinate Stage Issue named by the stage;
+5. only then the permanent standards/contracts/reference documents needed by that stage.
+
+No other document or issue is a parallel execution roadmap. Static roadmaps, acceptance catalogs, architecture standards, backlogs and future recommendations never independently define the current stage, current Release, current SHA, next bounded action or checkpoint cadence.
+
+Document roles:
+
+- PRODUCT #179 — only dynamic stage/operations cursor;
+- `docs/PRODUCTION_STAGE_ROADMAP.md` — static seven-stage sequence and scope;
+- `docs/architecture/ARCHITECTURE_STANDARD.md` — permanent architecture/complexity/ownership standard applied inside every stage;
+- `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` — stage-mapped acceptance catalog, not action authority;
+- PRODUCT #249 — planning/acceptance backlog only;
+- `docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md` — future/post-baseline guidance only;
+- historical A-H, Item15-23 and Item19/20 plans — evidence/history only when superseded.
+
 ## One stage
 
 For every development/acceptance stage:
@@ -38,6 +60,28 @@ Physical phone state must be **observed, not guessed**. Do not infer a phone fac
 4. Local-agent assistance may provide exact read-only diagnostics, device/UI observations and explicitly authorized physical interactions required by the current stage. State exactly what to observe/do and what evidence to return; never ask the agent to improvise or "try things".
 5. The local agent is not deployment authority. It must not bypass immutable Release identity, durable mutation intent, target serialization, exactly-once destructive dispatch or UNKNOWN reconciliation. Raw/manual ADB or destructive local mutation is forbidden as a shortcut around the Controller. Any destructive action remains owned by the proper authorized Controller transaction path unless a newer owner checkpoint explicitly defines a different physical-test boundary.
 6. If a phone-dependent conclusion cannot be proven with available evidence, classify it as unknown/unproven and request the missing local-agent observation. Do not substitute a hypothesis.
+
+### Local-agent result -> Controller capability feedback
+
+Every local-agent result is classified as exactly one:
+
+- `controller_capability_gap` — repeatable or decision-critical observation needed for deployment, recovery or operational validation that should reasonably be available through Controller observation/target-adapter semantics;
+- `human_only_physical_observation` — inherently device-UI, physical, modem or operator interaction that should remain outside normal Controller automation;
+- `one_off_observation` — bounded evidence without a demonstrated reusable Controller requirement.
+
+A `controller_capability_gap` is evidence of a missing capability, **not automatic permission to add framework code**. Apply the normal complexity/necessity gate:
+
+- implement the smallest observation capability in the current stage when the gap is demonstrated, stage-relevant, reduces guessing/UNKNOWN/manual dependence, and is simpler than repeated local assistance;
+- if it is real but does not block the current stage, record it and defer it to the earliest stage it actually blocks;
+- if it is human-only or one-off, do not generalize it into Controller machinery.
+
+When a Controller-owned authoritative decision, postcondition or recovery classification repeatedly depends on a local-agent fact that could be machine-observed safely, treat that dependence as a Controller design smell and resolve it before accepting the earliest stage whose exit depends on it.
+
+## Architecture work is stage-mapped
+
+Architecture improvement is not a parallel workstream. `ARCHITECTURE_STANDARD.md` supplies permanent rules; concrete architecture changes enter the earliest stage whose exit they block or whose demonstrated P0/P1 they close. Stage 5 explicitly owns phone-baseline simplification. Stage 6 is the first point where phone and VM are two real target implementations and therefore the first normal point for extracting shared target abstractions from demonstrated duplication.
+
+Future architecture recommendations remain inactive until promoted through #179 into a stage.
 
 ## Durable-progress rule
 
