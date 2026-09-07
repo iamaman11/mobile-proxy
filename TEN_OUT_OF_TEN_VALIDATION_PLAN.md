@@ -1,31 +1,33 @@
-# 10/10 Reproducibility and Reliability Validation Plan
+# 10/10 Reproducibility and Reliability Validation Catalog
 
-Status: **normative acceptance matrix**  
-Current implementation backlog: public Issue `#228`  
-Current engineering/execution cursor: newest authoritative checkpoint in public Issue `#179`  
-Authority boundary: `docs/operations/project-authority.md`  
-Primary runtime: `first_party_reverse_tunnel`  
-Rollback runtime: `stock_wireguard_bridge`
+Status: **normative acceptance catalog; not execution authority**  
+Dynamic engineering/operations cursor: newest authoritative checkpoint in PRODUCT Issue #179  
+Static stage sequence: `docs/PRODUCTION_STAGE_ROADMAP.md`  
+Planning backlog: PRODUCT Issue #249  
+Authority boundary: `docs/operations/project-authority.md`
+
+This document defines evidence that final production acceptance may require. It does **not** authorize tests from later stages early. The newest #179 checkpoint selects the current stage; that stage's Issue binds the concrete matrix and identities.
+
+Historical A-H ordering is superseded as execution sequencing. Its useful acceptance requirements are mapped below into the seven-stage model.
 
 ## 1. Meaning of 10/10
 
-The project uses two distinct statuses:
+The project distinguishes:
 
-1. **Software 10/10-ready** — every source-controlled, process-testable, dependency, Android-build and immutable-Product-Release gate passes on one exact protected PRODUCT revision.
-2. **10/10 accepted / baseline complete** — that immutable Product Release, together with one exact admitted Deployment Controller revision, also passes the complete real-phone, real-provider/network, deployment, rollback, recovery and soak matrix.
+1. **PRODUCT software/release accepted** — required source-controlled security, behavior, dependency, build and immutable Product Release gates pass on exact reviewed PRODUCT identity.
+2. **Target accepted** — an exact immutable Product Release plus exact admitted Controller revision has direct target-local deployment/operational evidence for the stage that owns that target.
+3. **Full production 10/10 accepted** — PRODUCT, Controller and the complete real PHONE+VM topology pass the Stage 7 functional/recovery/load/soak definition with no unresolved P0/P1.
 
-Passing CI is necessary but cannot prove Android boot behavior, modem policy routing, carrier QUIC blocking, real cellular egress, signer/install state, real WireGuard handshake or long-running recovery. Software evidence therefore never claims physical acceptance or baseline completion.
+CI is necessary but cannot manufacture Android boot behavior, modem routing, carrier behavior, physical process state, VM host state or long-running reliability evidence.
 
 Both repositories are public:
 
 - `iamaman11/mobile-proxy` = PRODUCT authority;
 - `iamaman11/mobile-proxy-production` = DEPLOYMENT CONTROLLER authority.
 
-Repository visibility is not the confidentiality boundary. Secret values, target bindings, raw device identifiers, credentials, private keys, sensitive rendered config and unsafe raw production logs remain private.
+Secrets, target bindings, raw target identifiers, credentials, private keys, sensitive rendered config and unsafe raw runtime logs remain private.
 
-## 2. Normative release and deployment identity
-
-PRODUCT and controller identity are intentionally separate.
+## 2. Release and deployment identity
 
 ```text
 product_release
@@ -35,273 +37,258 @@ product_release
 
 runtime_deployment_identity
   = product_release
-  + exact admitted deployment_controller_revision
+  + exact admitted Deployment Controller revision
 ```
 
-A controller-only repair must not force a rebuild of unchanged product bytes. A new Product Release must not silently redefine which controller revision executed it.
+A Controller-only repair does not force a rebuild of unchanged product bytes. A new Product Release does not silently redefine which Controller revision deployed it.
 
-For one acceptance campaign:
-
-```text
-accepted_product_source_sha
-  == final annotated product tag target SHA
-  == source SHA recorded by Product Release provenance
-
-accepted_controller_revision
-  == exact controller revision admitted for the deployment/acceptance campaign
-```
-
-The two SHAs are not required to be equal and normally belong to different repositories.
-
-If protected PRODUCT `main` advances before Product Release creation, PRODUCT candidate evidence is stale and must be regenerated as required by its contracts. If the controller revision advances, controller admission/policy evidence must be re-established for the new controller revision without pretending the Product Release changed.
-
-Historical Item 19/Item 20 candidates remain immutable historical evidence only. They do not define current Product Release or Deployment Controller identity.
+`latest`, mutable refs, approximate versions or GitHub Deployment projection are not runtime identity.
 
 ## 3. Runtime and Android roles
 
-The primary phone path is:
+The primary phone runtime is:
 
 ```text
 root/Magisk boot hook
   -> runtime-supervisor
       -> host-daemon
-      -> sing-box on 127.0.0.1
+      -> sing-box on loopback
           -> certificate-pinned QUIC reverse tunnel
           -> certificate-pinned TLS/TCP reserve
 ```
 
-Primary invariants:
+The Android app is **not the primary reverse-tunnel owner**. It is a managed PRODUCT component for Android-owned capabilities such as cellular `Network.bindSocket()` egress and the app-owned WireGuard compatibility path when the selected topology consumes them.
 
-- `tunnel_owner=first_party_reverse_tunnel`;
-- `wireguard.enabled=false`;
-- no active Android VPN owner in native mode;
-- no `tun0` requirement in native mode;
-- QUIC is primary and TLS/TCP reserve is certificate-pinned;
-- plaintext downgrade is forbidden;
-- device and tunnel-session identity are exact;
-- routing never selects an arbitrary available device.
+Primary invariants include:
 
-`stock_wireguard_bridge` is an explicit emergency rollback. The Android app is **not the primary reverse-tunnel owner**, but it is a **managed production auxiliary component** for topologies that use first-party Android/cellular `Network.bindSocket()` egress or the app-owned WireGuard compatibility path.
+- `tunnel_owner=first_party_reverse_tunnel` for native primary mode;
+- no plaintext downgrade;
+- exact device/tunnel-session authority;
+- no arbitrary available-device routing;
+- exact APK package/version/signer/artifact identity when the topology consumes Android app capability;
+- stock WireGuard only as explicit compatibility/rollback where production policy permits it.
 
-A topology that consumes an Android app capability must treat exact package/version/signer/install state and retained signed artifact provenance as candidate-specific production acceptance evidence.
+## 4. Stage mapping rule
 
-## 4. Durable A-H acceptance path
+Acceptance evidence belongs to the **earliest stage whose exit depends on it**. A later-stage test is not pulled forward merely because this catalog contains it.
 
-The project is completed in these gates. Issue #179 determines which gate/action is currently authorized; Issue #228 is backlog only.
+- Stage 1 — Controller phone transaction semantics, no live phone acceptance requirement.
+- Stage 2 — immutable Product Release/software identity.
+- Stage 3 — one exact phone deployment and local postcondition.
+- Stage 4 — phone-only industrial operational validation.
+- Stage 5 — phone baseline simplification/evidence convergence.
+- Stage 6 — VM-local transaction and first real VM deployment.
+- Stage 7 — combined PHONE+VM end-to-end acceptance.
 
-### Gate A — Deployment Controller health
+## 5. PRODUCT software and immutable Release evidence — Stages 1–2 prerequisites
 
-The current controller revision must execute its required hosted policy set on real runners and finish terminal green. Tree-equivalence is not a substitute for operational CI health.
-
-### Gate B — source ownership / authority convergence
-
-There must be exactly one active deployment controller implementation. PRODUCT retains application/runtime source, shared product/domain code, Quality/build/release logic. Deployment ingress, target mutation State Machine / Transaction Kernel, durable intent, exactly-once dispatch, target adapters, recovery/quarantine and canonical runtime execution evidence belong only to `mobile-proxy-production`.
-
-### Gate C — Android security hardening
-
-Eliminate plaintext persistent tunnel secret/config state, explicitly exclude secret-bearing state from backup/device transfer, retain deterministic direct-boot behavior and fail closed on missing/corrupt key material.
-
-### Gate D — Android behavior tests
-
-Prove secure state, boot restoration, tunnel lifecycle, cellular egress authentication/network refusal, local control behavior and at least one Android framework/Keystore/service instrumentation smoke path.
-
-### Gate E — supply chain and Product Release prerequisites
-
-Bind vendored Android binary dependencies to authoritative upstream provenance/digests. Product tag creation must require exact same-SHA successful Product Quality and Product Release prerequisite evidence without needlessly loading signing secret values into readiness jobs.
-
-### Gate F — new immutable Product Release
-
-Create a new semantic Product Release from the hardened exact PRODUCT revision. Do not rewrite historical `v0.1.4`. Require exact annotated tag -> exact source -> exact signed artifacts -> manifest/provenance/digests -> immutable GitHub Release.
-
-### Gate G — exactly one admitted deployment
-
-Through Deployment Controller Issue #1, submit exactly one semantic deployment request for the new immutable Product Release. Require exact Product Release + exact controller revision admission, target-global serialization, durable intent before destructive dispatch, exactly-once effect, independent postcondition and fail-closed UNKNOWN recovery.
-
-### Gate H — real-world acceptance
-
-On the deployed immutable release prove the real registered phone, reverse tunnel, relay/provider path, external client access, carrier egress/IP rotation, reboot/fallback/recovery and reliability/soak criteria below.
-
-Historical real-phone experiments are valuable engineering evidence but never substitute for Gate H on the final immutable Product Release.
-
-## 5. Immutable software gate
-
-All PRODUCT checks pass on one clean, unchanged PRODUCT Git SHA before the Product Release is created.
+As applicable to the current Product Release contract:
 
 ### Architecture and policy
 
-- application/domain dependency boundaries;
+- product/application/domain dependency boundaries;
 - native reverse-tunnel default enforcement;
-- Android auxiliary role is explicit and cannot silently become the primary tunnel owner;
-- unknown or contradictory tunnel ownership fails closed;
-- bounded logs, errors, enums, queues and retries;
-- source-controlled migration and rollback procedures;
-- PRODUCT repository is the single product source/build/release authority;
-- Deployment Controller is the single deployment transaction/target-mutation authority;
-- no controller source is maintained in both repositories;
-- repository visibility is not used as a substitute for secret/evidence containment.
+- Android auxiliary role cannot silently become primary tunnel owner;
+- unknown/contradictory tunnel ownership fails closed;
+- bounded errors, queues and retries;
+- PRODUCT is the sole product source/build/release authority;
+- Controller is the sole deployment transaction/target-mutation authority;
+- no active duplicate Controller implementation in PRODUCT.
 
 ### Cryptographic and release integrity
 
-- internal release/config/binary digests use the admitted typed digest contracts;
-- static domain separation and length framing are enforced where required;
-- externally mandated algorithms remain unchanged;
-- release roots contain sorted manifests and exact sizes;
-- deployment identity is checked against immutable Product Release identity;
-- evidence contains the exact full relevant Git revisions;
-- final published artifact provenance records the exact final PRODUCT tag target SHA.
+- admitted typed digest contracts;
+- release roots/manifests include exact files/sizes/digests as required;
+- exact full relevant revisions are recorded;
+- final published artifact provenance records exact PRODUCT tag/source identity;
+- release artifacts match the Product Release authority contract.
 
-### Rust, supply chain and Android quality
+### Build and behavior
 
-- `cargo fmt --all -- --check`;
-- `cargo clippy --workspace --all-targets -- -D warnings`;
-- `cargo test --workspace`;
-- RustSec/cargo-deny gates;
-- vendored Android binary provenance/digest verification;
-- Android unit/behavior/instrumentation tests;
-- Android lint and assembly;
-- sensitive backup/D2D policy is explicit;
-- no production runtime reference may turn the app-owned VPN service into the default native tunnel owner;
-- production release APK signing/package/version contracts remain machine-verified.
+- Rust formatting/lint/tests and dependency/security gates;
+- Android build/lint/unit/behavior/instrumentation coverage required by PRODUCT policy;
+- secret persistence/backup/D2D policy is fail-closed;
+- product compatibility ports/protocols remain protected;
+- PRODUCT durable-state migrations and readiness semantics remain deterministic.
 
-### Durable product state and operations
+Only PRODUCT evidence may claim software/release acceptance. It cannot claim physical target state.
 
-- canonical product mutable-state owners are explicit;
-- migrations are deterministic and fail closed;
-- acknowledged product state/replay/idempotency requirements survive restart where applicable;
-- liveness is separate from serving readiness;
-- readiness reports critical state without exposing secrets.
+## 6. Stage 3 — exact phone deployment evidence
 
-### Reverse-tunnel and proxy software acceptance
+Use the exact immutable Product Release and registered phone through the admitted Controller revision.
 
-Controlled tests prove mixed `1080`, SOCKS5 `1081`, HTTP/CONNECT `3128`, forced QUIC failure, pinned TLS/TCP reserve, return to fresh QUIC, same device/session authority, no plaintext fallback and bounded deterministic capacity handling where these are product-testable.
+Required evidence includes:
 
-Only after all software gates pass may evidence claim `software_10_of_10_ready=true`.
+- exact Release and Controller admission;
+- target binding proof without publishing raw identifiers;
+- durable mutation intent before destructive dispatch;
+- exactly-once physical transaction semantics;
+- exact installed APK when required by topology;
+- exact rooted runtime inventory/materialization;
+- exact active/current release;
+- independent postcondition observation;
+- canonical terminal classification;
+- any ambiguous dispatch -> `UNKNOWN` -> read-only reconciliation before conflicting mutation.
 
-## 6. Provider and phone prerequisites
+A successful workflow alone is not Stage 3 acceptance.
 
-Historical provider/phone evidence remains historical evidence. Gate H must establish fresh release/controller-specific readiness as required by current v2 contracts.
+## 7. Stage 4 — phone industrial operational validation
 
-Before any mutable phone/provider action:
+Stage 4 is **phone-only**. It does not authorize VM/provider creation, VM restart matrices or combined topology acceptance.
 
-- newest #179 checkpoint must explicitly authorize that bounded action;
-- exact immutable Product Release identity must be resolved when deployment requires it;
-- exact Deployment Controller revision/policies must be admitted;
-- registered target binding must be proven without publishing raw identifiers;
-- secrets/credentials must be supplied only through admitted private secret/environment inputs;
-- UNKNOWN/QUARANTINED prior transactions must be reconciled according to controller policy before any new conflicting mutation.
+The current Stage 4 Issue binds the exact concrete matrix. Candidate categories are:
 
-No phone mutation is authorized merely by this document.
+### Serving and process health
 
-## 7. Fresh relay VM drill
+- phone-local proxy/runtime is actually serving the selected phone-side path;
+- `runtime-supervisor`, `host-daemon` and `sing-box` health/readiness is correct where used;
+- rendered runtime configuration matches admitted topology without exposing secrets;
+- no false success when service is not actually usable.
 
-Create or recreate a controlled test relay only through the admitted Deployment Controller/provider lifecycle for the active Product Release.
+### Restart and reboot
 
-Acceptance includes declared topology, exact candidate artifacts, clean service startup, deterministic storage migration/restart, public proxy compatibility, QUIC and pinned TLS/TCP reachability, explicit rollback backend availability, idempotent provisioning and verified cleanup. Exact provider identity remains bounded according to trust-zone policy.
+- bounded runtime-supervisor termination/recovery;
+- bounded host-daemon termination/recovery;
+- bounded sing-box termination/recovery;
+- full phone reboot followed by correct rehydration of exact accepted release/runtime;
+- recovery evidence distinguishes process restart, boot/session change and deployment mutation.
 
-## 8. Fresh rooted-phone drill
+### Network/degraded behavior
 
-Use the exact immutable Product Release and registered rooted phone through the admitted Deployment Controller revision.
+- phone-local loss/recovery of mobile-data path where required;
+- QUIC failure/reserve behavior only where it can be tested without opening Stage 6 provider/VM mutation;
+- deterministic classification of degraded/unavailable states;
+- causal re-observation invalidates only facts whose dependencies changed;
+- no plaintext or wrong-session fallback.
+
+### Tamper/mismatch
+
+- detect relevant runtime/config/current mismatch;
+- fail closed rather than report accepted/healthy state from stale evidence;
+- recovery or reconciliation does not blindly repeat destructive mutation.
+
+### Resource/load
+
+- bounded CPU/memory/process/file-descriptor/queue behavior for the phone runtime under the load actually used by the selected phone topology;
+- bounded concurrency and explicit overload behavior;
+- no monotonic resource leak or unbounded queue/log growth.
+
+### Phone-side repetitions and soak
+
+The Stage 4 Issue may bind repetitions from the historical reliability model when they remain necessary and feasible. Historical targets included:
+
+- up to 20 full phone reboots;
+- up to 20 forced terminations for each critical phone runtime process;
+- up to 20 mobile-data disconnect/reconnect events;
+- bounded QUIC/reserve/return cycles where Stage-4 scope can exercise them safely;
+- bounded rotation cycles when rotation is part of the selected phone topology;
+- a production-like phone-side soak, historically 24 hours, with periodic serving/resource checks.
+
+These numbers are acceptance targets/catalog values, **not automatic authorization for destructive operations**. The current Stage Issue must bind the exact agreed matrix, and #179 must authorize any mutation/physical-test boundary involved.
+
+### Local-agent evidence and Controller feedback
+
+If Controller cannot reliably observe a required phone fact, request the narrow local-agent observation instead of guessing. Classify it as:
+
+- `controller_capability_gap`;
+- `human_only_physical_observation`;
+- `one_off_observation`.
+
+A repeatable or decision-critical Controller capability gap that blocks Stage 4 should be closed with the smallest safe observer/adapter improvement when that is simpler than recurring manual dependence. Local-agent mutation never bypasses Controller transaction authority.
+
+### Stage 4 reliability thresholds
+
+For the concrete repeated categories selected by the Stage Issue, use bounded thresholds appropriate to the measured sample. The historical acceptance targets remain:
+
+- automatic recovery success rate at least 99.5% where sample size can meaningfully support that claim;
+- median recovery under 20 seconds;
+- p95 recovery under 60 seconds;
+- no silent stuck state longer than 60 seconds;
+- no success classification while the required phone service/path is unusable;
+- no unexplained degraded state.
+
+With small fixed samples, one unexplained failure blocks acceptance rather than being hidden by percentages.
+
+## 8. Stage 5 — phone baseline acceptance / simplification
+
+Stage 5 is not another broad physical test program. It consumes Stage 4 evidence and leaves one long-term phone path.
 
 Acceptance includes:
 
-- registered-device/root proof before mutation;
-- exact architecture-correct package/runtime identity;
-- local manifest and byte-for-byte active-file verification where required;
-- Magisk/service ownership by the exact active release;
-- healthy/serving `runtime-supervisor`, `host-daemon` and `sing-box` where used by current topology;
-- durable control-plane heartbeat;
-- `tunnel_owner=first_party_reverse_tunnel` and no native-mode Android VPN owner;
-- authenticated public proxy traffic exits through the phone carrier path;
-- when Android auxiliary egress/compatibility is used: exact `com.example.mobileproxy` package, required versionName/versionCode, installed signer equals accepted candidate signer as a bounded classification, exact retained APK digest/provenance, and auxiliary service health.
+- close remaining demonstrated phone P0/P1 and evidence-trust gaps;
+- remove/isolate redundant v1/reconstruction/temporary recovery surfaces;
+- converge normative phone/Controller docs and ownership;
+- ensure local-agent observations that revealed reusable Controller gaps are either implemented where required or explicitly deferred with stage mapping;
+- reduce active workflows/policies/code where independent invariants do not justify them;
+- preserve exact Release/deployment/recovery safety while simplifying cognitive surface.
 
-“No APK installation required” is valid only for a topology that does not consume an Android app capability. It is not a global production-stack invariant.
+Exit requires one singular, protected, documented phone baseline.
 
-## 9. Immutable physical stage sequence
+## 9. Stage 6 — VM-local transaction and first real VM deployment
 
-Execute the current controller-owned physical acceptance operations corresponding to these stages. Historical public phone scripts are not active execution authority.
+Only after #179 explicitly opens Stage 6 may VM/provider mutation occur.
 
-Required stages remain conceptually:
+Acceptance includes:
 
-1. **online** — clean startup, fresh QUIC and all protected proxy protocol checks;
-2. **post-reboot** — full phone reboot, service rehydration, durable inventory and fresh QUIC;
-3. **fallback** — QUIC blocked while pinned TLS/TCP remains available and proxy paths pass;
-4. **recovered** — QUIC restored and new connections return to fresh QUIC;
-5. **wireguard** — explicit stock WireGuard rollback owns Android VPN, `tun0` exists, handshake is recent, reverse tunnel is inactive and protected proxy paths pass;
-6. **post-wireguard-recovered** — the exact already-installed native release is reactivated without rebuilding, WireGuard stops, `tun0` disappears and fresh QUIC/proxy service returns.
+- one concrete real VM lifecycle and target identity;
+- exact immutable Product Release Linux artifact/provenance/digest;
+- smallest VM-specific Controller adapter for materialization, activation/service lifecycle and independent observation;
+- durable intent and exactly-once mutation semantics reused from the Controller kernel;
+- VM-local postcondition independent of workflow success;
+- direct tests for artifact mismatch, binding mismatch, partial materialization, activation/service failure, ambiguous dispatch and read-only reconciliation;
+- provider credentials/mutation separated from phone runner;
+- explicit provisioning/replacement ownership only if the chosen real lifecycle requires it;
+- one real canonical `ACCEPTED` VM deployment.
 
-The final summary proves one exact Product Release, one exact controller revision, one bounded target identity, exact deployment/recovery evidence, all accepted stages and absence of secrets/unbounded logs.
+VM-local restart/reboot checks required to prove that target may occur here. Combined PHONE+VM behavior remains Stage 7.
 
-## 10. Repeated recovery matrix
+Stage 6 is the first normal point for extracting shared target abstractions from demonstrated phone/VM duplication. No generic multi-target platform.
 
-A single successful physical run is not sufficient.
+## 10. Stage 7 — combined PHONE + VM operational acceptance
 
-Phone-side repetitions:
+Bind the exact real topology when Stage 7 opens. Expected class:
 
-- 20 full phone reboots;
-- 20 `runtime-supervisor` forced terminations;
-- 20 `host-daemon` forced terminations;
-- 20 `sing-box` forced terminations;
-- 20 mobile-data disconnect/reconnect events;
-- 10 forced QUIC-block/TLS-reserve/QUIC-return cycles;
-- 5 native-to-stock-WireGuard-to-native rollback cycles;
-- 30 managed IP rotations at the selected hold window.
+```text
+external client
+  <-> VM / relay / serving edge
+  <-> reverse tunnel
+  <-> registered phone runtime
+  <-> selected mobile/cellular egress
+```
 
-Relay-side repetitions:
+Required combined evidence includes:
 
-- 20 control-plane restarts;
-- 20 reverse-tunnel-server restarts;
-- 20 relay-gate restarts;
-- 20 Nginx reloads;
-- 10 full VM reboots;
-- one clean backup restore;
-- one VM delete-and-recreate drill.
+- exact accepted identities of phone and VM and permitted compatibility/version relationship;
+- authenticated end-to-end proxy path through both targets;
+- required public compatibility endpoints;
+- phone restart/reboot and VM service/host restart/reconnect interactions;
+- deterministic partial-target unavailability;
+- recovery on either target without blind destructive retry;
+- QUIC primary and certificate-pinned TLS/TCP reserve behavior across the real path where production uses it;
+- provider/relay lifecycle operations only when they are part of the selected real topology;
+- bounded load/resources across the whole path;
+- end-to-end soak/leak/reliability evidence;
+- no unresolved cross-target P0/P1.
 
-Every operation records bounded UTC/recovery/transport/result evidence without secrets.
+Historical relay-side targets may inform the Stage 7 matrix, including repeated service restarts, VM reboots, backup/restore and delete/recreate drills. They are not Stage 4 work and are executed only when Stage 7/#179 authority and the concrete VM lifecycle require them.
 
-## 11. Reliability thresholds
+## 11. Security and operational review
 
-For each repeated category and combined set:
+At the stage that owns each surface, verify applicable firewall exposure, credential separation, certificate pinning, wrong-credential failure behavior, release/backup permissions, rollback immutability, dependency audit results and explicit residual-risk records.
 
-- automatic recovery success rate at least **99.5%**;
-- median recovery under **20 seconds**;
-- p95 recovery under **60 seconds**;
-- no silent stuck state longer than **60 seconds**;
-- no success while proxy traffic fails or tunnel freshness is stale;
-- no unresolved degraded state without a bounded machine-readable reason;
-- no cross-device/stale-session routing, plaintext downgrade or lost acknowledged operation.
+A full independent penetration test, fleet orchestration, generic chaos platform or hypothetical provider matrix is outside the baseline unless separately promoted.
 
-With small fixed samples, one unexplained failure blocks acceptance. A PRODUCT software fix establishes a new Product Release candidate; a controller-only fix establishes a new controller revision. In either case, invalidate only evidence whose declared dependencies changed.
+## 12. Final decision
 
-## 12. Rotation timing gate
+Declare full production 10/10 accepted only when:
 
-For each supported phone/operator profile, evaluate candidate hold windows with at least 30 runs each and select the shortest window meeting the documented IP-change/recovery threshold. Materially different device/modem/operator profiles require their own current matrix.
+- exact PRODUCT software/Release evidence is accepted;
+- Controller transaction/recovery invariants are accepted for real targets;
+- phone Stage 4 and Stage 5 exits are satisfied;
+- VM Stage 6 exit is satisfied;
+- Stage 7 combined topology passes the agreed functional/recovery/load/soak matrix;
+- no unresolved P0/P1 remains;
+- all evidence is bound to the exact Product Release, Controller revision and causal target dependencies it claims;
+- no sensitive target/secret material was made public.
 
-## 13. Soak and resource gate
-
-After recovery repetitions, run at least a 24-hour production-like soak using the same immutable Product Release and admitted controller/runtime identity. During soak, verify protected proxy paths at least once per minute, bounded tunnel/runtime/egress metrics, controlled rotations/restarts, no unbounded resource growth, no credential leakage and no unexplained outage longer than 60 seconds.
-
-A monotonic leak or unbounded queue blocks acceptance regardless of remaining capacity.
-
-## 14. Security and operational review
-
-Before final closeout verify firewall exposure, credential separation, certificate pinning, wrong-credential failure behavior, release/backup permissions, rollback immutability, clean backup restore, dependency audit results and any explicit residual-risk record.
-
-A full independent penetration test or fleet orchestration is outside current scope unless separately activated; absence is not misrepresented as completed assurance.
-
-## 15. Final decision
-
-Declare **10/10 accepted / baseline complete** only when:
-
-- exact Product Release software evidence says `software_10_of_10_ready=true`;
-- applicable Android signing and installed-state proof passes;
-- Deployment Controller terminal evidence proves the admitted deployment transaction without blind retry;
-- complete physical summary says `physical_phone_acceptance_complete=true` and `accepted=true`;
-- repeated recovery thresholds pass;
-- 24-hour soak passes;
-- no unresolved P0/P1 defect remains;
-- all evidence is bound to the exact Product Release and exact controller revision/dependencies it claims;
-- final Product tag targets the accepted PRODUCT source SHA;
-- published artifacts are derived from or immutably reused with provenance bound to that same PRODUCT source SHA;
-- no sensitive target/secret material was made public as part of acceptance evidence.
-
-Architecture/documentation reconciliation can complete before this global acceptance state. It must not claim that live physical 10/10 has already happened.
+Architecture/documentation convergence may complete earlier. It must never be misrepresented as live physical acceptance.
