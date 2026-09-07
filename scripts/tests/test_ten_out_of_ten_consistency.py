@@ -18,6 +18,13 @@ SPEC.loader.exec_module(MODULE)
 SURFACES = (
     "TEN_OUT_OF_TEN_VALIDATION_PLAN.md",
     "README.md",
+    "QUICK_REFERENCE.md",
+    "AGENTS.md",
+    "STAGE_WORKFLOW.md",
+    "IMPLEMENTATION_PLAN.md",
+    "docs/PRODUCTION_STAGE_ROADMAP.md",
+    "docs/PRODUCTION_BASELINE_PLAN.md",
+    "scripts/repository_context.py",
     "RUNTIME_LAYOUT.md",
     "docs/operations/project-authority.md",
     "docs/operations/phone-gitops-runtime.md",
@@ -209,6 +216,47 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             path.write_text(body, encoding="utf-8")
             errors = MODULE.check_repository(root)
         self.assertTrue(any("historical Item 19 closeout lost its immutable proof SHA" in error for error in errors))
+
+    def test_static_stage_roadmap_cannot_restore_dynamic_current(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "docs/PRODUCTION_STAGE_ROADMAP.md"
+            path.write_text(path.read_text(encoding="utf-8") + "\n## Stage 4 — CURRENT\n", encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("must not embed dynamic CURRENT state" in error for error in errors))
+
+    def test_repository_context_cannot_restore_issue90_as_dynamic_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "scripts/repository_context.py"
+            path.write_text(path.read_text(encoding="utf-8") + '\n# "canonical_gitops_issue"\n', encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("superseded execution-spine wording" in error for error in errors))
+
+    def test_baseline_cannot_restore_checkpoint_after_every_merge(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "docs/PRODUCTION_BASELINE_PLAN.md"
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "\nAfter each accepted merge or separately authorized production operation, record a bounded #179 checkpoint\n",
+                encoding="utf-8",
+            )
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("superseded execution-spine wording" in error for error in errors))
+
+    def test_stage_workflow_requires_capability_gap_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "STAGE_WORKFLOW.md"
+            body = path.read_text(encoding="utf-8").replace("controller_capability_gap", "manual_gap")
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("STAGE_WORKFLOW.md is missing controller-v2 invariant 'controller_capability_gap'" in error for error in errors))
 
 
 if __name__ == "__main__":
