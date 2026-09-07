@@ -1,12 +1,13 @@
-# Production Baseline Plan
+# Production Baseline Architecture and Invariants
 
-Status: **active canonical implementation roadmap**  
+Status: **active static architecture/invariant baseline; not an execution roadmap**  
 PRODUCT repository: `iamaman11/mobile-proxy`  
 Deployment Controller repository: `iamaman11/mobile-proxy-production`  
-Acceptance backlog: public Issue #228  
-Authoritative next-step cursor: newest authoritative checkpoint in public Issue #179
+Dynamic stage/operations authority: newest authoritative checkpoint in PRODUCT Issue #179  
+Static stage sequence: `docs/PRODUCTION_STAGE_ROADMAP.md`  
+Planning/acceptance backlog: PRODUCT Issue #249
 
-This file defines durable ordering and acceptance criteria. Issue #179 alone decides the exact current bounded action. Passing a roadmap stage never grants phone/ADB/provider/VM/tag/Release authority by itself.
+This document defines durable production architecture and acceptance invariants. It intentionally contains no dynamic `CURRENT` stage, current SHA, current Product Release, next action or checkpoint cadence. Historical A-H implementation ordering is superseded by the seven-stage roadmap and is not an alternate execution plan.
 
 ## 1. Goal
 
@@ -19,23 +20,21 @@ Reach a simple, understandable industrial Mobile Proxy baseline with:
 - independent target postcondition observation;
 - deterministic recovery/quarantine after ambiguous execution;
 - auditable dependency provenance;
-- separately authorized real-target acceptance and soak evidence;
-- no unresolved P0/P1 defect.
+- separately authorized real-target operational evidence;
+- no unresolved P0/P1 defect contradicting acceptance.
 
 No code for code. No verification of verification. Prefer deletion/consolidation over new framework layers.
 
 ## 2. Authority model
-
-The accepted v2 split is normative:
 
 | Plane | Repository | Authority |
 | --- | --- | --- |
 | PRODUCT | `iamaman11/mobile-proxy` | application/runtime source, shared product/domain architecture, Quality, product build, Android signing verification, annotated tags, immutable Product Releases |
 | DEPLOYMENT CONTROLLER | `iamaman11/mobile-proxy-production` | deployment ingress, State Machine / Transaction Kernel, target admission/serialization/observation/adapters, durable mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine, canonical runtime execution classification |
 
-Both repositories are public. Secrets, private keys, target bindings, raw target identifiers, credentials, sensitive rendered configuration and unsafe raw production/ADB logs remain private. Repository visibility is never an authorization or confidentiality mechanism.
+Both repositories are public. Secrets, private keys, target bindings, raw target identifiers, credentials, sensitive rendered configuration and unsafe raw production logs remain private. Repository visibility is never an authority or confidentiality mechanism.
 
-Normative contracts:
+Normative cross-plane contracts:
 
 - `docs/operations/project-authority.md`
 - `contracts/operations/project-authority-v2.json`
@@ -43,11 +42,9 @@ Normative contracts:
 - `contracts/operations/production-topology-v2.json`
 - `contracts/operations/product-release-authority-v2.json`
 
-The old “thin execution satellite / public physical State Machine owner” model is superseded.
+The old “thin execution satellite / PRODUCT-owned physical controller” model is superseded.
 
-## 3. Retained PRODUCT invariants
-
-Gate B changes deployment ownership, not product behavior.
+## 3. Product invariants
 
 ### Compatibility
 
@@ -57,45 +54,40 @@ Gate B changes deployment ownership, not product behavior.
 - QUIC remains primary reverse-tunnel transport;
 - certificate-pinned TLS/TCP reserve remains available;
 - plaintext downgrade is forbidden;
-- WireGuard remains a controlled compatibility/rollback path until an explicit accepted deprecation;
-- operator CLI/admin API compatibility changes only through reviewed versioned migration.
+- WireGuard remains an explicit compatibility/rollback path until an accepted deprecation;
+- operator/admin compatibility changes only through reviewed versioned migration.
 
 ### Architecture and state ownership
 
 Inside PRODUCT, dependency direction remains foundation/domain -> application -> infrastructure/adapters -> composition/delivery. Pure/domain modules do not own transport, persistence, Android, filesystem, process, environment or provider responsibilities.
 
-Every registered PRODUCT mutable-state group has one authoritative owner. Deployment admission, target mutation, exactly-once dispatch and recovery are not PRODUCT mutable-state ownership; they belong to the Deployment Controller.
+Every authoritative mutable state/decision has one owner. Deployment admission, target mutation, durable mutation intent, exactly-once dispatch and recovery are Controller responsibilities, not PRODUCT mutable-state ownership.
 
 ### Durable PRODUCT state
 
-- canonical mutable PRODUCT control-plane state is durable rather than memory-only;
-- SQLite retains WAL, foreign keys, bounded busy timeout, single-writer/short-transaction discipline, integrity checks, backup and clean restore behavior;
-- related product-state transitions commit atomically where the persistence contract requires it;
-- legacy JSON migration remains bounded compatibility, not an alternate canonical store.
+Where PRODUCT state is durable, persistence remains deterministic and fail-closed. SQLite retains WAL, foreign keys, bounded busy timeout, single-writer/short-transaction discipline, integrity checks, backup and clean restore behavior. Legacy stores are bounded migration/compatibility surfaces, not alternate authority.
 
 ### Security and bounded operation
 
-Typed identifier/status/error/protocol/tunnel/strategy contracts and typed content/fingerprint digest policy remain in force. Secret values do not enter public Git/evidence. PRODUCT Actions remain least-privilege, fork-safe and free of production phone/ADB execution.
+Typed identifiers/status/error/protocol/tunnel/strategy contracts and typed content/fingerprint digest policy remain in force. Secret values do not enter public Git/evidence. PRODUCT Actions remain least-privilege and free of production target mutation.
 
 Requests, idempotency, queues/retries, liveness/readiness, authentication and fail-closed proxy/session behavior remain governed by their PRODUCT contracts/tests.
-
-### Delivery integrity
-
-PRODUCT delivery requires reviewed exact source, exact successful Quality where required, deterministic build/signing verification, typed digests/provenance and immutable Product Release evidence. `latest`, mutable branches or approximate artifact identity are forbidden production deployment identity.
 
 ## 4. Product Release precedes deployment
 
 ```text
-protected PRODUCT main + exact successful Quality
+protected PRODUCT source + required Quality
   -> Product Release prerequisite proof
   -> annotated product tag
   -> signed PRODUCT build
-  -> immutable Product Release v2
+  -> immutable Product Release
   -> /deploy <target> <tag>
-  -> Deployment Controller admission / observation / possible mutation / verification / recovery
+  -> Controller admission / observation / possible mutation / verification / recovery
 ```
 
-Physical phone acceptance is not a prerequisite for Product Release creation. Runtime identity combines the exact immutable Product Release and exact admitted controller revision.
+A Product Release is an input to deployment. Physical phone acceptance is not a prerequisite for Product Release creation. Runtime deployment identity combines the exact immutable Product Release and exact admitted Controller revision.
+
+`latest`, mutable branches, approximate versions and public GitHub Deployment projection are forbidden deployment identity.
 
 ## 5. Deployment execution invariants
 
@@ -116,97 +108,85 @@ Required:
 2. one intent admits at most one destructive target dispatch;
 3. GitHub comment/run/attempt provenance does not redefine semantic request identity;
 4. ambiguous post-dispatch outcome never causes blind destructive retry;
-5. UNKNOWN continuation is read-only observation/reconciliation;
-6. `RECOVERED != ACCEPTED`;
-7. evidence-write retry never repeats a physical effect;
-8. public GitHub Deployment is bounded projection only;
-9. target-global serialization is Deployment Controller authority;
-10. workflow success is not an independent target postcondition.
+5. `UNKNOWN` continuation is read-only observation/reconciliation;
+6. evidence-write retry never repeats a physical effect;
+7. public GitHub Deployment is bounded projection only;
+8. target-global serialization is Controller authority;
+9. workflow success is not an independent target postcondition;
+10. a Controller-only repair does not force a new Product Release when product bytes/semantics are unchanged.
 
-PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.
+PRODUCT must not reintroduce a second deployment State Machine or mutation ledger.
 
-## 6. Historical evidence boundary
+## 6. Physical facts and observation capability
 
-Historical Item 19 candidate `d151dbdd156279e32a5361d304c90f996bd2d565` remains immutable provider-lifecycle evidence only. Historical Item 20/signing/reconstruction records remain audit history and do not restore old release ordering or runtime authority.
+Git/GitHub is authoritative for reviewed source, contracts, Quality, release identity and durable transaction evidence. It is not a global clock for physical target state.
 
-Old failed workflow runs are never rerun merely to obtain a second physical effect. Re-entry follows current controller durable state and read-only recovery rules.
+Physical facts must be observed under their declared target/domain/session/artifact dependencies. Do not infer them from chat history, workflow color, elapsed time or expected architecture.
 
-## 7. Durable A-H implementation order
+Prefer Controller observer/target-adapter evidence. If a required phone fact cannot be obtained reliably, narrow local-agent assistance is allowed by `STAGE_WORKFLOW.md` and the current #179 checkpoint. Every returned fact is classified as:
 
-### Gate A — Deployment Controller health
+- `controller_capability_gap`;
+- `human_only_physical_observation`;
+- `one_off_observation`.
 
-Required current-controller policies execute on real hosted runners and finish terminal green.
+A repeatable/decision-critical `controller_capability_gap` should be closed with the smallest Controller observation capability when it blocks the current stage and doing so is simpler/safer than recurring manual dependence. This is architecture feedback, not automatic permission to add framework machinery.
 
-### Gate B — source ownership / authority convergence
+## 7. Architecture complexity discipline
 
-Remove duplicate active deployment-controller/physical-operation implementation from PRODUCT. Keep genuine PRODUCT/shared-domain/build/release code. Deployment Controller remains the single owner of ingress, target mutation State Machine, durable intent, exactly-once dispatch, recovery/quarantine and canonical runtime classification.
+`docs/architecture/ARCHITECTURE_STANDARD.md` is the permanent quality floor.
 
-### Gate C — Android secret-state and backup/D2D hardening
+- one owner per state/decision;
+- one layer only for an independent responsibility/lifecycle/failure mode;
+- prefer deletion, reuse and concrete implementations;
+- generic abstractions require demonstrated present-day need;
+- tests protect real behavior/failure/security/authority boundaries;
+- no checker solely to prove another checker exists;
+- no generic multi-target orchestration platform;
+- physical operations must expose observable boundaries rather than hide unrelated effects behind one opaque success/timeout result.
 
-- no plaintext persistent WireGuard/private tunnel configuration;
-- reuse AndroidKeyStore/AES-GCM;
-- explicit backup/device-transfer exclusions for secret-bearing state;
-- preserve direct-boot requirements;
-- missing/corrupt ciphertext/key material fails closed;
-- no plaintext fallback.
+Architecture work is stage-mapped, not a parallel roadmap. Stage 5 is the dedicated phone simplification/convergence stage. Stage 6 is the first normal point for extracting shared phone/VM target abstractions from two real implementations.
 
-### Gate D — Android behavior and framework tests
+## 8. Historical evidence boundary
 
-Protect secure state, boot restoration, tunnel lifecycle, cellular egress authentication/network refusal, local-control authentication/retry semantics and one Android framework/Keystore/service instrumentation smoke path.
+Historical Item19/Item20, Item15-23 and A-H execution plans remain immutable audit evidence where useful. They do not restore old release ordering, same-repository controller ownership, old execution-satellite semantics or old current-stage authority.
 
-### Gate E — supply-chain + Product Release prerequisite hardening
+Old failed workflow runs are never rerun merely to obtain a second physical effect. Re-entry follows current Controller durable state and read-only reconciliation rules.
 
-Bind vendored WireGuard AAR to official upstream identity/version/license/digest. Product tag creation requires exact same-SHA successful Quality plus Product Release prerequisite proof; prerequisite readiness must not unnecessarily load signing secret values.
+## 9. PRODUCT acceptance
 
-### Gate F — new immutable Product Release
+PRODUCT acceptance requires, as applicable to the current Product Release contract:
 
-Create a new semantic Product Release from the hardened exact PRODUCT revision. Never rewrite historical `v0.1.4`. Require annotated tag -> exact source -> signed artifacts -> manifest/provenance/digests -> immutable Release.
-
-### Gate G — exactly one admitted deployment
-
-Only when #179 authorizes it, issue one semantic `/deploy <target> <new-release>` through Controller Issue #1. Bind exact immutable Product Release + exact controller revision, persist intent before destructive dispatch, execute at most once and independently verify postconditions.
-
-### Gate H — real-world acceptance
-
-On the final deployed release prove registered phone, reverse tunnel, relay/provider, external client, cellular egress/IP rotation, reboot/fallback/recovery and reliability/soak criteria from `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`.
-
-Historical phone experiments prove components only; they never substitute for Gate H on the final immutable release.
-
-## 8. PRODUCT acceptance
-
-PRODUCT 10/10-ready requires:
-
-- coherent v2 authority docs/contracts and no active duplicate controller owner;
+- coherent v2 authority docs/contracts and no active duplicate deployment owner;
 - retained compatibility/architecture/persistence/security invariants;
-- Android secret persistence/backup boundary fail-closed;
-- strong Android behavior coverage;
-- exact Quality success;
+- required Android security/behavior coverage;
+- exact required Quality success;
 - deterministic build/signing verification;
 - release prerequisite/tag gates bound to exact source;
-- immutable Product Release v2;
-- complete provenance for vendored production binaries;
-- no unresolved P0/P1 PRODUCT defect.
+- immutable Product Release with complete provenance/digests;
+- no unresolved PRODUCT P0/P1.
 
 Quality proves PRODUCT software/policy; it does not manufacture target state.
 
-## 9. Deployment Controller acceptance
+## 10. Deployment Controller acceptance
 
-Controller acceptance requires exact Product Release admission, exact controller-revision binding, semantic dedup independent of GitHub provenance, target-global serialization, observation before decision, durable intent before dispatch, exactly-once destructive dispatch per intent, independent postcondition observation, canonical terminal evidence, read-only UNKNOWN recovery, deterministic quarantine and `RECOVERED != ACCEPTED`.
+Controller acceptance requires exact Product Release admission, exact Controller-revision binding, semantic dedup independent of GitHub provenance, target-global serialization, observation before decision, durable intent before dispatch, exactly-once destructive dispatch per intent, independent postcondition observation, canonical terminal evidence, read-only UNKNOWN reconciliation and deterministic recovery/quarantine.
 
-`vm-production` remains fail-closed until its controller-owned adapter is proven end-to-end.
+`vm-production` remains fail-closed until Stage 6 explicitly opens and proves its real target adapter/lifecycle end-to-end.
 
-## 10. Full production 10/10
+## 11. Full production acceptance
 
-Full production 10/10 requires all three:
+Full production acceptance requires all of:
 
-1. PRODUCT acceptance complete.
-2. Deployment Controller invariants proven.
-3. Separately authorized live target acceptance/recovery/restart/soak succeeds with no unresolved P0/P1 defect.
+1. PRODUCT acceptance complete for the exact immutable Release(s) in use.
+2. Controller invariants proven for each real target.
+3. Phone and VM each have direct local evidence appropriate to their stages.
+4. The combined topology passes Stage 7 end-to-end functional, recovery, bounded-load and soak acceptance.
+5. No unresolved P0/P1 contradicts final acceptance.
 
 Do not collapse these evidence domains into one green workflow.
 
-## 11. Change discipline
+## 12. Change discipline
 
-For docs/policy-sized changes use `scripts/quality-gate.sh fast`; for code/release changes use `scripts/quality-gate.sh`.
+For docs/policy-sized changes use `scripts/quality-gate.sh fast`; for code/release/tooling changes use `scripts/quality-gate.sh`.
 
-After each accepted merge or separately authorized production operation, record a bounded #179 checkpoint with exact identities, mutation status and exactly one `NEXT ALLOWED ITEM`. The newest #179 checkpoint supersedes stale wording elsewhere.
+The active execution sequence is governed only by `STAGE_WORKFLOW.md` + newest PRODUCT #179 checkpoint + current Stage Issue. Do not create a #179 checkpoint for ordinary commits, PR/CI repair, deterministic in-stage repair, read-only observations, local-agent evidence, protected merge or post-merge checks. At stage exit, close the Stage Issue and publish one #179 checkpoint opening the next stage.
