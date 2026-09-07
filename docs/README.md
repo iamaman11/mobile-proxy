@@ -1,16 +1,24 @@
 # Documentation index
 
-Use the smallest authoritative document that answers the task:
+Use the single execution spine for dynamic work:
 
-- ../README.md — product behavior, commands and public compatibility;
-- ../AGENTS.md — bounded operating rules for agents;
-- GIT_DELIVERY.md — branch, quality, release and production deployment policy;
-- ../RUNTIME_LAYOUT.md — current runtime topology;
-- PRODUCTION_BASELINE_PLAN.md — accepted production baseline;
-- physical-phone-acceptance-runbook.md — live device acceptance;
-- architecture/ — active architecture decisions and boundaries;
-- operations/ — production counters and operational runbooks;
-- history/ — completed studies, superseded plans and dated validation evidence;
-- future/ — explicitly deferred product direction.
+`../AGENTS.md -> ../STAGE_WORKFLOW.md -> newest authoritative PRODUCT #179 checkpoint -> current Stage Issue`.
 
-Historical documents do not authorize new work. Current behavior is defined by code, tests, README.md and active architecture decisions.
+Then use the smallest permanent document that answers the task:
+
+- `../README.md` — product behavior, compatibility and project authority summary;
+- `../QUICK_REFERENCE.md` — concise navigation after context loss;
+- `../IMPLEMENTATION_PLAN.md` — static project/stage overview;
+- `PRODUCTION_STAGE_ROADMAP.md` — static seven-stage sequence and scope, never dynamic current state;
+- `PRODUCTION_BASELINE_PLAN.md` — stable production architecture/invariants, not an execution roadmap;
+- `../TEN_OUT_OF_TEN_VALIDATION_PLAN.md` — stage-mapped acceptance catalog, not action authority;
+- `architecture/ARCHITECTURE_STANDARD.md` — permanent architecture/ownership/complexity standard;
+- `GIT_DELIVERY.md` — branch, Quality, Product Release and Controller handoff policy;
+- `../RUNTIME_LAYOUT.md` — runtime topology;
+- `operations/` — operational contracts/runbooks;
+- `history/` — completed studies, superseded plans and dated validation evidence;
+- `FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md` and other explicitly future material — non-active recommendations.
+
+PRODUCT Issue #249 is planning/backlog only. PRODUCT Issue #179 is the only dynamic development/operations cursor.
+
+Historical A-H and Item15-23/Item19-20 plans do not authorize new work. Static docs must not maintain hand-written `CURRENT` stages, current SHAs, current Product Releases or next bounded actions.
