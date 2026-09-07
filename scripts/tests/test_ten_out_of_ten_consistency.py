@@ -258,6 +258,45 @@ class TenOutOfTenConsistencyTests(unittest.TestCase):
             errors = MODULE.check_repository(root)
         self.assertTrue(any("STAGE_WORKFLOW.md is missing controller-v2 invariant 'controller_capability_gap'" in error for error in errors))
 
+    def test_stage_workflow_requires_bounded_last_comment_179_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "STAGE_WORKFLOW.md"
+            body = path.read_text(encoding="utf-8").replace("last comment only", "full comment history")
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("STAGE_WORKFLOW.md is missing controller-v2 invariant 'last comment only'" in error for error in errors))
+
+    def test_quick_reference_must_remain_optional(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "QUICK_REFERENCE.md"
+            body = path.read_text(encoding="utf-8").replace("Optional **human cheat-sheet**", "Mandatory agent handbook")
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("QUICK_REFERENCE.md is missing controller-v2 invariant 'Optional **human cheat-sheet**'" in error for error in errors))
+
+    def test_implementation_plan_must_remain_static_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "IMPLEMENTATION_PLAN.md"
+            body = path.read_text(encoding="utf-8").replace("**static index**", "active current plan")
+            path.write_text(body, encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("IMPLEMENTATION_PLAN.md is missing controller-v2 invariant '**static index**'" in error for error in errors))
+
+    def test_context_entrypoint_size_budget_is_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_surfaces(root)
+            path = root / "IMPLEMENTATION_PLAN.md"
+            path.write_text(path.read_text(encoding="utf-8") + ("\nnoise" * 2000), encoding="utf-8")
+            errors = MODULE.check_repository(root)
+        self.assertTrue(any("IMPLEMENTATION_PLAN.md exceeds bounded context budget" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
