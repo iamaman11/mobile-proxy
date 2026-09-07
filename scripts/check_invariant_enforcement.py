@@ -36,18 +36,21 @@ REQUIRED_COLUMNS = [
     "expires_on",
 ]
 # Source P may be semantic-re-audited while retaining the existing invariant
-# catalog. Gate B PR #241 removes duplicate deployment-controller ownership and
-# updates the active roadmap for the two-public-repository v2 authority model,
-# while retaining the audited PRODUCT compatibility, architecture, persistence,
-# security and delivery invariants. The transition remains fail-closed: only the
-# exact matrix pin may resolve to this exact re-audited baseline blob.
+# catalog. Governance convergence PR #262 makes PRODUCTION_BASELINE_PLAN a
+# stable architecture/invariant source instead of a competing execution roadmap.
+# The PRODUCT compatibility, architecture, persistence, security and delivery
+# invariant catalog is unchanged, and live ruleset 21243704 was independently
+# reverified on 2026-09-07 as active, PR-only, strict Quality Gate, resolved
+# threads, no deletion/non-fast-forward and no bypass actor. The transition
+# remains fail-closed: only the exact matrix pin may resolve to this exact
+# re-audited baseline blob.
 RECONCILED_SOURCE_BLOB_TRANSITIONS = {
     "P": {
         "path": "docs/PRODUCTION_BASELINE_PLAN.md",
         "previous_blob_sha": "65a88761e6bf840638d828f218db4b2ffeccccd4",
-        "supersedes_audited_blob_sha": "2b9f72627c5e07d4ade1ba941deb8d68e623c42d",
-        "audited_blob_sha": "10cbf5fa78af9c3b4faeba6dfbbc31b27e21b2a4",
-        "issue": 241,
+        "supersedes_audited_blob_sha": "10cbf5fa78af9c3b4faeba6dfbbc31b27e21b2a4",
+        "audited_blob_sha": "44421d02ba616636e7faab0542cbc86661d5d9c5",
+        "issue": 262,
     }
 }
 EXPECTED_INVARIANT_IDS = {
