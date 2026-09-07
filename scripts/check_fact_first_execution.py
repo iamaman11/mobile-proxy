@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Protect the accepted PRODUCT / Deployment Controller v2 foundation invariants.
 
-This remains intentionally small. It protects the real cross-repository authority
-and exactly-once safety boundary; it does not encode a Markdown roadmap, test
-another checker, or keep superseded Item19/Item20 development ordering alive.
-Behavioral controller semantics belong in Deployment Controller tests and
-separately authorized target acceptance.
+This checker intentionally validates each invariant at its canonical concern owner.
+It must not force the same doctrine into navigation files or resurrect a historical
+execution roadmap merely to satisfy literal Markdown checks.
 """
 
 from __future__ import annotations
@@ -13,36 +11,41 @@ from __future__ import annotations
 from pathlib import Path
 
 
-IMPLEMENTATION = Path("IMPLEMENTATION_PLAN.md")
-BASELINE = Path("docs/PRODUCTION_BASELINE_PLAN.md")
 ARCHITECTURE = Path("docs/architecture/ARCHITECTURE_STANDARD.md")
+BASELINE = Path("docs/PRODUCTION_BASELINE_PLAN.md")
+STAGE_WORKFLOW = Path("STAGE_WORKFLOW.md")
+STAGE_ROADMAP = Path("docs/PRODUCTION_STAGE_ROADMAP.md")
 AUTHORITY = Path("docs/operations/project-authority.md")
 GITHUB_V2 = Path("contracts/operations/github-control-plane-v2.json")
 
 REQUIRED: dict[Path, tuple[str, ...]] = {
-    IMPLEMENTATION: (
-        "PRODUCT",
-        "DEPLOYMENT CONTROLLER",
-        "Both repositories are public.",
-        "No new framework is justified merely to reconcile old PRODUCT/controller duplication.",
-        "No code for code.",
-        "No verification of verification.",
-        "No old failed GitHub run is manually rerun to perform a deployment.",
-    ),
-    BASELINE: (
-        "The accepted v2 split is normative:",
-        "Both repositories are public.",
-        "PRODUCT work must not reintroduce a second runtime State Machine or mutation ledger.",
-        "durable mutation intent exists before destructive dispatch",
-        "UNKNOWN continuation is read-only observation/reconciliation",
-        "No code for code. No verification of verification.",
-        "Gate H — real-world acceptance",
-    ),
     ARCHITECTURE: (
         "one primary developer",
+        "Parallel roadmaps, duplicated policy planes and framework layers",
         "No code for code",
         "adding a checker whose only purpose is to confirm that another checker/test exists or ran",
+        "Do not introduce speculative interfaces, factories, registries, plugins or generic frameworks",
         "Protect boundaries, not bootstrap state",
+    ),
+    BASELINE: (
+        "active static architecture/invariant baseline; not an execution roadmap",
+        "Both repositories are public.",
+        "Deployment admission, target mutation, durable mutation intent, exactly-once dispatch and recovery are Controller responsibilities",
+        "durable mutation intent exists before destructive dispatch",
+        "`UNKNOWN` continuation is read-only observation/reconciliation",
+        "PRODUCT must not reintroduce a second deployment State Machine or mutation ledger.",
+        "Old failed workflow runs are never rerun merely to obtain a second physical effect.",
+        "combined topology passes Stage 7 end-to-end functional, recovery, bounded-load and soak acceptance",
+    ),
+    STAGE_WORKFLOW: (
+        "A #179 checkpoint that opens a stage is continuous authority for that whole stage",
+        "Physical phone state must be **observed, not guessed**.",
+        "controller_capability_gap",
+        "Architecture improvement is not a parallel workstream.",
+    ),
+    STAGE_ROADMAP: (
+        "static seven-stage sequencing and scope model",
+        "Stage 7 — Combined PHONE + VM operational acceptance",
     ),
     AUTHORITY: (
         "Both repositories are public; repository visibility is not the confidentiality boundary.",
