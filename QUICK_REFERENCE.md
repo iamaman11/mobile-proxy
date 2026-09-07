@@ -2,14 +2,14 @@
 
 ## Authority in 30 seconds
 
-Mobile Proxy has one product and two authoritative planes:
+Mobile Proxy has one product and two authoritative planes. **Both repositories are public.** Confidentiality lives in secrets, target bindings and bounded/redacted evidence, not repository visibility.
 
-- **PRODUCT** — `iamaman11/mobile-proxy`: source, product/domain architecture, public Quality, product build/signing verification, annotated tags, immutable Product Releases and product documentation.
-- **DEPLOYMENT CONTROLLER** — `iamaman11/mobile-proxy-production`: private Issue #1 deployment ingress, deployment State Machine / Transaction Kernel, target admission/serialization/observation, target adapters, durable mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine, private bindings/secrets and canonical runtime execution evidence.
+- **PRODUCT** — `iamaman11/mobile-proxy`: source, product/domain architecture, Quality, product build/signing verification, annotated tags, immutable Product Releases and product documentation.
+- **DEPLOYMENT CONTROLLER** — `iamaman11/mobile-proxy-production`: Issue #1 deployment ingress, deployment State Machine / Transaction Kernel, target admission/serialization/observation, target adapters, durable mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine and canonical runtime execution evidence.
 
-The private repository is not a thin execution satellite and is not a second product source. It is authoritative only inside the deployment domain.
+The Controller is not a thin execution satellite and is not a second product source.
 
-Normative contracts:
+Normative v2 contracts:
 
 1. `docs/operations/project-authority.md`
 2. `contracts/operations/project-authority-v2.json`
@@ -21,113 +21,118 @@ Older v1 authority/topology/control-plane wording is historical when it conflict
 
 ## Start here after context loss
 
-Read:
+Use exactly this execution spine:
 
-1. `AGENTS.md` — operating contract and safety boundaries;
-2. `IMPLEMENTATION_PLAN.md` — concise current development sequence;
-3. `docs/PRODUCTION_BASELINE_PLAN.md` — active 10/10 roadmap;
-4. `REPOSITORY_MAP.md` — code/ownership map;
-5. `RUNTIME_LAYOUT.md` — product runtime topology;
-6. `docs/GIT_DELIVERY.md` — Product Release -> Deployment Controller handoff;
-7. newest authoritative checkpoint in public Issue #179.
+1. `AGENTS.md` — operating contract;
+2. `STAGE_WORKFLOW.md` — canonical working method;
+3. newest authoritative checkpoint in PRODUCT Issue **#179** — current stage, exact authority and boundaries;
+4. the current subordinate Stage Issue — mission, evidence, active PR and blockers;
+5. only then open stage-relevant standards/contracts/reference docs.
 
-Do not reconstruct current execution authority from older issue bodies, historical Item19/Item20 wording or chat memory.
+Do **not** reconstruct current execution from this file, `IMPLEMENTATION_PLAN.md`, a static roadmap, old issue body, chat memory, A-H gates, Item15-23/Item19-20 history or GitHub Deployment status.
 
-## Current control surfaces
+## Control surfaces
 
-- public Issue **#179** — authoritative migration/development checkpoint stream; exactly one bounded engineering item at a time;
-- public Issue **#228** — 10/10 PRODUCT-hardening backlog only; no runtime authority;
-- public Issue **#90** — product tag/release command surface where required by the current product-release contract;
-- private Issue **#1** — Deployment Controller command surface and canonical runtime ledger.
+- PRODUCT Issue **#179** — sole dynamic stage/operations cursor;
+- PRODUCT Issue **#249** — stage-mapped planning/acceptance backlog only;
+- PRODUCT Issue **#90** — Product Release/tag command surface where the current Product Release contract requires it; its historical architecture-tracker role is superseded;
+- Controller Issue **#1** — deployment command ingress and durable runtime ledger surface.
 
-A `/deploy`, phone/ADB action, provider/VM mutation, signing action or release rewrite is forbidden unless the newest #179 checkpoint and the owning v2 authority plane explicitly permit it.
+A stage checkpoint authorizes the **whole stage to its exit criteria** inside its mission/scope/hard boundaries. `NEXT ALLOWED ITEM` names the next starting action, not a one-step permission or stop point.
+
+Routine commits, PR/CI iterations, deterministic in-stage repairs, read-only observations, local-agent evidence, protected merge and post-merge checks are not checkpoint reasons.
+
+## Document map
+
+- `docs/PRODUCTION_STAGE_ROADMAP.md` — static seven-stage sequence/scope; contains no authoritative current stage.
+- `docs/PRODUCTION_BASELINE_PLAN.md` — stable production architecture/invariants; not a parallel execution roadmap.
+- `docs/architecture/ARCHITECTURE_STANDARD.md` — permanent architecture/complexity standard applied inside every stage.
+- `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` — acceptance catalog mapped to stages; does not authorize later-stage tests early.
+- `docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md` — future/post-baseline recommendations only.
+- #249 — planning/backlog only.
+- #179 — dynamic execution authority only.
+
+Architecture work is stage-mapped. Stage 5 owns phone baseline simplification; Stage 6 is the first normal point for shared phone/VM target abstractions after two real implementations exist.
 
 ## Product/release boundary
 
-Public PRODUCT flow:
+PRODUCT flow:
 
 ```text
-protected main + exact successful Quality
+protected PRODUCT main + required Quality
   -> annotated product tag
   -> signed PRODUCT build
-  -> immutable Product Release v2
+  -> immutable Product Release
 ```
 
 Deployment flow:
 
 ```text
 exact immutable Product Release
-+ exact admitted private controller revision
-  -> private deployment request
-  -> admission/serialization/observation
-  -> possible exactly-once mutation
++ exact admitted Controller revision
+  -> semantic deployment request
+  -> admission / target serialization / observation
+  -> durable intent before destructive dispatch
+  -> at most one destructive dispatch for that intent
   -> independent postcondition
-  -> canonical private terminal evidence
+  -> canonical terminal evidence
 ```
 
-Public GitHub Deployment status is projection only. It is never the canonical runtime ledger.
+GitHub Deployment status is projection only. It is never the canonical runtime ledger.
 
-## Current 10/10 hardening order
+## Static seven-stage sequence
 
-Issue #228 is the backlog; Issue #179 decides which item is actually executable now.
+1. Controller composite phone transaction foundation.
+2. Immutable Product Release.
+3. First real phone deployment.
+4. Phone industrial operational validation.
+5. Phone production baseline acceptance / simplification.
+6. VM production transaction + first real deployment.
+7. Combined PHONE + VM operational acceptance.
 
-The intended order is:
+The current stage, current Release and exact target identities are intentionally absent here; resolve them from #179.
 
-1. remove active v1 authority drift from normative entry points;
-2. classify and then simplify/remove duplicate public deployment-controller ownership;
-3. close Android secret-state / backup-D2D gaps;
-4. add the smallest strong Android behavior coverage;
-5. finish Product Release prerequisite/tag hardening;
-6. establish complete WireGuard AAR upstream provenance;
-7. clean stale normative trackers/docs;
-8. only when separately authorized, execute live deployment/acceptance through the private controller.
+## Phone facts and local-agent assistance
 
-Do not create a third shared controller framework to reconcile public/private duplication.
+Never infer physical phone state from chat history, workflow color, elapsed time, timeout wording or expected architecture.
 
-## Existing public physical/controller surfaces
+Prefer Controller observation. If an exact fact cannot be obtained reliably or the test inherently needs device UI/local-workstation/physical interaction, request the narrow exact observation/action from the local agent and state what evidence must be returned.
 
-Files such as:
+Classify every local-agent result as one of:
 
-- `scripts/transaction_runner.py`
-- `scripts/control_state_machine.py`
-- `scripts/operation_state_machine.py`
-- `scripts/atomic_physical_contracts.py`
-- `scripts/physical_operation_plan.py`
-- `scripts/operations/*`
-- `scripts/clean_install_android_production.py`
-- `scripts/run_android_filesystem_certification.py`
-- `scripts/run_physical_phone_acceptance.py`
-- public phone/Item19/Item20/deployment workflows
+- `controller_capability_gap` — repeatable/decision-critical observation Controller should reasonably expose;
+- `human_only_physical_observation` — inherently physical/UI/modem/operator interaction;
+- `one_off_observation` — bounded fact with no demonstrated reusable Controller need.
 
-are not current runtime authority merely because they remain in the public tree. Their bounded PRODUCT/shared-domain vs deployment-only vs historical disposition is handled in the source-ownership migration through #179.
+A capability gap is not automatic framework work. Implement only the smallest stage-relevant observation improvement when it materially reduces guessing, UNKNOWN or recurring manual dependence. Local-agent assistance never becomes deployment mutation authority.
 
 ## Runtime safety invariants
 
-The private Deployment Controller must preserve:
+Controller must preserve:
 
 - target-global serialization;
 - durable mutation intent before destructive dispatch;
 - at most one destructive dispatch per durable intent;
 - independent target postcondition observation;
 - no blind retry after an ambiguous destructive boundary;
-- read-only UNKNOWN recovery;
-- `RECOVERED != ACCEPTED`;
+- read-only UNKNOWN reconciliation;
 - semantic request identity independent of GitHub run/comment provenance;
-- canonical private terminal evidence.
+- canonical terminal evidence.
 
 ## Development quality
 
 ```bash
 scripts/quality-gate.sh fast  # docs/policy-sized changes
-scripts/quality-gate.sh       # code/release changes
+scripts/quality-gate.sh       # code/release/tooling changes
 ```
 
-GitHub requires the aggregate `Quality Gate`. Read the compact quality summary before opening large logs.
+GitHub requires the aggregate `Quality Gate`. Read the compact quality summary before large logs.
 
 ## Hard boundaries
 
-- public PRODUCT workflows do not access the production phone or invoke deployment ADB;
-- private controller does not copy/build/sign/tag/publish the product;
-- manual SSH/raw ADB/workstation provider CLI are not normal production control paths;
-- secret values, raw device identifiers and sensitive private runtime evidence do not belong in public Git/evidence;
-- `latest`, mutable branches and public Deployment status are never runtime identity.
+- PRODUCT workflows do not access the production phone or perform deployment mutation;
+- Controller does not independently build/sign/tag/publish PRODUCT artifacts;
+- raw/manual destructive ADB and manual SSH/provider CLI are not normal production control paths;
+- secrets/raw target identifiers/sensitive runtime evidence do not enter public Git/evidence;
+- `latest`, mutable branches and GitHub Deployment projection are never runtime identity;
+- VM/provider mutation remains fail-closed until Stage 6 is explicitly opened by #179.
