@@ -171,3 +171,15 @@ For code or release changes:
 GitHub has one aggregate required check named `Quality Gate`. Read the compact quality summary before opening large logs.
 
 Verification must be behavior-oriented and proportional. Prefer a few strong transition/fault tests for independent invariants over layers of meta-checks.
+
+## Stage-continuation and phone-assistance rule
+
+The canonical mechanics are in `STAGE_WORKFLOW.md` and the newest #179 checkpoint.
+
+- A checkpoint that opens a stage authorizes the **whole stage to its exit criteria** within the stated mission, scope and hard boundaries. `NEXT ALLOWED ITEM` is the next starting action, not a one-step permission or stop point.
+- Do not stop or manufacture a new #179 cursor for ordinary commits, PR/CI iterations, deterministic in-stage repairs, read-only observations, protected merge/post-merge checks, evidence collection or local-agent evidence requests/results.
+- Stop for owner authority only at the exceptional checkpoint conditions defined in `STAGE_WORKFLOW.md`; otherwise continue the current stage end-to-end.
+- Never guess a phone-dependent physical fact from chat history, workflow color, elapsed time, timeout wording or expected architecture. Prefer the Deployment Controller observer/target adapter.
+- If an exact phone fact cannot be obtained reliably through the available Controller observation, or a test inherently needs physical device UI/local-workstation interaction, explicitly request the **narrow exact observation or interaction** from the local agent and state what evidence must be returned.
+- Local-agent assistance is not deployment authority and must not bypass immutable Release identity, durable intent, target serialization, exactly-once destructive dispatch or UNKNOWN reconciliation. Raw/manual ADB or destructive local mutation remains forbidden as a shortcut around the Controller unless a newer owner checkpoint explicitly defines another physical-test boundary.
+- A local-agent assistance request/result is not a stage checkpoint. Record significant returned evidence in the Stage Issue and continue the same stage.
