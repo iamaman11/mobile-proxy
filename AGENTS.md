@@ -5,20 +5,34 @@ Start every repository task with:
     python3 scripts/repository_context.py
     git status --short --branch
 
-The generated context is a bounded source for the current PRODUCT revision, workspace layout, Quality and release workflows. Read deeper documents only when the task touches them.
+`repository_context.py` is a bounded **static repository map**. It does not declare the current stage, current Product Release, current production state or next action. Resolve dynamic work only through the execution spine below.
+
+## Context recovery and execution spine
+
+After any context loss, read in this order and stop looking for competing current-state prose:
+
+1. this `AGENTS.md`;
+2. `STAGE_WORKFLOW.md`;
+3. the newest authoritative checkpoint in PRODUCT Issue #179;
+4. the one current subordinate Stage Issue;
+5. only the permanent standards/contracts/reference documents needed for that stage.
+
+PRODUCT Issue #179 is the **only dynamic development/operations stage cursor**. A stage checkpoint authorizes the whole named stage through its exit criteria within its stated mission, scope and hard boundaries. `NEXT ALLOWED ITEM` is a starting action, not a stop point.
+
+Do not reconstruct current work from old issue bodies, historical comments, chat memory, hand-maintained SHAs, `CURRENT` labels in static documents, A-H gates, Item15-23/Item19-20 plans or public GitHub Deployment status.
 
 ## Authority model
 
 The project has one product and two authoritative planes. **Both repositories are public; authority and confidentiality are not inferred from repository visibility.**
 
-- `iamaman11/mobile-proxy` = **PRODUCT authority**: application/runtime source, shared product/domain architecture, public Quality, product build/signing verification, annotated product tags, immutable Product Releases and product documentation.
+- `iamaman11/mobile-proxy` = **PRODUCT authority**: application/runtime source, shared product/domain architecture, Quality, product build/signing verification, annotated product tags, immutable Product Releases and product documentation.
 - `iamaman11/mobile-proxy-production` = **DEPLOYMENT CONTROLLER authority**: Issue #1 deployment ingress, deployment State Machine / Transaction Kernel, target admission and serialization, target observation/adapters, durable mutation intent, exactly-once destructive dispatch, postconditions, recovery/quarantine and canonical runtime execution evidence.
 
-Neither repository may silently take over the other's responsibility. The controller repository is not a second product source and must not independently build, sign, tag or publish the product. The PRODUCT repository must not own the runtime deployment transaction ledger, production target mutation authority or exactly-once destructive dispatch.
+Neither repository may silently take over the other's responsibility. Controller is not a second product source and must not independently build, sign, tag or publish the product. PRODUCT must not own the deployment transaction ledger, production target mutation authority or exactly-once destructive dispatch.
 
-Controller source/policy may be public, but repository/environment secret values, target bindings, raw device identifiers, credentials, private keys, sensitive rendered config and unsafe raw runtime/ADB logs remain private and must never be committed or emitted unredacted.
+Repository/environment secret values, target bindings, raw target identifiers, credentials, private keys, sensitive rendered config and unsafe raw runtime/ADB logs remain private even though Controller source/policy is public.
 
-Use these normative v2 contracts first:
+Normative v2 authority contracts:
 
 - `docs/operations/project-authority.md`
 - `contracts/operations/project-authority-v2.json`
@@ -26,45 +40,38 @@ Use these normative v2 contracts first:
 - `contracts/operations/production-topology-v2.json`
 - `contracts/operations/product-release-authority-v2.json`
 
-Older v1 authority/topology/control-plane contracts and Item 19/Item 20 material are historical/development evidence when they conflict with v2.
+Older v1 authority/topology/control-plane contracts and Item19/Item20 material are historical evidence when they conflict with v2.
 
-## Current control surfaces
+## Control surfaces
 
-Keep product-development authority separate from runtime execution authority:
+- PRODUCT Issue #179 = sole dynamic stage/operations cursor;
+- PRODUCT Issue #249 = stage-mapped planning/acceptance backlog only;
+- PRODUCT Issue #90 = Product Release/tag command surface where the current Product Release contract requires it; its historical GitOps architecture tracker role is superseded;
+- `iamaman11/mobile-proxy-production` Issue #1 = Deployment Controller command ingress and durable runtime ledger surface.
 
-- public Issue #179 = the single current engineering/migration/execution cursor; always obey its newest authoritative checkpoint;
-- public Issue #228 = 10/10 PRODUCT hardening backlog only; it never overrides #179 or grants runtime execution authority;
-- public Issue #90 = product tag/release command surface where the accepted release contract requires it;
-- `iamaman11/mobile-proxy-production` Issue #1 = Deployment Controller command surface and durable runtime ledger surface.
+Before any repository or production-state write, reread the newest #179 checkpoint and revalidate relevant PRODUCT/Controller mains, protected checks and immutable Release identity. A stale issue body or older comment never overrides a newer checkpoint.
 
-Always reread the newest authoritative #179 checkpoint before changing repository or production state. A stale Issue #179 body, #228 item or older comment does not override a newer checkpoint.
+A `/deploy`, phone mutation, provider/VM mutation, signing operation, tag or Product Release action is permitted only when the newest #179 checkpoint and the owning v2 authority plane permit it.
 
-A `/deploy` command, phone/ADB action, provider/VM mutation, signing operation, tag or Product Release action is allowed only when the newest #179 checkpoint and the owning v2 authority plane explicitly permit it.
+## Document roles
 
-## Sources of truth
+There is one execution roadmap, not several parallel plans:
 
-PRODUCT sources include:
+- `STAGE_WORKFLOW.md` — canonical working method;
+- `docs/PRODUCTION_STAGE_ROADMAP.md` — static seven-stage sequence/scope only; no dynamic current state;
+- `docs/PRODUCTION_BASELINE_PLAN.md` — stable production architecture/invariants baseline, not a competing execution sequence;
+- `docs/architecture/ARCHITECTURE_STANDARD.md` — permanent architecture, ownership and complexity standard applied inside every stage;
+- `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` — acceptance catalog mapped to stages; it never authorizes later-stage work early;
+- `IMPLEMENTATION_PLAN.md` and `QUICK_REFERENCE.md` — concise navigation/context-recovery entrypoints;
+- PRODUCT Issue #249 — planning/backlog only;
+- `docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md` — non-active future/post-baseline recommendations;
+- `docs/history` and superseded A-H / Item15-23 / Item19-20 plans — history/evidence only.
 
-- product/operator behavior: `README.md`;
-- current development roadmap: `docs/PRODUCTION_BASELINE_PLAN.md` with `IMPLEMENTATION_PLAN.md` as the concise entry point;
-- normative acceptance matrix: `TEN_OUT_OF_TEN_VALIDATION_PLAN.md`;
-- runtime topology: `RUNTIME_LAYOUT.md`;
-- architecture quality standard: `docs/architecture/ARCHITECTURE_STANDARD.md`;
-- exact Rust workspace module graph: `contracts/governance/module-boundaries-v1.json`;
-- authoritative product mutable-state ownership: `contracts/governance/state-ownership-v1.json`;
-- Git delivery/product release policy: `docs/GIT_DELIVERY.md`;
-- PRODUCT / Deployment Controller boundary: `docs/operations/project-authority.md` and the v2 contracts above;
-- current code and tests, not superseded plans.
-
-Deployment Controller runtime truth includes the exact controller revision, target bindings, durable mutation intent, terminal evidence and recovery/quarantine classification. Sensitive values supporting that truth remain private even though the repository itself is public.
-
-Documents under `docs/history` and superseded v1 physical-control documents are evidence, not normal runtime authority.
+Architecture improvement is **stage-mapped**. A concrete architecture defect enters the earliest stage whose exit it blocks or whose demonstrated P0/P1 it closes. Stage 5 owns phone-baseline simplification. Stage 6 is the first normal point for extracting shared phone/VM target abstractions from demonstrated duplication. Do not run an architecture roadmap in parallel with the stages.
 
 ## Deployment-controller invariants
 
-The PRODUCT repository may document shared product/domain semantics, but active production target execution belongs to the Deployment Controller.
-
-The controller must preserve this shape:
+Controller must preserve:
 
 ```text
 exact immutable Product Release
@@ -72,114 +79,88 @@ exact immutable Product Release
   -> admission
   -> target-global serialization
   -> observation
-  -> durable mutation intent (before destructive dispatch)
+  -> durable mutation intent before destructive dispatch
   -> at most one destructive dispatch for that intent
   -> independent postcondition observation
   -> canonical terminal classification
 ```
 
-If a destructive dispatch may have occurred but the result is ambiguous:
+If a destructive dispatch may have occurred but its result is ambiguous:
 
 ```text
 UNKNOWN
   -> read-only observation/reconciliation
-  -> RECOVERED | QUARANTINED | separately proven terminal
+  -> proven resulting state
 ```
 
 Rules:
 
 - no blind destructive retry after the dispatch boundary;
 - `RECOVERED != ACCEPTED`;
-- public GitHub Deployment is a bounded projection, never the canonical runtime ledger;
-- GitHub run/comment/attempt provenance must not redefine semantic request identity;
+- GitHub Deployment is projection, never canonical runtime ledger;
+- GitHub run/comment/attempt provenance does not redefine semantic request identity;
 - evidence-write retry is not permission to repeat a physical effect;
-- exact target serialization is controller-owned;
-- a successful command or workflow is not an independent postcondition.
+- target serialization is Controller-owned;
+- workflow success is not an independent target postcondition.
 
-The old public physical controller implementation (`transaction_runner.py`, public physical state machines, operation executors, phone certification/acceptance scripts and their controller-specific tests) is historical Git evidence after the Gate B source-ownership migration. Do not recreate or maintain a second active public controller in the PRODUCT repository.
+## Phone facts, local agent and Controller feedback
 
-## PRODUCT hardening discipline
+Never infer physical phone state from chat history, Issue prose, workflow color, elapsed time, timeout wording or architectural expectation.
 
-The target is a small, understandable industrial system, not a larger framework.
+Prefer Controller observer/target-adapter evidence. If an exact phone fact cannot be obtained reliably through Controller observation, or validation inherently requires device UI/local-workstation/physical interaction, ask the local agent for the **narrow exact observation or interaction** and specify the evidence to return. This request/result is not a stage checkpoint or stage stop.
 
-- Do not add code for code's sake. New machinery must close a concrete demonstrated defect, ambiguity or trust boundary.
-- Do not verify verification. Tests protect behavior/invariants, not the existence or invocation of other tests/checkers.
-- Prefer deletion, consolidation and reuse before adding a module, workflow, registry, abstraction or contract.
-- One state/decision has one authoritative owner.
-- Keep normal flow understandable as `state -> guard -> operation -> effect -> independent observation -> resulting state`.
-- Do not build compatibility machinery merely to preserve disposable bootstrap phone state unless production policy actually requires continuity.
-- Product security, behavior tests, release provenance and release gates belong to the PRODUCT plane.
-- Deployment exactly-once, target observation/mutation and recovery belong to the Deployment Controller plane.
+Every local-agent result must be classified as exactly one:
 
-## Durable hardening path
+- `controller_capability_gap` — repeatable or decision-critical observation that should reasonably be available through Controller observation semantics;
+- `human_only_physical_observation` — inherently UI/physical/modem/operator interaction;
+- `one_off_observation` — bounded evidence without a demonstrated reusable Controller requirement.
 
-The project progresses through these acceptance gates; Issue #179 determines which one is currently executable:
+A `controller_capability_gap` is not automatic permission for new framework code. Apply the architecture complexity/necessity gate. Implement the smallest observation capability when the gap is demonstrated, current-stage relevant, reduces guessing/UNKNOWN/manual dependence and is simpler than repeated local assistance; otherwise record it for the earliest stage it blocks. Human-only and one-off facts must not be generalized without evidence.
 
-```text
-A  Deployment Controller health
-B  source ownership / authority convergence
-C  Android secret-state and backup/D2D hardening
-D  Android behavior and framework integration tests
-E  supply-chain provenance + Product Release prerequisite hardening
-F  new immutable Product Release
-G  exactly one admitted deployment of that release
-H  real-world phone + reverse-tunnel + provider + external-client acceptance
-```
+The local agent is never deployment mutation authority. It must not bypass immutable Release identity, durable intent, target serialization, exactly-once destructive dispatch or UNKNOWN reconciliation. Raw/manual destructive ADB remains forbidden as a Controller shortcut unless a newer owner checkpoint explicitly defines a different physical-test boundary.
 
-Historical phone experiments prove pieces of the path but never substitute for Gate H against the final immutable Product Release.
+## Product architecture and complexity discipline
 
-## Evidence validity
+Build the smallest understandable industrial system that satisfies the real topology.
 
-Git/GitHub is authority for reviewed PRODUCT source, product contracts, Quality, release identity and immutable Product Release evidence. It is not a global clock for physical targets.
+- functional outcome first;
+- one owner per state/decision;
+- add a layer only for an independent responsibility/lifecycle/failure mode;
+- no code for code and no verification of verification;
+- prefer explicit contracts, small pure functions and thin adapters;
+- prefer deletion/consolidation/reuse before new modules, workflows, registries or abstractions;
+- generalize only when two real implementations need the same abstraction or another concrete present-day requirement exists;
+- tests protect behavior/failure/security/authority boundaries, not other tests/checkers;
+- do not build generic extension mechanisms for hypothetical future targets.
 
-Physical facts may be reused only according to the Deployment Controller's admitted observer/target/domain/session/artifact dependencies. A PRODUCT Git SHA is provenance unless the relevant controller contract explicitly makes it a validity dependency.
-
-Do not infer physical current state from chat history, Issue prose, workflow success or public Deployment projection.
+Inside PRODUCT, exact workspace dependency rules remain in `contracts/governance/module-boundaries-v1.json`; PRODUCT mutable-state ownership remains in `contracts/governance/state-ownership-v1.json` where applicable.
 
 ## Change discipline
 
 - Work on a topic branch; do not deploy an uncommitted tree.
-- Keep `Cargo.lock` and the pinned Rust toolchain synchronized.
-- Every Rust workspace member and internal dependency edge must match `contracts/governance/module-boundaries-v1.json`.
-- New PRODUCT authoritative/operational mutable product state must identify one owner and be registered in `contracts/governance/state-ownership-v1.json` when that registry applies.
-- Architecture-significant changes must justify complexity, identify ownership and rollback/deletion path, and add/update an ADR only when they establish a long-lived decision.
-- Do not create generic extension mechanisms for hypothetical future targets.
-- Do not commit target directories, APK/build outputs, runtime binaries, credentials, generated GitHub credentials or raw acceptance logs.
-- Secret values never belong in Git.
-- The PRODUCT repository has no production self-hosted runner and must not perform deployment ADB/phone mutation.
-- Phone execution belongs to the Deployment Controller on the registered `android-production` self-hosted runner with private target binding.
-- VM/provider deployment remains fail-closed until its controller adapter is proven end-to-end.
-- Manual SSH, raw/manual ADB and workstation/provider CLI are not the standard production control plane.
-- Production deployment consumes an exact immutable Product Release plus an exact admitted controller revision; `latest` and mutable branches are forbidden deployment identity.
-
-## Protect boundaries, not bootstrap state
-
-Project-owned bootstrap phone state is disposable unless a current production requirement explicitly makes continuity necessary. Do not build architecture around preserving an incidental installation.
-
-This never weakens confidentiality or containment: credentials remain secret, non-project-owned phone state is outside the mutation boundary and provider/account actions remain separately authorized.
+- Finished meaningful code/docs + direct tests -> commit; significant non-code evidence -> current Stage Issue.
+- Routine PR/CI failures/fixes, deterministic in-stage repairs, read-only observations, local-agent evidence, protected merge and post-merge checks are not stop points.
+- Do not commit target directories, build outputs, runtime binaries, credentials or raw sensitive acceptance logs.
+- PRODUCT has no production self-hosted runner and performs no production phone mutation.
+- Production phone execution belongs to Controller on the registered target runner with private binding.
+- VM/provider work remains fail-closed until Stage 6 is explicitly opened.
+- Manual SSH/raw ADB/workstation provider CLI are not the standard production control plane.
+- Deployment identity is exact immutable Product Release + exact admitted Controller revision; `latest` and mutable branches are forbidden.
 
 ## Proportional verification
 
-For docs and policy-only work:
+For docs/policy-sized changes:
 
     scripts/quality-gate.sh fast
 
-For code or release changes:
+For code/release/tooling changes:
 
     scripts/quality-gate.sh
 
-GitHub has one aggregate required check named `Quality Gate`. Read the compact quality summary before opening large logs.
+GitHub's required aggregate check is `Quality Gate`. Verification must be behavior-oriented and proportional.
 
-Verification must be behavior-oriented and proportional. Prefer a few strong transition/fault tests for independent invariants over layers of meta-checks.
+## Stage completion
 
-## Stage-continuation and phone-assistance rule
+Follow `STAGE_WORKFLOW.md`. Continue the current stage autonomously through analysis, implementation, tests, PR work, CI repair, protected merge/post-merge acceptance, authorized operational validation and final evidence until its real exit criteria are satisfied.
 
-The canonical mechanics are in `STAGE_WORKFLOW.md` and the newest #179 checkpoint.
-
-- A checkpoint that opens a stage authorizes the **whole stage to its exit criteria** within the stated mission, scope and hard boundaries. `NEXT ALLOWED ITEM` is the next starting action, not a one-step permission or stop point.
-- Do not stop or manufacture a new #179 cursor for ordinary commits, PR/CI iterations, deterministic in-stage repairs, read-only observations, protected merge/post-merge checks, evidence collection or local-agent evidence requests/results.
-- Stop for owner authority only at the exceptional checkpoint conditions defined in `STAGE_WORKFLOW.md`; otherwise continue the current stage end-to-end.
-- Never guess a phone-dependent physical fact from chat history, workflow color, elapsed time, timeout wording or expected architecture. Prefer the Deployment Controller observer/target adapter.
-- If an exact phone fact cannot be obtained reliably through the available Controller observation, or a test inherently needs physical device UI/local-workstation interaction, explicitly request the **narrow exact observation or interaction** from the local agent and state what evidence must be returned.
-- Local-agent assistance is not deployment authority and must not bypass immutable Release identity, durable intent, target serialization, exactly-once destructive dispatch or UNKNOWN reconciliation. Raw/manual ADB or destructive local mutation remains forbidden as a shortcut around the Controller unless a newer owner checkpoint explicitly defines another physical-test boundary.
-- A local-agent assistance request/result is not a stage checkpoint. Record significant returned evidence in the Stage Issue and continue the same stage.
+Create a new #179 checkpoint only for the exceptional boundaries defined there: stage exit/next stage, authority or stage-boundary change, genuine cross-stage contract decision/blocker, unresolved post-intent physical `UNKNOWN` where further mutation is unsafe, irreversible/external action outside current authority, or explicit owner plan change.
