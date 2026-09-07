@@ -78,6 +78,15 @@ STALE_EXECUTION_SPINE_TOKENS = (
     "After each accepted merge or separately authorized production operation, record a bounded #179 checkpoint",
 )
 
+# Keep mandatory recovery material deliberately bounded. These are not style limits;
+# they prevent navigation files from becoming parallel handbooks again.
+CONTEXT_BUDGET_MAX_CHARS = {
+    IMPLEMENTATION_PLAN: 4_500,
+    QUICK: 7_500,
+    STAGE_WORKFLOW: 11_000,
+    AGENTS: 15_000,
+}
+
 
 def _read(root: Path, path: Path, errors: list[str]) -> str:
     try:
@@ -113,12 +122,15 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
         text[STAGE_WORKFLOW],
         STAGE_WORKFLOW,
         (
-            "newest authoritative checkpoint in PRODUCT Issue #179",
             "Context recovery: one execution spine",
-            "current subordinate Stage Issue",
+            "Context-budget protocol",
+            "last comment only",
+            "Controller #1: never use the full ledger as context",
+            "Controller #97: optional reusable rooted-phone diagnostic/probe reference only",
             "controller_capability_gap",
             "human_only_physical_observation",
             "one_off_observation",
+            "Evidence routing",
             "Architecture work is stage-mapped",
         ),
         errors,
@@ -127,11 +139,14 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
         text[AGENTS],
         AGENTS,
         (
-            "PRODUCT Issue #179 is the **only dynamic development/operations stage cursor**",
-            "PRODUCT Issue #249 = stage-mapped planning/acceptance backlog only",
-            "Document roles",
+            "PRODUCT #179 is the **only dynamic development/operations cursor**",
+            "Context-budget rule",
+            "Never fetch all #179 comments for normal recovery.",
+            "Controller #1",
+            "Controller #97",
+            "optional human navigation",
             "controller_capability_gap",
-            "A `controller_capability_gap` is not automatic permission",
+            "Evidence routing",
         ),
         errors,
     )
@@ -139,10 +154,11 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
         text[QUICK],
         QUICK,
         (
-            "Use exactly this execution spine",
-            "PRODUCT Issue **#179** — sole dynamic stage/operations cursor",
-            "PRODUCT Issue **#249** — stage-mapped planning/acceptance backlog only",
-            "Static seven-stage sequence",
+            "Optional **human cheat-sheet**",
+            "last owner-authored authoritative checkpoint comment only",
+            "Controller #1",
+            "Controller #97",
+            "IMPLEMENTATION_PLAN.md` — static index only",
             "controller_capability_gap",
         ),
         errors,
@@ -151,10 +167,11 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
         text[IMPLEMENTATION_PLAN],
         IMPLEMENTATION_PLAN,
         (
-            "static context and sequencing entrypoint",
-            "newest authoritative checkpoint in PRODUCT Issue #179",
-            "Static seven-stage sequence",
-            "Architecture improvement belongs inside stages",
+            "**static index**",
+            "Do **not** start here after context loss",
+            "last #179 checkpoint comment",
+            "Controller #1 only by exact causal ledger comment IDs",
+            "architecture changes are stage-mapped",
         ),
         errors,
     )
@@ -199,6 +216,11 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
         for token in STALE_EXECUTION_SPINE_TOKENS:
             if token in body:
                 errors.append(f"{path} contains superseded execution-spine wording {token!r}")
+
+    for path, limit in CONTEXT_BUDGET_MAX_CHARS.items():
+        size = len(text[path])
+        if size > limit:
+            errors.append(f"{path} exceeds bounded context budget: {size} > {limit} chars")
 
     if "— CURRENT" in text[STAGE_ROADMAP] or "**CURRENT**" in text[STAGE_ROADMAP]:
         errors.append("static Stage Roadmap must not embed dynamic CURRENT state")
@@ -264,6 +286,7 @@ def check_repository(root: Path) -> list[str]:
         or release_link.get("physical_acceptance_before_product_release") is not False
     ):
         errors.append("topology does not enforce Product Release before deployment")
+
     targets = topology.get("targets")
     vm = targets.get("vm-production") if isinstance(targets, dict) else None
     if (
@@ -294,6 +317,7 @@ def check_repository(root: Path) -> list[str]:
         errors.append("GitHub v2 contract does not bind production topology v2")
     if github.get("product_release_contract") != str(RELEASE_AUTHORITY):
         errors.append("GitHub v2 contract does not bind Product Release v2")
+
     github_controller = github.get("deployment_controller_repository")
     if (
         not isinstance(github_controller, dict)
@@ -403,9 +427,9 @@ def check_repository(root: Path) -> list[str]:
     )
 
     for path in (TEN_PLAN, RUNTIME, PHONE_DOC):
-        body = text[path]
-        if "not the primary reverse-tunnel owner" not in body:
+        if "not the primary reverse-tunnel owner" not in text[path]:
             errors.append(f"{path} lost Android auxiliary-role invariant")
+
     _require(
         text[README],
         README,
