@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Emit a bounded, current repository map for humans, agents and CI."""
+"""Emit a bounded static repository map for humans, agents and CI.
+
+Dynamic stage, release and production state intentionally do not live here.
+Resolve them from the newest authoritative PRODUCT Issue #179 checkpoint and
+its current subordinate Stage Issue.
+"""
 
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ def _git(*args: str) -> str:
 def build_context() -> dict[str, Any]:
     cargo = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     workspace = cargo["workspace"]
-    version = workspace["package"]["version"]
+    source_version = workspace["package"]["version"]
     members = sorted(workspace["members"])
     workflows = sorted(path.name for path in (ROOT / ".github/workflows").glob("*.yml"))
     source_files = sum(
@@ -41,16 +46,15 @@ def build_context() -> dict[str, Any]:
         )
     )
     return {
-        "format_version": 1,
+        "format_version": 2,
         "project_authority": {
-            "canonical_repository": "iamaman11/mobile-proxy",
-            "canonical_url": "https://github.com/iamaman11/mobile-proxy",
-            "canonical_gitops_issue": 90,
-            "execution_satellite": "iamaman11/mobile-proxy-production",
-            "execution_satellite_control_issue": 1,
-            "authority_rule": (
-                "canonical repository wins; conflicts fail closed and are reconciled here first"
-            ),
+            "product_repository": "iamaman11/mobile-proxy",
+            "deployment_controller_repository": "iamaman11/mobile-proxy-production",
+            "stage_cursor": "iamaman11/mobile-proxy#179",
+            "planning_backlog": "iamaman11/mobile-proxy#249",
+            "product_release_command_surface": "iamaman11/mobile-proxy#90",
+            "deployment_command_ingress": "iamaman11/mobile-proxy-production#1",
+            "authority_rule": "one product, two authoritative planes; newest PRODUCT #179 checkpoint governs stage authority",
             "chat_history_authority": "none",
         },
         "git": {
@@ -61,38 +65,38 @@ def build_context() -> dict[str, Any]:
             "sha": _git("rev-parse", "HEAD"),
         },
         "current_execution": {
-            "context_entrypoint": "QUICK_REFERENCE.md",
-            "temporary_checkpoint": "IMPLEMENTATION_PLAN.md#current-execution-checkpoint",
-            "active_roadmap": "docs/PRODUCTION_BASELINE_PLAN.md",
-            "acceptance_matrix": "TEN_OUT_OF_TEN_VALIDATION_PLAN.md",
-            "architecture_standard": "docs/architecture/ARCHITECTURE_STANDARD.md",
-            "future_direction": "docs/future/ (non-active)",
-        },
-        "release": {
-            "version": version,
-            "expected_tag": f"v{version}",
-            "release_id_rule": "git-<first 12 characters of tag commit SHA>",
-            "cross_repository_deployment_id_rule": "mobile-proxy-<tag>-<first12sha>",
-            "identity_fields": [
-                "annotated release tag",
-                "full Git SHA",
-                "artifact name",
-                "artifact digest",
-                "provenance identity",
+            "dynamic_stage_source": "newest authoritative checkpoint in iamaman11/mobile-proxy#179",
+            "context_recovery_spine": [
+                "AGENTS.md",
+                "STAGE_WORKFLOW.md",
+                "newest authoritative PRODUCT #179 checkpoint",
+                "current subordinate Stage Issue",
             ],
+            "stage_roadmap": "docs/PRODUCTION_STAGE_ROADMAP.md",
+            "baseline_invariants": "docs/PRODUCTION_BASELINE_PLAN.md",
+            "acceptance_catalog": "TEN_OUT_OF_TEN_VALIDATION_PLAN.md",
+            "architecture_standard": "docs/architecture/ARCHITECTURE_STANDARD.md",
+            "future_direction": "docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md (non-active)",
+            "dynamic_state_embedded_here": False,
+        },
+        "source_metadata": {
+            "workspace_version": source_version,
+            "expected_tag_from_source_version": f"v{source_version}",
+            "warning": "source metadata is not the current immutable Product Release; resolve Release authority from GitHub Release evidence and #179",
         },
         "architecture": {
             "primary_runtime": "first_party_reverse_tunnel",
             "production_phone_owner": "first_party_reverse_tunnel",
             "default_tunnel_owner": "first_party_reverse_tunnel",
             "carrier_specific_egress_owner": "first_party_android_egress",
+            "deployment_identity": "exact immutable Product Release + exact admitted Deployment Controller revision",
             "public_proxy_ports": {
                 "1080": "mixed SOCKS5/HTTP compatibility",
                 "1081": "SOCKS5",
                 "3128": "HTTP including CONNECT",
             },
             "production_data_path": (
-                "public relay edge -> Rust reverse-tunnel server -> phone-local proxy -> Android cellular egress"
+                "relay edge -> reverse-tunnel server -> phone-local proxy -> Android cellular egress"
             ),
             "rollback_only": [
                 "sing-box VM termination",
@@ -113,20 +117,18 @@ def build_context() -> dict[str, Any]:
         },
         "delivery": {
             "release_workflow": ".github/workflows/release.yml",
-            "deployment_workflow": ".github/workflows/deploy-production.yml",
-            "vultr_environment": "production-vultr (tag-only; GitHub-hosted)",
-            "phone_control_repository": (
-                "iamaman11/mobile-proxy-production (private execution satellite only)"
-            ),
-            "phone_control_issue": "iamaman11/mobile-proxy-production#1",
-            "deployment_status": "blocked until split GitOps workflows are implemented",
-            "release_immutability": "not enabled until publish ordering is corrected",
+            "release_tag_workflow": ".github/workflows/release-tag.yml",
+            "deployment_controller_ingress": "iamaman11/mobile-proxy-production#1",
+            "phone_mutation_owner": "Deployment Controller",
+            "vm_provider_authority": "fail-closed until Stage 6 is explicitly opened by PRODUCT #179",
         },
         "authoritative_docs": [
+            "AGENTS.md",
+            "STAGE_WORKFLOW.md",
             "README.md",
             "QUICK_REFERENCE.md",
-            "AGENTS.md",
             "IMPLEMENTATION_PLAN.md",
+            "docs/PRODUCTION_STAGE_ROADMAP.md",
             "docs/PRODUCTION_BASELINE_PLAN.md",
             "TEN_OUT_OF_TEN_VALIDATION_PLAN.md",
             "REPOSITORY_MAP.md",
@@ -141,9 +143,15 @@ def build_context() -> dict[str, Any]:
             "contracts/governance/module-boundaries-v1.json",
             "contracts/governance/state-ownership-v1.json",
             "contracts/compatibility/proxy-surface-v1.json",
-            "contracts/operations/project-authority-v1.json",
-            "contracts/operations/github-control-plane-v1.json",
-            "contracts/operations/production-topology-v1.json",
+            "contracts/operations/project-authority-v2.json",
+            "contracts/operations/github-control-plane-v2.json",
+            "contracts/operations/production-topology-v2.json",
+            "contracts/operations/product-release-authority-v2.json",
+        ],
+        "historical_not_execution_authority": [
+            "A-H implementation sequences superseded by the seven-stage roadmap",
+            "Item15-23 / Item19-20 execution plans",
+            "v1 cross-repository authority/topology/control-plane contracts when they conflict with v2",
         ],
         "workflows": workflows,
     }
@@ -153,28 +161,26 @@ def to_markdown(context: dict[str, Any]) -> str:
     project = context["project_authority"]
     git = context["git"]
     current = context["current_execution"]
-    release = context["release"]
+    source = context["source_metadata"]
     workspace = context["workspace"]
     quality = context["quality"]
     return "\n".join(
         [
             "## Repository context",
             "",
-            f"- Canonical repository: {project['canonical_repository']}",
-            f"- Canonical GitOps issue: #{project['canonical_gitops_issue']}",
-            f"- Execution satellite: {project['execution_satellite']}",
+            f"- PRODUCT authority: {project['product_repository']}",
+            f"- Deployment Controller authority: {project['deployment_controller_repository']}",
+            f"- Dynamic stage cursor: {project['stage_cursor']}",
             f"- SHA: {git['sha']}",
             f"- Branch: {git['branch']}",
             f"- Tracked worktree clean: {str(git['clean_tracked']).lower()}",
-            f"- Context entrypoint: {current['context_entrypoint']}",
-            f"- Current checkpoint: {current['temporary_checkpoint']}",
-            f"- Active roadmap: {current['active_roadmap']}",
-            f"- Version/tag: {release['version']} / {release['expected_tag']}",
+            "- Context recovery: AGENTS.md -> STAGE_WORKFLOW.md -> newest #179 checkpoint -> current Stage Issue",
+            f"- Static stage roadmap: {current['stage_roadmap']}",
+            f"- Architecture standard: {current['architecture_standard']}",
+            f"- Source workspace version: {source['workspace_version']} (not current Release authority)",
             f"- Workspace members: {workspace['member_count']}",
             f"- Required check: {quality['required_check']}",
-            "- Production path: public relay edge -> Rust reverse tunnel -> phone-local proxy -> Android cellular egress",
-            "- Deployable unit: published annotated tag resolved to one immutable SHA",
-            "- Satellite authority: execution-only; canonical repository wins on conflict",
+            "- Current stage/release/production facts are intentionally not embedded here.",
             "",
         ]
     )
