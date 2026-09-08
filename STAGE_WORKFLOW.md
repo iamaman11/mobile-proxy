@@ -67,20 +67,6 @@ Physical phone state must be **observed, not guessed**.
 5. Raw/manual destructive ADB may not bypass immutable Release identity, durable mutation intent, target serialization, exactly-once destructive dispatch or UNKNOWN reconciliation.
 6. If the fact is unproven, keep it unknown and request the missing evidence.
 
-### Transport prerequisites and local-agent task construction
-
-Do not use `ADB`, `manual ADB`, `phone access` or `phone mutation` as interchangeable terms. Before writing a local-agent task that depends on Android transport, recover the **current owning transport contract** from Controller code and, for rooted-shell mechanics, Controller Issue #97. Current protected code wins over historical prose.
-
-Keep these layers distinct:
-
-1. **Host-side transport readiness** — for example an already-adopted `adb start-server`, runner/service readiness observation, or existing USB bridge readiness. A host-side ADB daemon start is transport establishment; by itself it does not prove a target state and is not a phone mutation. If a requested read-only fact requires ADB-backed evidence, do not simultaneously prohibit all ADB startup unless a running server is an explicitly proven prerequisite.
-2. **Read-only target observation** — use the exact current Controller-owned transport semantics when validating a Controller-owned path. Do not invent an alternate `adb shell`, `su`, quoting, PTY or stdin protocol. For rooted-shell probes, read current `phone_target` mechanics plus Controller #97 before constructing the task.
-3. **Target mutation** — remains Controller-owned and requires the normal immutable Release / serialization / durable-intent / exactly-once / postcondition / UNKNOWN boundaries. Local-agent assistance never gains authority to improvise this layer.
-
-A local-agent task is invalid if its own prohibitions make its requested evidence impossible under the accepted transport lifecycle. Detect that contradiction while constructing the task, not after execution. Historical bounded instructions such as “do not run ADB” apply only to the exact task that issued them; never copy them forward as a global rule when the current owner contract requires host-side transport establishment.
-
-If an allowed transport prerequisite cannot be established, fail closed and return that missing prerequisite without guessing downstream phone state. Starting an ADB daemon, seeing a USB function, or reaching a root transport marker is evidence only for that layer; none may be silently promoted into a stronger phone/runtime conclusion.
-
 Every local-agent result is classified as exactly one:
 
 - `controller_capability_gap` — repeatable/decision-critical machine-observable fact Controller should reasonably expose;
