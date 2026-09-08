@@ -1,107 +1,127 @@
 # Universal Stage Workflow
 
-Canonical runtime authority is the newest authoritative checkpoint in PRODUCT Issue #179. If this file and #179 differ, #179 wins.
+Canonical runtime authority is the newest authoritative owner checkpoint in PRODUCT Issue #179. If any static document, Stage Issue, chat context or workflow projection conflicts with that checkpoint, #179 wins for **current stage/authority only**.
 
-## Doctrine
+## 1. One source of truth per concern
 
-**Analyze only enough to act. Save every meaningful result durably. One stage has one subordinate Stage Issue in its owning repository; implementation progress lives in the stage branch/PR, working decisions/evidence live in the Stage Issue, and #179 carries only authority/stage boundaries. A stage checkpoint authorizes the whole named stage within its scope and hard boundaries: continue until the real exit criteria are satisfied.**
+| Concern | Sole owner |
+| --- | --- |
+| Current stage, current operational authority/boundaries | PRODUCT Issue #179 newest authoritative checkpoint |
+| Full static Stage 1-7 plan: goal/scope/non-goals/exit | `docs/PRODUCTION_STAGE_ROADMAP.md` |
+| Durable architecture/topology/invariants | `docs/PRODUCTION_BASELINE_PLAN.md` + normative v2 contracts |
+| Architecture/complexity quality floor | `docs/architecture/ARCHITECTURE_STANDARD.md` |
+| Acceptance evidence requirements | `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` |
+| Candidate/not-yet-promoted work | PRODUCT Issue #249 |
+| Current-stage execution plan, findings, evidence, PR links | one subordinate Stage Issue |
+| Deployment command/intent/terminal runtime ledger | Controller Issue #1 |
+| Reusable rooted-phone diagnostic mechanics | optional Controller Issue #97 |
 
-## Context recovery: one execution spine
+No second file/Issue independently restates or redefines another owner's concern.
 
-After losing chat/local context, recover current work only in this order:
+## 2. Context recovery — minimum sufficient path
 
-1. repository `AGENTS.md`;
+After context loss, read only:
+
+1. repository `AGENTS.md` — repo-local rules only;
 2. this `STAGE_WORKFLOW.md`;
-3. the newest authoritative checkpoint in PRODUCT Issue #179;
-4. the one current subordinate Stage Issue;
-5. only then permanent standards/contracts/reference docs required by that stage.
+3. PRODUCT #179 metadata/body + **last owner-authored authoritative checkpoint only**;
+4. current Stage Issue body + only the newest stage-relevant comments needed to resume;
+5. only then the specific permanent reference that the current decision actually requires.
 
-No other document/Issue is a parallel execution roadmap.
+Do **not** load the full roadmap, acceptance catalog, backlog, #179 history, Controller #1 ledger or #97 by default.
 
-### Context-budget protocol
+Load `PRODUCTION_STAGE_ROADMAP.md` only for a stage-boundary/scope/dependency decision. Load `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` only when deciding whether evidence is sufficient. Load #249 only when triaging/promoting future work.
 
-- #179 has historical depth: read Issue metadata/body + **last comment only**; require an owner-authored authoritative checkpoint. Walk backward minimally only if needed. Never fetch all #179 comments for normal recovery.
-- Current Stage Issue: read the body + only newest stage-relevant comments needed to resume.
-- Controller #1: never use the full ledger as context. Read exact command/intent/terminal comment IDs referenced by current stage/causal evidence.
-- Controller #97: optional reusable rooted-phone diagnostic/probe reference only; read on demand, not during default recovery.
-- Static roadmaps, acceptance catalogs, architecture standards, backlogs, `QUICK_REFERENCE.md` and `IMPLEMENTATION_PLAN.md` are on-demand references, not extra mandatory recovery hops.
+### Context-budget invariant
 
-After governance convergence, routine evidence must not be posted to #179. Future #179 comments are reserved for authority checkpoints and should be compact rather than restating permanent doctrine.
+A normal resume should answer four questions without historical replay:
 
-## Document roles
+- What stage is current?
+- What is currently allowed/forbidden?
+- What is the current Stage Issue?
+- What is the latest accepted finding / next unresolved stage item?
 
-- PRODUCT #179 — only dynamic stage/operations cursor;
-- `docs/PRODUCTION_STAGE_ROADMAP.md` — static seven-stage sequence/scope;
-- `docs/architecture/ARCHITECTURE_STANDARD.md` — permanent architecture/complexity standard;
-- `TEN_OUT_OF_TEN_VALIDATION_PLAN.md` — stage-mapped acceptance catalog, not action authority;
-- PRODUCT #249 — planning/acceptance backlog only;
-- `docs/FUTURE_PLATFORM_ARCHITECTURE_ROADMAP.md` — future/post-baseline guidance only;
-- historical A-H, Item15-23 and Item19/20 plans — evidence/history only when superseded.
+If those answers require reading dozens of historical comments, the documentation/evidence routing is defective and should be repaired rather than normalized.
 
-## One stage
+## 3. Stage execution model
 
-For every stage:
+Each stage has exactly one subordinate Stage Issue in its owning repository.
 
-1. Create exactly one subordinate Stage Issue in the owning repository with mission, scope, hard boundaries, exit criteria and PR links. It is never authority.
-2. After the first completed code/docs slice, create the stage branch and stage PR. If both repos are genuinely touched, use at most one active stage PR per repo, linked to the same Stage Issue.
-3. Finished functional slice + direct tests -> commit now.
-4. Important decision/finding/blocker/evidence without ready code -> Stage Issue comment with enough detail to resume without repeating analysis.
-5. Routine implementation/CI fix -> commit, not Issue commentary.
-6. PR creation, commits, red/green CI, deterministic known-state repair, read-only observation, ordinary evidence collection, bounded fixes, protected merge/post-merge checks and local-agent requests/results are not stop points inside the stage.
-7. At stage exit: final Stage Issue summary -> close completed -> one #179 checkpoint opening the next stage.
+The Stage Issue stores:
 
-## Stage-completion mandate
+- current-stage mission and concrete execution order;
+- scope/hard boundaries inherited from the canonical roadmap + #179;
+- significant findings/decisions/blockers;
+- accepted evidence references;
+- PR links and exit matrix.
 
-A #179 checkpoint that opens a stage is continuous authority for that whole stage inside its mission/scope/hard boundaries/exit criteria. `NEXT ALLOWED ITEM` names the next starting action, not a one-step token.
+It is never authority by itself and must not redefine future stages.
 
-Do not manufacture intermediate #179 checkpoints for routine progress. Repair demonstrated in-stage defects inside the same stage when no authority/stage boundary is crossed.
+A #179 checkpoint that opens a stage authorizes the **whole named stage** inside the roadmap scope and checkpoint hard boundaries. `NEXT ALLOWED ITEM` is the next starting point, not a one-step token.
 
-## Phone facts and local-agent assistance
+Routine branch/PR creation, commits, CI failure/fix, deterministic known-state repair, read-only observation, local-agent evidence, protected merge and post-merge checks are continuous in-stage work, not checkpoint boundaries.
 
-Physical phone state must be **observed, not guessed**.
+## 4. Durable progress
 
-1. Prefer Deployment Controller observer/target-adapter paths.
-2. If the exact fact cannot be obtained reliably, or validation inherently requires device UI/local-workstation/physical interaction, request the **narrow exact observation/interaction** and define evidence to return.
-3. Local-agent help is operational assistance, not a checkpoint or mutation authority.
-4. Never ask the local agent to improvise or “try things”.
-5. Raw/manual destructive ADB may not bypass immutable Release identity, durable mutation intent, target serialization, exactly-once destructive dispatch or UNKNOWN reconciliation.
-6. If the fact is unproven, keep it unknown and request the missing evidence.
+- Work on a topic/stage branch; use protected PR flow.
+- Finished meaningful code/docs + direct tests -> commit promptly.
+- Significant non-code finding/decision/evidence -> current Stage Issue comment.
+- Do not leave more than one meaningful completed slice only in chat/local state.
+- At stage exit: final evidence/handoff summary -> close Stage Issue completed -> one #179 checkpoint opening the next stage.
 
-Every local-agent result is classified as exactly one:
+## 5. Physical facts and local-agent assistance
 
-- `controller_capability_gap` — repeatable/decision-critical machine-observable fact Controller should reasonably expose;
-- `human_only_physical_observation` — inherently device-UI/physical/modem/operator interaction;
+Physical target state is observed, never guessed.
+
+1. Prefer the Controller observer/target adapter that owns the fact.
+2. If the fact cannot be obtained reliably, or inherently needs physical/UI/local-workstation interaction, request the narrow exact observation/interaction and exact evidence to return.
+3. Never ask a local agent to improvise, explore or perform broad repair.
+4. Local-agent assistance is not deployment mutation authority.
+5. Raw/manual destructive ADB never bypasses immutable Release identity, target serialization, durable intent, exactly-once dispatch, independent postcondition or `UNKNOWN` reconciliation.
+
+Classify every local-agent result exactly as:
+
+- `controller_capability_gap` — repeatable/decision-critical safely machine-observable fact the Controller should reasonably expose;
+- `human_only_physical_observation` — inherently physical/UI/modem/operator fact;
 - `one_off_observation` — bounded evidence without demonstrated reusable Controller need.
 
-A capability gap is evidence of missing capability, not automatic framework permission. Implement only the smallest observation capability when demonstrated, stage-relevant, materially reduces guessing/UNKNOWN/manual dependence and is simpler than repeated local assistance; otherwise defer to the earliest stage it blocks.
+A capability gap is not framework permission. Implement only the smallest stage-relevant observation capability when it materially reduces guessing/`UNKNOWN`/manual dependence and is simpler/safer than recurring local assistance.
 
 ### Evidence routing
 
-- Current Stage Issue owns the **stage-level conclusion, classification, blocker and acceptance relevance**.
-- Controller #97 may hold reusable long-form rooted-phone probe/transport diagnostics. Link the exact #97 evidence comment from the Stage Issue; do not duplicate full evidence in both places.
-- One-off stage evidence stays only in the Stage Issue.
-- Controller #1 contains machine command/intent/terminal ledger records only.
-- #179 contains authority/stage boundaries only.
+- Stage-specific conclusion/classification/blocker/acceptance relevance -> current Stage Issue.
+- Reusable long-form rooted-phone diagnostic mechanics -> Controller #97, linked from the Stage Issue.
+- Machine command/ACK/intent/terminal/recovery ledger -> Controller #1.
+- Current authority/stage boundary -> #179 only.
 
-If a Controller-owned decision/postcondition/recovery repeatedly depends on a safely machine-observable local-agent fact, treat it as a Controller design smell and close the smallest necessary observation gap before the earliest dependent stage exits.
+Do not duplicate the same evidence across these surfaces.
 
-## Architecture work is stage-mapped
+## 6. Architecture work is stage-mapped
 
-Architecture improvement is not a parallel workstream. `ARCHITECTURE_STANDARD.md` supplies permanent rules; concrete changes enter the earliest stage whose exit they block or whose demonstrated P0/P1 they close. Stage 5 owns phone-baseline simplification. Stage 6 is the first normal point for shared phone/VM target abstractions from demonstrated duplication.
+Architecture improvement is not a parallel roadmap.
 
-## Durable-progress rule
+A change enters the earliest stage whose exit it actually blocks or whose demonstrated P0/P1 it closes. Add a layer only for an independent responsibility/lifecycle/failure mode. Prefer explicit contracts, small pure functions, thin adapters and deletion/consolidation.
 
-No more than one completed meaningful slice may exist only locally/chat. Before switching context or ending a work session, commit finished code/docs or record significant non-code evidence in the Stage Issue.
+Stage 5 owns phone-baseline simplification. Stage 6 is the first normal point where two real target implementations may justify shared phone/VM abstractions.
 
-## #179 checkpoint rule
+## 7. #179 checkpoint rule
 
 Create a new authoritative #179 checkpoint only for:
 
 - stage exit / next stage;
 - authority or stage-boundary change;
+- explicit owner plan change affecting stage scope/dependencies;
 - genuine cross-stage contract decision/blocker;
 - unresolved post-intent physical `UNKNOWN` where further mutation is unsafe;
-- irreversible/external action outside current authority;
-- explicit owner plan change.
+- irreversible/external action outside current authority.
 
-Do not checkpoint ordinary commits, PR/CI state, deterministic repair, read-only observations, local-agent evidence, protected merge or post-merge checks already inside current stage authority.
+A checkpoint should be compact and contain only:
+
+- decision;
+- current stage;
+- current Stage Issue;
+- exact current authority/hard boundaries;
+- concrete current identities only when operationally necessary;
+- pointers to the protected roadmap/contracts rather than copied plan text.
+
+Do not post routine progress/evidence to #179.
