@@ -1,33 +1,28 @@
 # 10/10 Reproducibility and Reliability Validation Catalog
 
-Status: **normative acceptance catalog; not execution authority**  
+Status: **normative acceptance evidence catalog; not execution authority and not a roadmap**  
 Dynamic engineering/operations cursor: newest authoritative checkpoint in PRODUCT Issue #179  
-Static stage sequence: `docs/PRODUCTION_STAGE_ROADMAP.md`  
+Canonical stage plan: `docs/PRODUCTION_STAGE_ROADMAP.md`  
 Planning backlog: PRODUCT Issue #249  
 Authority boundary: `docs/operations/project-authority.md`
 
-This document defines evidence that final production acceptance may require. It does **not** authorize tests from later stages early. The newest #179 checkpoint selects the current stage; that stage's Issue binds the concrete matrix and identities.
+This document defines **what evidence is required** for acceptance. It does not define which stage is current, does not authorize actions, and does not independently redefine stage scope/order.
 
-Historical A-H ordering is superseded as execution sequencing. Its useful acceptance requirements are mapped below into the seven-stage model.
+Historical A-H/Item plans are superseded as execution sequencing. Useful requirements survive here only when they protect a current architecture, security, reliability or operational invariant.
 
 ## 1. Meaning of 10/10
 
 The project distinguishes:
 
-1. **PRODUCT software/release accepted** — required source-controlled security, behavior, dependency, build and immutable Product Release gates pass on exact reviewed PRODUCT identity.
-2. **Target accepted** — an exact immutable Product Release plus exact admitted Controller revision has direct target-local deployment/operational evidence for the stage that owns that target.
-3. **Full production 10/10 accepted** — PRODUCT, Controller and the complete real PHONE+VM topology pass the Stage 7 functional/recovery/load/soak definition with no unresolved P0/P1.
+1. **PRODUCT software/Release accepted** — exact reviewed PRODUCT identity passes the required source-controlled security, behavior, dependency, build and immutable Product Release gates.
+2. **Target accepted** — an exact immutable Product Release plus exact admitted Controller revision has direct target-local deployment/operational evidence appropriate to that target's owning stage.
+3. **Full production 10/10 accepted** — PRODUCT, Controller and the complete real PHONE+VM topology pass Stage 7 functional/network/recovery/load/soak acceptance with no unresolved P0/P1.
 
-CI is necessary but cannot manufacture Android boot behavior, modem routing, carrier behavior, physical process state, VM host state or long-running reliability evidence.
+CI is necessary but cannot manufacture Android boot behavior, modem/carrier behavior, physical process state, VM host state or long-running full-topology reliability evidence.
 
-Both repositories are public:
+Secrets, target bindings, raw identifiers, credentials, private keys, sensitive rendered config and unsafe raw runtime logs remain private.
 
-- `iamaman11/mobile-proxy` = PRODUCT authority;
-- `iamaman11/mobile-proxy-production` = DEPLOYMENT CONTROLLER authority.
-
-Secrets, target bindings, raw target identifiers, credentials, private keys, sensitive rendered config and unsafe raw runtime logs remain private.
-
-## 2. Release and deployment identity
+## 2. Release and runtime identity
 
 ```text
 product_release
@@ -40,13 +35,13 @@ runtime_deployment_identity
   + exact admitted Deployment Controller revision
 ```
 
-A Controller-only repair does not force a rebuild of unchanged product bytes. A new Product Release does not silently redefine which Controller revision deployed it.
+`latest`, mutable refs, approximate versions and GitHub Deployment projection are not runtime identity.
 
-`latest`, mutable refs, approximate versions or GitHub Deployment projection are not runtime identity.
+A Controller-only observation/recovery repair does not force a rebuild of unchanged product bytes. A new Product Release does not silently redefine the Controller revision that deployed it.
 
-## 3. Runtime and Android roles
+## 3. Runtime topology and roles
 
-The primary phone runtime is:
+Primary phone runtime class:
 
 ```text
 root/Magisk boot hook
@@ -57,7 +52,7 @@ root/Magisk boot hook
           -> certificate-pinned TLS/TCP reserve
 ```
 
-The Android app is **not the primary reverse-tunnel owner**. It is a managed PRODUCT component for Android-owned capabilities such as cellular `Network.bindSocket()` egress and the app-owned WireGuard compatibility path when the selected topology consumes them.
+The Android app is not the primary reverse-tunnel owner. It remains the PRODUCT owner of Android-specific capabilities consumed by the selected topology, including cellular `Network.bindSocket()` egress and the explicit WireGuard compatibility path where applicable.
 
 Primary invariants include:
 
@@ -65,334 +60,364 @@ Primary invariants include:
 - no plaintext downgrade;
 - exact device/tunnel-session authority;
 - no arbitrary available-device routing;
-- exact APK package/version/signer/artifact identity when the topology consumes Android app capability;
-- stock WireGuard only as explicit compatibility/rollback where production policy permits it.
+- exact APK package/version/signer/artifact identity when Android capability is consumed;
+- WireGuard only as explicit compatibility/rollback where production policy permits it.
 
-## 4. Stage mapping rule
+## 4. Evidence-domain rule
 
-Acceptance evidence belongs to the **earliest stage whose exit depends on it**. A later-stage test is not pulled forward merely because this catalog contains it.
+Acceptance evidence belongs to the **earliest stage whose exit genuinely depends on it**. A later-stage test is not pulled forward merely because it is useful eventually.
 
-- Stage 1 — Controller phone transaction semantics, no live phone acceptance requirement.
-- Stage 2 — immutable Product Release/software identity.
-- Stage 3 — one exact phone deployment and local postcondition.
-- Stage 4 — phone-only industrial operational validation.
-- Stage 5 — phone baseline simplification/evidence convergence.
-- Stage 6 — VM-local transaction and first real VM deployment.
-- Stage 7 — combined PHONE+VM end-to-end acceptance.
+Distinct domains:
 
-## 5. PRODUCT software and immutable Release evidence — Stages 1–2 prerequisites
+- **transport readiness** — can the admitted Controller path reach the registered target through runner/host/USB/ADB/root;
+- **exact Release state** — are immutable target bytes/current state exact for the admitted Product Release;
+- **live operational state** — is the accepted target locally running/ready/healthy with bounded resource state;
+- **lifecycle exercise** — did one separately admitted perturbation recover to its exact postcondition;
+- **full-topology state** — does the real external consumer -> VM -> reverse tunnel -> phone -> cellular path work correctly under failure/load/time.
 
-As applicable to the current Product Release contract:
+One domain's success must not be projected as another domain's truth.
 
-### Architecture and policy
+Stage mapping:
+
+- Stage 1 — Controller phone transaction semantics;
+- Stage 2 — immutable Product Release/software identity;
+- Stage 3 — one exact real phone deployment/postcondition;
+- Stage 4 — phone production-node operational acceptance;
+- Stage 5 — phone baseline convergence/simplification;
+- Stage 6 — VM foundation + VM-local target acceptance;
+- Stage 7 — complete PHONE+VM end-to-end product/topology acceptance.
+
+## 5. PRODUCT software and immutable Release evidence
+
+As applicable to the active Product Release contract:
+
+### Architecture / policy
 
 - product/application/domain dependency boundaries;
 - native reverse-tunnel default enforcement;
-- Android auxiliary role cannot silently become primary tunnel owner;
+- Android auxiliary role cannot silently become tunnel owner;
 - unknown/contradictory tunnel ownership fails closed;
 - bounded errors, queues and retries;
-- PRODUCT is the sole product source/build/release authority;
-- Controller is the sole deployment transaction/target-mutation authority;
+- PRODUCT remains the sole product source/build/release authority;
+- Controller remains the sole deployment transaction/target-mutation authority;
 - no active duplicate Controller implementation in PRODUCT.
 
-### Cryptographic and release integrity
+### Cryptographic / release integrity
 
-- admitted typed digest contracts;
-- release roots/manifests include exact files/sizes/digests as required;
-- exact full relevant revisions are recorded;
-- final published artifact provenance records exact PRODUCT tag/source identity;
-- release artifacts match the Product Release authority contract.
+- typed digest contracts are admitted;
+- release roots/manifests contain required exact files/sizes/digests;
+- exact relevant revisions are retained;
+- immutable Release provenance records exact PRODUCT tag/source identity;
+- published assets match Product Release authority contracts.
 
-### Build and behavior
+### Build / behavior
 
-- Rust formatting/lint/tests and dependency/security gates;
+- Rust format/lint/tests and dependency/security gates required by PRODUCT policy;
 - Android build/lint/unit/behavior/instrumentation coverage required by PRODUCT policy;
-- secret persistence/backup/D2D policy is fail-closed;
-- product compatibility ports/protocols remain protected;
-- PRODUCT durable-state migrations and readiness semantics remain deterministic.
+- secret persistence/backup/D2D remains fail-closed;
+- compatibility ports/protocols remain protected;
+- PRODUCT durable-state migrations/readiness remain deterministic.
 
-Only PRODUCT evidence may claim software/release acceptance. It cannot claim physical target state.
+PRODUCT evidence may claim software/Release acceptance. It cannot claim physical target state.
 
 ## 6. Stage 3 — exact phone deployment evidence
 
-Use the exact immutable Product Release and registered phone through the admitted Controller revision.
+Required evidence:
 
-Required evidence includes:
-
-- exact Release and Controller admission;
+- exact Product Release and Controller admission;
 - target binding proof without publishing raw identifiers;
 - durable mutation intent before destructive dispatch;
-- exactly-once physical transaction semantics;
-- exact installed APK when required by topology;
-- exact rooted runtime inventory/materialization;
-- exact active/current release;
-- independent postcondition observation;
+- at most one physical transaction effect for the semantic intent;
+- exact installed APK where topology requires it;
+- exact rooted-runtime inventory/materialization/current state;
+- independent local postcondition observation;
 - canonical terminal classification;
-- any ambiguous dispatch -> `UNKNOWN` -> read-only reconciliation before conflicting mutation.
+- ambiguous dispatch -> `UNKNOWN` -> read-only reconciliation before conflicting mutation.
 
-A successful workflow alone is not Stage 3 acceptance.
+A green workflow alone is not Stage-3 acceptance.
 
-## 7. Stage 4 — phone industrial operational validation
+## 7. Stage 4 — phone production-node operational acceptance
 
-Stage 4 is **phone-only**. It does not authorize VM/provider creation, VM restart matrices or combined topology acceptance.
+Stage 4 is phone-only and must not claim complete proxy-product acceptance.
 
-The current Stage 4 Issue binds the exact concrete matrix. Passing a control-plane subplan alone is insufficient: the full phone serving/recovery/resource/soak exit must be evidenced.
+### 7.1 Controller exact-state convergence
 
-### Controller exact-state convergence
+- exact immutable Product Release admission precedes expected-state preparation;
+- APK + rooted-runtime/current state uses one consistent Controller-owned concrete truth where normal Release observation, deployment postcondition and target-read-only reconciliation genuinely share the same facts;
+- bounded exact/degraded/unknown evidence leaks no raw identifiers/config/secrets;
+- workflow/job success is not target truth;
+- Controller-only observation changes do not require a new Product Release when product bytes/semantics are unchanged;
+- no speculative phone/VM framework before Stage 6.
 
-Stage 4 must prove that normal phone observation, deployment postcondition and target-read-only reconciliation do not carry independent definitions of desired phone state.
+### 7.2 Target-read-only projection reconciliation
 
-Required properties:
-
-- exact immutable Product Release admission precedes Release-bound expected-state preparation;
-- APK + rooted-runtime current state is observed through one consistent Controller-owned phone Release state semantics;
-- bounded result distinguishes exact, degraded and unknown without leaking raw identifiers/config/secrets;
-- workflow/job success is not a second target truth;
-- a Controller-only change to observation/reconciliation semantics does not force a new Product Release when product bytes/behavior are unchanged;
-- no generic phone/VM target framework is introduced merely to share one phone capability; cross-target abstraction waits for Stage 6 unless another present-day requirement proves it necessary.
-
-### Target-read-only reconciliation
-
-Where the durable mutation ledger contains historical terminal state but the current phone is independently proven exact, Stage 4 may require a separately admitted reconciliation operation.
-
-Acceptance for that operation includes:
+Where current phone state is independently exact but an already-admitted public projection is stale:
 
 - semantic identity is separate from `/deploy` and `/retry-deploy` mutation identity;
-- exact current target observation occurs before any projection write;
+- exact target observation occurs first;
 - no mutation intent is created;
-- no APK/runtime dispatch or phone filesystem/package mutation occurs;
-- the historical Controller terminal is not rewritten or retroactively converted;
-- public GitHub Deployment remains visibility projection only;
-- only one uniquely matching already-admitted projection may be repaired; missing or ambiguous projection fails closed rather than manufacturing history;
-- a second identical reconcile is idempotent/no-op at the projection layer when no correction is required.
+- no APK/runtime/phone mutation occurs;
+- historical Controller terminals are not rewritten;
+- GitHub Deployment remains visibility projection only;
+- missing/ambiguous projection fails closed;
+- repeated identical reconcile is projection-layer no-op/idempotent when already correct.
 
-### Transport, observation efficiency and evidence
+### 7.3 Transport readiness / observation efficiency / evidence
 
-- independent phone transport preflight proves runner assignment, exact registered-device ADB state and required root capability without Release materialization;
-- Release observation records separate admission/materialization/phone-probe timings rather than only one total;
-- immutable/static cache entries are content-addressed, verified on every reuse, atomically published, bounded and disposable;
-- cache hits never skip immutable Release admission or integrity verification;
-- secret-derived rendered trees and mutable phone observations are never retained as static cache truth;
-- mandatory decision-grade evidence is durable; required evidence upload failure cannot produce a green acceptance result;
-- recurring Broker/runner errors are represented by bounded non-secret counters/classification without publishing raw listener logs or credentials.
+- independent transport preflight proves runner assignment + registered-device ADB/root readiness without Release materialization;
+- transport degradation is not classified as Product Release mismatch/runtime drift;
+- Release observation records useful admission/materialization/phone-probe phase timings;
+- cache entries are restricted to verified immutable/static intermediates with exact identity, atomic publication, per-use verification and bounded eviction;
+- rendered secret-derived trees and mutable target observations are never retained as static cache truth;
+- mandatory decision-grade evidence is durable; required evidence failure cannot produce acceptance success;
+- recurring Broker/runner faults are represented only by bounded non-secret classification/counters needed for decisions.
 
-### Runner / host / USB recovery
+### 7.4 Runner / host / USB recovery
 
-The exact Stage Issue selects the required host drills. Evidence should distinguish at least the recovery layers it exercises:
+The Stage-4 Issue binds the exact matrix from demonstrated failure domains, potentially including:
 
 - existing runner-service session recovery without re-registration;
-- WSL restart/cold-start recovery;
-- Windows restart followed by the accepted owner-logon bridge path where that is the chosen USB ownership model;
-- USB detach/re-attach recovery of only the registered/allowlisted phone path;
-- transient GitHub Actions Broker/RunServer transport recovery.
+- WSL restart/cold-start;
+- Windows restart + accepted owner-logon USB bridge path;
+- USB detach/re-attach of only the registered/allowlisted phone path;
+- transient Actions Broker/RunServer transport recovery.
 
-Acceptance requires runner identity/labels remain unchanged, no unrelated USB/network target is modified, and the registered phone returns to an observable state before target claims resume.
+Acceptance requires stable runner identity/labels, no unrelated device mutation and direct target observability before target claims resume.
 
-### Serving and process health
+### 7.5 Independent live operational observer
 
-- phone-local proxy/runtime is actually serving the selected phone-side path;
-- `runtime-supervisor`, `host-daemon` and `sing-box` health/readiness is correct where used;
-- rendered runtime configuration matches admitted topology without exposing secrets;
-- no false success when service is not actually usable.
+Operational health must be independently observable from immutable Release-state observation.
 
-A failure in actual PRODUCT/runtime serving, lifecycle, resource or boot behavior is a PRODUCT defect. A failure in Controller admission/observation/target adapter/evidence/projection/runner control is a Controller defect. Fix the owning plane rather than moving responsibility across the PRODUCT/Controller boundary.
+Where used by the selected phone topology, evidence includes:
 
-### Restart and reboot
+- `runtime-supervisor`, `host-daemon`, `sing-box` process/service presence using bounded counters without publishing PID/cmdline;
+- PRODUCT-owned authenticated local health/readiness contract rather than Controller reimplementation of PRODUCT health logic;
+- serving/readiness/cellular prerequisites required by the phone node;
+- bounded CPU/memory/FD/queue/log-growth indicators;
+- result classification such as `READY`, `DEGRADED` or `UNKNOWN` without mutating the phone;
+- operational failure does not rewrite an independently exact Release-state result.
 
-- bounded runtime-supervisor termination/recovery;
-- bounded host-daemon termination/recovery;
-- bounded sing-box termination/recovery;
-- full phone reboot followed by correct rehydration of exact accepted release/runtime;
-- recovery evidence distinguishes process restart, boot/session change and deployment mutation.
+### 7.6 Controlled phone-local lifecycle
 
-### Network/degraded behavior
+Each perturbation must be a separately allowlisted fixed scenario with no arbitrary operator shell/argv surface and must have scenario identity, precondition, durable intent/evidence as appropriate, timeout, postcondition and recovery policy.
 
-- phone-local loss/recovery of mobile-data path where required;
-- QUIC failure/reserve behavior only where it can be tested without opening Stage 6 provider/VM mutation;
-- deterministic classification of degraded/unavailable states;
-- causal re-observation invalidates only facts whose dependencies changed;
-- no plaintext or wrong-session fallback.
+Required categories as bound by the Stage Issue:
 
-### Tamper/mismatch
+- critical process termination -> automatic recovery;
+- runtime restart -> exact operational + Release re-observation;
+- full phone reboot -> exact accepted Release/runtime rehydration;
+- phone-local network/degraded transition where meaningful without VM/provider mutation;
+- runtime/config/current mismatch or tamper -> deterministic detection and fail-closed safe recovery/reconciliation.
 
-- detect relevant runtime/config/current mismatch;
-- classify the bounded mismatch sufficiently to select safe recovery without exposing secret-derived data;
-- fail closed rather than report accepted/healthy state from stale evidence;
-- recovery or reconciliation does not blindly repeat destructive mutation.
+Ambiguous destructive outcome never authorizes blind retry.
 
-### Resource/load
+### 7.7 Bounded local resource sanity
 
-- bounded CPU/memory/process/file-descriptor/queue behavior for the phone runtime under the load actually used by the selected phone topology;
-- bounded concurrency and explicit overload behavior;
-- no monotonic resource leak or unbounded queue/log growth.
+Before Stage 4 exits, prove enough local resource behavior to establish the phone is a viable production node:
 
-### Phone-side repetitions and soak
+- bounded idle and bounded-exercise CPU/memory/process/FD/queue/log behavior;
+- no immediate unbounded queue/log growth;
+- no unexplained silent stuck state;
+- no obvious monotonic local leak across the bounded phone-local exercise window;
+- repetitions are chosen only for concrete phone failure modes, not inherited mechanically from historical counts.
 
-The Stage 4 Issue may bind repetitions from the historical reliability model when they remain necessary and feasible. Historical targets included:
+Stage 4 does **not** need to manufacture production-scale throughput/concurrency or a long full-product soak before the VM exists.
 
-- up to 20 full phone reboots;
-- up to 20 forced terminations for each critical phone runtime process;
-- up to 20 mobile-data disconnect/reconnect events;
-- bounded QUIC/reserve/return cycles where Stage-4 scope can exercise them safely;
-- bounded rotation cycles when rotation is part of the selected phone topology;
-- a production-like phone-side soak, historically 24 hours, with periodic serving/resource checks.
+### 7.8 Deferred full-topology evidence
 
-These numbers are acceptance targets/catalog values, **not automatic authorization for destructive operations**. The current Stage Issue must bind the exact agreed matrix, and #179 must authorize any mutation/physical-test boundary involved.
+The following belong to Stage 7 because they require the real VM/remote-consumer path:
 
-### Controlled successor deployment and rollback
+- remote HTTP CONNECT/SOCKS5 acceptance;
+- external mobile-egress IP proof;
+- end-to-end DNS/IPv6/leak policy;
+- production QUIC <-> pinned TLS/TCP failover through the real relay;
+- production-scale external concurrency/throughput/latency;
+- long production soak of the complete proxy path;
+- cross-target degradation/recovery;
+- full-topology release evolution/rollback.
 
-Stage 4 may consume a legitimate successor Product Release created through normal PRODUCT authority when Stage 4 product/runtime fixes or normal release progression produce one. Do not create a fake/repacked Product Release solely to satisfy a drill.
+### 7.9 Legitimate successor Product Release
 
-When a successor deployment/rollback drill is part of the Stage Issue matrix, evidence must prove:
+Stage 4 may consume a real successor Product Release only when normal PRODUCT work independently creates one and the Stage-4 Issue needs deployment/rollback evidence. Never manufacture/repack a Release solely to satisfy a drill. The absence of such an artificial successor is not a Stage-4 exit blocker.
 
-- one durable mutation intent before the first possible destructive effect;
-- at most one destructive dispatch for the intent;
-- atomic activation/materialization properties required by the phone target;
-- exact independent postcondition;
-- duplicate/retry handling cannot create a second mutation;
-- rollback selects a retained immutable prior APK/runtime Release with compatible signing lineage;
-- ambiguous rollback is `UNKNOWN` and fail-closed;
-- the approved final target is restored and independently verified.
+### 7.10 Local-agent / Controller feedback
 
-### Local-agent evidence and Controller feedback
-
-If Controller cannot reliably observe a required phone fact, request the narrow local-agent observation instead of guessing. Classify it as:
+If Controller cannot reliably observe a required phone fact, request the narrow local-agent fact and classify it exactly as:
 
 - `controller_capability_gap`;
 - `human_only_physical_observation`;
 - `one_off_observation`.
 
-A repeatable or decision-critical Controller capability gap that blocks Stage 4 should be closed with the smallest safe observer/adapter improvement when that is simpler than recurring manual dependence. Local-agent mutation never bypasses Controller transaction authority.
+Close a repeatable decision-critical Controller gap with the smallest safe observer/adapter capability only when it blocks acceptance and is simpler/safer than recurring manual dependence.
 
-### Stage 4 reliability thresholds
+### 7.11 Stage-4 handoff
 
-For the concrete repeated categories selected by the Stage Issue, use bounded thresholds appropriate to the measured sample. The historical acceptance targets remain:
+Before Stage 4 closes, retain:
 
-- automatic recovery success rate at least 99.5% where sample size can meaningfully support that claim;
-- median recovery under 20 seconds;
-- p95 recovery under 60 seconds;
-- no silent stuck state longer than 60 seconds;
-- no success classification while the required phone service/path is unusable;
-- no unexplained degraded state.
+- one exact evidence matrix for required categories;
+- residual findings with owner/severity/disposition and no unresolved required P0/P1;
+- active phone control-surface inventory: `retain`, `consolidate`, `isolate/deprecate`, `remove`;
+- explicit Stage-4-only commands/workflows/version locks/recovery scaffolding;
+- no guessed physical fact represented as accepted state.
 
-With small fixed samples, one unexplained failure blocks acceptance rather than being hidden by percentages.
+## 8. Stage 5 — phone baseline convergence / simplification
 
-### Stage 4 handoff evidence
-
-Before Stage 4 closes, retain one bounded handoff matrix mapping every accepted category above to exact evidence and classifying every active phone control surface as `retain`, `consolidate`, `isolate/deprecate`, or `remove` for Stage 5. Stage 5 must not begin by rediscovering which Stage 4 paths were temporary.
-
-## 8. Stage 5 — phone baseline acceptance / simplification
-
-Stage 5 is not another broad physical test program. It consumes the completed Stage 4 evidence/handoff and leaves one long-term phone path.
+Stage 5 consumes accepted Stage-4 evidence. It is not another broad physical test program.
 
 Acceptance includes:
 
-### One canonical phone control path
+### One canonical phone Release-state path
 
-- one concrete Controller-owned exact phone Release state semantics remains for normal observation, deployment postcondition and reconciliation where applicable;
-- workflow/script-specific duplicate desired-state/drift classification is removed;
-- Stage-4-only release/version bindings are removed from long-term operation unless a real compatibility contract requires them;
-- GitHub Actions, shell, ADB and GitHub Deployment remain adapters/projection, not parallel state owners.
+- one concrete Controller-owned exact phone Release-state semantics remains where observe/postcondition/reconcile share the same truth;
+- workflow/script duplicate desired-state/drift classification is removed;
+- Actions/shell/ADB/GitHub Deployment remain adapters/projection, not state owners.
+
+### Independent concerns remain independent
+
+- transport diagnostics remain separate only when they own a real independent operational concern;
+- live operational observation remains separate from immutable Release-state truth when the failure modes/lifecycle differ;
+- route consolidation must not recreate the S4.3/S4.4 coupling by merging semantically independent evidence domains.
 
 ### One mutation/recovery model
 
-- preserve semantic deployment identity, target serialization, durable mutation intent, exactly-once destructive dispatch, independent postcondition and `UNKNOWN` read-only recovery;
-- projection reconciliation remains separate from deployment mutation identity and cannot rewrite private canonical terminal history;
-- redundant v1/reconstruction/quarantine/migration/temporary-recovery paths are removed or isolated once their retained evidence/rollback obligations no longer require them.
+- semantic request identity, target serialization, durable intent, exactly-once destructive dispatch, independent postcondition and `UNKNOWN` read-only recovery remain singular;
+- projection reconcile remains separate from mutation identity/history;
+- obsolete reconstruction/quarantine/migration/temporary recovery paths are removed or isolated after obligations end.
 
-### Minimal command/workflow surface
+### Minimal operator/workflow surface
 
-- every active Issue #1 route and production workflow has one current operator purpose;
-- preflight/diagnostic routes remain separate only when they own an independent operational concern;
-- routes/workflows that exist only because of Stage 4 implementation history are consolidated or removed;
-- declarative command/target registries describe the actual supported production surface, with no dormant competing authority paths.
+- every Issue #1 route/workflow has a current operator purpose;
+- Stage-4-only variants are consolidated/removed where responsibilities are not independent;
+- declarative registries equal the actually supported surface.
 
-### Stable materialization/cache/evidence ownership
+### Stable code/evidence ownership
 
-- stable phone Release preparation/observation logic sits under the narrowest real Controller owner rather than being imported from workflow-private helpers by multiple consumers;
-- immutable cache optimizations remain bounded, verified, disposable and free of secret-derived rendered state;
-- evidence schemas let one developer trace exact Release -> observed state -> decision -> possible effect -> postcondition without joining contradictory status systems;
-- local-agent observations that revealed reusable Controller gaps are either implemented where required or explicitly dispositioned with stage mapping.
+- stable Release preparation/observation logic sits under the narrowest concrete Controller owner;
+- immutable caches remain verified/bounded/disposable and contain no secret-derived rendered state;
+- one developer can trace Release -> observation -> decision -> effect -> postcondition without contradictory status systems.
 
-### Documentation, authority and code deletion
+### Documentation / code deletion
 
-- converge normative phone/Controller docs and ownership on the real path;
-- remove active stale A-H/Item15-23/Item19-20 execution language and stale backlog/cursor roles while retaining historical audit evidence as historical;
-- reduce active workflows/policies/code/cognitive surface wherever an independent invariant does not require separation;
-- remove redundant wiring/meta-verification checks that only prove other tests/checks exist;
-- verify PRODUCT remains application/runtime/build/Release authority and Controller remains deployment/target execution authority.
+- active normative docs converge on the real path;
+- superseded historical material remains history, not execution guidance;
+- redundant meta/wiring checks protecting no independent invariant are removed;
+- PRODUCT/Controller authority boundaries remain intact.
 
-### Generalization boundary
+Exit requires one singular protected phone baseline with no unresolved phone P0/P1/evidence-trust gap and no unjustified Stage-4 scaffolding.
 
-Stage 5 may make phone-specific ownership coherent, but it must not build a speculative generic phone/VM target framework. Stage 6 is the first normal point for shared target abstractions from two real implementations.
-
-Exit requires one singular, protected, documented phone baseline with no unresolved phone P0/P1 or evidence-trust gap and no active Stage-4-only scaffolding lacking a long-term justification.
-
-## 9. Stage 6 — VM-local transaction and first real VM deployment
+## 9. Stage 6 — VM foundation and VM-local target acceptance
 
 Only after #179 explicitly opens Stage 6 may VM/provider mutation occur.
 
 Acceptance includes:
 
-- one concrete real VM lifecycle and target identity;
-- exact immutable Product Release Linux artifact/provenance/digest;
-- smallest VM-specific Controller adapter for materialization, activation/service lifecycle and independent observation;
-- durable intent and exactly-once mutation semantics reused from the Controller kernel;
+- one concrete real provider/VM lifecycle and target identity;
+- required VM network/firewall/DNS/TLS/certificate/secrets ownership for the selected topology;
+- exact immutable Product Release Linux/server artifact/provenance/digest;
+- smallest VM-specific Controller adapter for any required provisioning hook, materialization, activation/service lifecycle and independent observation;
+- durable intent/exactly-once mutation semantics reused from the Controller kernel;
 - VM-local postcondition independent of workflow success;
-- direct tests for artifact mismatch, binding mismatch, partial materialization, activation/service failure, ambiguous dispatch and read-only reconciliation;
-- provider credentials/mutation separated from phone runner;
-- explicit provisioning/replacement ownership only if the chosen real lifecycle requires it;
+- direct tests/evidence for concrete artifact/binding mismatch, partial materialization, activation/service failure, ambiguous dispatch and read-only reconciliation;
+- provider credentials/mutation separated from the phone runner;
+- required VM-local service/host restart/reboot recovery;
 - one real canonical `ACCEPTED` VM deployment.
 
-VM-local restart/reboot checks required to prove that target may occur here. Combined PHONE+VM behavior remains Stage 7.
+Stage 6 is the first normal point for extracting a shared phone/VM target abstraction from demonstrated duplication. No generic multi-target/provider platform.
 
-Stage 6 is the first normal point for extracting shared target abstractions from demonstrated phone/VM duplication. No generic multi-target platform.
+## 10. Stage 7 — complete PHONE + VM operational acceptance
 
-## 10. Stage 7 — combined PHONE + VM operational acceptance
-
-Bind the exact real topology when Stage 7 opens. Expected class:
+Bind the exact real topology when Stage 7 opens:
 
 ```text
-external client
+external consumer
   <-> VM / relay / serving edge
-  <-> reverse tunnel
+  <-> authenticated reverse tunnel
   <-> registered phone runtime
   <-> selected mobile/cellular egress
+  <-> Internet
 ```
 
 Required combined evidence includes:
 
-- exact accepted identities of phone and VM and permitted compatibility/version relationship;
-- authenticated end-to-end proxy path through both targets;
-- required public compatibility endpoints;
-- phone restart/reboot and VM service/host restart/reconnect interactions;
-- deterministic partial-target unavailability;
-- recovery on either target without blind destructive retry;
-- QUIC primary and certificate-pinned TLS/TCP reserve behavior across the real path where production uses it;
-- provider/relay lifecycle operations only when they are part of the selected real topology;
-- bounded load/resources across the whole path;
-- end-to-end soak/leak/reliability evidence;
-- no unresolved cross-target P0/P1.
+### Identity / compatibility
 
-Historical relay-side targets may inform the Stage 7 matrix, including repeated service restarts, VM reboots, backup/restore and delete/recreate drills. They are not Stage 4 work and are executed only when Stage 7/#179 authority and the concrete VM lifecycle require them.
+- exact accepted phone and VM identities;
+- explicit permitted version/compatibility relation;
+- no mutable/latest identity.
+
+### Real external serving
+
+- remote HTTP including CONNECT where supported;
+- remote SOCKS5 where supported;
+- authentication and wrong-credential behavior;
+- actual external mobile-egress identity where claimed.
+
+### Network / confidentiality
+
+- production QUIC primary path;
+- certificate-pinned TLS/TCP reserve/failover/recovery where production uses it;
+- no plaintext downgrade/wrong-session routing;
+- DNS/IPv6/leak behavior for the selected topology.
+
+### Cross-target lifecycle / degradation
+
+- phone critical-process/runtime restart and full phone reboot while topology is in use;
+- VM service/host restart/reboot/reconnect;
+- cellular loss/recovery;
+- deterministic partial-target degradation;
+- no blind destructive retry during cross-target ambiguity.
+
+### Real load / overload
+
+- external-client concurrency;
+- production-relevant throughput/latency;
+- bounded overload behavior;
+- bounded CPU/memory/FD/queue/log state on relevant targets;
+- no silent stuck state or unbounded growth.
+
+### End-to-end soak / reliability
+
+- production-like long-duration soak through the complete path;
+- periodic functional/resource observations;
+- exact duration/cadence/repetition matrix chosen from real measured behavior and the failures being protected, not mechanically inherited historical values.
+
+### Release evolution / rollback
+
+When production claims upgrade/rollback support:
+
+- only legitimate immutable Product Releases and compatible signing/version relationships are used;
+- durable intent precedes target effects;
+- duplicate/retry cannot create a second destructive effect;
+- local postconditions remain independent;
+- ambiguous result -> `UNKNOWN` -> read-only reconciliation;
+- the approved topology is restored and independently verified end-to-end.
+
+No unresolved cross-target P0/P1 may remain at final acceptance.
 
 ## 11. Security and operational review
 
-At the stage that owns each surface, verify applicable firewall exposure, credential separation, certificate pinning, wrong-credential failure behavior, release/backup permissions, rollback immutability, dependency audit results and explicit residual-risk records.
+At the stage owning each surface, verify applicable:
 
-A full independent penetration test, fleet orchestration, generic chaos platform or hypothetical provider matrix is outside the baseline unless separately promoted.
+- firewall/exposure boundaries;
+- credential/provider separation;
+- certificate pinning and wrong-credential failure behavior;
+- release/backup permissions and rollback immutability;
+- dependency/security audit results;
+- explicit residual-risk records.
+
+A full independent penetration test, fleet orchestration, generic chaos platform or hypothetical provider matrix is outside baseline acceptance unless separately promoted.
 
 ## 12. Final decision
 
 Declare full production 10/10 accepted only when:
 
 - exact PRODUCT software/Release evidence is accepted;
-- Controller transaction/recovery invariants are accepted for real targets;
-- phone Stage 4 and Stage 5 exits are satisfied;
-- VM Stage 6 exit is satisfied;
-- Stage 7 combined topology passes the agreed functional/recovery/load/soak matrix;
+- Controller transaction/recovery invariants are accepted for the real targets;
+- Stage-4 phone-node and Stage-5 baseline exits are satisfied;
+- Stage-6 VM-local exit is satisfied;
+- Stage-7 complete topology passes the agreed functional/network/recovery/load/soak matrix;
 - no unresolved P0/P1 remains;
 - all evidence is bound to the exact Product Release, Controller revision and causal target dependencies it claims;
 - no sensitive target/secret material was made public.
 
-Architecture/documentation convergence may complete earlier. It must never be misrepresented as live physical acceptance.
+Architecture/documentation convergence may complete earlier. It must never be represented as live physical acceptance.
