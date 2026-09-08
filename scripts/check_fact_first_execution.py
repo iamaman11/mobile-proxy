@@ -38,14 +38,17 @@ REQUIRED: dict[Path, tuple[str, ...]] = {
         "combined topology passes Stage 7 end-to-end functional, recovery, bounded-load and soak acceptance",
     ),
     STAGE_WORKFLOW: (
-        "A #179 checkpoint that opens a stage is continuous authority for that whole stage",
-        "Physical phone state must be **observed, not guessed**.",
+        "authorizes the **whole named stage**",
+        "Physical target state is observed, never guessed.",
         "controller_capability_gap",
-        "Architecture improvement is not a parallel workstream.",
+        "Architecture improvement is not a parallel roadmap.",
     ),
     STAGE_ROADMAP: (
-        "static seven-stage sequencing and scope model",
-        "Stage 7 — Combined PHONE + VM operational acceptance",
+        "canonical static Stage 1-7 plan",
+        "single source of truth for the complete production stage sequence",
+        "Stage 4 — Phone production-node operational acceptance",
+        "Stage 6 — VM foundation, transaction and first real VM acceptance",
+        "Stage 7 — Full PHONE + VM product/topology acceptance",
     ),
     AUTHORITY: (
         "Both repositories are public; repository visibility is not the confidentiality boundary.",

@@ -16,6 +16,7 @@ STAGE_WORKFLOW = Path("STAGE_WORKFLOW.md")
 IMPLEMENTATION_PLAN = Path("IMPLEMENTATION_PLAN.md")
 STAGE_ROADMAP = Path("docs/PRODUCTION_STAGE_ROADMAP.md")
 BASELINE = Path("docs/PRODUCTION_BASELINE_PLAN.md")
+EVIDENCE_DOMAIN_ADR = Path("docs/architecture/ADR-004-production-evidence-domain-separation.md")
 REPOSITORY_CONTEXT = Path("scripts/repository_context.py")
 RUNTIME = Path("RUNTIME_LAYOUT.md")
 PROJECT_DOC = Path("docs/operations/project-authority.md")
@@ -114,11 +115,13 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
         text[STAGE_WORKFLOW],
         STAGE_WORKFLOW,
         (
-            "Context recovery: one execution spine",
-            "Context-budget protocol",
-            "last comment only",
-            "Controller #1: never use the full ledger as context",
-            "Controller #97: optional reusable rooted-phone diagnostic/probe reference only",
+            "One source of truth per concern",
+            "Context recovery — minimum sufficient path",
+            "last owner-authored authoritative checkpoint only",
+            "Do **not** load the full roadmap",
+            "Context-budget invariant",
+            "Deployment command/intent/terminal runtime ledger",
+            "Reusable rooted-phone diagnostic mechanics",
             "controller_capability_gap",
             "human_only_physical_observation",
             "one_off_observation",
@@ -155,11 +158,12 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
         text[STAGE_ROADMAP],
         STAGE_ROADMAP,
         (
-            "static seven-stage sequencing and scope model",
-            "does not declare a current stage",
-            "Architecture improvement is not a parallel lane",
-            "Stage 4 — Phone industrial operational validation",
-            "Stage 6 — VM production transaction + first real deployment",
+            "canonical static Stage 1-7 plan",
+            "single source of truth for the complete production stage sequence",
+            "Stage 4 — Phone production-node operational acceptance",
+            "Stage 6 — VM foundation, transaction and first real VM acceptance",
+            "Stage 7 — Full PHONE + VM product/topology acceptance",
+            "Full-system acceptance claims remain fail-closed until Stage 7",
         ),
         errors,
     )
@@ -171,6 +175,20 @@ def _check_execution_spine(text: dict[Path, str], errors: list[str]) -> None:
             "Historical A-H implementation ordering is superseded",
             "Physical facts and observation capability",
             "Architecture work is stage-mapped, not a parallel roadmap",
+        ),
+        errors,
+    )
+    _require(
+        text[EVIDENCE_DOMAIN_ADR],
+        EVIDENCE_DOMAIN_ADR,
+        (
+            "transport readiness",
+            "exact Release state",
+            "live operational state",
+            "lifecycle exercise result",
+            "full-topology state",
+            "Stage 4 proves the phone",
+            "Stage 7 proves the complete PHONE+VM product/topology",
         ),
         errors,
     )
@@ -209,8 +227,9 @@ def check_repository(root: Path) -> list[str]:
     errors: list[str] = []
     text_paths = (
         TEN_PLAN, README, QUICK, AGENTS, STAGE_WORKFLOW, IMPLEMENTATION_PLAN,
-        STAGE_ROADMAP, BASELINE, REPOSITORY_CONTEXT, RUNTIME, PROJECT_DOC,
-        PHONE_DOC, RELEASE_DOC, ITEM19_CLOSEOUT, RELEASE_TAG, RELEASE,
+        STAGE_ROADMAP, BASELINE, EVIDENCE_DOMAIN_ADR, REPOSITORY_CONTEXT,
+        RUNTIME, PROJECT_DOC, PHONE_DOC, RELEASE_DOC, ITEM19_CLOSEOUT,
+        RELEASE_TAG, RELEASE,
     )
     text = {path: _read(root, path, errors) for path in text_paths}
     project = _load(root, PROJECT, errors)
@@ -337,11 +356,12 @@ def check_repository(root: Path) -> list[str]:
             errors.append(f"{path} lost Android auxiliary-role invariant")
     _require(text[README], README, ("first_party_android_egress", "Network.bindSocket()", "app-owned WireGuard compatibility path"), errors)
     _require(text[TEN_PLAN], TEN_PLAN, (
-        "normative acceptance catalog; not execution authority",
-        "Stage 4 — phone industrial operational validation",
-        "Stage 4 is **phone-only**",
-        "Stage 6 — VM-local transaction and first real VM deployment",
-        "Stage 7 — combined PHONE + VM operational acceptance",
+        "normative acceptance evidence catalog; not execution authority and not a roadmap",
+        "Stage 4 — phone production-node operational acceptance",
+        "Stage 4 is phone-only and must not claim complete proxy-product acceptance",
+        "Stage 4 does **not** need to manufacture production-scale throughput/concurrency",
+        "Stage 6 — VM foundation and VM-local target acceptance",
+        "Stage 7 — complete PHONE + VM operational acceptance",
         "controller_capability_gap",
     ), errors)
 
