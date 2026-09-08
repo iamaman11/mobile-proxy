@@ -4,10 +4,10 @@ Status: **active static architecture/invariant baseline; not an execution roadma
 PRODUCT repository: `iamaman11/mobile-proxy`  
 Deployment Controller repository: `iamaman11/mobile-proxy-production`  
 Dynamic stage/operations authority: newest authoritative checkpoint in PRODUCT Issue #179  
-Static stage sequence: `docs/PRODUCTION_STAGE_ROADMAP.md`  
+Canonical Stage 1-7 plan: `docs/PRODUCTION_STAGE_ROADMAP.md`  
 Planning/acceptance backlog: PRODUCT Issue #249
 
-This document defines durable production architecture and acceptance invariants. It intentionally contains no dynamic `CURRENT` stage, current SHA, current Product Release, next action or checkpoint cadence. Historical A-H implementation ordering is superseded by the seven-stage roadmap and is not an alternate execution plan.
+This document defines durable production architecture and acceptance invariants. It intentionally contains no dynamic `CURRENT` stage, current SHA, current Product Release, next action or checkpoint cadence. It also does not duplicate the stage plan.
 
 ## 1. Goal
 
@@ -20,7 +20,7 @@ Reach a simple, understandable industrial Mobile Proxy baseline with:
 - independent target postcondition observation;
 - deterministic recovery/quarantine after ambiguous execution;
 - auditable dependency provenance;
-- separately authorized real-target operational evidence;
+- separately authorized target-local and full-topology operational evidence;
 - no unresolved P0/P1 defect contradicting acceptance.
 
 No code for code. No verification of verification. Prefer deletion/consolidation over new framework layers.
@@ -42,7 +42,7 @@ Normative cross-plane contracts:
 - `contracts/operations/production-topology-v2.json`
 - `contracts/operations/product-release-authority-v2.json`
 
-The old “thin execution satellite / PRODUCT-owned physical controller” model is superseded.
+The old thin execution-satellite / PRODUCT-owned physical controller model is superseded.
 
 ## 3. Product invariants
 
@@ -85,7 +85,7 @@ protected PRODUCT source + required Quality
   -> Controller admission / observation / possible mutation / verification / recovery
 ```
 
-A Product Release is an input to deployment. Physical phone acceptance is not a prerequisite for Product Release creation. Runtime deployment identity combines the exact immutable Product Release and exact admitted Controller revision.
+A Product Release is an input to deployment. Physical target acceptance is not a prerequisite for Product Release creation. Runtime deployment identity combines the exact immutable Product Release and exact admitted Controller revision.
 
 `latest`, mutable branches, approximate versions and public GitHub Deployment projection are forbidden deployment identity.
 
@@ -117,7 +117,44 @@ Required:
 
 PRODUCT must not reintroduce a second deployment State Machine or mutation ledger.
 
-## 6. Physical facts and observation capability
+## 6. Evidence-domain separation
+
+The production system has distinct evidence domains. They may share low-level adapters, but one result must not silently become another domain's truth.
+
+### 6.1 Transport readiness
+
+Runner/host/USB/ADB/root readiness proves only that the Controller can reach the registered target through the admitted transport. Transport degradation must not be reported as Release mismatch or PRODUCT runtime drift.
+
+### 6.2 Exact Release state
+
+Exact target-state observation proves only the immutable Product Release state required by the target contract: for the phone this includes the admitted APK/rooted-runtime/current truth. It is the shared concrete truth where deployment postcondition, normal Release observation and target-read-only reconciliation genuinely require the same facts.
+
+### 6.3 Live operational state
+
+Live runtime health is a separate concern from immutable Release state. Process presence, authenticated local health/readiness, serving prerequisites, cellular availability and bounded resource indicators may be `READY`, `DEGRADED` or `UNKNOWN` while exact Release state remains independently true.
+
+Operational observation must not duplicate PRODUCT-owned health computation when a PRODUCT health contract already exists. It observes that contract and bounded target facts.
+
+### 6.4 Lifecycle exercise state
+
+A controlled process termination, runtime restart, phone reboot, VM restart or mismatch drill is an admitted perturbation with its own scenario identity, timeout, postcondition and recovery classification. It is not a free-form shell surface and is not ordinary observation.
+
+### 6.5 Full-topology state
+
+Phone-local or VM-local acceptance does not constitute full Mobile Proxy acceptance. Full production behavior exists only on the real path:
+
+```text
+external consumer
+  -> VM / relay / serving edge
+  -> authenticated reverse tunnel
+  -> registered phone runtime
+  -> mobile/cellular egress
+  -> Internet
+```
+
+External proxy compatibility, real mobile-egress identity, production QUIC/reserve behavior, DNS/IPv6/leak policy, cross-target recovery, production-scale load and long soak are full-topology evidence and are accepted only at the stage that owns the complete real path.
+
+## 7. Physical facts and observation capability
 
 Git/GitHub is authoritative for reviewed source, contracts, Quality, release identity and durable transaction evidence. It is not a global clock for physical target state.
 
@@ -129,9 +166,9 @@ Prefer Controller observer/target-adapter evidence. If a required phone fact can
 - `human_only_physical_observation`;
 - `one_off_observation`.
 
-A repeatable/decision-critical `controller_capability_gap` should be closed with the smallest Controller observation capability when it blocks the current stage and doing so is simpler/safer than recurring manual dependence. This is architecture feedback, not automatic permission to add framework machinery.
+A repeatable/decision-critical `controller_capability_gap` should be closed with the smallest Controller observation capability when it blocks the current stage and doing so is simpler/safer than recurring manual dependence. This is architecture feedback, not automatic framework permission.
 
-## 7. Architecture complexity discipline
+## 8. Architecture complexity discipline
 
 `docs/architecture/ARCHITECTURE_STANDARD.md` is the permanent quality floor.
 
@@ -142,17 +179,17 @@ A repeatable/decision-critical `controller_capability_gap` should be closed with
 - tests protect real behavior/failure/security/authority boundaries;
 - no checker solely to prove another checker exists;
 - no generic multi-target orchestration platform;
-- physical operations must expose observable boundaries rather than hide unrelated effects behind one opaque success/timeout result.
+- physical operations expose observable boundaries rather than hiding unrelated effects behind one opaque success/timeout result.
 
-Architecture work is stage-mapped, not a parallel roadmap. Stage 5 is the dedicated phone simplification/convergence stage. Stage 6 is the first normal point for extracting shared phone/VM target abstractions from two real implementations.
+Architecture work is stage-mapped, not a parallel roadmap. Stage 5 owns phone-baseline simplification/convergence. Stage 6 is the first normal point for extracting shared phone/VM target abstractions from two real implementations.
 
-## 8. Historical evidence boundary
+## 9. Historical evidence boundary
 
-Historical Item19/Item20, Item15-23 and A-H execution plans remain immutable audit evidence where useful. They do not restore old release ordering, same-repository controller ownership, old execution-satellite semantics or old current-stage authority.
+Historical Item19/Item20, Item15-23 and A-H execution plans remain audit evidence where useful. They do not restore old release ordering, same-repository controller ownership, old execution-satellite semantics or old current-stage authority.
 
 Old failed workflow runs are never rerun merely to obtain a second physical effect. Re-entry follows current Controller durable state and read-only reconciliation rules.
 
-## 9. PRODUCT acceptance
+## 10. PRODUCT acceptance
 
 PRODUCT acceptance requires, as applicable to the current Product Release contract:
 
@@ -167,26 +204,28 @@ PRODUCT acceptance requires, as applicable to the current Product Release contra
 
 Quality proves PRODUCT software/policy; it does not manufacture target state.
 
-## 10. Deployment Controller acceptance
+## 11. Deployment Controller acceptance
 
 Controller acceptance requires exact Product Release admission, exact Controller-revision binding, semantic dedup independent of GitHub provenance, target-global serialization, observation before decision, durable intent before dispatch, exactly-once destructive dispatch per intent, independent postcondition observation, canonical terminal evidence, read-only UNKNOWN reconciliation and deterministic recovery/quarantine.
 
 `vm-production` remains fail-closed until Stage 6 explicitly opens and proves its real target adapter/lifecycle end-to-end.
 
-## 11. Full production acceptance
+## 12. Full production acceptance
 
 Full production acceptance requires all of:
 
 1. PRODUCT acceptance complete for the exact immutable Release(s) in use.
 2. Controller invariants proven for each real target.
-3. Phone and VM each have direct local evidence appropriate to their stages.
-4. The combined topology passes Stage 7 end-to-end functional, recovery, bounded-load and soak acceptance.
+3. Phone and VM each have direct target-local evidence appropriate to their stages.
+4. The combined topology passes Stage 7 end-to-end functional, network, recovery, real-load and soak acceptance.
 5. No unresolved P0/P1 contradicts final acceptance.
 
 Do not collapse these evidence domains into one green workflow.
 
-## 12. Change discipline
+## 13. Change discipline
 
 For docs/policy-sized changes use `scripts/quality-gate.sh fast`; for code/release/tooling changes use `scripts/quality-gate.sh`.
 
-The active execution sequence is governed only by `STAGE_WORKFLOW.md` + newest PRODUCT #179 checkpoint + current Stage Issue. Do not create a #179 checkpoint for ordinary commits, PR/CI repair, deterministic in-stage repair, read-only observations, local-agent evidence, protected merge or post-merge checks. At stage exit, close the Stage Issue and publish one #179 checkpoint opening the next stage.
+The active execution sequence is governed only by `STAGE_WORKFLOW.md` + newest PRODUCT #179 checkpoint + current Stage Issue. The complete static Stage 1-7 plan is owned only by `docs/PRODUCTION_STAGE_ROADMAP.md`.
+
+Do not create a #179 checkpoint for ordinary commits, PR/CI repair, deterministic in-stage repair, read-only observations, local-agent evidence, protected merge or post-merge checks. At a genuine stage/authority/plan boundary, update the owning protected docs first, then publish one compact #179 checkpoint that points to them rather than restating them.
