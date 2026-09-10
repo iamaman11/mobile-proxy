@@ -1,7 +1,9 @@
 package com.example.mobileproxy
 
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -41,6 +43,48 @@ class CellularEgressServiceTest {
 
         assertArrayEquals(byteArrayOf(5, 2, 1, 1), response)
         assertFalse(networkRequested)
+    }
+
+    @Test
+    fun stopClosesTrackedSessionAndRejectsLateOldGenerationSocket() {
+        val service = Robolectric.buildService(CellularEgressService::class.java).create().get()
+        val generation = service.sessions.advanceGeneration()
+        val tracked = Socket()
+
+        assertTrue(service.sessions.register(tracked, generation))
+        assertEquals(1, service.sessions.trackedCount())
+
+        service.onStartCommand(CellularEgressService.stopIntent(service), 0, 1)
+
+        assertTrue(tracked.isClosed)
+        assertEquals(0, service.sessions.trackedCount())
+
+        val stale = Socket()
+        assertFalse(service.sessions.register(stale, generation))
+        assertTrue(stale.isClosed)
+    }
+
+    @Test
+    fun generationAdvanceClosesPreviousSocketsAndAdmitsOnlyCurrentGeneration() {
+        val registry = SocketSessionRegistry()
+        val firstGeneration = registry.advanceGeneration()
+        val first = Socket()
+        assertTrue(registry.register(first, firstGeneration))
+
+        val secondGeneration = registry.advanceGeneration()
+        assertTrue(first.isClosed)
+        assertEquals(0, registry.trackedCount())
+
+        val stale = Socket()
+        assertFalse(registry.register(stale, firstGeneration))
+        assertTrue(stale.isClosed)
+
+        val current = Socket()
+        assertTrue(registry.register(current, secondGeneration))
+        assertEquals(1, registry.trackedCount())
+        registry.unregister(current)
+        current.close()
+        assertEquals(0, registry.trackedCount())
     }
 
     private fun exercise(
