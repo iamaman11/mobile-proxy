@@ -43,6 +43,12 @@ A normal resume should answer four questions without historical replay:
 
 If those answers require reading dozens of historical comments, the documentation/evidence routing is defective and should be repaired rather than normalized.
 
+### Current-state-over-history rule
+
+Current physical/runtime state is never reconstructed from a dense historical narrative merely because that narrative contains exact SHAs, run IDs or prior bounded evidence. Historical evidence explains what happened in that transaction; it does not establish what is true now.
+
+When a current decision depends on target state, first identify the owning observation surface and obtain current bounded evidence. Source inspection and historical artifacts may narrow hypotheses only after the relevant current-state prerequisite is known or explicitly unavailable.
+
 ## 3. Stage execution model
 
 Each stage has exactly one subordinate Stage Issue in its owning repository.
@@ -57,6 +63,8 @@ The Stage Issue stores:
 
 It is never authority by itself and must not redefine future stages.
 
+Keep the Stage Issue body **compact and current**. Do not turn it into an append-only historical replay. Superseded execution plans, old SHAs and one-off evidence remain in comments/Git history; the body should contain only durable stage scope, current decision structure, current blockers/accepted slices and exit criteria. If the body contradicts a newer stage comment, repair the body instead of expecting future agents to mentally reconcile both.
+
 A #179 checkpoint that opens a stage authorizes the **whole named stage** inside the roadmap scope and checkpoint hard boundaries. `NEXT ALLOWED ITEM` is the next starting point, not a one-step token.
 
 Routine branch/PR creation, commits, CI failure/fix, deterministic known-state repair, read-only observation, local-agent evidence, protected merge and post-merge checks are continuous in-stage work, not checkpoint boundaries.
@@ -69,9 +77,24 @@ Routine branch/PR creation, commits, CI failure/fix, deterministic known-state r
 - Do not leave more than one meaningful completed slice only in chat/local state.
 - At stage exit: final evidence/handoff summary -> close Stage Issue completed -> one #179 checkpoint opening the next stage.
 
-## 5. Physical facts and local-agent assistance
+## 5. Physical facts, diagnostic ordering and local-agent assistance
 
 Physical target state is observed, never guessed.
+
+### Observation-before-hypothesis gate
+
+For any current physical/runtime failure or ambiguous result, use this order:
+
+1. **Classify the evidence domain first**: runner/host transport, phone transport/root, exact Release identity, live operational runtime, lifecycle/recovery, resource behavior, or another already-owned domain.
+2. **Use the existing owning read-only observer/target adapter before inventing a deeper causal theory.** A specialized exercise must not substitute for a missing prerequisite observation.
+3. **Separate current evidence from historical evidence.** A historical failure remains exactly what its artifact proved; later observations may explain it but do not rewrite it.
+4. **Use source inspection only to interpret observed behavior or define the next discriminating observation.** Source semantics are not evidence that a process, listener, route or target is currently healthy.
+5. If the owning observer cannot obtain the required fact reliably, classify the missing fact as a capability gap or bounded local-only observation and request the narrowest exact evidence.
+6. Choose a repair, retry, recovery or mutation only after the failure domain is decision-grade. Never add pacing/backoff/retry merely to obtain green when the failed prerequisite is unknown.
+
+This is a sequencing invariant, not a new orchestration framework. Existing domain owners and command surfaces remain independent.
+
+### Local-agent assistance
 
 1. Prefer the Controller observer/target adapter that owns the fact.
 2. If the fact cannot be obtained reliably, or inherently needs physical/UI/local-workstation interaction, request the narrow exact observation/interaction and exact evidence to return.
@@ -86,6 +109,12 @@ Classify every local-agent result exactly as:
 - `one_off_observation` — bounded evidence without demonstrated reusable Controller need.
 
 A capability gap is not framework permission. Implement only the smallest stage-relevant observation capability when it materially reduces guessing/`UNKNOWN`/manual dependence and is simpler/safer than recurring local assistance.
+
+### Chat local-agent handoff protocol
+
+When the project uses the chat bridge to invoke a local agent, the local-agent instruction must be emitted as a **standalone assistant message** containing the bounded task itself. Do not bury it inside a progress update, explanation, writing block or final summary. One local-agent request owns one bounded observation/interaction scope. Wait for and consume its returned evidence before issuing a replacement request unless the owner explicitly changes the task.
+
+This UI/protocol rule exists so the operator can unambiguously distinguish project discussion from an executable local-agent handoff.
 
 ### Evidence routing
 
