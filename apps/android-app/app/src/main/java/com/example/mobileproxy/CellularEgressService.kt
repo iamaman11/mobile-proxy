@@ -20,9 +20,49 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.ConcurrentHashMap
+
+internal class SocketSessionRegistry {
+    private val lock = Any()
+    private val sockets = mutableSetOf<Socket>()
+    private var generation = 0L
+
+    fun advanceGeneration(): Long {
+        val staleSockets: List<Socket>
+        val nextGeneration: Long
+        synchronized(lock) {
+            generation += 1
+            nextGeneration = generation
+            staleSockets = sockets.toList()
+            sockets.clear()
+        }
+        staleSockets.forEach { socket -> runCatching { socket.close() } }
+        return nextGeneration
+    }
+
+    fun register(socket: Socket, expectedGeneration: Long): Boolean {
+        val accepted = synchronized(lock) {
+            if (expectedGeneration != generation) {
+                false
+            } else {
+                sockets.add(socket)
+                true
+            }
+        }
+        if (!accepted) runCatching { socket.close() }
+        return accepted
+    }
+
+    fun unregister(socket: Socket) {
+        synchronized(lock) {
+            sockets.remove(socket)
+        }
+    }
+
+    internal fun trackedCount(): Int = synchronized(lock) { sockets.size }
+}
 
 /**
  * A loopback-only SOCKS5 endpoint whose outbound sockets are explicitly bound to a
@@ -32,6 +72,7 @@ import java.util.concurrent.ConcurrentHashMap
 class CellularEgressService : Service() {
     private val workers: ExecutorService = Executors.newCachedThreadPool()
     private val dnsCache = ConcurrentHashMap<String, CachedTargets>()
+    internal val sessions = SocketSessionRegistry()
     @Volatile private var server: ServerSocket? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -39,10 +80,10 @@ class CellularEgressService : Service() {
             stopAgent()
         } else {
             // Provisioning may rotate SOCKS credentials while the process is
-            // alive. Rebind so the listener never keeps stale in-memory auth.
-            server?.close()
-            server = null
-            startAgent()
+            // alive. Reset the previous listener and all authenticated sessions
+            // so stale credentials cannot keep an established egress path alive.
+            val generation = resetSessions()
+            startAgent(generation)
         }
         return START_STICKY
     }
@@ -50,11 +91,13 @@ class CellularEgressService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        stopAgent()
+        resetSessions()
+        workers.shutdownNow()
+        stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
-    private fun startAgent() {
+    private fun startAgent(generation: Long) {
         if (server != null) return
         // Android requires a foreground notification immediately after
         // startForegroundService(), including during first-boot provisioning
@@ -79,28 +122,60 @@ class CellularEgressService : Service() {
         server = listener
         workers.execute {
             while (!listener.isClosed) {
-                runCatching { listener.accept() }.getOrNull()?.let { socket ->
-                    workers.execute { socket.use { handleClient(it, config) } }
+                val socket = runCatching { listener.accept() }.getOrNull() ?: continue
+                if (!sessions.register(socket, generation)) continue
+                runCatching {
+                    workers.execute {
+                        socket.use { client ->
+                            try {
+                                handleClient(client, config, generation)
+                            } finally {
+                                sessions.unregister(client)
+                            }
+                        }
+                    }
+                }.onFailure {
+                    sessions.unregister(socket)
+                    runCatching { socket.close() }
                 }
             }
         }
     }
 
-    private fun stopAgent() {
+    private fun resetSessions(): Long {
+        val generation = sessions.advanceGeneration()
         server?.close()
         server = null
+        return generation
+    }
+
+    private fun stopAgent() {
+        resetSessions()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun handleClient(client: Socket, config: TunnelState.EgressConfig) {
-        handleClient(client, config) { validatedCellularNetwork() }
+    private fun handleClient(
+        client: Socket,
+        config: TunnelState.EgressConfig,
+        generation: Long,
+    ) {
+        handleClient(client, config, { validatedCellularNetwork() }, generation)
     }
 
     internal fun handleClient(
         client: Socket,
         config: TunnelState.EgressConfig,
         networkProvider: () -> Network?,
+    ) {
+        handleClient(client, config, networkProvider, null)
+    }
+
+    private fun handleClient(
+        client: Socket,
+        config: TunnelState.EgressConfig,
+        networkProvider: () -> Network?,
+        generation: Long?,
     ) {
         client.soTimeout = HANDSHAKE_TIMEOUT_MS
         val input = BufferedInputStream(client.getInputStream())
@@ -139,7 +214,7 @@ class CellularEgressService : Service() {
             reply(output, HOST_UNREACHABLE)
             return
         }
-        val upstream = connectUpstream(network, targets, port)
+        val upstream = connectUpstream(network, targets, port, generation)
         if (upstream == null) {
             reply(output, HOST_UNREACHABLE)
             return
@@ -148,17 +223,24 @@ class CellularEgressService : Service() {
             reply(output, SUCCESS)
             client.soTimeout = 0
             bridge(client, upstream)
-        } catch (_: Exception) {
-            upstream.close()
+        } finally {
+            if (generation != null) sessions.unregister(upstream)
+            runCatching { upstream.close() }
         }
     }
 
-    private fun connectUpstream(network: Network, targets: List<InetAddress>, port: Int): Socket? {
+    private fun connectUpstream(
+        network: Network,
+        targets: List<InetAddress>,
+        port: Int,
+        generation: Long?,
+    ): Socket? {
         for (target in targets) {
             val candidate = Socket()
             try {
                 network.bindSocket(candidate)
                 candidate.connect(InetSocketAddress(target, port), CONNECT_TIMEOUT_MS)
+                if (generation != null && !sessions.register(candidate, generation)) return null
                 return candidate
             } catch (_: Exception) {
                 candidate.close()
@@ -209,7 +291,6 @@ class CellularEgressService : Service() {
             left.shutdownOutput()
         }
         first.get()
-        right.close()
     }
 
     private fun readAddress(input: BufferedInputStream): String? = when (input.read()) {
